@@ -1086,26 +1086,46 @@ pub(crate) fn build_call_template_subs(
 }
 
 /// Parameter names (`$`-prefixed) that are the *exclusive* binding site
-/// for a `@template` parameter.
+/// for a `@template` parameter at this call site.
 ///
-/// A template bound from exactly one parameter has no independent
-/// signal to check that parameter's argument against: the substituted
-/// type came from resolving that same argument, so any diagnostic that
-/// compares the argument to it again is comparing the argument against
-/// itself through two potentially-diverging resolution paths. For
-/// example, PHPUnit's `assertSame(ExpectedType $expected, mixed
-/// $actual)` binds `ExpectedType` only from `$expected`, so checking
-/// `$expected` against `ExpectedType` is circular and can never
-/// legitimately fail.
+/// A template bound from exactly one argument has no independent
+/// signal to check that argument against: the substituted type came from
+/// resolving that same argument, so any diagnostic that compares the
+/// argument to it again is comparing the argument against itself through
+/// two potentially-diverging resolution paths. For example, PHPUnit's
+/// `assertSame(ExpectedType $expected, mixed $actual)` binds
+/// `ExpectedType` only from `$expected`, so checking `$expected` against
+/// `ExpectedType` is circular and can never legitimately fail.
 ///
-/// A template bound from more than one parameter (or from a parameter
-/// plus a return-type appearance elsewhere) is not covered here — those
-/// still carry a real independent check.
-pub(crate) fn self_bound_template_params(bindings: &[(Atom, Atom)]) -> AtomSet {
+/// What counts is the binding sites the *caller filled*, not the ones the
+/// signature declares. Laravel's `travelTo` names `TDate` in both `$date`
+/// and the optional `$callback`'s callable signature; a call that passes
+/// only a date still binds `TDate` from that one argument, so checking it
+/// is just as circular as if `$callback` did not exist. Omitted
+/// parameters are dropped here for that reason.
+///
+/// A template two arguments both bind is not covered: those disagree with
+/// each other rather than with themselves, which is a real check.
+pub(crate) fn self_bound_template_params(
+    bindings: &[(Atom, Atom)],
+    parameters: &[ParameterInfo],
+    arg_texts: &[&str],
+) -> AtomSet {
+    let bound = crate::call_args::bind_text_args_to_params(parameters, arg_texts);
+    let was_passed = |param_name: &Atom| {
+        parameters
+            .iter()
+            .position(|p| p.name == param_name.as_str())
+            .is_some_and(|idx| bound.get(idx).is_some_and(Option::is_some))
+    };
+    let filled: Vec<&(Atom, Atom)> = bindings
+        .iter()
+        .filter(|(_, param_name)| was_passed(param_name))
+        .collect();
+
     let mut result = AtomSet::default();
-    for (tpl_name, param_name) in bindings {
-        let is_sole_binding = bindings.iter().filter(|(t, _)| t == tpl_name).count() == 1;
-        if is_sole_binding {
+    for (tpl_name, param_name) in &filled {
+        if filled.iter().filter(|(t, _)| t == tpl_name).count() == 1 {
             result.insert(*param_name);
         }
     }

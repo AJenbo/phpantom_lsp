@@ -806,6 +806,9 @@ impl Backend {
                     let mut cls = c.clone();
                     cls.file_namespace = ns.as_deref().map(atom);
                     cls.cache_fqn();
+                    // Keyed by FQN, so this has to wait until the class
+                    // carries one.
+                    crate::stub_patches::apply_third_party_class_patches(&mut cls);
                     cls
                 })
                 .collect();

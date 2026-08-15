@@ -625,6 +625,25 @@ fn restrict_union_to_classes(ty: &PhpType, survives: &impl Fn(&str) -> bool) -> 
     if let TypeKind::Nullable(inner) = ty.kind() {
         return Some(restrict_union_to_classes(inner, survives).unwrap_or_else(|| inner.clone()));
     }
+    // An intersection whose members are themselves unions restricts one
+    // member at a time: `(FunctionNode|MethodNode)&MockObject` proven to
+    // be a `MethodNode` is `MethodNode&MockObject`. The `MockObject` side
+    // names no surviving class and is kept — it is a conjunct the value
+    // still satisfies, not an alternative the proof ruled out.
+    if let TypeKind::Intersection(members) = ty.kind() {
+        let mut restricted = false;
+        let narrowed: Vec<PhpType> = members
+            .iter()
+            .map(|m| match restrict_union_to_classes(m, survives) {
+                Some(inner) => {
+                    restricted = true;
+                    inner
+                }
+                None => m.clone(),
+            })
+            .collect();
+        return restricted.then(|| PhpType::intersection(narrowed));
+    }
     let TypeKind::Union(members) = ty.kind() else {
         return None;
     };

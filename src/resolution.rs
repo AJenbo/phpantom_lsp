@@ -774,6 +774,13 @@ impl Backend {
             for class in &mut classes {
                 crate::stub_patches::apply_class_stub_patches(class);
             }
+        } else {
+            // A handful of third-party classes make a promise their own
+            // docblocks leave undeclared.  Keyed by FQN, so everything
+            // else passes through on one string compare.
+            for class in &mut classes {
+                crate::stub_patches::apply_third_party_class_patches(class);
+            }
         }
 
         let arc_classes: Vec<Arc<ClassInfo>> = classes.into_iter().map(Arc::new).collect();

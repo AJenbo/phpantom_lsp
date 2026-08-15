@@ -706,3 +706,111 @@ function f(array $state, string $path, string $other): void {
         "a proof about a different element does not carry over, got: {text}"
     );
 }
+
+// ─── The proof reaches the chain through the value it was stored in ─────────
+
+const CHAIN_SCAFFOLD: &str = r#"
+class Period {}
+class Agreement {
+    public function latestPeriod(): ?Period { return null; }
+}
+function accept(Agreement $agreement): void {}
+"#;
+
+/// Run the slow diagnostic pipeline and keep the argument-type errors a
+/// lost narrowing produces.
+fn argument_type_errors(backend: &Backend, uri: &str, php: &str) -> Vec<String> {
+    backend.update_ast(uri, php);
+    let mut out = Vec::new();
+    backend.collect_slow_diagnostics(uri, php, &mut out);
+    out.iter()
+        .filter(|d| {
+            d.code.as_ref().is_some_and(
+                |c| matches!(c, NumberOrString::String(s) if s == "type_mismatch_argument"),
+            )
+        })
+        .map(|d| d.message.clone())
+        .collect()
+}
+
+/// The guard names only the chain's *result*, but a null `$agreement`
+/// short-circuits the chain to `null`, so past the guard the receiver
+/// cannot be null either.
+#[test]
+fn a_guard_on_a_stored_chain_result_narrows_the_receiver() {
+    let backend = create_test_backend();
+    let uri = "file:///chain_stored.php";
+    let content = format!(
+        r#"<?php
+{CHAIN_SCAFFOLD}
+function process(?Agreement $agreement): void {{
+    $period = $agreement?->latestPeriod();
+    if (!$period instanceof Period) {{
+        return;
+    }}
+    accept($agreement);
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert!(
+        errors.is_empty(),
+        "the receiver cannot be null past the guard, got: {errors:?}"
+    );
+}
+
+/// The branch that runs when the chain *did* yield null learns nothing:
+/// a null receiver is exactly one of the ways it gets there.
+#[test]
+fn a_stored_chain_result_leaves_the_failing_path_alone() {
+    let backend = create_test_backend();
+    let uri = "file:///chain_stored_else.php";
+    let content = format!(
+        r#"<?php
+{CHAIN_SCAFFOLD}
+function process(?Agreement $agreement): void {{
+    $period = $agreement?->latestPeriod();
+    if ($period !== null) {{
+        return;
+    }}
+    accept($agreement);
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert_eq!(
+        errors.len(),
+        1,
+        "a failing chain leaves the receiver's null in play, got: {errors:?}"
+    );
+}
+
+/// Writing to the receiver between the chain and the guard drops the
+/// proof: what the guard rules out is the value the chain ran against,
+/// not whatever the variable holds now.
+#[test]
+fn reassigning_the_receiver_drops_the_chain_proof() {
+    let backend = create_test_backend();
+    let uri = "file:///chain_reassigned.php";
+    let content = format!(
+        r#"<?php
+{CHAIN_SCAFFOLD}
+function process(?Agreement $agreement): void {{
+    $period = $agreement?->latestPeriod();
+    $agreement = null;
+    if ($period !== null) {{
+        accept($agreement);
+    }}
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert_eq!(
+        errors.len(),
+        1,
+        "the reassigned receiver is not what the guard proved, got: {errors:?}"
+    );
+}

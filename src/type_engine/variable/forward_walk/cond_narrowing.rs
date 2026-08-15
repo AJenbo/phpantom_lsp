@@ -588,6 +588,11 @@ pub(crate) fn apply_condition_narrowing<'b>(
     // `if (preg_match(…, $matches))` — the body runs on a successful match,
     // so `$matches` has the keys the pattern describes.
     apply_preg_match_narrowing(condition, scope, ctx, true);
+
+    // Whatever the passes above proved about a value read out of a `?->`
+    // chain, they proved about the chain's receivers too.  Last, so it
+    // sees the narrowed state rather than the state on the way in.
+    apply_nullsafe_origin_narrowing(scope, ctx);
 }
 
 /// Narrow the `$matches` out-parameter of a `preg_match`/`preg_match_all`
@@ -1059,6 +1064,11 @@ fn apply_condition_narrowing_inverse_operand<'b>(
     // an `if (!preg_match(…, $matches)) { return; }` guard) knows the opposite
     // outcome of the one the condition tests for.
     apply_preg_match_narrowing(condition, scope, ctx, false);
+
+    // Whatever the passes above proved about a value read out of a `?->`
+    // chain, they proved about the chain's receivers too.  Last, so it
+    // sees the narrowed state rather than the state on the way in.
+    apply_nullsafe_origin_narrowing(scope, ctx);
 }
 
 /// Report whether `condition` contains a member-existence proof for any
@@ -1411,29 +1421,14 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
                     &func_info.parameters,
                 ) {
                     let should_exclude = assertion.negated ^ !applies_positively;
-                    let var_ctx = build_var_ctx(&arg_var, ctx, &scope_resolver);
-                    let mut results = scope.get(&arg_var).to_vec();
-                    if should_exclude {
-                        ResolvedType::apply_narrowing(&mut results, |classes| {
-                            narrowing::apply_instanceof_exclusion(
-                                &assertion.asserted_type,
-                                &var_ctx,
-                                classes,
-                            )
-                        });
-                    } else {
-                        ResolvedType::apply_narrowing(&mut results, |classes| {
-                            narrowing::apply_instanceof_inclusion(
-                                &assertion.asserted_type,
-                                false,
-                                &var_ctx,
-                                classes,
-                            )
-                        });
-                    }
-                    if !results.is_empty() {
-                        scope.set(&arg_var, results);
-                    }
+                    apply_assertion_to_key(
+                        &arg_var,
+                        &assertion.asserted_type,
+                        should_exclude,
+                        scope,
+                        ctx,
+                        &scope_resolver,
+                    );
                 }
             }
         }
@@ -1496,29 +1491,14 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
                     } else {
                         assertion.asserted_type.clone()
                     };
-                    let var_ctx = build_var_ctx(&arg_var, ctx, &scope_resolver);
-                    let mut results = scope.get(&arg_var).to_vec();
-                    if should_exclude {
-                        ResolvedType::apply_narrowing(&mut results, |classes| {
-                            narrowing::apply_instanceof_exclusion(
-                                &resolved_assert_type,
-                                &var_ctx,
-                                classes,
-                            )
-                        });
-                    } else {
-                        ResolvedType::apply_narrowing(&mut results, |classes| {
-                            narrowing::apply_instanceof_inclusion(
-                                &resolved_assert_type,
-                                false,
-                                &var_ctx,
-                                classes,
-                            )
-                        });
-                    }
-                    if !results.is_empty() {
-                        scope.set(&arg_var, results);
-                    }
+                    apply_assertion_to_key(
+                        &arg_var,
+                        &resolved_assert_type,
+                        should_exclude,
+                        scope,
+                        ctx,
+                        &scope_resolver,
+                    );
                 }
             }
         }
@@ -1580,6 +1560,17 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
                     if assertion.param_name == "$this" {
                         // Narrows the receiver variable itself.
                         to_apply.push((resolved_type, should_exclude, receiver_var.clone()));
+                    } else if let Some(member) = assertion.param_name.strip_prefix("$this->") {
+                        // `@phpstan-assert-if-true !null
+                        // $this->getTraitReflection()` on `isInTrait()` is a
+                        // promise about a member read off the *receiver*, so
+                        // at the call site the subject is that same read
+                        // through the variable the call was written on.
+                        to_apply.push((
+                            resolved_type,
+                            should_exclude,
+                            format!("{receiver_var}->{member}"),
+                        ));
                     } else if let Some(arg_var) = narrowing::find_assertion_arg_variable(
                         &method_call.argument_list,
                         &assertion.param_name,
@@ -1590,28 +1581,68 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
                 }
             }
             for (asserted_type, should_exclude, target_var) in to_apply {
-                let var_ctx = build_var_ctx(&target_var, ctx, &scope_resolver);
-                let mut results = scope.get(&target_var).to_vec();
-                if should_exclude {
-                    ResolvedType::apply_narrowing(&mut results, |classes| {
-                        narrowing::apply_instanceof_exclusion(&asserted_type, &var_ctx, classes)
-                    });
-                } else {
-                    ResolvedType::apply_narrowing(&mut results, |classes| {
-                        narrowing::apply_instanceof_inclusion(
-                            &asserted_type,
-                            false,
-                            &var_ctx,
-                            classes,
-                        )
-                    });
-                }
-                if !results.is_empty() {
-                    scope.set(&target_var, results);
-                }
+                apply_assertion_to_key(
+                    &target_var,
+                    &asserted_type,
+                    should_exclude,
+                    scope,
+                    ctx,
+                    &scope_resolver,
+                );
             }
         }
         _ => {}
+    }
+}
+
+/// Apply one `@phpstan-assert-if-true` / `-if-false` conclusion to the
+/// scope entry for `target`.
+///
+/// `target` is a scope key rather than a plain variable name: an
+/// assertion whose subject is written `$this->getClassReflection()`
+/// resolves to a member path off the receiver, which the scope tracks
+/// under its own key once it has been seeded.
+///
+/// A class-named assertion narrows through the `instanceof` machinery. A
+/// scalar or pseudo-type one (`!null`, `string`, `array` — PHPUnit's
+/// `assertIsString` and every `!null` promise) names no class at all, so
+/// that machinery would exclude nothing and include nothing; those are
+/// routed through the same type guards the matching `is_*()` check uses.
+fn apply_assertion_to_key(
+    target: &str,
+    asserted_type: &PhpType,
+    should_exclude: bool,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+    scope_resolver: &dyn Fn(&str) -> Vec<ResolvedType>,
+) {
+    seed_synthetic_key_if_needed(target, scope, ctx);
+    let mut results = scope.get(target).to_vec();
+    if results.is_empty() {
+        return;
+    }
+
+    if let Some(kind) = narrowing::scalar_assert_guard_kind(asserted_type) {
+        if should_exclude {
+            narrowing::apply_type_guard_exclusion(kind, &mut results, Some(ctx.class_loader));
+        } else {
+            narrowing::apply_type_guard_inclusion(kind, &mut results, Some(ctx.class_loader));
+        }
+    } else {
+        let var_ctx = build_var_ctx(target, ctx, scope_resolver);
+        if should_exclude {
+            ResolvedType::apply_narrowing(&mut results, |classes| {
+                narrowing::apply_instanceof_exclusion(asserted_type, &var_ctx, classes)
+            });
+        } else {
+            ResolvedType::apply_narrowing(&mut results, |classes| {
+                narrowing::apply_instanceof_inclusion(asserted_type, false, &var_ctx, classes)
+            });
+        }
+    }
+
+    if !results.is_empty() {
+        scope.set(target, results);
     }
 }
 
@@ -2334,15 +2365,87 @@ pub(crate) fn apply_nullsafe_receiver_narrowing<'b>(
     let mut proven: Vec<&Expression<'_>> = Vec::new();
     collect_proven_non_null_exprs(condition, truthy, &mut proven);
     for expr in proven {
-        let mut node = expr;
-        while let Some(receiver) = nullsafe_receiver(node) {
-            if let Some(key) = narrowing::expr_to_subject_key(receiver) {
-                seed_synthetic_key_if_needed(&key, scope, ctx);
-                strip_null_from_scope(&key, scope);
-            }
-            node = receiver;
+        for key in nullsafe_receiver_keys(expr) {
+            seed_synthetic_key_if_needed(&key, scope, ctx);
+            strip_null_from_scope(&key, scope);
         }
     }
+}
+
+/// The scope keys of every receiver a nullsafe chain short-circuits on,
+/// outermost first.  Empty when `expr` is not a nullsafe chain.
+fn nullsafe_receiver_keys(expr: &Expression<'_>) -> Vec<String> {
+    let mut keys = Vec::new();
+    let mut node = expr;
+    while let Some(receiver) = nullsafe_receiver(node) {
+        if let Some(key) = narrowing::expr_to_subject_key(receiver) {
+            keys.push(key);
+        }
+        node = receiver;
+    }
+    keys
+}
+
+/// Record what a `?->` chain assigned to `lhs_name` proves about its own
+/// receivers, for a guard that arrives later and only names the result.
+///
+/// `$period = $agreement?->latestPeriod();` followed by
+/// `if (!$period instanceof Period) { return; }` proves `$agreement` is
+/// not null past the guard — the chain would have short-circuited to
+/// `null` otherwise — but the guard's condition never mentions
+/// `$agreement`, so the link has to be recorded where it is written.
+///
+/// Nothing is recorded when the assigned value is not nullable: without a
+/// `null` to rule out, "not null" is not evidence that any guard ran.
+pub(crate) fn record_nullsafe_origin<'b>(
+    lhs_name: &str,
+    rhs: &'b Expression<'b>,
+    scope: &mut ScopeState,
+) {
+    if !scope_value_is_nullable(lhs_name, scope) {
+        return;
+    }
+    let receivers: Vec<Atom> = nullsafe_receiver_keys(rhs)
+        .iter()
+        .filter(|key| key.as_str() != lhs_name)
+        .map(|key| atom(key))
+        .collect();
+    scope.record_nullsafe_origin(lhs_name, receivers);
+}
+
+/// Carry a proof about a `?->` chain's result back to the receivers the
+/// chain would have short-circuited on.
+///
+/// Runs after the condition's own narrowing has landed, so what it reads
+/// is the guarded state: a holder that is no longer nullable is one the
+/// condition ruled the null out of, whichever shape the guard was written
+/// in (`instanceof`, `!== null`, a bare truthy test, an assertion helper).
+fn apply_nullsafe_origin_narrowing(scope: &mut ScopeState, ctx: &ForwardWalkCtx<'_>) {
+    if scope.nullsafe_origins.is_empty() {
+        return;
+    }
+    let proven: Vec<Atom> = scope
+        .nullsafe_origins
+        .iter()
+        .filter(|(holder, _)| !scope_value_is_nullable(holder, scope))
+        .flat_map(|(_, receivers)| receivers.iter().copied())
+        .collect();
+    for receiver in proven {
+        seed_synthetic_key_if_needed(&receiver, scope, ctx);
+        strip_null_from_scope(&receiver, scope);
+    }
+}
+
+/// Whether the scope's entry for `key` still admits `null`.
+///
+/// An entry with no types admits everything, so it counts as nullable:
+/// an unknown value is not a proof.
+fn scope_value_is_nullable(key: &str, scope: &ScopeState) -> bool {
+    let types = scope.get(key);
+    types.is_empty()
+        || types
+            .iter()
+            .any(|rt| rt.type_string.non_null_type().is_some() || rt.type_string == PhpType::null())
 }
 
 /// The receiver a nullsafe access short-circuits on, when `expr` is one.
@@ -3656,6 +3759,21 @@ pub(crate) fn collect_condition_property_keys_inner(expr: &Expression<'_>, keys:
                 }
             }
         }
+        // A bare truthy test names its subject and nothing else:
+        // `$article->alt ? $article->alt : $article->title` and
+        // `if ($row->id)` both prove the path is truthy, and no operator
+        // is present for the arms above to match on.
+        Expression::Access(
+            Access::Property(_) | Access::NullSafeProperty(_) | Access::StaticProperty(_),
+        )
+        | Expression::ArrayAccess(_) => {
+            if let Some(key) = narrowing::expr_to_subject_key(expr)
+                && narrowing::is_member_path_key(&key)
+                && !keys.contains(&key)
+            {
+                keys.push(key);
+            }
+        }
         _ => {}
     }
 }
@@ -3691,14 +3809,14 @@ pub(crate) fn seed_property_keys_into_scope(
 /// Seed the scope with the current type of every call the condition
 /// tests, keyed under the call's own written form.
 ///
-/// This is the argument-carrying counterpart of
-/// [`seed_synthetic_key_if_needed`]: `mb_strpos($slug, $marker)` cannot be
+/// This is the counterpart of [`seed_synthetic_key_if_needed`] for the
+/// calls that seeder cannot answer: `mb_strpos($slug, $marker)` cannot be
 /// re-resolved from its key text the way `$this->handle` can, because the
-/// arguments are what decide the return type.  Resolving it here, from the
-/// expression, puts the un-narrowed type in scope so the guard that
-/// follows has something to narrow — and every later occurrence of the
-/// same call text then reads the narrowed entry instead of asking the
-/// method what it returns.
+/// arguments are what decide the return type, and `currentUser()` has no
+/// receiver path to walk.  Resolving them here, from the expression, puts
+/// the un-narrowed type in scope so the guard that follows has something
+/// to narrow — and every later occurrence of the same call text then reads
+/// the narrowed entry instead of asking the callee what it returns.
 pub(crate) fn seed_call_subject_keys(
     condition: &Expression<'_>,
     scope: &mut ScopeState,
@@ -3771,11 +3889,26 @@ fn seed_call_subject(expr: &Expression<'_>, scope: &mut ScopeState, ctx: &Forwar
     let Some(key) = narrowing::expr_to_subject_key(expr) else {
         return;
     };
-    if !narrowing::is_call_key_with_arguments(&key) || scope.contains(&key) {
+    if !seeds_from_expression(&key) || scope.contains(&key) {
         return;
     }
     let types = super::assignment::resolve_rhs_with_scope(expr, scope, ctx);
     scope.set(&key, types);
+}
+
+/// Whether a call key has to be seeded from the expression it was built
+/// from rather than re-resolved from its own text by
+/// [`resolve_synthetic_key_type`].
+///
+/// A key carrying arguments never re-resolves: the arguments are what
+/// decide the return type, and the key text is all that survives. A bare
+/// `currentUser()` or `Holder::make()` names everything needed to resolve
+/// it, but the text-based resolver only knows how to walk a receiver path,
+/// which neither has. What it does own is `$h->get()`, whose receiver the
+/// walker's scope already holds, so that shape is left to it.
+fn seeds_from_expression(key: &str) -> bool {
+    narrowing::is_call_key(key)
+        && (narrowing::is_call_key_with_arguments(key) || !narrowing::is_member_path_key(key))
 }
 
 /// Resolve what a member key's declaration promises, reading the scope

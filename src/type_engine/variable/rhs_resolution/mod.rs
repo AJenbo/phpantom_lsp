@@ -872,6 +872,18 @@ fn resolve_rhs_expression_inner<'b>(
         }
         Expression::Call(call) => resolve_rhs_call(call, expr, ctx),
         Expression::Access(access) => {
+            // A ternary or match arm narrows the whole path, not just the
+            // variable it is rooted at: `$a->alt ? $a->alt : $a->title`
+            // proves `$a->alt` truthy for its own then-arm, and that
+            // proof is keyed under the path.  Checked before the scope
+            // lookup because the arm describes this branch specifically,
+            // where the scope entry describes the statement as a whole.
+            if !ctx.match_arm_narrowing.is_empty()
+                && let Some(key) = crate::type_engine::types::narrowing::expr_to_subject_key(expr)
+                && let Some(narrowed) = ctx.match_arm_narrowing.get(&key)
+            {
+                return narrowed.clone();
+            }
             // Check if the scope has a narrowed type for this property
             // access (e.g. `$a->foo` narrowed through if/elseif
             // conditions, or assigned inside a guarded `if`).  A static

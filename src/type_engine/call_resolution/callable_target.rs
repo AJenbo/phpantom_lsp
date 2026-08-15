@@ -158,8 +158,11 @@ impl Backend {
                             &mut result_method,
                             &method_subs,
                         );
-                        self_bound_params =
-                            super::template_subs::self_bound_template_params(&m.template_bindings);
+                        self_bound_params = super::template_subs::self_bound_template_params(
+                            &m.template_bindings,
+                            &m.parameters,
+                            &split_args,
+                        );
                     }
                     // Collapse any conditionals nested inside the return type
                     // (e.g. `Collection<($k is array|string ? array-key :
@@ -313,8 +316,11 @@ impl Backend {
                 Self::build_method_template_subs(&merged, method_name, &split_args, rctx);
             if !method_subs.is_empty() {
                 crate::inheritance::apply_substitution_to_method(&mut result_method, &method_subs);
-                self_bound_params =
-                    super::template_subs::self_bound_template_params(&m.template_bindings);
+                self_bound_params = super::template_subs::self_bound_template_params(
+                    &m.template_bindings,
+                    &m.parameters,
+                    &split_args,
+                );
             }
             // Collapse conditionals nested inside the return type (e.g.
             // `Str::replace`'s `($subject is string ? string : string[])`
@@ -408,6 +414,8 @@ impl Backend {
                     return_type: func.return_type.clone(),
                     self_bound_params: super::template_subs::self_bound_template_params(
                         &func.template_bindings,
+                        &func.parameters,
+                        &split_args.iter().map(String::as_str).collect::<Vec<_>>(),
                     ),
                     ..Default::default()
                 };
@@ -467,8 +475,11 @@ impl Backend {
             let split_args = crate::type_engine::types::conditional::split_text_args(at);
             let subs = Self::build_method_template_subs(&merged, "__construct", &split_args, rctx);
             if !subs.is_empty() {
-                let self_bound_params =
-                    super::template_subs::self_bound_template_params(&ctor.template_bindings);
+                let self_bound_params = super::template_subs::self_bound_template_params(
+                    &ctor.template_bindings,
+                    &ctor.parameters,
+                    &split_args,
+                );
                 let mut result_ctor = ctor;
                 crate::inheritance::apply_substitution_to_method(&mut result_ctor, &subs);
                 return Some(ResolvedCallableTarget {

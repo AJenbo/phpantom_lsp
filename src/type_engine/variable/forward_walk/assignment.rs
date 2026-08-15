@@ -141,27 +141,33 @@ pub(crate) fn process_expression_statement<'b>(
     let expr = unwrap_parens(outer);
 
     // Try inline `/** @var Type $x */` override first.
-    match try_process_inline_var_override(expr, stmt_offset(outer), scope, ctx) {
-        VarOverrideResult::NamedVar => {
-            // Re-record the scope snapshot at this expression's offset
-            // so that variable lookups within the same statement (e.g.
-            // `$app` in `$client = $app->make(...)` where a preceding
-            // `@var` block declared `$app`) see the updated types.
-            // The snapshot recorded by `walk_body_for_diagnostics` at
-            // the statement start was taken *before* the `@var`
-            // override was applied.
-            record_scope_snapshot(stmt_offset(outer), scope);
-            return;
-        }
-        VarOverrideResult::NoVar => {
-            // A `@var Type` (no variable name) was applied to the
-            // assignment LHS.  The override already set the LHS type,
-            // so skip further assignment processing to avoid the RHS
-            // overwriting the docblock type.
-            return;
-        }
-        VarOverrideResult::None => {}
-    }
+    // A `@var` block is authoritative over the assignment it annotates,
+    // so that one pass is skipped.  Only that one: everything else the
+    // statement carries — the ternary and short-circuit snapshots, assert
+    // narrowing, by-ref captures — still has to run, now against the scope
+    // the docblock just established.  Returning outright here left
+    // `takesString($m->virtual ? $m->virtual : $m->title)` under a
+    // preceding `/** @var Model $m */` with no branch snapshots at all, so
+    // the truthy arm read the property's declared nullable type.
+    let skip_assignment =
+        match try_process_inline_var_override(expr, stmt_offset(outer), scope, ctx) {
+            VarOverrideResult::NamedVar => {
+                // Re-record the scope snapshot at this expression's offset
+                // so that variable lookups within the same statement (e.g.
+                // `$app` in `$client = $app->make(...)` where a preceding
+                // `@var` block declared `$app`) see the updated types.
+                // The snapshot recorded by `walk_body_for_diagnostics` at
+                // the statement start was taken *before* the `@var`
+                // override was applied.
+                record_scope_snapshot(stmt_offset(outer), scope);
+                true
+            }
+            // A `@var Type` (no variable name) was applied to the assignment
+            // LHS.  The snapshot is deliberately *not* re-recorded: the LHS
+            // variable must not be visible to lookups inside the RHS.
+            VarOverrideResult::NoVar => true,
+            VarOverrideResult::None => false,
+        };
 
     // Record intermediate scope snapshots within `&&` and `||` chains
     // so that member accesses after an instanceof/null guard see the
@@ -175,7 +181,9 @@ pub(crate) fn process_expression_statement<'b>(
         record_match_ternary_snapshots(expr, scope, ctx);
     }
 
-    process_assignment_expr(expr, scope, ctx);
+    if !skip_assignment {
+        process_assignment_expr(expr, scope, ctx);
+    }
 
     process_by_ref_closure_captures(expr, scope, ctx);
 
@@ -766,7 +774,7 @@ pub(crate) fn process_by_ref_closure_capture<'b>(
 
     for var_name in captured {
         scope.invalidate_dependent_keys(&var_name);
-        scope.invalidate_assertions(&var_name);
+        scope.invalidate_proofs(&var_name);
         let types = closure_scope.get(&var_name).to_vec();
         if !types.is_empty() {
             if invoked_immediately {
@@ -1445,7 +1453,7 @@ pub(crate) fn process_assignment_expr<'b>(
                     return;
                 }
                 let rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
-                scope.invalidate_assertions(&key);
+                scope.invalidate_proofs(&key);
                 if !rhs_types.is_empty() {
                     scope.set(&key, rhs_types);
                 }
@@ -1478,7 +1486,7 @@ pub(crate) fn process_assignment_expr<'b>(
         // after resolving the RHS, so `$x = $x->foo` still reads the old
         // key while resolving.
         scope.invalidate_dependent_keys(&lhs_name);
-        scope.invalidate_assertions(&lhs_name);
+        scope.invalidate_proofs(&lhs_name);
         if !rhs_types.is_empty() {
             scope.set(&lhs_name, rhs_types);
         } else if !scope.contains(&lhs_name) {
@@ -1487,6 +1495,9 @@ pub(crate) fn process_assignment_expr<'b>(
         // `$isHtml = $raw instanceof HtmlString` makes `$isHtml` stand
         // for the check, so testing it later narrows `$raw`.
         record_assertion_variable(&lhs_name, assignment.rhs, scope);
+        // `$period = $agreement?->latestPeriod()` makes `$period`'s null
+        // stand for `$agreement`'s, so ruling out one rules out the other.
+        record_nullsafe_origin(&lhs_name, assignment.rhs, scope);
     }
 }
 
@@ -3133,9 +3144,23 @@ pub(crate) fn process_assert_narrowing<'b>(
 
         // @phpstan-assert / @psalm-assert
         let mut type_guard: Option<(narrowing::TypeGuardKind, bool)> = None;
+        let mut intersected = false;
         ResolvedType::apply_narrowing(&mut results, |classes| {
-            narrowing::try_apply_custom_assert_narrowing(expr, &var_ctx, classes, &mut type_guard)
+            narrowing::try_apply_custom_assert_narrowing(
+                expr,
+                &var_ctx,
+                classes,
+                &mut type_guard,
+                &mut intersected,
+            )
         });
+        // The assertion proved a class the subject does not nominally
+        // implement, so the entries describe one value that is all of them
+        // rather than a choice between them.  Untagged they join as a
+        // union, which satisfies neither half's declared type.
+        if intersected {
+            ResolvedType::tag_as_intersection(&mut results);
+        }
 
         // A scalar / pseudo-type assertion (`assertIsString`, `assertIsObject`,
         // `assertIsArray`, their `assertIsNot*` negations, or the `object`

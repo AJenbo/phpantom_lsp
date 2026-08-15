@@ -278,7 +278,7 @@ pub(in crate::type_engine) fn find_method_in_chain_where(
 /// So `@phpstan-assert string $x` (PHPUnit's `assertIsString`) narrows like
 /// `is_string($x)`, and its negation excludes `string`.  Returns `None` for
 /// class names, so those fall through to the class-based narrowing.
-fn scalar_assert_guard_kind(ty: &PhpType) -> Option<TypeGuardKind> {
+pub(in crate::type_engine) fn scalar_assert_guard_kind(ty: &PhpType) -> Option<TypeGuardKind> {
     match ty.kind() {
         TypeKind::Array(_) | TypeKind::ArrayShape(_) => Some(TypeGuardKind::Array),
         TypeKind::Generic(g) if crate::php_type::is_array_like_name(&g.name) => {
@@ -322,6 +322,13 @@ fn scalar_assert_guard_kind(ty: &PhpType) -> Option<TypeGuardKind> {
 /// (e.g. `assertInstanceOf($variableClass, $x)`): the subject is still known
 /// to be an object, so it is narrowed to `object` rather than cleared.
 ///
+/// `*intersected` is set when the assertion proved a class the subject
+/// does not nominally implement — PHPUnit's `assertInstanceOf(Node::class,
+/// $mock)` on a `MockObject`, where the value really is both at once. The
+/// caller has to tag the surviving entries as an intersection; left as a
+/// plain list they read as a union, which says the value is one *or* the
+/// other and satisfies neither half's declared type.
+///
 /// Returns `true` when a definite (inclusion-style) narrowing was
 /// applied to `results` — see [`ResolvedType::apply_narrowing`]. The
 /// scalar/pseudo-type and template-deferral branches signal through
@@ -332,6 +339,7 @@ pub(in crate::type_engine) fn try_apply_custom_assert_narrowing(
     ctx: &VarResolutionCtx<'_>,
     results: &mut Vec<ClassInfo>,
     type_guard: &mut Option<(TypeGuardKind, bool)>,
+    intersected: &mut bool,
 ) -> bool {
     let expr = match expr {
         Expression::Parenthesized(inner) => inner.expression,
@@ -388,7 +396,14 @@ pub(in crate::type_engine) fn try_apply_custom_assert_narrowing(
             if assertion.negated {
                 apply_instanceof_exclusion(&effective_type, ctx, results);
             } else {
+                // `apply_instanceof_inclusion` only *grows* a single
+                // starting class into two entries through its "keep both"
+                // branch — every other path clears and replaces — so
+                // growth is the signal that the merge was an
+                // intersection.
+                let before = results.len();
                 definite |= apply_instanceof_inclusion(&effective_type, false, ctx, results);
+                *intersected |= before <= 1 && results.len() > before;
             }
         }
     }

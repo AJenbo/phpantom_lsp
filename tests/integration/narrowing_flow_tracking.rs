@@ -558,3 +558,422 @@ class SectionTest extends Asserts
 "#
     ));
 }
+
+// ─── A checked call is the same call where it is written again ──────────────
+
+const REPEATED_CALL_SCAFFOLD: &str = r#"<?php
+namespace Repro;
+
+class User {}
+
+class Session
+{
+    public static function current(): ?User { return null; }
+}
+
+function currentUser(): ?User { return null; }
+function render(User $user): void {}
+"#;
+
+/// `if (currentUser())` proves the call's result non-null, and writing the
+/// same call again inside the branch is the idiom the check exists for.
+#[test]
+fn a_guard_on_a_plain_function_call_narrows_the_repeated_call() {
+    assert_no_type_errors(&format!(
+        r#"{REPEATED_CALL_SCAFFOLD}
+function show(): void
+{{
+    if (currentUser()) {{
+        render(currentUser());
+    }}
+}}
+"#
+    ));
+}
+
+/// The same for a static call, whose key names the class rather than a
+/// receiver variable.
+#[test]
+fn a_guard_on_a_static_call_narrows_the_repeated_call() {
+    assert_no_type_errors(&format!(
+        r#"{REPEATED_CALL_SCAFFOLD}
+function show(): void
+{{
+    if (Session::current() !== null) {{
+        render(Session::current());
+    }}
+}}
+"#
+    ));
+}
+
+/// Negative control: the guard says nothing about a *different* call, so
+/// the nullable return survives.
+#[test]
+fn a_guard_on_one_call_leaves_another_alone() {
+    assert_type_error(&format!(
+        r#"{REPEATED_CALL_SCAFFOLD}
+function show(): void
+{{
+    if (currentUser()) {{
+        render(Session::current());
+    }}
+}}
+"#
+    ));
+}
+
+// ─── A `continue` guard reaches the copy the loop body makes of it ──────────
+
+const CONTINUE_GUARD_SCAFFOLD: &str = r#"<?php
+namespace Repro;
+
+class Country {}
+
+class Sheet
+{
+    /** @return array{0: false|string, 1: Country|false} */
+    private function columnValues(string $key): array { return [false, false]; }
+
+    private function updatePrice(int $productId, Country $market, array $row): void {}
+"#;
+
+/// `continue` on `!$newMarket` rules `false` out for the rest of the
+/// iteration, so the copy two lines down only ever stores a `Country` —
+/// including on the path where the copy is itself guarded and the merged
+/// state is what the call reads.
+#[test]
+fn a_continue_guard_reaches_a_variable_the_value_is_copied_into() {
+    assert_no_type_errors(&format!(
+        r#"{CONTINUE_GUARD_SCAFFOLD}
+    /** @param list<string> $keys */
+    public function run(array $keys, array $row, int $productId): void
+    {{
+        $market = null;
+        foreach ($keys as $key) {{
+            [$dbCol, $newMarket] = $this->columnValues($key);
+            if (!$dbCol || !$newMarket) {{
+                continue;
+            }}
+            if (!$market) {{
+                $market = $newMarket;
+            }}
+            $this->updatePrice($productId, $market, $row);
+        }}
+    }}
+}}
+"#
+    ));
+}
+
+/// Negative control: without the guard, the `false` the shape declares is
+/// still in play where the copy is read.
+#[test]
+fn an_unguarded_copy_keeps_the_falsy_union_member() {
+    assert_type_error(&format!(
+        r#"{CONTINUE_GUARD_SCAFFOLD}
+    /** @param list<string> $keys */
+    public function run(array $keys, array $row, int $productId): void
+    {{
+        $market = null;
+        foreach ($keys as $key) {{
+            [$dbCol, $newMarket] = $this->columnValues($key);
+            if (!$market) {{
+                $market = $newMarket;
+            }}
+            $this->updatePrice($productId, $market, $row);
+        }}
+    }}
+}}
+"#
+    ));
+}
+
+// ─── An assertion against a class the subject does not implement ────────────
+
+const MOCK_SCAFFOLD: &str = r#"<?php
+namespace Repro;
+
+interface MockObject {}
+class MethodNode {}
+class FunctionNode {}
+
+class Asserts
+{
+    /**
+     * @template ExpectedType of object
+     * @param class-string<ExpectedType> $expected
+     * @phpstan-assert =ExpectedType $actual
+     */
+    public static function assertInstanceOf(string $expected, mixed $actual): void {}
+}
+"#;
+
+/// A mock really is both the interface it was built as and the class it
+/// stands in for, so an assertion naming the class leaves an intersection
+/// of the two. Recorded as a union instead, it satisfies neither half of
+/// the declared `MethodNode&MockObject`.
+#[test]
+fn an_assertion_against_an_unrelated_class_intersects_rather_than_unions() {
+    assert_no_type_errors(&format!(
+        r#"{MOCK_SCAFFOLD}
+class Probe extends Asserts
+{{
+    /** @return MethodNode&MockObject */
+    protected function build(MockObject $node)
+    {{
+        static::assertInstanceOf(MethodNode::class, $node);
+
+        return $node;
+    }}
+}}
+"#
+    ));
+}
+
+/// The same proof applied to a subject that is *already* an intersection
+/// picks the union member it named and leaves the conjunct alone:
+/// `(FunctionNode|MethodNode)&MockObject` proven `MethodNode` is
+/// `MethodNode&MockObject`.
+#[test]
+fn an_assertion_picks_one_arm_of_a_union_inside_an_intersection() {
+    assert_no_type_errors(&format!(
+        r#"{MOCK_SCAFFOLD}
+class Probe extends Asserts
+{{
+    /** @return (FunctionNode|MethodNode)&MockObject */
+    private function make(string $class) {{ }}
+
+    /** @return MethodNode&MockObject */
+    protected function methodMock()
+    {{
+        $node = $this->make(MethodNode::class);
+        static::assertInstanceOf(MethodNode::class, $node);
+
+        return $node;
+    }}
+
+    /** @return FunctionNode&MockObject */
+    protected function functionMock()
+    {{
+        $node = $this->make(FunctionNode::class);
+        static::assertInstanceOf(FunctionNode::class, $node);
+
+        return $node;
+    }}
+}}
+"#
+    ));
+}
+
+/// Negative control: the arm the assertion did *not* name is gone, so
+/// returning the narrowed value as the other half is still a mismatch.
+#[test]
+fn an_assertion_rules_out_the_union_arm_it_did_not_name() {
+    assert_type_error(&format!(
+        r#"{MOCK_SCAFFOLD}
+class Probe extends Asserts
+{{
+    /** @return (FunctionNode|MethodNode)&MockObject */
+    private function make(string $class) {{ }}
+
+    /** @return FunctionNode&MockObject */
+    protected function methodMock()
+    {{
+        $node = $this->make(MethodNode::class);
+        static::assertInstanceOf(MethodNode::class, $node);
+
+        return $node;
+    }}
+}}
+"#
+    ));
+}
+
+// ─── A predicate that promises something about its own receiver ─────────────
+
+const PREDICATE_SCAFFOLD: &str = r#"<?php
+namespace PHPStan\Analyser;
+
+class ClassReflection {}
+class TraitReflection {}
+
+interface Scope
+{
+    /** @phpstan-assert-if-true !null $this->getTraitReflection() */
+    public function isInTrait(): bool;
+
+    public function getTraitReflection(): ?TraitReflection;
+
+    /** @api */
+    public function isInClass(): bool;
+
+    public function getClassReflection(): ?ClassReflection;
+}
+
+function useTrait(TraitReflection $reflection): void {}
+function useClass(ClassReflection $reflection): void {}
+"#;
+
+/// `@phpstan-assert-if-true !null $this->getTraitReflection()` names a
+/// member of the *receiver*, not a parameter, so the subject it narrows
+/// is that member read through the variable the call was written on.
+#[test]
+fn a_predicate_narrows_the_member_its_tag_names_on_the_receiver() {
+    assert_no_type_errors(&format!(
+        r#"{PREDICATE_SCAFFOLD}
+function f(Scope $scope): void
+{{
+    if ($scope->isInTrait()) {{
+        $reflection = $scope->getTraitReflection();
+        useTrait($reflection);
+    }}
+}}
+"#
+    ));
+}
+
+/// PHPStan annotates `isInTrait()` and leaves the identical `isInClass()`
+/// bare, so the pairing is supplied for it. Every PHPStan extension is
+/// written against it regardless of the missing tag.
+#[test]
+fn phpstan_is_in_class_narrows_the_paired_reflection_getter() {
+    assert_no_type_errors(&format!(
+        r#"{PREDICATE_SCAFFOLD}
+function f(Scope $scope): void
+{{
+    if ($scope->isInClass()) {{
+        $reflection = $scope->getClassReflection();
+        useClass($reflection);
+    }}
+}}
+"#
+    ));
+}
+
+/// Negative control: without the guard the getter is as nullable as it
+/// declares itself to be.
+#[test]
+fn an_unguarded_reflection_getter_keeps_its_null() {
+    assert_type_error(&format!(
+        r#"{PREDICATE_SCAFFOLD}
+function f(Scope $scope): void
+{{
+    $reflection = $scope->getClassReflection();
+    useClass($reflection);
+}}
+"#
+    ));
+}
+
+/// A `!null` promise about a plain parameter narrows the same way — the
+/// tag names no class, so it goes through the type guards rather than the
+/// `instanceof` machinery.
+#[test]
+fn an_assert_if_true_not_null_tag_strips_the_null() {
+    assert_no_type_errors(
+        r#"<?php
+namespace Repro;
+
+class Row {}
+
+class Reader
+{
+    /** @phpstan-assert-if-true !null $row */
+    public function isLoaded(?Row $row): bool { return $row !== null; }
+}
+
+function takesRow(Row $row): void {}
+
+function f(Reader $reader, ?Row $row): void
+{
+    if ($reader->isLoaded($row)) {
+        takesRow($row);
+    }
+}
+"#,
+    );
+}
+
+// ─── A ternary that repeats its own subject ─────────────────────────────────
+
+const SELF_TERNARY_SCAFFOLD: &str = r#"<?php
+namespace Repro;
+
+/**
+ * @property null|string $alt
+ * @property string $caption
+ */
+class Article
+{
+    public ?string $subtitle = null;
+    public string $title = '';
+
+    public function __get(string $name): mixed { return null; }
+}
+
+function takesString(string $value): void {}
+"#;
+
+/// `$a->alt ? $a->alt : $a->caption` proves the path truthy for its own
+/// then-arm. The proof is keyed under the whole path, not under the
+/// variable it is rooted at, which is why the arm has to look for it
+/// there.
+#[test]
+fn a_self_referencing_ternary_narrows_a_property_path() {
+    assert_no_type_errors(&format!(
+        r#"{SELF_TERNARY_SCAFFOLD}
+function render(Article $article): void
+{{
+    $alt = $article->alt ? $article->alt : $article->caption;
+    takesString($alt);
+}}
+"#
+    ));
+}
+
+/// The same for a real declared property, which took the same path and
+/// lost the same proof.
+#[test]
+fn a_self_referencing_ternary_narrows_a_declared_property() {
+    assert_no_type_errors(&format!(
+        r#"{SELF_TERNARY_SCAFFOLD}
+function render(Article $article): void
+{{
+    $subtitle = $article->subtitle ? $article->subtitle : $article->title;
+    takesString($subtitle);
+}}
+"#
+    ));
+}
+
+/// A `@var` block annotating the statement is authoritative over the
+/// assignment it names and nothing else: the ternary in the same
+/// statement still narrows.
+#[test]
+fn a_preceding_var_docblock_does_not_cancel_the_statements_narrowing() {
+    assert_no_type_errors(&format!(
+        r#"{SELF_TERNARY_SCAFFOLD}
+function render(): void
+{{
+    /** @var Article $article */
+    takesString($article->alt ? $article->alt : $article->caption);
+}}
+"#
+    ));
+}
+
+/// Negative control: the else arm gets the opposite proof, so returning
+/// the nullable half there is still a mismatch.
+#[test]
+fn the_else_arm_of_a_self_ternary_keeps_the_falsy_half() {
+    assert_type_error(&format!(
+        r#"{SELF_TERNARY_SCAFFOLD}
+function render(Article $article): void
+{{
+    $alt = $article->caption ? $article->caption : $article->alt;
+    takesString($alt);
+}}
+"#
+    ));
+}

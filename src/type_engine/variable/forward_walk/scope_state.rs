@@ -53,6 +53,18 @@ pub(crate) struct ScopeState {
     /// narrows the original subject.
     pub assertions: AtomMap<Vec<VarAssertion>>,
 
+    /// Scope key → the receivers a `?->` chain stored under it would have
+    /// short-circuited on.
+    ///
+    /// `$period = $agreement?->latestPeriod();` records `$agreement` under
+    /// `$period`.  The chain yields `null` for a null receiver, so a guard
+    /// that later rules out `$period`'s null rules out `$agreement`'s with
+    /// it — a proof the guard's own condition never names.
+    ///
+    /// Only recorded when the stored value is nullable to begin with:
+    /// "not null now" is evidence of a narrowing only if null was in play.
+    pub nullsafe_origins: AtomMap<Vec<Atom>>,
+
     /// No value can reach this program point.
     ///
     /// Set when a condition narrows some variable down to nothing — the
@@ -69,6 +81,7 @@ impl ScopeState {
         Self {
             locals: AtomMap::default(),
             assertions: AtomMap::default(),
+            nullsafe_origins: AtomMap::default(),
             unreachable: false,
         }
     }
@@ -114,7 +127,7 @@ impl ScopeState {
     /// Remove a variable (e.g. after `unset($x)`).
     pub fn remove(&mut self, var_name: &str) {
         self.locals.remove(&atom(var_name));
-        self.invalidate_assertions(var_name);
+        self.invalidate_proofs(var_name);
     }
 
     /// Remove synthetic keys that read `var_name` — a path rooted at it
@@ -154,6 +167,8 @@ impl ScopeState {
                 && crate::type_engine::types::narrowing::key_reads_variable(key, receiver)
         };
         self.locals.retain(|key, _| !reads_receiver(key));
+        self.nullsafe_origins
+            .retain(|_, receivers| !receivers.iter().any(|r| reads_receiver(r)));
         if self.assertions.is_empty() {
             return;
         }
@@ -163,25 +178,39 @@ impl ScopeState {
         });
     }
 
-    /// Drop the checks that writing to `var_name` invalidates: whatever
-    /// the variable itself stood for, plus every check whose subject
+    /// Drop the proofs that writing to `var_name` invalidates: whatever
+    /// the variable itself stood for, plus every proof whose subject
     /// reads it.  A boolean only describes the value its subject held
-    /// when the check ran.
-    pub fn invalidate_assertions(&mut self, var_name: &str) {
-        if self.assertions.is_empty() {
+    /// when the check ran, and a `?->` chain only describes the receiver
+    /// it was evaluated against.
+    pub fn invalidate_proofs(&mut self, var_name: &str) {
+        let key = atom(var_name);
+        let stale = |subject: &Atom| {
+            *subject == key
+                || crate::type_engine::types::narrowing::key_reads_variable(subject, var_name)
+        };
+        if !self.assertions.is_empty() {
+            self.assertions.remove(&key);
+            self.assertions.retain(|_, checks| {
+                checks.retain(|c| !stale(&c.subject));
+                !checks.is_empty()
+            });
+        }
+        if !self.nullsafe_origins.is_empty() {
+            self.nullsafe_origins.remove(&key);
+            self.nullsafe_origins
+                .retain(|holder, receivers| !stale(holder) && !receivers.iter().any(stale));
+        }
+    }
+
+    /// Record that the value stored under `holder` came from a `?->` chain
+    /// evaluated against `receivers`, so proving the value non-null proves
+    /// each receiver non-null too.
+    pub fn record_nullsafe_origin(&mut self, holder: &str, receivers: Vec<Atom>) {
+        if receivers.is_empty() {
             return;
         }
-        let key = atom(var_name);
-        self.assertions.remove(&key);
-        self.assertions.retain(|_, checks| {
-            checks.retain(|c| {
-                c.subject != key
-                    && !crate::type_engine::types::narrowing::key_reads_variable(
-                        &c.subject, var_name,
-                    )
-            });
-            !checks.is_empty()
-        });
+        self.nullsafe_origins.insert(atom(holder), receivers);
     }
 
     /// Whether two scopes say the same thing about every name they hold.
@@ -190,7 +219,10 @@ impl ScopeState {
     /// the check that matters are clones of one another, so a shared
     /// `class_info` compares by pointer and never walks a class.
     fn describes_same_state_as(&self, other: &ScopeState) -> bool {
-        if self.locals.len() != other.locals.len() || self.assertions != other.assertions {
+        if self.locals.len() != other.locals.len()
+            || self.assertions != other.assertions
+            || self.nullsafe_origins != other.nullsafe_origins
+        {
             return false;
         }
         self.locals.iter().all(|(name, types)| {
@@ -257,6 +289,14 @@ impl ScopeState {
         if !self.assertions.is_empty() {
             self.assertions
                 .retain(|name, checks| other.assertions.get(name) == Some(checks));
+        }
+
+        // A chain proof survives a join only when both paths recorded the
+        // same one: a path that reassigned the holder, or never ran the
+        // assignment at all, says nothing about the receivers.
+        if !self.nullsafe_origins.is_empty() {
+            self.nullsafe_origins
+                .retain(|name, receivers| other.nullsafe_origins.get(name) == Some(receivers));
         }
 
         for (name, other_types) in &other.locals {

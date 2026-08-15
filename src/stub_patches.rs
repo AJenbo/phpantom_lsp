@@ -691,6 +691,59 @@ pub fn apply_class_stub_patches(class: &mut ClassInfo) {
     mark_benevolent_methods(class);
 }
 
+/// A `@phpstan-assert-if-true` promise a third-party class makes in its
+/// implementation but forgets to declare.
+///
+/// Each entry is `(class FQN, predicate method, member the predicate
+/// proves non-null)`. The member is spelled as the tag would spell it, so
+/// the narrowing that reads it needs no special case of its own.
+///
+/// This list exists only for promises the library *documents elsewhere*
+/// (in prose, or by annotating its siblings) — never to paper over a
+/// method that really can return null. PHPStan annotates `isInTrait()`
+/// with `@phpstan-assert-if-true !null $this->getTraitReflection()` and
+/// leaves the identical `isInClass()` bare, and every PHPStan extension
+/// is written against the pairing regardless.
+const THIRD_PARTY_ASSERT_IF_TRUE: &[(&str, &str, &str)] = &[(
+    "PHPStan\\Analyser\\Scope",
+    "isInClass",
+    "$this->getClassReflection()",
+)];
+
+/// Supply the `@phpstan-assert-if-true` tags that [`THIRD_PARTY_ASSERT_IF_TRUE`]
+/// records, for a class parsed from the user's project or its vendor tree.
+///
+/// Separate from [`apply_class_stub_patches`], which is deliberately
+/// confined to the embedded stubs: this one has to reach vendor code, so
+/// it does nothing at all for a class whose FQN is not in the list.
+pub fn apply_third_party_class_patches(class: &mut ClassInfo) {
+    let fqn = class.fqn();
+    for (class_fqn, method_name, subject) in THIRD_PARTY_ASSERT_IF_TRUE {
+        if fqn.as_str() != *class_fqn {
+            continue;
+        }
+        let Some(idx) = class
+            .methods
+            .iter()
+            .position(|m| m.name.as_str() == *method_name)
+        else {
+            continue;
+        };
+        // A version that grew the tag upstream keeps its own.
+        if !class.methods[idx].type_assertions.is_empty() {
+            continue;
+        }
+        let mut method = (*class.methods[idx]).clone();
+        method.type_assertions.push(crate::types::TypeAssertion {
+            kind: crate::types::AssertionKind::IfTrue,
+            param_name: (*subject).to_string(),
+            asserted_type: PhpType::null(),
+            negated: true,
+        });
+        class.methods.make_mut()[idx] = std::sync::Arc::new(method);
+    }
+}
+
 /// Tag the class's benevolent methods (`Redis::get`, `SplFileInfo::getSize`,
 /// `DateTime::modify`, …) so their `|false` branch stops being enforced at
 /// call sites.

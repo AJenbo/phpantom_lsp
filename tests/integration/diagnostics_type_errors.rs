@@ -2842,6 +2842,75 @@ class MyTest extends TestCase {
     );
 }
 
+#[test]
+fn no_false_positive_when_the_other_binding_site_was_not_passed() {
+    // Laravel's `travelTo` names `TDate` in both `$date` and the optional
+    // `$callback`'s callable signature. A call that passes only the date
+    // binds `TDate` from that one argument, so checking the argument
+    // against the substitution is exactly as circular as it would be if
+    // `$callback` did not exist — the second binding site contributes
+    // nothing when the caller leaves it out.
+    let php = r#"<?php
+class Carbon {
+    public static function create(int $year): ?Carbon { return null; }
+}
+
+class TestCase {
+    /**
+     * @template TReturn of mixed
+     * @template TDate of \DateTimeInterface|\Closure|Carbon|string|bool|null
+     * @param  TDate  $date
+     * @param  (callable(TDate): TReturn)|null  $callback
+     * @return ($callback is null ? void : TReturn)
+     */
+    public function travelTo($date, $callback = null) {}
+}
+
+class MyTest extends TestCase {
+    public function testTime(): void {
+        $this->travelTo(Carbon::create(2024));
+    }
+}
+"#;
+    let diags = collect(php);
+    let msgs = type_error_messages(&diags);
+    assert!(
+        !has_type_error(&diags),
+        "The unfilled second binding site is not an independent check, got: {msgs:?}"
+    );
+}
+
+#[test]
+fn skipping_a_self_bound_parameter_leaves_the_rest_of_the_call_checked() {
+    // Only the parameter the template was bound from goes unchecked. The
+    // ordinary parameters beside it are unaffected.
+    let php = r#"<?php
+class Carbon {
+    public static function create(int $year): ?Carbon { return null; }
+}
+
+class TestCase {
+    /**
+     * @template TDate of Carbon|string
+     * @param  TDate  $date
+     * @param  (callable(TDate): void)|null  $callback
+     */
+    public function travelTo($date, $callback = null, int $times = 1) {}
+}
+
+class MyTest extends TestCase {
+    public function testTime(): void {
+        $this->travelTo(Carbon::create(2024), null, 'not an int');
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "a string argument does not satisfy the `int $times` parameter"
+    );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Class-level template parameter substitution
 // ═══════════════════════════════════════════════════════════════════════════
