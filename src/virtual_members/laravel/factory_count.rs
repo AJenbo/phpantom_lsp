@@ -61,10 +61,16 @@ pub(crate) fn chain_count(receiver: &SubjectExpr) -> FactoryCount {
         let SubjectExpr::CallExpr { callee, args_text } = current else {
             return FactoryCount::Unknown;
         };
-        let args = split_text_args(args_text);
-        let first_arg = args.first().map(|a| a.trim());
         match callee.as_ref() {
             SubjectExpr::MethodCall { base, method } => {
+                let args = if method == "count" {
+                    Some(split_text_args(args_text))
+                } else {
+                    None
+                };
+                let first_arg = args
+                    .as_ref()
+                    .and_then(|args| args.first().map(|arg| arg.trim()));
                 if let Some(state) = instance_count_state(method, first_arg, &|| None) {
                     return state;
                 }
@@ -73,6 +79,14 @@ pub(crate) fn chain_count(receiver: &SubjectExpr) -> FactoryCount {
             // A static call is the head of the chain: `Model::factory()`,
             // `UserFactory::new()`, `UserFactory::times(3)`.
             SubjectExpr::StaticMethodCall { method, .. } => {
+                let args = if method == "factory" {
+                    Some(split_text_args(args_text))
+                } else {
+                    None
+                };
+                let first_arg = args
+                    .as_ref()
+                    .and_then(|args| args.first().map(|arg| arg.trim()));
                 return static_count_state(method, first_arg, &|| None);
             }
             _ => return FactoryCount::Unknown,
@@ -114,7 +128,15 @@ pub(crate) fn chain_count_ast(receiver: &Expression<'_>, content: &str) -> Facto
             return FactoryCount::Unknown;
         };
         let method = bytes_to_str(ident.value);
-        let first_arg = first_argument_text(argument_list, content);
+        let reads_first_arg = match object {
+            Some(_) => method == "count",
+            None => method == "factory",
+        };
+        let first_arg = if reads_first_arg {
+            first_argument_text(argument_list, content)
+        } else {
+            None
+        };
         match object {
             Some(base) => {
                 if let Some(state) = instance_count_state(method, first_arg, &|| None) {
@@ -323,12 +345,18 @@ fn is_decidable_literal(arg: &str) -> bool {
 /// not veto the factory's own state.  Class entries that disagree do,
 /// since the value is then a factory of unknown count.
 fn carried_count(receiver: &[ResolvedType]) -> FactoryCount {
-    receiver
+    let mut carried = None;
+    for count in receiver
         .iter()
         .filter(|rt| rt.class_info.is_some())
         .map(|rt| rt.factory_count)
-        .reduce(FactoryCount::join)
-        .unwrap_or(FactoryCount::Unknown)
+    {
+        if count == FactoryCount::Unknown || carried.is_some_and(|previous| previous != count) {
+            return FactoryCount::Unknown;
+        }
+        carried = Some(count);
+    }
+    carried.unwrap_or(FactoryCount::Unknown)
 }
 
 /// The count state an instance call hands to its result, or `None` when
@@ -412,16 +440,18 @@ pub(crate) fn tag_static_factory_call(
     if !matches!(method, "factory" | "times" | "new") {
         return;
     }
-    let count = static_count_state(method, first_arg, first_arg_type);
-    if count == FactoryCount::Unknown {
-        return;
-    }
+    let mut count = None;
     for result in results.iter_mut() {
         if result
             .class_info
             .as_ref()
             .is_some_and(|ci| extends_eloquent_factory(ci, ctx.class_loader))
         {
+            let count =
+                *count.get_or_insert_with(|| static_count_state(method, first_arg, first_arg_type));
+            if count == FactoryCount::Unknown {
+                return;
+            }
             result.factory_count = count;
         }
     }

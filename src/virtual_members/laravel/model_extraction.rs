@@ -15,11 +15,11 @@
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
-use crate::atom::{Atom, atom, bytes_to_str, last_segment};
+use crate::atom::{Atom, atom, bytes_to_str, last_segment, literal_bytes_to_str};
 use crate::parser::DocblockCtx;
 use crate::php_type::PhpType;
 use crate::types::{FacadeAccessor, LaravelMetadata, MethodInfo, PivotRelation};
-use crate::util::{strip_fqn_prefix, unescape_php_string_literal};
+use crate::util::strip_fqn_prefix;
 
 use super::{extract_pivot_using, extract_with_pivot_columns, infer_relationship_from_body};
 
@@ -316,7 +316,6 @@ fn extract_custom_collection_from_new_collection(methods: &[MethodInfo]) -> Opti
 /// before that pass, preventing the factory's namespace from being prepended.
 fn extract_factory_model<'a>(
     members: impl Iterator<Item = &'a class_like::member::ClassLikeMember<'a>>,
-    content: &str,
 ) -> Option<PhpType> {
     for member in members {
         let class_like::member::ClassLikeMember::Property(class_like::property::Property::Plain(
@@ -344,27 +343,17 @@ fn extract_factory_model<'a>(
                 && let Expression::Identifier(identifier) = access.class
             {
                 let name = bytes_to_str(identifier.value()).trim();
-                if !name.is_empty()
+                return (!name.is_empty()
                     && !name.eq_ignore_ascii_case("self")
                     && !name.eq_ignore_ascii_case("static")
-                    && !name.eq_ignore_ascii_case("parent")
-                {
-                    return Some(PhpType::named(atom(name)));
-                }
-                continue;
+                    && !name.eq_ignore_ascii_case("parent"))
+                .then(|| PhpType::named(atom(name)));
             }
 
-            if !matches!(concrete.value, Expression::Literal(Literal::String(_))) {
-                continue;
-            }
-
-            let span = concrete.value.span();
-            let start = span.start.offset as usize;
-            let end = span.end.offset as usize;
-            let Some(raw) = content.get(start..end) else {
+            let Expression::Literal(Literal::String(literal)) = concrete.value else {
                 continue;
             };
-            let Some(name) = unescape_php_string_literal(raw.trim()) else {
+            let Some(name) = literal.value.and_then(literal_bytes_to_str) else {
                 continue;
             };
             let name = name.trim();
@@ -995,7 +984,7 @@ pub(crate) fn extract_laravel_metadata<'a>(
     content: &str,
     doc_ctx: Option<&DocblockCtx<'a>>,
 ) -> LaravelMetadata {
-    let factory_model = extract_factory_model(class.members.iter(), content);
+    let factory_model = extract_factory_model(class.members.iter());
 
     let custom_collection =
         extract_custom_collection(&class.attribute_lists, use_generics, methods, content);
@@ -1176,6 +1165,10 @@ class StringFactory {
     protected $model = 'Domain\\Models\\PublishedDraft';
 }
 
+class DoubleQuotedStringFactory {
+    protected $model = "Domain\\Models\\PreviewDraft";
+}
+
 class DynamicFactory {
     protected $model = model_name();
 }
@@ -1212,7 +1205,168 @@ class InterpolatedFactory {
             model_type("StringFactory").as_deref(),
             Some("Domain\\Models\\PublishedDraft")
         );
+        assert_eq!(
+            model_type("DoubleQuotedStringFactory").as_deref(),
+            Some("Domain\\Models\\PreviewDraft")
+        );
         assert_eq!(model_type("DynamicFactory"), None);
         assert_eq!(model_type("InterpolatedFactory"), None);
+    }
+
+    #[test]
+    fn laravel_factory_model_property_resolves_supported_class_name_forms() {
+        let src = r#"<?php
+namespace Database\Factories;
+
+use App\Models as Models;
+
+class LocalDraft {}
+
+class NamespaceRelativeFactory {
+    public function definition(): array { return []; }
+
+    protected $unused = null, $model = LocalDraft::CLASS;
+}
+
+class QualifiedImportFactory {
+    protected $model = Models\QualifiedDraft::class;
+}
+
+class FullyQualifiedFactory {
+    protected $model = \App\Models\AbsoluteDraft::class;
+}
+
+class AbsoluteStringFactory {
+    protected $model = '\\Domain\\Models\\AbsoluteDraft';
+}
+
+class BinaryStringFactory {
+    protected $model = b'Domain\\Models\\BinaryDraft';
+}
+
+class EscapedDoubleQuotedStringFactory {
+    protected $model = "\x44omain\\Models\\EscapedDraft";
+}
+"#;
+        let mut classes: Vec<_> = Backend::parse_php_versioned_with_namespaces(src, None)
+            .into_iter()
+            .map(|(class, _)| class)
+            .collect();
+        let use_map = HashMap::from([("Models".to_string(), "App\\Models".to_string())]);
+        Backend::resolve_parent_class_names(
+            &mut classes,
+            &use_map,
+            &Some("Database\\Factories".to_string()),
+        );
+
+        let model_type = |class_name: &str| {
+            classes
+                .iter()
+                .find(|class| class.name == atom(class_name))
+                .and_then(|class| class.laravel())
+                .and_then(|laravel| laravel.factory_model.as_ref())
+                .map(ToString::to_string)
+        };
+
+        assert_eq!(
+            model_type("NamespaceRelativeFactory").as_deref(),
+            Some("Database\\Factories\\LocalDraft")
+        );
+        assert_eq!(
+            model_type("QualifiedImportFactory").as_deref(),
+            Some("App\\Models\\QualifiedDraft")
+        );
+        assert_eq!(
+            model_type("FullyQualifiedFactory").as_deref(),
+            Some("App\\Models\\AbsoluteDraft")
+        );
+        assert_eq!(
+            model_type("AbsoluteStringFactory").as_deref(),
+            Some("Domain\\Models\\AbsoluteDraft")
+        );
+        assert_eq!(
+            model_type("BinaryStringFactory").as_deref(),
+            Some("Domain\\Models\\BinaryDraft")
+        );
+        assert_eq!(
+            model_type("EscapedDoubleQuotedStringFactory").as_deref(),
+            Some("Domain\\Models\\EscapedDraft")
+        );
+    }
+
+    #[test]
+    fn laravel_factory_model_property_ignores_non_model_initializers() {
+        let src = r#"<?php
+namespace Database\Factories;
+
+class FactoryParent {}
+
+class UninitializedFactory {
+    protected $model;
+}
+
+class EmptyStringFactory {
+    protected $model = '   ';
+}
+
+class SelfFactory {
+    protected $model = self::class;
+}
+
+class StaticFactory {
+    protected $model = static::class;
+}
+
+class ParentFactory extends FactoryParent {
+    protected $model = parent::class;
+}
+
+class OtherConstantFactory {
+    private const MODEL_CLASS = 'App\\Models\\Draft';
+    protected $model = self::MODEL_CLASS;
+}
+
+class UnrelatedPropertyFactory {
+    protected $notModel = \App\Models\Draft::class;
+}
+
+class NonUtf8StringFactory {
+    protected $model = "\xff";
+}
+
+class InvalidEscapeFactory {
+    protected $model = "\u{}";
+}
+"#;
+        let mut classes: Vec<_> = Backend::parse_php_versioned_with_namespaces(src, None)
+            .into_iter()
+            .map(|(class, _)| class)
+            .collect();
+        Backend::resolve_parent_class_names(
+            &mut classes,
+            &HashMap::new(),
+            &Some("Database\\Factories".to_string()),
+        );
+
+        for class_name in [
+            "UninitializedFactory",
+            "EmptyStringFactory",
+            "SelfFactory",
+            "StaticFactory",
+            "ParentFactory",
+            "OtherConstantFactory",
+            "UnrelatedPropertyFactory",
+            "NonUtf8StringFactory",
+            "InvalidEscapeFactory",
+        ] {
+            let class = classes
+                .iter()
+                .find(|class| class.name == atom(class_name))
+                .expect("factory model fixture should parse");
+            let model = class
+                .laravel()
+                .and_then(|laravel| laravel.factory_model.as_ref());
+            assert!(model.is_none(), "{class_name} must not declare a model");
+        }
     }
 }

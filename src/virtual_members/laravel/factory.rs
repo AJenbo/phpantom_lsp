@@ -147,12 +147,6 @@ fn declared_factory_model_type(
     class: &ClassInfo,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<PhpType> {
-    let mut template_params: Vec<String> = class
-        .template_params
-        .iter()
-        .map(ToString::to_string)
-        .collect();
-
     // Preserve the allocation-free direct path, and allow isolated test/stub
     // classes to carry a complete declaration without loading the parent. A
     // raw template is not a model declaration yet: `$model` or the convention
@@ -160,11 +154,12 @@ fn declared_factory_model_type(
     if let Some(model) = class.extends_generics.iter().find_map(|(name, args)| {
         let short = name.rsplit('\\').next().unwrap_or(name);
         (short == "Factory").then(|| args.last()).flatten()
-    }) && !model.references_any_template_param(&template_params)
+    }) && !model.references_any_name(&class.template_params)
     {
         return Some(model.clone());
     }
 
+    let mut template_params = class.template_params.clone();
     let mut current = ClassRef::Borrowed(class);
     let mut active_subs: HashMap<String, PhpType> = HashMap::new();
     let mut property_model = None;
@@ -198,7 +193,7 @@ fn declared_factory_model_type(
                         model.substitute(&active_subs)
                     }
                 })
-                .filter(|model| !model.references_any_template_param(&template_params));
+                .filter(|model| !model.references_any_name(&template_params));
             return generic_model.or(property_model);
         }
 
@@ -209,7 +204,7 @@ fn declared_factory_model_type(
 
         active_subs = level_subs;
         current = ClassRef::Owned(parent);
-        template_params.extend(current.template_params.iter().map(ToString::to_string));
+        template_params.extend_from_slice(&current.template_params);
     }
 
     property_model
@@ -258,19 +253,17 @@ pub(crate) fn factory_model_type(
 /// Build virtual `create()` and `make()` methods for a factory class
 /// that does not have `@extends Factory<Model>`.
 ///
-/// The model type is resolved by [`factory_model_type`].
-fn build_factory_model_methods(
-    class: &ClassInfo,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> Vec<MethodInfo> {
-    let model_type = match factory_model_type(class, class_loader) {
+/// The model type is resolved once by the provider and shared with every
+/// factory-specific member builder.
+fn build_factory_model_methods(model_type: Option<&PhpType>) -> Vec<MethodInfo> {
+    let model_type = match model_type {
         Some(ty) => ty,
         None => return Vec::new(),
     };
 
     vec![
-        MethodInfo::virtual_method_typed("create", Some(&model_type)),
-        MethodInfo::virtual_method_typed("make", Some(&model_type)),
+        MethodInfo::virtual_method_typed("create", Some(model_type)),
+        MethodInfo::virtual_method_typed("make", Some(model_type)),
     ]
 }
 
@@ -347,11 +340,11 @@ fn model_uses_soft_deletes(
 /// The associated model is fully resolved so that relationships declared on
 /// traits or parent classes are visible.
 fn build_factory_relationship_methods(
-    class: &ClassInfo,
+    model_type: Option<&PhpType>,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     cache: Option<&ResolvedClassCache>,
 ) -> Vec<MethodInfo> {
-    let model_type = match factory_model_type(class, class_loader) {
+    let model_type = match model_type {
         Some(model) => model,
         None => return Vec::new(),
     };
@@ -463,9 +456,10 @@ impl VirtualMemberProvider for LaravelFactoryProvider {
         class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
         cache: Option<&crate::virtual_members::ResolvedClassCache>,
     ) -> VirtualMembers {
-        let mut methods = build_factory_model_methods(class, class_loader);
+        let model_type = factory_model_type(class, class_loader);
+        let mut methods = build_factory_model_methods(model_type.as_ref());
         methods.extend(build_factory_relationship_methods(
-            class,
+            model_type.as_ref(),
             class_loader,
             cache,
         ));
