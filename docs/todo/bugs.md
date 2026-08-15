@@ -57,3 +57,19 @@ pending member reference counts finish (`reference_counts.rs`), but not
 when the initial index completes, so the stale zeros sit there until
 something else happens to trigger a refresh. Send the same refresh once
 indexing finishes.
+
+### B175. Renaming a global constant renames a class constant of the same name
+
+**Impact: Medium · Effort: Low**
+
+`find_constant_references` matches `MemberDeclaration` spans by short
+name, so a global `const BAR = 1;` and an unrelated `class Holder {
+public const BAR = 2; }` are treated as one symbol. Renaming the global
+constant to `QUX` rewrites `Holder`'s declaration too, and only the
+declaration: `Holder::BAR` at every use site is left alone, so a file
+that compiled no longer does.
+
+A class constant is reached through `Holder::BAR` and a global one is
+not, so the two can never be the same symbol. The match should require
+the reference to be a global constant, not merely share the last
+segment of its name.

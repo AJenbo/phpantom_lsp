@@ -19,7 +19,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::reference_index::ReferenceIndexKey;
-use crate::symbol_map::{CallSite, SymbolKind, UntypedClosureSite};
+use crate::symbol_map::{CallSite, SymbolKind, SymbolMap, UntypedClosureSite};
 use crate::text_position::{offset_to_position, position_to_offset};
 use crate::types::{ClassInfo, ClassLikeKind, FileContext, MAX_INHERITANCE_DEPTH, Visibility};
 
@@ -107,7 +107,13 @@ impl Backend {
             );
         }
 
-        self.emit_declaration_count_hints(uri, content, (range_start, range_end), &mut hints);
+        self.emit_declaration_count_hints(
+            uri,
+            content,
+            &symbol_map,
+            (range_start, range_end),
+            &mut hints,
+        );
 
         // Translate hints back to Blade if needed.  A hint anchored in the
         // injected prologue has no template text to attach to.
@@ -130,6 +136,7 @@ impl Backend {
         &self,
         uri: &str,
         content: &str,
+        symbol_map: &SymbolMap,
         range: (u32, u32),
         hints: &mut Vec<InlayHint>,
     ) {
@@ -141,7 +148,7 @@ impl Backend {
         // below never reaches one.  These go first, or a file holding
         // nothing but functions would leave at the `else` below with no
         // hints at all.
-        self.emit_function_count_hints(uri, content, range, hints);
+        self.emit_function_count_hints(uri, content, symbol_map, range, hints);
 
         let Some(classes) = self.symbols.uri_classes_index.read().get(uri).cloned() else {
             return;
@@ -274,13 +281,10 @@ impl Backend {
         &self,
         uri: &str,
         content: &str,
+        symbol_map: &SymbolMap,
         range: (u32, u32),
         hints: &mut Vec<InlayHint>,
     ) {
-        let Some(symbol_map) = self.symbol_maps.read().get(uri).cloned() else {
-            return;
-        };
-
         for span in &symbol_map.spans {
             let SymbolKind::FunctionCall {
                 name,
