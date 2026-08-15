@@ -847,23 +847,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Type comparison">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b87-union-argument-compatibility-requires-every-member-to-satisfy-phpstan-requires-only-one" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B87. Union-argument compatibility requires every member to satisfy, PHPStan requires only one
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1419,23 +1402,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Type comparison">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b87-union-argument-compatibility-requires-every-member-to-satisfy-phpstan-requires-only-one" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B87. Union-argument compatibility requires every member to satisfy, PHPStan requires only one
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1540,25 +1506,7 @@ each bug's row lives in the current sprint/backlog.</p>
 <h2 id="crashes">Crashes<a class="headerlink" href="#crashes" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="type-comparison">Type comparison<a class="headerlink" href="#type-comparison" title="Permanent link">&para;</a></h2>
-<h3 id="b87-union-argument-compatibility-requires-every-member-to-satisfy-phpstan-requires-only-one">B87. Union-argument compatibility requires every member to satisfy, PHPStan requires only one<a class="headerlink" href="#b87-union-argument-compatibility-requires-every-member-to-satisfy-phpstan-requires-only-one" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: High</strong></p>
-<p><code>is_type_compatible</code>'s union-argument rule demands that <em>every</em> member
-of an argument's union type satisfy the parameter before the call is
-accepted; PHPStan treats a union that only <em>partly</em> satisfies the
-target as a "maybe" and stays silent rather than reporting the members
-that don't. This came up while fixing <code>float</code> → <code>int</code> coercion outside
-<code>strict_types</code> (<a href="../../CHANGELOG/"><code>docs/CHANGELOG.md</code></a>): PHPStan does
-not report the <em>strict</em> spelling of that case either (an <code>int|float</code>
-value assigned to <code>int</code> under <code>declare(strict_types=1)</code>), specifically
-because the <code>int</code> half already satisfies the parameter and the union
-rule only needs one member to.</p>
-<p>Whether to relax the union-argument rule to "at least one member
-satisfies" project-wide is a bigger policy change than the escape
-hatch above: it would silence real mismatches where only one union
-member happens to be compatible by accident rather than by design.
-Needs a decision on the tradeoff (and probably a survey of how much
-signal the current "every member" rule catches in <code>projects/*</code>) before
-changing it.</p>
+<p>No outstanding items.</p>
 <h2 id="standard-library-return-types">Standard-library return types<a class="headerlink" href="#standard-library-return-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
