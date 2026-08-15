@@ -1594,7 +1594,13 @@ function test(string $k): void {
 /// names the specific value that fails rather than its base type.
 #[test]
 fn a_dynamic_key_read_reports_the_literal_value_that_fails() {
+    // Under strict_types=1 neither the float nor the numeric-string
+    // literal coerce into `int`, so the union still has a genuine
+    // mismatch to report (outside strict_types, PHP's weak-typing
+    // coercion makes all three literals valid `int` arguments).
     let php = r#"<?php
+declare(strict_types=1);
+
 function takesInt(int $x): void {}
 
 function test(): void {
@@ -4178,8 +4184,10 @@ function test(): void {
 // ─── Additional positive tests: clear type mismatches ───────────────────────
 
 #[test]
-fn flags_float_passed_to_int() {
+fn flags_float_passed_to_int_under_strict_types() {
     let php = r#"<?php
+declare(strict_types=1);
+
 function takes_int(int $x): void {}
 
 function test(): void {
@@ -4190,7 +4198,27 @@ function test(): void {
     let diags = collect(php);
     assert!(
         has_type_error(&diags),
-        "Expected a type error for float passed to int, got: {diags:?}"
+        "Expected a type error for float passed to int under strict_types=1, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_strict_types_allows_float_passed_to_int() {
+    // Outside declare(strict_types=1), PHP coerces (truncates) a float
+    // argument passed where int is expected instead of raising a
+    // TypeError, so there is nothing to flag.
+    let php = r#"<?php
+function takes_int(int $x): void {}
+
+function test(): void {
+    $f = 1.5;
+    takes_int($f);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Without strict_types, float passed to int should be allowed, got: {diags:?}"
     );
 }
 

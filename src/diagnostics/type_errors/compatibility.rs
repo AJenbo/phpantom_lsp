@@ -630,6 +630,31 @@ pub(crate) fn is_type_compatible(
         return true;
     }
 
+    // ── PHP type juggling: float → int ──────────────────────────
+    // `int / int` in PHP resolves to `int|float` (division only
+    // stays an int when it divides evenly), so this hatch is what
+    // actually gets exercised: the `float` half of that union
+    // reaching an `int` position.  Outside `declare(strict_types=1)`
+    // PHP truncates the float on the way in rather than raising a
+    // TypeError, so there is nothing to report. Under strict_types=1
+    // this coercion is forbidden and stays a real mismatch.  Covers
+    // both a bare `float` type and a float literal (e.g. `1.5`),
+    // since a literal keeps its own `Literal` kind rather than
+    // widening to `Named("float")`.
+    if !strict_types {
+        let arg_is_float = match arg_type.kind() {
+            TypeKind::Named(sub) => matches!(sub.to_ascii_lowercase().as_str(), "float" | "double"),
+            TypeKind::Literal(l) => matches!(**l, LiteralValue::Float(_)),
+            _ => false,
+        };
+        if arg_is_float
+            && let TypeKind::Named(sup) = param_type.kind()
+            && matches!(sup.to_ascii_lowercase().as_str(), "int" | "integer")
+        {
+            return true;
+        }
+    }
+
     // ── model-property<Model>: string literal validation ────────
     // Larastan's `model-property<Model>` is a string subtype
     // representing the property names of an Eloquent model.  When

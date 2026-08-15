@@ -4141,3 +4141,42 @@ function lines(): array
         return_error_messages(&diags)
     );
 }
+
+// ─── int / int (int|float) returned from an int position ───────────────────
+
+#[test]
+fn no_strict_types_allows_int_division_returned_as_int() {
+    // `int / int` resolves to `int|float`, but outside strict_types PHP
+    // coerces (truncates) the float half on the way in instead of raising
+    // a TypeError, so there is nothing to flag.
+    let php = r#"<?php
+function to_whole_days(int $length): int
+{
+    return $length / 86400;
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_return_error(&diags),
+        "Without strict_types, int/int returned as int should be allowed, got: {:?}",
+        return_error_messages(&diags)
+    );
+}
+
+#[test]
+fn strict_types_flags_int_division_returned_as_int() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+function to_whole_days(int $length): int
+{
+    return $length / 86400;
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_return_error(&diags),
+        "Under strict_types=1, int/int returned as int should be flagged, got: {:?}",
+        return_error_messages(&diags)
+    );
+}

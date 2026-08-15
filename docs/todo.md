@@ -34,7 +34,6 @@ contributor even though it's short.
 
 | #    | Item                                                                                                                                                      | Impact      | Complexity  |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
-| B86  | [`int / int` reaching an `int` position is reported in a non-strict file](todo/bugs.md#b86-int--int-reaching-an-int-position-is-reported-in-a-non-strict-file) | Medium      | Low         |
 |      | **Release 0.10.0**                                                                                                                                        |             |             |
 
 ## Sprint 7 — 1.0 release & IDE extensions
@@ -99,6 +98,8 @@ unlikely to move the needle for most users.
 | T5  | Fiber type resolution                                                                                                                                                       | Low         | Medium      |
 | T10 | [Ternary expression as RHS of list destructuring](todo/type-inference.md#t10-ternary-expression-as-rhs-of-list-destructuring)                                               | Low         | Medium      |
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Medium      |
+|     | **[Bug Fixes](todo/bugs.md)**                                                                                                                                               |             |             |
+| B87 | [Union-argument compatibility requires every member to satisfy, PHPStan requires only one](todo/bugs.md#b87-union-argument-compatibility-requires-every-member-to-satisfy-phpstan-requires-only-one) | Low         | High        |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |

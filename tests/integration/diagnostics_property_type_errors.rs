@@ -2501,3 +2501,48 @@ class Holder {
         "array<string, Twig> is not array<string, Leaf>"
     );
 }
+
+// ─── int / int (int|float) assigned to an int property ─────────────────────
+
+#[test]
+fn no_strict_types_allows_int_division_assigned_to_int_property() {
+    // `int / int` resolves to `int|float`, but outside strict_types PHP
+    // coerces (truncates) the float half on the way in instead of raising
+    // a TypeError, so there is nothing to flag.
+    let php = r#"<?php
+class Job {
+    public int $timeout = 3600;
+
+    public function __construct(int $max) {
+        $this->timeout = $max / 300;
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        property_error_messages(&diags).is_empty(),
+        "Without strict_types, int/int assigned to int property should be allowed, got: {:?}",
+        property_error_messages(&diags)
+    );
+}
+
+#[test]
+fn strict_types_flags_int_division_assigned_to_int_property() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+class Job {
+    public int $timeout = 3600;
+
+    public function __construct(int $max) {
+        $this->timeout = $max / 300;
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !property_error_messages(&diags).is_empty(),
+        "Under strict_types=1, int/int assigned to int property should be flagged, got: {:?}",
+        property_error_messages(&diags)
+    );
+}
