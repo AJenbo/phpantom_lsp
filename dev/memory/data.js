@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786837133691,
+  "lastUpdate": 1786837676405,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -22745,6 +22745,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 77,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "4e813513eb3667ec02c91bf7a50b4e1b7fadd729",
+          "message": "A workspace diagnostics pull no longer re-sends files the editor already\nhas",
+          "timestamp": "2026-08-16T01:32:25+02:00",
+          "tree_id": "e048741b0c4212b0b1e3da9db704ac685017db79",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/4e813513eb3667ec02c91bf7a50b4e1b7fadd729"
+        },
+        "date": 1786837670767,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 82.2,
             "unit": "MiB"
           }
         ]
