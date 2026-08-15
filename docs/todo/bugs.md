@@ -233,35 +233,6 @@ PHPStan-extension-authoring-specific, not general PHP or Laravel code.
 
 No outstanding items.
 
-### B77. A one-line function body lets the preceding docblock's `@param` reach the next function
-
-**Impact: Low · Complexity: Medium**
-
-```php
-/** @param array<Status> $s */
-function g3(array $s): void { foreach ($s as $x) { doThing($x); } }
-
-function g4(Status $s): void { doThing($s); }   // reported: got array<Status>
-```
-
-`g4` declares no docblock of its own, so the backward `@param` scan in
-`find_iterable_raw_type_in_source` keeps going and finds `g3`'s, matching
-on the shared parameter name `$s`. The scan does have a sibling-function
-boundary check, but it only fires once it has seen the brace depth rise
-above zero and come back down. A body written entirely on the signature
-line opens and closes on the same line, so the net depth never leaves
-zero and the boundary is never detected.
-
-Reformatting `g3` across multiple lines makes it go away, which is why
-this stays out of sight in PSR-12 code and shows up in fixtures and
-tests, where one-line bodies are the norm.
-
-**Fix:** detect the sibling boundary from the `function` keyword at the
-scan's own depth rather than from a depth excursion, so a body that
-opens and closes on one line still ends the search. The same scan is
-what `resolve_param_type` and the array-literal element inference both
-call, so both inherit the leak.
-
 ## Array types
 
 No outstanding items.

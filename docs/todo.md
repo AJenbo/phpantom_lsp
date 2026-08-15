@@ -40,7 +40,6 @@ contributor even though it's short.
 | B53  | [A repeated identical no-argument call is not recognized as consistent within a scope](todo/bugs.md#b53-a-repeated-identical-no-argument-call-is-not-recognized-as-consistent-within-the-same-truthy-guarded-scope) | Low-Medium  | Medium-High |
 | B71  | [A `continue`-discarded falsy union member is not carried into a variable it's copied into](todo/bugs.md#b71-a-continue-discarded-falsy-union-member-is-not-carried-into-a-variable-the-value-is-copied-into) | Low-Medium  | High        |
 | B74  | [`Scope::isInClass()` paired with `getClassReflection()` is not recognized as an assert-if-true pair](todo/bugs.md#b74-scopeisinclass-paired-with-getclassreflection-is-not-recognized-as-an-assert-if-true-pair) | Low         | Medium      |
-| B77  | [A one-line function body lets the preceding docblock's `@param` reach the next function](todo/bugs.md#b77-a-one-line-function-body-lets-the-preceding-docblocks-param-reach-the-next-function) | Low         | Medium      |
 | B55  | [A ternary's self-referencing true branch loses truthy narrowing when compiled from a Blade component attribute](todo/bugs.md#b55-a-ternarys-self-referencing-true-branch-loses-truthy-narrowing-when-compiled-from-a-blade-component-attribute) | Low         | Medium-High |
 |      | **Release 0.10.0**                                                                                                                                        |             |             |
 

@@ -1015,6 +1015,8 @@ pub fn find_iterable_raw_type_in_source(
         let is_comment_line =
             trimmed.starts_with('*') || trimmed.starts_with("/*") || trimmed.starts_with("//");
 
+        let prev_min_depth = min_depth;
+
         if !is_comment_line {
             let (opens, closes) = count_braces_on_line(trimmed);
             // Going backward: `}` means entering a block, `{` means leaving.
@@ -1060,7 +1062,26 @@ pub fn find_iterable_raw_type_in_source(
         // scan starting from the parameter list `(` would flag the
         // function's own signature as a sibling boundary, hiding
         // the docblock directly above it.
-        if !seen_sibling_scope && !is_comment_line && brace_depth == 0 && max_depth > 0 {
+        //
+        // Neither of these two checks fires when a sibling's entire
+        // body sits on one line (`function f() { ...; }` or a
+        // bodyless `function f();`): its opens and closes cancel out
+        // (or are both zero) within a single `count_braces_on_line`
+        // call, so `brace_depth` never moves away from `min_depth` and
+        // never rises above it either.  Detect that shape separately:
+        // a non-comment line sitting at the already-established floor
+        // (`brace_depth == min_depth`, unchanged from before this line
+        // was processed) is a sibling, since the line that first
+        // *carves out* that floor is our own enclosing signature, not
+        // a sibling — that one is excluded by requiring `min_depth`
+        // itself to be unchanged by this line.
+        let at_established_floor =
+            min_depth < 0 && brace_depth == min_depth && min_depth == prev_min_depth;
+
+        if !seen_sibling_scope
+            && !is_comment_line
+            && ((brace_depth == 0 && max_depth > 0) || at_established_floor)
+        {
             // Check for a function/method keyword.  This covers:
             //   `public function foo(...)`, `private static function bar(...)`,
             //   `function baz(...)`, `public static function qux(): array`
@@ -2364,6 +2385,46 @@ mod tests {
         assert_eq!(
             result.as_ref().map(|t| t.to_string()),
             Some("list<Pen>".to_string())
+        );
+    }
+
+    #[test]
+    fn iterable_docblock_does_not_leak_across_one_line_sibling_function() {
+        // A sibling function whose entire body fits on one line opens and
+        // closes its braces within the same `count_braces_on_line` call,
+        // so brace_depth never moves.  Its own `@param` must not leak into
+        // the next function just because it shares a parameter name.
+        let src = concat!(
+            "<?php\n",
+            "/** @param array<Status> $s */\n",
+            "function g3(array $s): void { foreach ($s as $x) { doThing($x); } }\n",
+            "\n",
+            "function g4(Status $s): void { doThing($s); }\n",
+        );
+        let cursor = src.find("doThing($s)").unwrap();
+        let result = find_iterable_raw_type_in_source(src, cursor, "$s");
+        assert_eq!(
+            result, None,
+            "@param from one-line g3() must not leak into g4()"
+        );
+    }
+
+    #[test]
+    fn iterable_docblock_does_not_leak_across_one_line_sibling_method() {
+        let src = concat!(
+            "<?php\n",
+            "class Demo {\n",
+            "    /** @param array<Status> $s */\n",
+            "    public function g3(array $s): void { foreach ($s as $x) { doThing($x); } }\n",
+            "\n",
+            "    public function g4(Status $s): void { doThing($s); }\n",
+            "}\n",
+        );
+        let cursor = src.find("doThing($s)").unwrap();
+        let result = find_iterable_raw_type_in_source(src, cursor, "$s");
+        assert_eq!(
+            result, None,
+            "@param from one-line g3() must not leak into g4()"
         );
     }
 }
