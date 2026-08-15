@@ -20,7 +20,11 @@ was patched in the sample sources. Every entry was isolated in a
 scratch repro and bisected to the minimal trigger shown in its code
 block; several sit at the same source sites as fixed bugs from the
 previous sweep (B50, B54, B59, B62), where the coarse defect was fixed
-and a finer one behind it became visible.
+and a finer one behind it became visible. **B83** was filed the same
+day from the follow-up re-run at `c618c8aa`, whose compatibility
+tightening surfaced one previously-swallowed site, and **B84** from a
+probe at `66a524bc` showing the return-position side of that
+tightening is still missing.
 
 ## Crashes
 
@@ -28,7 +32,44 @@ No outstanding items.
 
 ## Type comparison
 
-No outstanding items.
+### B84. Return-position compatibility ignores an array shape's value types
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+/** @return array<string, int> */
+function bad(): array {
+    return ['a' => 'x'];   // not reported
+}
+
+/** @param array<string, int> $m */
+function takesIntMap(array $m): void {}
+
+function alsoBad(): void {
+    takesIntMap(['a' => 'x']);   // reported, as expected
+}
+```
+
+Needs investigation: `type_mismatch_argument` correctly reports an
+array shape whose values do not satisfy the declared map or list value
+type (`array{a: 'x'}` vs `array<string, int>`, `array{'x', 'y'}` vs
+`list<int>`), but `type_mismatch_return` accepts the identical
+mismatch silently. The return side is not skipping shapes entirely —
+a nullability mismatch in a shape value (`array{a: ?bool}` vs
+`array<string, int>`) is reported in return position — so the two
+diagnostics are reaching different verdicts for the same shape-vs-map
+comparison somewhere below the nullability check. `array<string,
+never>` as the declared type is the extreme case: any all-optional-keys
+shape (e.g. an `array_filter()` result) passes against it, which is
+what kept masking scratch probes during the 2026-08-15 sweeps.
+
+Found by probe at `66a524bc`, after the argument-side tightening
+landed; no sample-project site currently hits it.
+
+**Fix:** find where the return-position compatibility path diverges
+from the argument-position path for shape-to-map value checks and
+unify them; the recently tightened argument behaviour is the correct
+one.
 
 ## Standard-library return types
 
@@ -263,6 +304,43 @@ half was B54 in the previous sweep.
 **Fix:** in the true branch of `$x?->chain() === $rhs`, when `$rhs`'s
 type excludes `null`, narrow `$x` to non-null (and mirror for `!==` in
 the false branch).
+
+### B83. A `match (true)` arm's condition does not narrow inside the arm's result
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+/** @param list<int|string> $args */
+function takesList(array $args): void {}
+
+function label(?int $buy, ?int $pay, string $kind): void {
+    $textArgs = match (true) {
+        $kind === 'xy' && $buy !== null && $pay !== null => [$buy, $pay],
+        default => [],
+    };
+    takesList($textArgs);   // reported: array{?int, ?int} does not satisfy list<int|string>
+}
+```
+
+The `!== null` conjuncts of a `match (true)` arm's condition prove the
+values non-null within that arm's result expression, exactly as the
+equivalent `if` statement does — and the `if` form narrows correctly.
+Inside a match arm nothing narrows: plain variables and property reads
+both keep their `null` arms.
+
+Filed 2026-08-15, after the evening sweep: the argument-compatibility
+tightening in `c618c8aa` surfaced it — the resulting shape mismatch
+was previously swallowed by the compatibility leniency that T32 tracks
+(the argument side has since been tightened further; the return-side
+remainder is B84).
+
+Sample site: `luxplus-website app/Contexts/Api/Resources/ProductResource.php:210`
+(discount label `$textArgs` built from `?int` properties the arm
+condition null-checks).
+
+**Fix:** evaluate each `match (true)` arm's result expression under
+the same condition-derived scope state the `if` evaluator would build
+from that arm's condition.
 
 ## Symbol resolution
 

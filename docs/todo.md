@@ -37,11 +37,14 @@ contributor even though it's short.
 | B80  | [`max()`/`min()` argument-dependent return type is a malformed union](todo/bugs.md#b80-maxmin-argument-dependent-return-type-is-a-malformed-union)          | Medium      | Medium      |
 | B78  | [A standalone `@var` cast above `return` is ignored](todo/bugs.md#b78-a-standalone-var-cast-above-return-is-ignored)                                        | Medium      | Medium      |
 | B82  | [A nullsafe chain compared `===` to a non-nullable value does not narrow the receiver](todo/bugs.md#b82-a-nullsafe-chain-compared--to-a-non-nullable-value-does-not-narrow-the-receiver) | Medium      | Medium      |
+| B83  | [A `match (true)` arm's condition does not narrow inside the arm's result](todo/bugs.md#b83-a-match-true-arms-condition-does-not-narrow-inside-the-arms-result) | Medium      | Medium      |
+| B84  | [Return-position compatibility ignores an array shape's value types](todo/bugs.md#b84-return-position-compatibility-ignores-an-array-shapes-value-types)      | Medium      | Medium      |
 | B79  | [`array_filter()` without a callback keeps `null` on values that share the array with a `?bool`](todo/bugs.md#b79-array_filter-without-a-callback-keeps-null-on-values-that-share-the-array-with-a-bool) | Low-Medium  | Medium      |
 | B81  | [Foreach element extraction widens `false` to `bool`](todo/bugs.md#b81-foreach-element-extraction-widens-false-to-bool)                                     | Low-Medium  | Medium      |
 | B76  | [Blade variables typed from a component class are immune to condition narrowing](todo/bugs.md#b76-blade-variables-typed-from-a-component-class-are-immune-to-condition-narrowing) | Medium      | Medium-High |
 | B77  | [A foreach over a proven non-empty array still merges the zero-iteration path](todo/bugs.md#b77-a-foreach-over-a-proven-non-empty-array-still-merges-the-zero-iteration-path) | Medium      | Medium-High |
 | B75  | [A dim-write to the foreach value variable leaks through the loop back-edge](todo/bugs.md#b75-a-dim-write-to-the-foreach-value-variable-leaks-through-the-loop-back-edge) | Medium      | High        |
+| T32  | [Audit `is_type_compatible`'s MAYBE escape hatches for core-engine gaps](todo/type-inference.md#t32-audit-is_type_compatibles-maybe-escape-hatches-for-core-engine-gaps)    | Medium      | High        |
 |      | **Release 0.10.0**                                                                                                                                        |             |             |
 
 ## Sprint 7 — 1.0 release & IDE extensions
@@ -95,7 +98,6 @@ unlikely to move the needle for most users.
 | T3  | [Property hooks (PHP 8.4)](todo/type-inference.md#t3-property-hooks-php-84)                                                                                                 | Medium      | Medium-High |
 | T34 | [`static::CONST` over-narrows to the declaring class's value](todo/type-inference.md#t34-staticconst-over-narrows-to-the-declaring-classs-value)                            | Medium      | Medium-High |
 | T29 | [Definite vs possible variable existence tracking](todo/type-inference.md#t29-definite-vs-possible-variable-existence-tracking)                                             | Medium      | High        |
-| T32 | [Audit `is_type_compatible`'s MAYBE escape hatches for core-engine gaps](todo/type-inference.md#t32-audit-is_type_compatibles-maybe-escape-hatches-for-core-engine-gaps)    | Medium      | High        |
 | T30 | [Literal type collapse limit](todo/type-inference.md#t30-literal-type-collapse-limit)                                                                                       | Low-Medium  | Medium      |
 | T40 | [`pathinfo()` returns a shape or a string depending on the flags argument](todo/type-inference.md#t40-pathinfo-returns-a-shape-or-a-string-depending-on-the-flags-argument) | Low-Medium  | Medium      |
 | T26 | [Globbed constant unions (`Foo::BAR_*`)](todo/type-inference.md#t26-globbed-constant-unions-foobar_)                                                                        | Low-Medium  | Medium      |
