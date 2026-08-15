@@ -168,16 +168,10 @@ impl Backend {
             }
 
             // Assemble and push so the editor sees fresh PHPStan
-            // results merged with cached native diagnostics.
-            self.assemble_and_push(&uri).await;
-
-            // In pull mode the editor must be told to re-pull so it
-            // picks up the new PHPStan results.
-            if self.supports_pull_diagnostics.load(Ordering::Acquire)
-                && let Some(client) = &self.client
-            {
-                let _ = client.workspace_diagnostic_refresh().await;
-            }
+            // results merged with cached native diagnostics.  In pull
+            // mode this also tells the editor to re-pull, but only when
+            // the run actually changed the file's diagnostics.
+            self.assemble_and_refresh(&uri).await;
         }
     }
 }

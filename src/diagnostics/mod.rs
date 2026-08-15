@@ -184,6 +184,10 @@
 //! **Pull mode:** Nothing is pushed via `publishDiagnostics`.  The
 //! merged set is cached in `diag_last_full` with a bumped `resultId`
 //! and the editor is asked to re-pull via `workspace/diagnostic/refresh`.
+//! A source run that reproduces the cached set exactly leaves both the
+//! cache and the `resultId` alone and sends no refresh: LSP has no
+//! per-document refresh, so each one costs a workspace-wide re-pull and
+//! is worth sending only for a real change.
 //! The pull handler (`textDocument/diagnostic`) returns this cached set.
 //! If the cache is missing (e.g. the file was just opened), the pull
 //! handler schedules a background computation and returns whatever is
@@ -1007,12 +1011,7 @@ impl Backend {
 
         // Update the assembled cache immediately so pull-capable editors
         // can see fast diagnostics before the slower native passes finish.
-        self.assemble_and_push(uri_str).await;
-        if self.supports_pull_diagnostics.load(Ordering::Acquire)
-            && let Some(client) = &self.client
-        {
-            let _ = client.workspace_diagnostic_refresh().await;
-        }
+        self.assemble_and_refresh(uri_str).await;
 
         // ── Phase 2: compute and cache slow diagnostics ─────────────
         let slow_diagnostics = {
@@ -1042,12 +1041,7 @@ impl Backend {
         }
 
         // Update again with fresh slow results merged in.
-        self.assemble_and_push(uri_str).await;
-        if self.supports_pull_diagnostics.load(Ordering::Acquire)
-            && let Some(client) = &self.client
-        {
-            let _ = client.workspace_diagnostic_refresh().await;
-        }
+        self.assemble_and_refresh(uri_str).await;
     }
 
     /// Assemble diagnostics from all per-source caches for a URI and
@@ -1067,15 +1061,21 @@ impl Backend {
     /// that support pull diagnostics merge pushed and pulled sets
     /// additively, so pushing anything here would duplicate native
     /// diagnostics.
-    pub(crate) async fn assemble_and_push(&self, uri_str: &str) {
-        let client = match &self.client {
-            Some(c) => c,
-            None => return,
-        };
-
+    ///
+    /// Returns `true` in pull mode when the merged set differs from the
+    /// one already cached, i.e. when the editor has something new to
+    /// re-pull.  Every source calls this whenever it finishes, and most
+    /// of those runs reproduce the previous result exactly (a file with
+    /// no diagnostics stays that way through re-index, re-open, and
+    /// every keystroke).  Bumping the `resultId` for an identical set
+    /// would invalidate the client's cached result for nothing and cost
+    /// a workspace-wide re-pull per run, so the caller uses the return
+    /// value to skip the refresh.  Always `false` in push mode: the set
+    /// is delivered inline, so there is nothing to re-pull.
+    pub(crate) async fn assemble_and_push(&self, uri_str: &str) -> bool {
         let uri = match uri_str.parse::<Url>() {
             Ok(u) => u,
-            Err(_) => return,
+            Err(_) => return false,
         };
 
         // ── Read all per-source caches ──────────────────────────────
@@ -1193,8 +1193,16 @@ impl Backend {
             // `workspace/diagnostic/refresh` so the editor re-pulls.  This
             // avoids duplicate diagnostics in clients that keep pushed and
             // pulled diagnostics in separate namespaces.
+            //
+            // A run that reproduces the cached set leaves both the cache
+            // and the `resultId` alone, so a pull still answers
+            // `Unchanged` and the caller skips the refresh.  A missing
+            // cache entry counts as changed: the client has nothing yet.
             {
                 let mut cache = self.diag.last_full.lock();
+                if cache.get(uri_str).is_some_and(|prev| *prev == full) {
+                    return false;
+                }
                 cache.insert(uri_str.to_string(), full);
             }
             {
@@ -1202,9 +1210,37 @@ impl Backend {
                 let id = ids.entry(uri_str.to_string()).or_insert(0);
                 *id += 1;
             }
+            true
         } else {
             // ── Push mode ───────────────────────────────────────────
+            let Some(client) = &self.client else {
+                return false;
+            };
             client.publish_diagnostics(uri, full, None).await;
+            false
+        }
+    }
+
+    /// Ask the editor to re-pull diagnostics.
+    ///
+    /// A no-op for push-mode clients, which receive their diagnostics
+    /// directly.  LSP has no per-document refresh, so this invalidates
+    /// the client's whole workspace result set: only call it when
+    /// something actually changed (see [`Self::assemble_and_push`]).
+    pub(crate) async fn request_diagnostic_refresh(&self) {
+        if !self.supports_pull_diagnostics.load(Ordering::Acquire) {
+            return;
+        }
+        if let Some(client) = &self.client {
+            let _ = client.workspace_diagnostic_refresh().await;
+        }
+    }
+
+    /// Assemble a URI's diagnostics and ask the editor to re-pull when
+    /// the merged set changed.
+    pub(crate) async fn assemble_and_refresh(&self, uri_str: &str) {
+        if self.assemble_and_push(uri_str).await {
+            self.request_diagnostic_refresh().await;
         }
     }
 
@@ -1833,5 +1869,70 @@ mod tests {
             }),
         );
         assert_eq!(stopped.len(), 1, "observer must be able to stop the pass");
+    }
+
+    /// A source run that reproduces the cached diagnostics must not bump
+    /// the `resultId` or ask the editor to re-pull.  Every source calls
+    /// `assemble_and_push` whenever it finishes and most runs reproduce
+    /// the previous result exactly, so bumping unconditionally cost a
+    /// workspace-wide re-pull per run (a clean open file burned several
+    /// of them during startup alone).
+    #[tokio::test]
+    async fn assemble_and_push_reports_change_only_on_difference() {
+        let backend = Backend::new_test();
+        backend
+            .supports_pull_diagnostics
+            .store(true, Ordering::Release);
+        let uri = "file:///test.php";
+
+        let diag = |line: u32| Diagnostic {
+            range: Range::new(Position::new(line, 0), Position::new(line, 5)),
+            severity: Some(DiagnosticSeverity::ERROR),
+            message: "boom".to_string(),
+            ..Default::default()
+        };
+        let result_id = || backend.diag.result_ids.lock().get(uri).copied();
+
+        // First assembly: the client has nothing yet, so even an empty
+        // set is news.
+        assert!(backend.assemble_and_push(uri).await);
+        assert_eq!(result_id(), Some(1));
+
+        // Re-running every source over an unchanged file changes
+        // nothing, so the client's cached result stays valid.
+        assert!(!backend.assemble_and_push(uri).await);
+        assert!(!backend.assemble_and_push(uri).await);
+        assert_eq!(result_id(), Some(1));
+
+        // A real diagnostic appearing is a change.
+        backend
+            .diag
+            .last_fast
+            .lock()
+            .insert(uri.to_string(), vec![diag(1)]);
+        assert!(backend.assemble_and_push(uri).await);
+        assert_eq!(result_id(), Some(2));
+        assert!(!backend.assemble_and_push(uri).await);
+
+        // So is a slow source adding to it.
+        backend
+            .diag
+            .last_slow
+            .lock()
+            .insert(uri.to_string(), vec![diag(7)]);
+        assert!(backend.assemble_and_push(uri).await);
+        assert_eq!(result_id(), Some(3));
+        assert_eq!(
+            backend.diag.last_full.lock().get(uri).map(Vec::len),
+            Some(2)
+        );
+
+        // And so is the file becoming clean again.
+        backend.diag.last_fast.lock().remove(uri);
+        backend.diag.last_slow.lock().remove(uri);
+        assert!(backend.assemble_and_push(uri).await);
+        assert_eq!(result_id(), Some(4));
+        assert!(!backend.assemble_and_push(uri).await);
+        assert_eq!(result_id(), Some(4));
     }
 }

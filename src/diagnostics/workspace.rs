@@ -13,6 +13,12 @@
 //! completes.  The pass additionally waits for `init_complete` so the
 //! post-index cache clears in `initialized` cannot race with it.
 //!
+//! For pull-diagnostics clients the pass is additionally deferred until
+//! the first `workspace/diagnostic` request arrives: its results are
+//! only deliverable through workspace pull responses, so a client that
+//! never pulls never pays for the scan.  Push clients get the pass
+//! unconditionally since their results are published directly.
+//!
 //! 1. **Native pass** — the same fast + slow collectors that diagnose
 //!    open files run over every unopened user file, on a throttled
 //!    worker pool (half the cores) so interactive requests stay
@@ -171,6 +177,28 @@ impl WorkspaceDiagnostics {
 }
 
 impl Backend {
+    /// Wait until the client has sent its first `workspace/diagnostic`
+    /// pull.  Returns immediately if one has already arrived, or when
+    /// the server shuts down (the caller's pass is a no-op then).
+    ///
+    /// In pull mode the background workspace pass is gated on this:
+    /// its results are only deliverable through workspace pull
+    /// responses, so computing them before the client has ever asked
+    /// is wasted work — and a client that never pulls never pays.
+    pub(crate) async fn wait_for_first_workspace_pull(&self) {
+        if self.diag.workspace_pull_seen.load(Ordering::Acquire) {
+            return;
+        }
+        loop {
+            self.diag.workspace_pull_notify.notified().await;
+            if self.diag.workspace_pull_seen.load(Ordering::Acquire)
+                || self.shutdown_flag.load(Ordering::Acquire)
+            {
+                return;
+            }
+        }
+    }
+
     /// Run the background workspace diagnostics pass.
     ///
     /// Called from the tail of the full background index task, so the
@@ -689,6 +717,7 @@ impl Backend {
         if open_results.is_empty() {
             return;
         }
+        let mut changed = false;
         for (uri, diags) in open_results {
             let cache = match source {
                 "phpstan" => &self.phpstan_tool.last_diags,
@@ -698,14 +727,12 @@ impl Backend {
                 _ => continue,
             };
             cache.lock().insert(uri.clone(), diags);
-            self.assemble_and_push(&uri).await;
+            changed |= self.assemble_and_push(&uri).await;
         }
-        if let Some(client) = &self.client
-            && self
-                .supports_pull_diagnostics
-                .load(std::sync::atomic::Ordering::Acquire)
-        {
-            let _ = client.workspace_diagnostic_refresh().await;
+        // One refresh covers every file the tool touched, and only when
+        // at least one of them actually changed.
+        if changed {
+            self.request_diagnostic_refresh().await;
         }
     }
 }

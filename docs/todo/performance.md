@@ -1044,3 +1044,101 @@ already have one, deref coercion covers the read sites, and the
 **Where to look:** `collect_deprecated_diagnostics` and
 `resolve_variable_subject` in `diagnostics/deprecated.rs`, plus the
 `var_type_cache` declaration at the top of the collector.
+
+## P54. A workspace pull re-serializes files the client already has
+
+**Impact: Medium-High · Complexity: Low-Medium**
+
+`workspace_pull_diagnostic` decides between a `Full` report and an
+`Unchanged` one purely from the `previousResultIds` the client sent:
+
+```rust
+let diags = if previous.get(uri.as_str()) == Some(&result_id.as_str()) {
+    None
+} else {
+    Some(ws.merged(&uri))
+};
+```
+
+The server keeps no record of what it already delivered, so a file the
+client does not echo an id for is re-serialized in full on every pull,
+for the whole session. A client will not necessarily ever echo one.
+Editors track diagnostics per worktree, and the workspace pass reports
+every parsed user file, which in a monorepo includes first-party
+sibling packages pulled in through a Composer path repository. Those
+sit outside the opened project, so the editor has nowhere to put them,
+never stores an id, and never sends one back.
+
+A captured Zed session over a 3,688-file project shows the split
+exactly. Of the 188 files the pass reported, the 155 under the opened
+project were acknowledged from the first pull onward; the 33 under a
+sibling package were acknowledged zero times across all 22 pulls, and
+were therefore sent in full 20 times each. That is 507 KB of the
+1.28 MB of workspace report the session produced, 40% of it, spent
+re-sending diagnostics for files the editor discards on arrival. The
+cost does not decay: it is paid on every refresh for as long as the
+session lasts.
+
+The streaming phase compounds it. The background pass sends a refresh
+every `DELIVERY_INTERVAL` (3s), so the number of rounds is the pass
+duration divided by three, and each round re-serializes everything
+diagnosed so far that the client has not acknowledged. Every round also
+re-runs `WorkspaceDiagnostics::merged` (a clone of each source's
+diagnostics plus an overlap-suppression pass) per file, on the request
+path, while holding the lock the pass writes its batches through.
+
+Record the result id last sent for each URI in a workspace response and
+answer a repeat with `Unchanged` instead of re-serializing. That makes
+each round genuinely incremental (O(files) across the pass rather than
+O(rounds × files)) and puts a ceiling on the out-of-project files
+rather than paying for them forever, without depending on client
+behaviour.
+
+Prefer `Unchanged` over omitting the file. Both leave a client that
+genuinely lost a result set stuck until the file's id next changes, but
+`Unchanged` is what the spec provides for and costs about 150 bytes.
+
+Worth deciding alongside this: whether the workspace pass should report
+files outside the workspace root to an editor at all. Diagnosing them
+is right for the `analyze` CLI, and they are first-party code, but an
+editor that cannot display them gains nothing from receiving them.
+
+**Where to look:** `workspace_pull_diagnostic` in
+`diagnostics/pull.rs`, and `WorkspaceDiagnostics` in
+`diagnostics/workspace.rs` for the id bookkeeping.
+
+## P55. An external tool run invalidates every file it reported
+
+**Impact: Medium-High · Complexity: Low**
+
+`WorkspaceDiagnostics::set_external` replaces a tool's whole result set
+and bumps the result id of every URI in the union of the old and new
+maps:
+
+```rust
+let mut updated: HashSet<String> = entry.keys().cloned().collect();
+updated.extend(results.keys().cloned());
+*entry = results;
+let updated: Vec<String> = updated.into_iter().collect();
+for uri in &updated {
+    self.bump(uri);
+}
+```
+
+Nothing compares the old diagnostics against the new ones, so a
+project-wide PHPStan re-run that changes one file still invalidates the
+client's cached result for every file the tool reports. The next
+workspace pull then answers `Full` for all of them and re-serializes
+the entire set. On a large project that is the most expensive single
+response the server produces, and it is triggered by every run whether
+or not anything moved.
+
+Bump only where the merged set actually differs, and return only those
+URIs so the caller's refresh and the push-mode publish loop follow the
+same rule. This is the same defect as the unconditional per-file
+`resultId` bump in `assemble_and_push`, on the source with the widest
+blast radius.
+
+**Where to look:** `set_external` and `set_external_for_uri` in
+`diagnostics/workspace.rs`; `flush_workspace_diag_updates` consumes the
+returned URI list.

@@ -38,6 +38,14 @@ pub(crate) struct DiagnosticState {
     pub(crate) workspace_diags: Arc<Mutex<WorkspaceDiagnostics>>,
     /// Prevents duplicate background workspace diagnostics passes.
     pub(crate) workspace_diag_pass_started: Arc<AtomicBool>,
+    /// Whether the client has sent at least one `workspace/diagnostic`
+    /// pull.  In pull mode the background workspace pass waits for this:
+    /// its results are only deliverable through workspace pull responses,
+    /// so computing them for a client that never asks is wasted work.
+    pub(crate) workspace_pull_seen: Arc<AtomicBool>,
+    /// Wakes the deferred background workspace pass when the first
+    /// `workspace/diagnostic` pull arrives.
+    pub(crate) workspace_pull_notify: Arc<Notify>,
     /// What each open file declared when it was last opened or saved, used
     /// to work out which other open files a save can affect.  See
     /// [`crate::diagnostics::cross_file`].
@@ -57,6 +65,8 @@ impl DiagnosticState {
             suppressed: Arc::new(Mutex::new(Vec::new())),
             workspace_diags: Arc::new(Mutex::new(WorkspaceDiagnostics::default())),
             workspace_diag_pass_started: Arc::new(AtomicBool::new(false)),
+            workspace_pull_seen: Arc::new(AtomicBool::new(false)),
+            workspace_pull_notify: Arc::new(Notify::new()),
             decl_baselines: Arc::new(Mutex::new(HashMap::new())),
         }
     }

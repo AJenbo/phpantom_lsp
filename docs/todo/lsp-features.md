@@ -488,7 +488,9 @@ to be picked up as a deliberate migration.
 This isn't just hygiene: A16 (snippet placeholder for extracted method
 name) is explicitly blocked on `SnippetTextEdit`, an LSP 3.18 feature
 that our pinned `lsp-types` 0.94 (via `tower-lsp` 0.20) doesn't cover.
-Migrating unblocks it directly.
+Migrating unblocks it directly. It also unblocks F21 (static
+`typeHierarchyProvider` advertisement), which needs a `lsp-types`
+version newer than 0.94.1.
 
 **What to check before starting:** the fork's public API surface
 relative to `tower_lsp::LspService`/`tower_lsp::lsp_types` (import
@@ -502,3 +504,39 @@ test harness described in `test-porting.md` Phase 6B if that gets
 ported around the same time.
 
 **Where to look:** `Cargo.toml`'s `tower-lsp = { version = "0.20", features = ["proposed"] }`.
+
+## F21. Static `typeHierarchyProvider` advertisement (depends on F20)
+
+**Impact: Low-Medium · Complexity: Low**
+
+Type hierarchy (`textDocument/prepareTypeHierarchy`,
+`typeHierarchy/supertypes`, `typeHierarchy/subtypes`) is fully
+implemented (`src/type_hierarchy.rs`) and registered dynamically via
+`client/registerCapability` in `initialized` (`server.rs`,
+`type_hierarchy_registration()`), gated on the client declaring
+`textDocument.typeHierarchy.dynamicRegistration: true`. This works for
+every client that supports dynamic registration, but there is no
+static fallback: `lsp-types` 0.94.1 (pinned by `tower-lsp` 0.20, see
+F20) has no `type_hierarchy_provider` field on `ServerCapabilities`, so
+a client that supports type hierarchy without dynamic registration —
+or any tool that inspects only the `initialize` response's static
+capabilities, such as a feature-conformance probe — sees no type
+hierarchy support at all, even though the feature works end-to-end for
+a real editor that does the dynamic-registration round trip.
+
+Once F20 lands and a `type_hierarchy_provider` field is available, add
+static advertisement (`Boolean(true)` or `TypeHierarchyOptions`) in
+`initialize`'s `ServerCapabilities`, conditional on the client *not*
+declaring `dynamicRegistration: true` for type hierarchy (avoid
+double-registering: send either the static capability or the dynamic
+registration, not both, per the client's declared support). Also
+verify whether the same version bump exposes `diagnostic` client
+capabilities more precisely — pull diagnostics (`diagnostic_provider`
+in `server.rs`) is unaffected by this gap (it's already advertised
+correctly whenever the client declares `textDocument.diagnostic`,
+verified by probing `initialize` directly with that capability set),
+but is worth a quick re-check after the migration in case the newer
+`lsp-types` changes the shape of that capability struct.
+
+**Where to look:** `src/server.rs` (`initialize`, `type_hierarchy_registration`),
+`src/type_hierarchy.rs`.

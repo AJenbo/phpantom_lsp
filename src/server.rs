@@ -16,7 +16,10 @@
 ///   via `textDocument/diagnostic` for visible files and
 ///   `workspace/diagnostic` for all open files.  Cross-file invalidation
 ///   (e.g. a class signature change) sends `workspace/diagnostic/refresh`
-///   so the editor re-pulls only the files it cares about.
+///   so the editor re-pulls only the files it cares about.  The
+///   background workspace pass over unopened files is deferred until the
+///   client's first `workspace/diagnostic` request, since its results
+///   are only deliverable through workspace pull responses.
 ///
 /// - **Push model** (fallback) — for clients without pull support, the
 ///   server pushes diagnostics via `textDocument/publishDiagnostics`
@@ -607,23 +610,16 @@ impl LanguageServer for Backend {
                 .iter()
                 .map(|(uri, content)| (uri.clone(), Arc::clone(content)))
                 .collect();
+            // Each file's own refresh (sent from
+            // `publish_diagnostics_for_file` once its full set is
+            // cached, and only when that set changed) is all the editor
+            // needs; a trailing workspace-wide one here would just
+            // invalidate every result again.
             for (uri, content) in &file_snapshots {
                 diagnostics_backend.schedule_diagnostics(uri.clone());
                 diagnostics_backend
                     .publish_diagnostics_for_file(uri, content)
                     .await;
-            }
-
-            // In pull mode the eager publish above only pushed fast
-            // diagnostics.  The full set (including slow diagnostics) is
-            // now cached in `diag_last_full`.  Send a refresh so the
-            // editor re-pulls and receives the complete diagnostics.
-            if diagnostics_backend
-                .supports_pull_diagnostics
-                .load(Ordering::Acquire)
-                && let Some(ref client) = diagnostics_backend.client
-            {
-                let _ = client.workspace_diagnostic_refresh().await;
             }
         });
     }
@@ -637,6 +633,7 @@ impl LanguageServer for Backend {
         // Wake all workers so they see the flag immediately instead
         // of sleeping until the next edit arrives.
         self.diag.notify.notify_one();
+        self.diag.workspace_pull_notify.notify_one();
         self.phpstan_tool.notify.notify_one();
         self.phpcs_tool.notify.notify_one();
         self.mago_lint_tool.notify.notify_one();
@@ -1248,12 +1245,7 @@ impl LanguageServer for Backend {
         // cleared diagnostic disappears immediately. In pull mode nothing is
         // pushed, so ask the editor to re-pull the freshly cached set.
         if let Some(uri_str) = republish_uri {
-            self.assemble_and_push(&uri_str).await;
-            if self.supports_pull_diagnostics.load(Ordering::Acquire)
-                && let Some(client) = &self.client
-            {
-                let _ = client.workspace_diagnostic_refresh().await;
-            }
+            self.assemble_and_refresh(&uri_str).await;
         }
 
         Ok(resolved)
@@ -1834,6 +1826,19 @@ impl Backend {
             // (native collectors over every unopened user file, then
             // project-wide external tools).  Deliberately chained after
             // the index so it never competes with startup for CPU.
+            // Pull clients receive these results only through
+            // `workspace/diagnostic` responses, so defer the pass until
+            // the client sends its first workspace pull — a client that
+            // never pulls never pays for the scan.
+            if progress_backend
+                .supports_pull_diagnostics
+                .load(Ordering::Acquire)
+            {
+                progress_backend.wait_for_first_workspace_pull().await;
+                if progress_backend.shutdown_flag.load(Ordering::Acquire) {
+                    return;
+                }
+            }
             progress_backend.run_workspace_diagnostics().await;
         });
     }

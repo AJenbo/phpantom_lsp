@@ -73,3 +73,34 @@ A class constant is reached through `Holder::BAR` and a global one is
 not, so the two can never be the same symbol. The match should require
 the reference to be a global constant, not merely share the last
 segment of its name.
+
+### B176. A reopened file recycles result ids a client may still hold
+
+**Impact: Low-Medium · Effort: Low**
+
+`did_close` drops the file's entry from `result_ids` and `last_full`, so
+reopening it starts the counter at zero again while the client may still
+hold an id from before the close. Once the reopened file's recomputes
+walk the counter back up to that number, a pull carrying the stale
+`previousResultId` matches the current one, the handler answers
+`Unchanged`, and the editor keeps showing the diagnostics the file had
+before it was closed.
+
+The window is narrow but reachable in ordinary use. A captured Zed
+session shows a controller reaching `resultId` 3, being closed, and
+climbing back through 1, 2, 3 on reopen with a different set at each
+step; nothing about the id says which generation it belongs to. The
+editor only escaped it there because it had dropped the file's id on
+close.
+
+Result ids are compared for equality alone, so they only need to never
+repeat within a session. Drawing them from a session-global sequence
+(the way `WorkspaceDiagnostics` already does with its `ws{n}` ids)
+removes the collision entirely, and keeping the counter across a close
+would do as well.
+
+**Where to look:** the `result_ids` removal in
+`clear_diagnostics_for_file` (`diagnostics/mod.rs`), and the equality
+checks in
+`document_pull_diagnostic` / `workspace_pull_diagnostic`
+(`diagnostics/pull.rs`).

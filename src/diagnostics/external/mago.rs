@@ -130,15 +130,9 @@ impl Backend {
                 cache.insert(uri.clone(), mago_diags);
             }
 
-            self.assemble_and_push(&uri).await;
-
-            // In pull mode the editor must be told to re-pull so it
-            // picks up the new Mago lint results.
-            if self.supports_pull_diagnostics.load(Ordering::Acquire)
-                && let Some(client) = &self.client
-            {
-                let _ = client.workspace_diagnostic_refresh().await;
-            }
+            // In pull mode this also tells the editor to re-pull, but
+            // only when the run actually changed the file's diagnostics.
+            self.assemble_and_refresh(&uri).await;
         }
     }
 
@@ -262,15 +256,9 @@ impl Backend {
                 cache.insert(uri.clone(), mago_diags);
             }
 
-            self.assemble_and_push(&uri).await;
-
-            // In pull mode the editor must be told to re-pull so it
-            // picks up the new Mago analyze results.
-            if self.supports_pull_diagnostics.load(Ordering::Acquire)
-                && let Some(client) = &self.client
-            {
-                let _ = client.workspace_diagnostic_refresh().await;
-            }
+            // In pull mode this also tells the editor to re-pull, but
+            // only when the run actually changed the file's diagnostics.
+            self.assemble_and_refresh(&uri).await;
         }
     }
 }

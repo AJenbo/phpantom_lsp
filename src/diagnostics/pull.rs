@@ -7,6 +7,7 @@
 //! in `server.rs` are thin delegations to these methods.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::Ordering;
 
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
@@ -88,6 +89,14 @@ impl Backend {
         &self,
         params: WorkspaceDiagnosticParams,
     ) -> Result<WorkspaceDiagnosticReportResult> {
+        // The first workspace pull releases the deferred background
+        // workspace pass (see `wait_for_first_workspace_pull`).  This
+        // request returns whatever is cached; the pass streams the rest
+        // via `workspace/diagnostic/refresh` as batches complete.
+        if !self.diag.workspace_pull_seen.swap(true, Ordering::AcqRel) {
+            self.diag.workspace_pull_notify.notify_one();
+        }
+
         // Build a set of previous result IDs sent by the client so we
         // can return Unchanged for files that haven't changed.
         let previous: HashMap<&str, &str> = params

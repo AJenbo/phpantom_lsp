@@ -34,8 +34,12 @@ contributor even though it's short.
 
 | #    | Item                                                                                                                                                      | Impact      | Complexity  |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
+| F20 | [Migrate to the maintained `tower-lsp` fork](todo/lsp-features.md#f20-migrate-to-the-maintained-tower-lsp-fork) (unblocks A16)                                              | Medium      | Medium      |
+| F21 | [Static `typeHierarchyProvider` advertisement](todo/lsp-features.md#f21-static-typehierarchyprovider-advertisement-depends-on-f20) (depends on F20)                        | Low-Medium  | Low         |
 | B174 | [Reference counts stay at zero until the next edit](todo/bugs.md#b174-reference-counts-stay-at-zero-until-the-next-edit)                                   | Low-Medium  | Low         |
 | B175 | [Renaming a global constant renames a class constant of the same name](todo/bugs.md#b175-renaming-a-global-constant-renames-a-class-constant-of-the-same-name) | Medium      | Low         |
+| P55  | [An external tool run invalidates every file it reported](todo/performance.md#p55-an-external-tool-run-invalidates-every-file-it-reported)                  | Medium-High | Low         |
+| P54  | [A workspace pull re-serializes files the client already has](todo/performance.md#p54-a-workspace-pull-re-serializes-files-the-client-already-has)          | Medium-High | Low-Medium  |
 |      | **Release 0.10.0**                                                                                                                                        |             |             |
 
 ## Sprint 7 — 1.0 release & IDE extensions
@@ -143,7 +147,6 @@ unlikely to move the needle for most users.
 | F13 | [Homebrew formula](todo/lsp-features.md#f13-homebrew-formula)                                                                                                                | Medium      | Low         |
 | F17 | [Wire class move to `workspace/willRenameFiles`](todo/lsp-features.md#f17-wire-class-move-to-workspacewillrenamefiles)                                                       | Medium      | Medium      |
 | F5  | [Call hierarchy](todo/lsp-features.md#f5-call-hierarchy) (incoming/outgoing calls)                                                                                          | Medium      | Medium      |
-| F20 | [Migrate to the maintained `tower-lsp` fork](todo/lsp-features.md#f20-migrate-to-the-maintained-tower-lsp-fork) (unblocks A16)                                              | Medium      | Medium      |
 | F2  | [Partial result streaming via `$/progress`](todo/lsp-features.md#f2-partial-result-streaming-via-progress)                                                                  | Medium      | Medium-High |
 | F7  | [Evaluatable expression support (DAP integration)](todo/lsp-features.md#f7-evaluatable-expression-support-dap-integration)                                                  | Low-Medium  | Low         |
 | F15 | [Go-to-declaration](todo/lsp-features.md#f15-go-to-declaration)                                                                                                              | Low-Medium  | Low         |
