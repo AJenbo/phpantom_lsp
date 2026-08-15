@@ -614,6 +614,7 @@ final class QodanaCheckerTest
             diags,
         );
     }
+
     /// A file may declare several `namespace` blocks. A call in the second
     /// block resolves against that block's namespace, so a function defined
     /// there (in another file) must not be reported as missing.
@@ -641,5 +642,61 @@ function run(): void {
         backend.collect_unknown_function_diagnostics("file:///test.php", php, &mut diags);
         let messages: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
         assert_eq!(messages, vec!["Function 'missingFn' not found"]);
+    }
+
+    // ─── Qualified function names ───────────────────────────────────────
+
+    #[test]
+    fn qualified_name_resolves_through_a_class_import() {
+        // PHP resolves the first segment of a qualified name against the
+        // import table, so `Ip\isIpAllowed()` under `use Core\Ip;` means
+        // `Core\Ip\isIpAllowed`.  The call and the declaration sit in
+        // different namespace blocks, which is what makes the per-offset
+        // resolution the only thing that can answer: a single file
+        // namespace describes one block, not both.
+        let php = r#"<?php
+namespace Core\Ip;
+
+function isIpAllowed(string $ip): bool { return true; }
+
+namespace App;
+
+use Core\Ip;
+
+Ip\isIpAllowed('203.0.113.1');
+"#;
+        let diags = collect(php);
+        assert!(
+            diags.is_empty(),
+            "`Ip\\isIpAllowed()` under `use Core\\Ip;` names a declared function, got: {:?}",
+            diags,
+        );
+    }
+
+    #[test]
+    fn qualified_name_is_not_expanded_through_a_function_import() {
+        // A `use function` import binds a function name, and PHP never
+        // lets one prefix a qualified name: `Lib\helper()` here means
+        // `App\Lib\helper`, which nothing declares.  The declaration of
+        // `Vendor\factory\helper` is the point of the test -- a resolver
+        // that expands the first segment through the shared import table
+        // finds it and stays silent, which is exactly the wrong answer.
+        let php = r#"<?php
+namespace Vendor\factory;
+
+function helper(): void {}
+
+namespace App;
+
+use function Vendor\factory as Lib;
+
+Lib\helper();
+"#;
+        let diags = collect(php);
+        assert!(
+            diags.iter().any(|d| d.message.contains("helper")),
+            "`Lib\\helper()` resolves to `App\\Lib\\helper`, which is undeclared, got: {:?}",
+            diags,
+        );
     }
 }

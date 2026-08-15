@@ -2,8 +2,9 @@
 //!
 //! [`OwnedResolvedNames`] mirrors the `ResolvedNames` API from `mago-names`
 //! but owns its data, decoupling it from the arena lifetime.  Built once
-//! per file in `update_ast_inner` for files open in the editor and stored
-//! in `Backend::resolved_names` for the lifetime of the file.
+//! per file for every file the indexer parses, not only the ones open in
+//! the editor, and stored in `Backend::resolved_names` for the lifetime
+//! of the file.
 
 use std::collections::HashMap;
 

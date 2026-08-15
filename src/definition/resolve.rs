@@ -374,9 +374,19 @@ impl Backend {
 
             SymbolKind::FunctionCall {
                 name,
+                is_definition,
                 is_docblock_reference,
-                ..
             } => {
+                // The cursor is on the function's own name at its
+                // declaration, so there is nothing to jump to: resolving
+                // it would land on the line the cursor already sits on.
+                // Answer with the declaration itself, which is how a
+                // class, member, and namespace declaration answer, and
+                // what an editor turns into a usage list.
+                if *is_definition {
+                    return self.declaration_or_usages(uri, content, cursor_offset, name);
+                }
+
                 // Build FQN candidates: the resolved name, the raw name,
                 // and (if namespaced) the namespace-qualified version.
                 let ctx = self.file_context(uri);

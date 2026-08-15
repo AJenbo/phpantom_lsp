@@ -323,6 +323,17 @@ pub(super) fn extract_from_statement<'a>(
             // that class references like `Foo::class` produce spans.
             extract_from_attribute_lists(&constant.attribute_lists, ctx, scope_start);
             for item in constant.items.iter() {
+                // The declaration site, so find-references and rename
+                // reach a global constant the way they reach a function.
+                // It is the same symbol a use of it names, hence the same
+                // kind -- `const` has no separate declaration span.
+                ctx.spans.push(SymbolSpan {
+                    start: item.name.span.start.offset,
+                    end: item.name.span.end.offset,
+                    kind: SymbolKind::ConstantReference {
+                        name: crate::atom::atom_bytes(item.name.value),
+                    },
+                });
                 extract_from_expression(item.value, ctx, scope_start);
             }
         }

@@ -18,6 +18,57 @@ use crate::util::build_fqn;
 use super::namespace::find_namespace_segment_at_offset;
 use super::validate::span_spells_its_name;
 
+/// The text a single function or constant reference should be replaced
+/// with, or `None` when it must be left exactly as it is.
+///
+/// Either is written three ways across its references and each one takes
+/// a different edit:
+///
+/// - `use function Foo\bar;` names it qualified.  Only the last segment
+///   is the symbol's name; replacing the whole span would drop the
+///   namespace and leave `use function baz;`.
+/// - `bar()` names it plainly and takes the new name.
+/// - `quux()`, under `use function Foo\bar as quux;`, does not name the
+///   symbol at all.  The alias is a local name for it and stays valid
+///   once the symbol is renamed, so rewriting it to `baz()` would break
+///   a file that compiles.
+fn import_aware_edit_text(
+    content: Option<&str>,
+    range: Range,
+    old_short_name: &str,
+    new_name: &str,
+    case_insensitive: bool,
+) -> Option<String> {
+    let Some(content) = content else {
+        return Some(new_name.to_string());
+    };
+
+    let start = crate::text_position::position_to_byte_offset(content, range.start);
+    let end = crate::text_position::position_to_byte_offset(content, range.end);
+    let Some(text) = content.get(start..end) else {
+        return Some(new_name.to_string());
+    };
+
+    let names_the_symbol = |candidate: &str| {
+        if case_insensitive {
+            candidate.eq_ignore_ascii_case(old_short_name)
+        } else {
+            candidate == old_short_name
+        }
+    };
+
+    match text.rsplit_once('\\') {
+        Some((namespace, short)) if names_the_symbol(short) => {
+            Some(format!("{}\\{}", namespace, new_name))
+        }
+        // A qualified name whose last segment is not the symbol is an
+        // alias reached through an imported namespace; leave it alone.
+        Some(_) => None,
+        None if names_the_symbol(text) => Some(new_name.to_string()),
+        None => None,
+    }
+}
+
 impl Backend {
     /// Handle `textDocument/prepareRename`.
     ///
@@ -138,6 +189,26 @@ impl Backend {
             return None;
         }
 
+        // A function is named three different ways across its references,
+        // and only one of them is the plain new name.  The old short name
+        // comes from the resolved FQN rather than from the text under the
+        // cursor, which is the alias itself when the rename is started
+        // from an aliased call.
+        // PHP matches function names case-insensitively and constant
+        // names case-sensitively, so `BAR()` is a reference to `bar` but
+        // `bar` is not a use of `BAR`.
+        let import_aware_target = match &span.kind {
+            SymbolKind::FunctionCall { name, .. } => {
+                let fqn = self.function_fqn_at(uri, span.start, name);
+                Some((crate::util::short_name(&fqn).to_string(), true))
+            }
+            SymbolKind::ConstantReference { name } => {
+                let fqn = self.constant_fqn_at(uri, span.start, name);
+                Some((crate::util::short_name(&fqn).to_string(), false))
+            }
+            _ => None,
+        };
+
         // Determine whether this is a property rename.  Properties are
         // special because the `$` prefix is part of the declaration but
         // usage sites via `->` or `?->` don't include it.
@@ -169,6 +240,30 @@ impl Backend {
             } else {
                 self.get_file_content(&loc_uri_str)
             };
+
+            // An import names the function qualified (`use function
+            // Foo\bar;`) and an aliased call does not name it at all, so
+            // neither can take the new name as written.  A location that
+            // yields no text is one an alias keeps naming under its own
+            // name, and editing it would break a file that compiles.
+            if let Some((ref old_short, case_insensitive)) = import_aware_target {
+                if let Some(text) = import_aware_edit_text(
+                    loc_content.as_deref(),
+                    location.range,
+                    old_short,
+                    new_name,
+                    case_insensitive,
+                ) {
+                    changes
+                        .entry(location.uri.clone())
+                        .or_default()
+                        .push(TextEdit {
+                            range: location.range,
+                            new_text: text,
+                        });
+                }
+                continue;
+            }
 
             let edit_text = if is_variable {
                 let bare_name = new_name.strip_prefix('$').unwrap_or(new_name);

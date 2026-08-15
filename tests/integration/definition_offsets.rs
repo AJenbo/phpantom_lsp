@@ -868,3 +868,62 @@ async fn test_anonymous_class_keyword_offset_is_zero() {
     let off = inner_method.name_offset as usize;
     assert_eq!(&text[off..off + 5], "inner");
 }
+
+/// Ctrl+Click on a function's own name at its declaration.
+///
+/// There is nowhere to jump to -- resolving the name would land on the
+/// line the cursor already sits on -- so the answer is the declaration
+/// itself, which is what a class, member, and namespace declaration
+/// answer and what an editor turns into a usage list.  Before, the name
+/// went through the call path and the click did nothing at all.
+#[tokio::test]
+async fn test_goto_definition_on_a_function_declaration_offers_usages() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///function_declaration.php").unwrap();
+    let content = "<?php\nfunction helper(): void {}\n\nhelper();\n";
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: content.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "helper" in `function helper(): void {}` on line 1.
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 1,
+                character: 11,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend
+        .goto_definition(params)
+        .await
+        .unwrap()
+        .expect("a function declaration should answer with itself");
+
+    match result {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(location.uri, uri);
+            assert_eq!(
+                location.range.start.line, 1,
+                "the answer is the declaration the cursor is on, got {:?}",
+                location.range
+            );
+        }
+        GotoDefinitionResponse::Array(locations) => {
+            assert_eq!(locations.len(), 1, "got {:?}", locations);
+            assert_eq!(locations[0].range.start.line, 1, "got {:?}", locations);
+        }
+        other => panic!("Expected a location, got: {:?}", other),
+    }
+}

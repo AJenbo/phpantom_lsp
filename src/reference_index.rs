@@ -390,7 +390,8 @@ impl Backend {
                 function_keys(&resolved, name)
             }
             SymbolKind::ConstantReference { name } => {
-                vec![(ReferenceIndexKey::Constant(name.to_string()), true)]
+                let resolved = self.constant_fqn_at(uri, span.start, name);
+                constant_keys(&resolved, name)
             }
             SymbolKind::MemberAccess {
                 member_name,
@@ -439,6 +440,51 @@ impl Backend {
             .read()
             .get(uri)
             .and_then(|rn| rn.get(offset).map(normalize_symbol_name))
+    }
+
+    /// The key a function named at `offset` in `uri` is indexed under.
+    ///
+    /// Resolution lives here rather than at the asking end so a caller
+    /// counting references cannot key the function differently from the
+    /// way its call sites were keyed on the way in.
+    pub(crate) fn function_reference_key(
+        &self,
+        uri: &str,
+        offset: u32,
+        name: &str,
+    ) -> ReferenceIndexKey {
+        ReferenceIndexKey::Function(self.function_fqn_at(uri, offset, name))
+    }
+
+    /// The fully-qualified name of the function named at `offset` in
+    /// `uri`, with any leading `\` stripped.
+    ///
+    /// mago-names answers first because it resolves the way PHP does,
+    /// including across a file's separate namespace blocks; the use-map
+    /// and namespace are the fallback for a file it has no entry for.
+    pub(crate) fn function_fqn_at(&self, uri: &str, offset: u32, name: &str) -> String {
+        let resolved = if let Some(fqn) = self.resolved_name_at(uri, offset) {
+            fqn
+        } else {
+            let (use_map, namespace) = self.use_map_and_namespace_at(uri, offset);
+            Self::resolve_to_fqn(name, &use_map, &namespace)
+        };
+        normalize_symbol_name(resolved)
+    }
+
+    /// The fully-qualified name of the constant named at `offset` in
+    /// `uri`, with any leading `\` stripped.
+    ///
+    /// Unlike a function, a constant falls back to the name as written
+    /// rather than to a use-map guess.  The use-map is untyped -- it
+    /// holds class, function, and const imports together -- and PHP
+    /// resolves an unqualified constant by looking in the current
+    /// namespace and then the global one, not through a class import.
+    /// Guessing through it would key a constant under a name that names
+    /// something else.
+    pub(crate) fn constant_fqn_at(&self, uri: &str, offset: u32, name: &str) -> String {
+        self.resolved_name_at(uri, offset)
+            .unwrap_or_else(|| normalize_symbol_name(name))
     }
 }
 
@@ -508,6 +554,13 @@ fn function_keys(resolved: &str, source_name: &str) -> Vec<(ReferenceIndexKey, b
     symbol_name_keys(resolved, source_name)
         .into_iter()
         .map(|(name, is_resolved)| (ReferenceIndexKey::Function(name), is_resolved))
+        .collect()
+}
+
+fn constant_keys(resolved: &str, source_name: &str) -> Vec<(ReferenceIndexKey, bool)> {
+    symbol_name_keys(resolved, source_name)
+        .into_iter()
+        .map(|(name, is_resolved)| (ReferenceIndexKey::Constant(name), is_resolved))
         .collect()
 }
 
