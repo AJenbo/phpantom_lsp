@@ -10420,3 +10420,89 @@ function run(): void {
         vec!["Argument 1 ($x) expects int, got string"]
     );
 }
+
+// ─── Template bound from an inline call argument ────────────────────────────
+
+/// A template bound from a call argument keeps the `null` arm the callee's
+/// return type declares.  The class walk that resolves the argument reports
+/// only the classes it can be, so the arm used to be dropped and the
+/// substituted return claimed the value could never be null.
+#[test]
+fn template_bound_from_inline_call_keeps_null_arm() {
+    let php = r#"<?php
+class Carbon {
+    public static function create(int $year): ?Carbon { return null; }
+}
+
+/**
+ * @template T of Carbon|string|null
+ * @param T $date
+ * @return T
+ */
+function passthrough(mixed $date): mixed { return $date; }
+
+function takesCarbon(Carbon $c): void {}
+
+function run(): void {
+    takesCarbon(passthrough(Carbon::create(2024)));
+}
+"#;
+    assert_eq!(
+        type_error_messages(&collect(php)),
+        vec!["Argument 1 ($c) expects Carbon, got ?Carbon"],
+        "the inline call form should bind `?Carbon`, like the variable form does"
+    );
+}
+
+/// The same for a non-null alternative: a `Carbon|string` return binds both
+/// arms, not just the one backed by a class.
+#[test]
+fn template_bound_from_inline_call_keeps_scalar_arm() {
+    let php = r#"<?php
+class Carbon {
+    public static function create(int $year): Carbon|string { return "x"; }
+}
+
+/**
+ * @template T of Carbon|string|null
+ * @param T $date
+ * @return T
+ */
+function passthrough(mixed $date): mixed { return $date; }
+
+function takesCarbon(Carbon $c): void {}
+
+function run(): void {
+    takesCarbon(passthrough(Carbon::create(2024)));
+}
+"#;
+    assert_eq!(
+        type_error_messages(&collect(php)),
+        vec!["Argument 1 ($c) expects Carbon, got Carbon|string (string does not satisfy Carbon)"]
+    );
+}
+
+/// A call whose return type names one class and nothing else binds that
+/// class alone, with no spurious alternative attached.
+#[test]
+fn template_bound_from_inline_call_keeps_plain_class() {
+    let php = r#"<?php
+class Carbon {
+    public static function create(int $year): Carbon { return new Carbon(); }
+}
+
+/**
+ * @template T of Carbon|string|null
+ * @param T $date
+ * @return T
+ */
+function passthrough(mixed $date): mixed { return $date; }
+
+function takesCarbon(Carbon $c): void {}
+
+function run(): void {
+    takesCarbon(passthrough(Carbon::create(2024)));
+}
+"#;
+    assert_eq!(type_error_messages(&collect(php)), Vec::<String>::new());
+}

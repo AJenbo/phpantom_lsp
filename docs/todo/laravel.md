@@ -625,6 +625,12 @@ still partially lack:
 - **Multi-locale hover.** Hover already shows a translation key's value
   for the resolved locale; show the value per locale (with a link to
   each file) instead of just the one.
+- **Insert missing key quick-fix.** When the unknown-translation-key
+  diagnostic fires on a `group.item` key whose `lang/{locale}/group.php`
+  array file already exists, offer a quick-fix that inserts the missing
+  `'item' => '...'` entry (existing keys as siblings for placement,
+  empty string as the value). No fix when the group file itself doesn't
+  exist yet; that case still just diagnoses.
 
 #### L25. Storage disk name strings
 
@@ -911,3 +917,58 @@ string literal) and prefer it over the convention, the way an explicit
 `build_factory_relationship_methods` in
 `virtual_members/laravel/factory.rs`, and the convention fallback in
 `inheritance/mod.rs`.
+
+#### L49. Unguarded Eloquent mass assignment diagnostic
+
+**Impact: Medium · Complexity: Medium**
+
+`Model::create($request->all())` (and `fill()`/`update()` with an
+unfiltered array) silently drops every key the model hasn't declared
+`$fillable` for, or throws `MassAssignmentException` in strict mode —
+a common first-app footgun with no signal today. Flag a call whose
+attribute-array argument is not a literal (so its keys can't be
+checked individually) and whose target model has neither `$fillable`
+nor `$guarded = []]` declared, on `create()`, `fill()`, `update()`,
+`updateOrCreate()`, `firstOrCreate()`, and `firstOrNew()`. The model
+resolution and column-source machinery L30 already needs (and the
+diagnostic's model-argument matching) share the same receiver-typing
+path, so build them together.
+
+**Where to look:** `virtual_members/laravel/model_extraction.rs` for
+existing `$fillable`/`$guarded` reads; `diagnostics/` for the
+call-site diagnostic pattern used by similarly-shaped checks.
+
+#### L50. "Create route" quick-fix for an unresolved route name
+
+**Impact: Low-Medium · Complexity: Medium**
+
+The unknown-route-name diagnostic (fed by `route_names.rs`) has no
+accompanying fix today. Once the diagnostic fires, generate a
+`Route::get('{path}', [{Controller}::class, '{method}'])
+->name('{name}');` stub appended to `routes/web.php` (or `api.php` if
+the call site is `Route::apiResource`-shaped context), inferring path
+and controller from the route name's own conventional dashes/dots
+where possible and otherwise leaving placeholders.
+
+**Where to look:** `code_actions/` for the code-action registration
+pattern used by other "declare the missing thing" fixes;
+`virtual_members/laravel/route_names.rs` for the existing scanner
+this reuses for the diagnostic and the insertion point.
+
+#### L51. "Convert facade call to dependency injection" refactor
+
+**Impact: Low · Complexity: Medium**
+
+A code action on a facade call inside a class method (`Cache::get(...)`,
+`Log::info(...)`) that adds a constructor-promoted property typed to
+the facade's underlying contract (resolved the same way `app('cache')`
+already resolves to a concrete class for member completion) and
+rewrites the call site to `$this->{property}->{method}(...)`. Purely
+mechanical once the facade-to-contract resolution already used
+elsewhere is in hand; skip call sites already inside a closure that
+captures `$this` differently, and skip static/trait contexts where
+constructor injection doesn't apply.
+
+**Where to look:** `code_actions/` for the promote-to-constructor
+pattern already used elsewhere; `virtual_members/laravel/facade.rs`
+for the facade-to-concrete-class resolution to reuse.

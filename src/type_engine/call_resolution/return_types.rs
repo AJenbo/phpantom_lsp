@@ -1854,15 +1854,100 @@ fn is_type_subclass_of(
 /// so template binding sees the full type rather than only the first
 /// member.
 pub(super) fn resolve_expression_to_type(text: &str, ctx: &ResolutionCtx<'_>) -> Option<PhpType> {
-    let results = crate::type_engine::resolver::resolve_target_classes(
-        text,
+    let expr = SubjectExpr::parse(text);
+    let results = crate::type_engine::resolver::resolve_target_classes_expr(
+        &expr,
         crate::types::AccessKind::Arrow,
         ctx,
     );
     if results.is_empty() {
         return None;
     }
-    Some(crate::types::ResolvedType::types_joined(&results))
+    let walked = crate::types::ResolvedType::types_joined(&results);
+    Some(restore_dropped_call_arms(&expr, walked, ctx))
+}
+
+/// Put back the alternatives of a call's declared return type that the
+/// class walk had no way to report.
+///
+/// [`resolve_expression_to_type`] answers with the classes an expression
+/// can be, so a `?Carbon` return arrives as a bare `Carbon` and a
+/// `Carbon|string` one as a bare `Carbon`: neither `null` nor `string`
+/// is a class.  A `@template` bound from that argument then claims the
+/// value can only ever be the class, which both hides a mismatch where
+/// the substituted type is consumed and invents one where a parameter is
+/// checked against it.
+///
+/// Only the alternatives of a union (or of a `?T`) are restored, and only
+/// the ones that bottom out in built-in types: a lone `class-string<User>`
+/// or `array{user: User}` is *represented* by the class the walk found
+/// rather than dropped by it, and re-adding it beside that class would
+/// name the same value twice.  `static`, `$this`, and unbound template
+/// names are likewise left out, since the walk resolves them on purpose.
+///
+/// A call that narrowing can key on is skipped entirely: there the walk's
+/// answer may be a narrowed type, and the declared return is exactly what
+/// the check refined away.
+fn restore_dropped_call_arms(
+    expr: &SubjectExpr,
+    walked: PhpType,
+    ctx: &ResolutionCtx<'_>,
+) -> PhpType {
+    let SubjectExpr::CallExpr { callee, args_text } = expr else {
+        return walked;
+    };
+    if crate::type_engine::resolver::narrowable_call_key(expr).is_some() {
+        return walked;
+    }
+
+    let mut hint = None;
+    Backend::resolve_call_return_types_on_receiver(callee, args_text, None, ctx, Some(&mut hint));
+    let Some(hint) = hint else {
+        return walked;
+    };
+    // `raw_kind` rather than `kind`, so a `__benevolent<string|false>` is
+    // not mistaken for the union it wraps: the marker says the failure arm
+    // is not worth enforcing, which is the opposite of restoring it.
+    if !matches!(hint.raw_kind(), TypeKind::Union(_) | TypeKind::Nullable(_)) {
+        return walked;
+    }
+
+    let mut present = Vec::new();
+    collect_top_level_arms(&walked, &mut present);
+    let mut arms = Vec::new();
+    collect_top_level_arms(&hint, &mut arms);
+
+    let extra: Vec<PhpType> = arms
+        .into_iter()
+        .filter(|arm| arm.is_scalar_leaf() && !present.contains(arm))
+        .collect();
+    if extra.is_empty() {
+        return walked;
+    }
+    if extra.len() == 1 && extra[0].is_null() {
+        return PhpType::nullable(walked);
+    }
+    let mut members = present;
+    members.extend(extra);
+    PhpType::union(members)
+}
+
+/// Flatten a type into the alternatives it offers at the top level,
+/// spelling a `?T` as its two arms so `null` can be compared like any
+/// other member.
+fn collect_top_level_arms(ty: &PhpType, out: &mut Vec<PhpType>) {
+    match ty.raw_kind() {
+        TypeKind::Union(members) => {
+            for member in members {
+                collect_top_level_arms(member, out);
+            }
+        }
+        TypeKind::Nullable(inner) => {
+            collect_top_level_arms(inner, out);
+            out.push(PhpType::named(atom("null")));
+        }
+        _ => out.push(ty.clone()),
+    }
 }
 
 /// Resolve a call expression to the return type the shared call-resolution

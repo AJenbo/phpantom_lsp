@@ -1706,7 +1706,7 @@ fn base_roots_in_variable(expr: &SubjectExpr) -> bool {
 /// variable (`$job->data()`, `$this->getKernel()`).  Everything else,
 /// calls with arguments, function calls, static calls, resolves purely
 /// from its signature and is never a narrowing subject.
-fn narrowable_call_key(expr: &SubjectExpr) -> Option<String> {
+pub(crate) fn narrowable_call_key(expr: &SubjectExpr) -> Option<String> {
     let SubjectExpr::CallExpr { callee, args_text } = expr else {
         return None;
     };

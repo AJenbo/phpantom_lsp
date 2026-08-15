@@ -439,16 +439,13 @@ isn't needed.
   `Psalm\Internal\Provider\ClassLikeStorageCacheProvider`
 - Psalm: `FileStorageCacheProvider` for the content-hash invalidation
   pattern
-- php-lsp: persists `FileIndex` entries under `~/.cache/php-lsp/`
-  keyed by `blake3(uri || content)`. They originally keyed on
+- A peer PHP LSP project persists its per-file index cache on disk
+  keyed by `blake3(uri || content)`. It originally keyed on
   `mtime + size` and shipped a cache-staleness bug (a size-preserving
   edit within the same mtime second was missed) before switching to
   content hashing. Confirms the content-hash-as-authority choice
   above; never trust mtime for correctness, at most as a cheap
   pre-filter to skip hashing unchanged files.
-- php-lsp: `docs/salsa-migration.md` in its own repo (Phases K1-K4)
-  documents their cache-size cap, reset-on-overflow, and
-  LRU-by-mtime eviction plans — useful pitfall list if P20 ships.
 
 ---
 
@@ -933,3 +930,40 @@ the same request cycle.
 `type_engine/variable/resolution.rs`, the `walk_top_level_for_globals`
 call. A per-request cache (similar to the chain resolution cache in
 `type_engine/resolver/context.rs`) would eliminate the redundant walks.
+
+---
+
+## P51. CI-gated scaling and memory invariants
+
+**Impact: Medium · Complexity: Low-Medium**
+
+`.github/workflows/ci.yml`'s `benchmark`/`benchmark-pr` jobs only run
+the `completion` bench and publish it to the tracking dashboard; a
+regression is visible after the fact (someone has to look at the
+dashboard) rather than failing the PR. `references.rs` and
+`laravel_completion.rs` under `benches/` exist but aren't wired into
+CI at all, and none of our benchmarks assert an absolute ceiling —
+only relative-to-history comparison.
+
+Add CI-gated invariants that fail the build outright when crossed,
+not just recorded for later inspection:
+
+- **Per-edit republish scaling.** A synthetic workspace ingested at
+  several sizes (e.g. 100 → 5000 files); assert republish-after-edit
+  wall time stays flat (or sub-linear) as file count grows, catching
+  an accidental O(n) or worse regression on the republish path before
+  it ships.
+- **Cold/warm start wall time.** Time to `indexReady` on a pinned
+  fixture workspace (a vendored copy of a real Laravel/Symfony
+  project, or one of the public corpora already used by `analyze`
+  triage), gated on an absolute ceiling, both cold (no cache) and warm
+  (repeat run).
+- **Session RSS guard.** `benches/memory_usage.py` already measures
+  resident memory on two workloads; run it in CI and fail if RSS
+  exceeds a fixed ceiling instead of only exposing the script for
+  manual use.
+
+**Where to look:** `.github/workflows/ci.yml`'s `benchmark`/
+`benchmark-pr` jobs; `benches/memory_usage.py`; `benches/references.rs`
+and `benches/laravel_completion.rs` for benches that exist but aren't
+CI-gated yet.

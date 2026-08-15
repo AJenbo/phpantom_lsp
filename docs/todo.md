@@ -34,6 +34,14 @@ contributor even though it's short.
 
 | #    | Item                                                                                                                                                      | Impact      | Complexity  |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
+| B80  | [`max()`/`min()` argument-dependent return type is a malformed union](todo/bugs.md#b80-maxmin-argument-dependent-return-type-is-a-malformed-union)          | Medium      | Medium      |
+| B78  | [A standalone `@var` cast above `return` is ignored](todo/bugs.md#b78-a-standalone-var-cast-above-return-is-ignored)                                        | Medium      | Medium      |
+| B82  | [A nullsafe chain compared `===` to a non-nullable value does not narrow the receiver](todo/bugs.md#b82-a-nullsafe-chain-compared--to-a-non-nullable-value-does-not-narrow-the-receiver) | Medium      | Medium      |
+| B79  | [`array_filter()` without a callback keeps `null` on values that share the array with a `?bool`](todo/bugs.md#b79-array_filter-without-a-callback-keeps-null-on-values-that-share-the-array-with-a-bool) | Low-Medium  | Medium      |
+| B81  | [Foreach element extraction widens `false` to `bool`](todo/bugs.md#b81-foreach-element-extraction-widens-false-to-bool)                                     | Low-Medium  | Medium      |
+| B76  | [Blade variables typed from a component class are immune to condition narrowing](todo/bugs.md#b76-blade-variables-typed-from-a-component-class-are-immune-to-condition-narrowing) | Medium      | Medium-High |
+| B77  | [A foreach over a proven non-empty array still merges the zero-iteration path](todo/bugs.md#b77-a-foreach-over-a-proven-non-empty-array-still-merges-the-zero-iteration-path) | Medium      | Medium-High |
+| B75  | [A dim-write to the foreach value variable leaks through the loop back-edge](todo/bugs.md#b75-a-dim-write-to-the-foreach-value-variable-leaks-through-the-loop-back-edge) | Medium      | High        |
 |      | **Release 0.10.0**                                                                                                                                        |             |             |
 
 ## Sprint 7 — 1.0 release & IDE extensions
@@ -110,6 +118,7 @@ unlikely to move the needle for most users.
 | A40 | [Generate method from call](todo/actions.md#a40-generate-method-from-call)                                                                                                  | Medium-High | Medium-High |
 | A28 | [Explicit nullable parameter type](todo/actions.md#a28-explicit-nullable-parameter-type-php-84-deprecation) (PHP 8.4 deprecation)                                           | Medium      | Low         |
 | A16 | [Snippet placeholder for extracted method name](todo/actions.md#a16-snippet-placeholder-for-extracted-method-name) (lets the user type over the generated name immediately) | Medium      | Medium      |
+| A46 | [Honor `context.only` in code action responses](todo/actions.md#a46-honor-contextonly-in-code-action-responses)                                                             | Medium      | Medium      |
 | A25 | [`strpos` → `str_contains`](todo/actions.md#a25-strpos-str_contains-php-80) (PHP 8.0+)                                                                                     | Medium      | Medium      |
 | A41 | [Create class from non-existing name](todo/actions.md#a41-create-class-from-non-existing-name)                                                                              | Medium      | Medium-High |
 | A34 | [Unified code action handler architecture](todo/actions.md#a34-unified-code-action-handler-architecture) (closure-based resolve, unified fix type)                          | Medium      | Very High   |
@@ -142,6 +151,7 @@ unlikely to move the needle for most users.
 | F13 | [Homebrew formula](todo/lsp-features.md#f13-homebrew-formula)                                                                                                                | Medium      | Low         |
 | F17 | [Wire class move to `workspace/willRenameFiles`](todo/lsp-features.md#f17-wire-class-move-to-workspacewillrenamefiles)                                                       | Medium      | Medium      |
 | F5  | [Call hierarchy](todo/lsp-features.md#f5-call-hierarchy) (incoming/outgoing calls)                                                                                          | Medium      | Medium      |
+| F20 | [Migrate to the maintained `tower-lsp` fork](todo/lsp-features.md#f20-migrate-to-the-maintained-tower-lsp-fork) (unblocks A16)                                              | Medium      | Medium      |
 | F2  | [Partial result streaming via `$/progress`](todo/lsp-features.md#f2-partial-result-streaming-via-progress)                                                                  | Medium      | Medium-High |
 | F7  | [Evaluatable expression support (DAP integration)](todo/lsp-features.md#f7-evaluatable-expression-support-dap-integration)                                                  | Low-Medium  | Low         |
 | F15 | [Go-to-declaration](todo/lsp-features.md#f15-go-to-declaration)                                                                                                              | Low-Medium  | Low         |
@@ -162,6 +172,7 @@ unlikely to move the needle for most users.
 | L30 | [Eloquent attribute-array key completion](todo/laravel.md#l30-eloquent-attribute-array-key-completion)                                                                      | Medium      | Medium      |
 | L32 | [Config-backed named-resource strings](todo/laravel.md#l32-config-backed-named-resource-strings) (log channels, cache stores, guards, connections, rate limiters)           | Medium      | Medium      |
 | L41 | [Conditional return types on `url()` and its sibling helpers](todo/laravel.md#l41-conditional-return-types-on-url-and-its-sibling-helpers)                                  | Medium      | Medium      |
+| L49 | [Unguarded Eloquent mass assignment diagnostic](todo/laravel.md#l49-unguarded-eloquent-mass-assignment-diagnostic)                                                          | Medium      | Medium      |
 | L17 | [Additional string contexts without booting](todo/laravel.md#l17-additional-string-contexts-without-booting) (middleware, assets, validation, Inertia)                     | Medium      | Medium-High |
 | L25 | [Storage disk name strings](todo/laravel.md#l25-storage-disk-name-strings)                                                                                                  | Low-Medium  | Low         |
 | L31 | [String-key rename, highlight, and semantic tokens](todo/laravel.md#l31-string-key-rename-highlight-and-semantic-tokens)                                                    | Low-Medium  | Medium      |
@@ -169,6 +180,7 @@ unlikely to move the needle for most users.
 | L3  | `$dates` array (deprecated)                                                                                                                  | Low-Medium  | Medium      |
 | L12 | [`HasUuids` / `HasUlids` trait — `$id` typed as `string`](todo/laravel.md#l12-hasuuids-hasulids-trait-id-typed-as-string)                                                 | Low-Medium  | Medium      |
 | L44 | [Sibling resource registrations and degenerate resource names](todo/laravel.md#l44-sibling-resource-registrations-and-degenerate-resource-names)                             | Low-Medium  | Medium      |
+| L50 | ["Create route" quick-fix for an unresolved route name](todo/laravel.md#l50-create-route-quick-fix-for-an-unresolved-route-name)                                            | Low-Medium  | Medium      |
 | L47 | [Morph aliases in `*_type` column comparisons](todo/laravel.md#l47-morph-aliases-in-_type-column-comparisons)                                                               | Low-Medium  | Medium-High |
 | L8  | `withSum`/`withAvg`/`withMin`/`withMax` aggregate properties                                                                                                                | Low-Medium  | High        |
 | L45 | [`*_count` properties are offered on every relationship](todo/laravel.md#l45-_count-properties-are-offered-on-every-relationship)                                           | Low-Medium  | High        |
@@ -178,6 +190,7 @@ unlikely to move the needle for most users.
 | L28 | [Path helper links and completion](todo/laravel.md#l28-path-helper-links-and-completion)                                                                                    | Low         | Low         |
 | L10 | `View::withX()` / `RedirectResponse::withX()` dynamic methods                                                                                                               | Low         | Medium      |
 | L39 | [Unused view and translation key detection](todo/laravel.md#l39-unused-view-and-translation-key-detection)                                                                  | Low         | Medium      |
+| L51 | ["Convert facade call to dependency injection" refactor](todo/laravel.md#l51-convert-facade-call-to-dependency-injection-refactor)                                          | Low         | Medium      |
 |     | **[Blade](todo/blade.md)**                                                                                                                                                  |             |             |
 | BL11 | [Custom directive discovery](todo/blade.md#bl11-custom-directive-discovery) (`Blade::directive()` / `Blade::if()` registrations)                                              | Medium      | Medium      |
 |     | **[External Stubs](todo/external-stubs.md)**                                                                                                                                |             |             |
@@ -187,6 +200,7 @@ unlikely to move the needle for most users.
 | P16 | [Pre-parsed stub format (eliminate raw PHP embedding)](todo/performance.md#p16-pre-parsed-stub-format-eliminate-raw-php-embedding)                                          | High        | Very High   |
 | P35 | [Diagnostic passes reach only a fraction of available cores](todo/performance.md#p35-diagnostic-passes-reach-only-a-fraction-of-available-cores)                            | Medium-High | Very High   |
 | P30 | [Evaluate migrating parse/resolve/docblock pipeline to `mago-hir`](todo/performance.md#p30-evaluate-migrating-parseresolvedocblock-pipeline-to-mago-hir) (parked — re-evaluated at mago 1.46.0, still no `mago-hir` consumers upstream) | Medium-High | Very High   |
+| P51 | [CI-gated scaling and memory invariants](todo/performance.md#p51-ci-gated-scaling-and-memory-invariants)                                                                    | Medium      | Low-Medium  |
 | P17 | [`mago-names` resolution on the parse hot path](todo/performance.md#p17-mago-names-resolution-on-the-parse-hot-path)                                                        | Medium      | High        |
 | P18 | [Subtype result caching](todo/performance.md#p18-subtype-result-caching) (per-request HashMap for hierarchy walks)                                                          | Medium      | High        |
 | P47 | [The resolved-class cache lock caps concurrent class resolution](todo/performance.md#p47-the-resolved-class-cache-lock-caps-concurrent-class-resolution)                     | Medium      | Very High   |

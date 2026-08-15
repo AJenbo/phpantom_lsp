@@ -250,10 +250,10 @@ directory, compare mtimes, re-parse only changed files. This is
 Libretto's `IncrementalCache` approach and it works well.
 
 The content hash must be the authority; mtime is only a pre-filter
-to skip hashing files that look unchanged. php-lsp shipped this
-exact bug: their cache was keyed on `mtime + size`, so a
+to skip hashing files that look unchanged. A peer PHP LSP project
+shipped this exact bug: its cache was keyed on `mtime + size`, so a
 size-preserving edit within the same mtime second served a stale
-index entry. They later switched to `blake3(uri || content)`.
+index entry. It later switched to `blake3(uri || content)`.
 
 ### Decision criteria
 

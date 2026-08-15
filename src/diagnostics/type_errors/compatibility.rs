@@ -954,19 +954,33 @@ pub(crate) fn is_type_compatible(
         }
     }
 
-    // ── ArrayShape → typed array: MAYBE ─────────────────────────
+    // ── ArrayShape → typed array: MAYBE, but only if every entry fits ──
     // `array{id: string, index: string, body: array}` should be
-    // accepted where `array<string, mixed>` or similar is expected.
-    // The shape is a more specific form of the typed array.
-    if matches!(arg_type.kind(), TypeKind::ArrayShape(_))
-        && matches!(param_type.kind(), TypeKind::Generic(g) if is_array_like_name(&g.name))
-    {
-        return true;
-    }
-    if matches!(arg_type.kind(), TypeKind::ArrayShape(_))
-        && matches!(param_type.kind(), TypeKind::Array(_))
-    {
-        return true;
+    // accepted where `array<string, mixed>` or similar is expected: the
+    // shape is a more specific form of the typed array. But a shape
+    // literal is a complete, statically-known list of values (unlike a
+    // shape read off a real array, which may hold more at runtime), so
+    // when every entry's value type is checked and one fails to fit the
+    // declared value type, that is a genuine mismatch, not a MAYBE — a
+    // `list<int>` parameter rejects an argument shape holding a string.
+    if let TypeKind::ArrayShape(arg_entries) = arg_type.kind() {
+        let value_type = match param_type.kind() {
+            TypeKind::Generic(g) if is_array_like_name(&g.name) => g.args.last(),
+            TypeKind::Array(elem) => Some(elem),
+            _ => None,
+        };
+        if let Some(value_type) = value_type {
+            if arg_entries
+                .iter()
+                .all(|e| is_type_compatible(&e.value_type, value_type, class_loader, strict_types))
+            {
+                return true;
+            }
+        } else if matches!(param_type.kind(), TypeKind::Generic(g) if is_array_like_name(&g.name))
+            || matches!(param_type.kind(), TypeKind::Array(_))
+        {
+            return true;
+        }
     }
 
     // ── Typed array → ArrayShape: MAYBE ─────────────────────────

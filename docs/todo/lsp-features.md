@@ -136,12 +136,6 @@ simple index query instead of relying on the scan-based approach that
 Find References uses on its own.
 
 **References:**
-- php-lsp: `src/navigation/call_hierarchy.rs` in its own repo — a
-  working Rust implementation (prepare/incoming/outgoing, cross-file)
-  built on the same "wrap Find References + walk the body" shape
-  described above. Their wire-protocol tests (`tests/`, call-hierarchy
-  cases in the Symfony suite) show the expected item/range semantics
-  editors rely on.
 - Phpactor: call hierarchy via its references index.
 
 ## F7. Evaluatable expression support (DAP integration)
@@ -445,10 +439,6 @@ machinery to produce the `WorkspaceEdit`. The companion
 
 **References:**
 - Phpactor: `MoveClass` refactoring in the class-mover package.
-- php-lsp: `handle_will_rename_files` in
-  `src/backend/handlers/workspace.rs` in its own repo (updates `use`
-  imports workspace-wide on file rename) and their `willCreateFiles`
-  PSR-4 stub insertion.
 
 ---
 
@@ -481,3 +471,34 @@ A remote server has its own filesystem view, so `rootUri` / workspace
 paths must line up with the paths the server sees (or be remapped).
 Auto-download, version checks, and the per-folder rooting do not apply
 in remote mode.
+
+## F20. Migrate to the maintained `tower-lsp` fork
+
+**Impact: Medium · Complexity: Medium**
+
+`tower-lsp` 0.20 (our current dependency) is the last release of the
+original crate; it's unmaintained upstream. A maintained fork exists
+under a different crate name and has since moved past LSP 3.17 to
+cover 3.18 proposed features. Because it's a rename rather than a
+version bump of the same crate, `cargo update`/routine dependency
+audits will not surface this on their own — nothing shows up as
+"outdated" since no new `tower-lsp` version is being withheld. It has
+to be picked up as a deliberate migration.
+
+This isn't just hygiene: A16 (snippet placeholder for extracted method
+name) is explicitly blocked on `SnippetTextEdit`, an LSP 3.18 feature
+that our pinned `lsp-types` 0.94 (via `tower-lsp` 0.20) doesn't cover.
+Migrating unblocks it directly.
+
+**What to check before starting:** the fork's public API surface
+relative to `tower_lsp::LspService`/`tower_lsp::lsp_types` (import
+paths, trait signatures, the `"proposed"` feature flag) to scope the
+mechanical rename across every file that does `use tower_lsp::...`
+(a wide but shallow set: `src/lsp_dispatch.rs`, `src/inlay_hints.rs`,
+`src/document_symbols.rs`, `src/folding.rs`, `src/phpcs.rs`,
+`src/fix.rs`, `src/selection_range.rs`, `src/text_position.rs`, and
+others — grep `tower_lsp::` for the full list), plus the wire-protocol
+test harness described in `test-porting.md` Phase 6B if that gets
+ported around the same time.
+
+**Where to look:** `Cargo.toml`'s `tower-lsp = { version = "0.20", features = ["proposed"] }`.
