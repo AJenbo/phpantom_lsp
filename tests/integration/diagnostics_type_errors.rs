@@ -7293,8 +7293,8 @@ class Caller {
 /// annotated `@param class-string<T>|T $objectOrClass` but its native hint
 /// comes from a `#[LanguageLevelTypeAware]` attribute resolving to
 /// `object|string`.  The docblock type must still refine that native union
-/// so `$reflection->newInstanceArgs(...)` resolves to `T|null` (the
-/// instance), not `class-string<T>|null`.
+/// so `$reflection->newInstanceArgs(...)` resolves to `T` (the
+/// instance), not `class-string<T>`.
 #[test]
 fn no_false_positive_for_reflection_class_new_instance_args() {
     const REFLECTION_STUB: &str = r#"<?php
@@ -7341,6 +7341,85 @@ class Test {
         out.is_empty(),
         "newInstanceArgs on ReflectionClass<T> should resolve to the instance type, \
          not a class-string, got: {out:?}"
+    );
+}
+
+/// The same call against the *embedded* stubs, which declare
+/// `newInstanceArgs()` as `@return T|null`.  The method throws rather
+/// than returning null, so the instance it builds is as non-null as the
+/// one `newInstance()` returns and neither call needs a null check.
+#[test]
+fn reflection_class_new_instance_args_is_not_nullable() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///reflection_new_instance_args.php";
+    let content = r#"<?php
+class Node {}
+
+class NodeBuilder {
+    public function fromArgs(): Node
+    {
+        /** @var class-string<Node> $class */
+        $class = substr(static::class, 0, -7);
+        $reflection = new ReflectionClass($class);
+
+        return $reflection->newInstanceArgs([__METHOD__]);
+    }
+
+    public function fromVariadic(): Node
+    {
+        /** @var class-string<Node> $class */
+        $class = substr(static::class, 0, -7);
+        $reflection = new ReflectionClass($class);
+
+        return $reflection->newInstance(__METHOD__);
+    }
+}
+"#;
+    backend.update_ast(uri, content);
+    let mut out = Vec::new();
+    backend.collect_return_type_diagnostics(uri, content, &mut out);
+    assert!(
+        out.is_empty(),
+        "newInstanceArgs must match newInstance and return a plain Node, got: {out:?}"
+    );
+}
+
+/// PHP calls an autoloader with the name of the class it is looking for,
+/// so an untyped `$class` parameter is a `string` even though the stub
+/// only says `callable`.  Without that, string builtins applied to it
+/// return their full union and the next call reports a mismatch.
+#[test]
+fn spl_autoload_register_closure_param_is_a_string() {
+    let diags = collect_with_full_stubs(
+        r#"<?php
+spl_autoload_register(function ($class): void {
+    $file = __DIR__ . strtr(str_replace('App\\', '', $class), '\\', '/') . '.php';
+    require $file;
+});
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "An autoloader's $class parameter should be inferred as string, got: {diags:?}"
+    );
+}
+
+/// The patched callback type keeps its nullable wrapper: registering the
+/// default autoloader by passing no callback at all is still valid.
+#[test]
+fn spl_autoload_register_still_accepts_no_callback() {
+    let diags = collect_with_full_stubs(
+        r#"<?php
+function myAutoload(string $class): void { echo $class; }
+
+spl_autoload_register();
+spl_autoload_register(null);
+spl_autoload_register('myAutoload');
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "spl_autoload_register must still accept a null or string callback, got: {diags:?}"
     );
 }
 

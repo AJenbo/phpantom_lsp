@@ -566,49 +566,7 @@ PHPStan-extension-authoring-specific, not general PHP or Laravel code.
 
 ## Symbol resolution
 
-### B65. `ReflectionClass<T>`'s generic argument is not carried through `newInstanceArgs()`
-
-**Impact: Low · Complexity: Medium**
-
-```php
-/** @var class-string<Node> $class */
-$class = substr(static::class, 0, -4);
-$reflection = new ReflectionClass($class);
-return $reflection->newInstanceArgs([__METHOD__]);   // reported: got Node|null
-```
-
-`new ReflectionClass($class)` on a `class-string<Node>` should produce
-`ReflectionClass<Node>`, and its generic `newInstanceArgs(): T` stub
-should then resolve to plain `Node` here — matching the declared return
-type exactly. An extra `|null` is added instead.
-
-**Fix:** confirm the generic type argument captured from the
-`class-string<T>` constructor argument is threaded through to
-`newInstanceArgs()`'s templated return, the same way it already must be
-for `newInstance()` (worth checking both stay in sync).
-
-### B66. A closure parameter passed to `spl_autoload_register()` is not inferred from the callback's declared type
-
-**Impact: Low · Complexity: Medium**
-
-```php
-spl_autoload_register(function ($class): void {
-    $file = __DIR__ . strtr(str_replace('App\\', '', $class), '\\', '/') . '.php';   // reported: got array<array-key,string>|string
-    // ...
-});
-```
-
-`spl_autoload_register()`'s stub types its callback parameter as
-`callable(string): void`. The closure's own `$class` parameter has no
-type declaration, so its type should be inferred from that
-context — `string` — the same way an inferred parameter type already
-works for other typed-callable consumers (e.g. `array_map`). Left
-untyped, `$class` falls back to a wider inferred type and `str_replace()`
-returns its full union.
-
-**Fix:** confirm the callable-parameter-type inference used for
-`usort`/`array_map`/similar higher-order builtins also covers
-`spl_autoload_register`.
+No outstanding items.
 
 ## Array types
 

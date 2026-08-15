@@ -59,7 +59,13 @@
 //!    return type (and thus the function's own return) stays in the
 //!    value-inspecting logic in `raw_type_inference.rs`.
 //!
-//! 6. **`ctype_*`** and **`define`** -- php-src declares both with `mixed`
+//! 6. **`spl_autoload_register`** -- the callback is typed bare
+//!    `?callable`, so the closure an autoloader is normally written as
+//!    leaves its parameter untyped. We retype it
+//!    `?callable(string): void`, which is what PHP actually calls the
+//!    autoloader with.
+//!
+//! 7. **`ctype_*`** and **`define`** -- php-src declares both with `mixed`
 //!    where the stubs narrow: the `ctype_*` family takes `mixed $text`
 //!    (a non-string argument is a deprecation, not a type error), and
 //!    `define`'s `$value` is `mixed` since PHP 8.0, not the pre-7.0
@@ -67,7 +73,7 @@
 //!    both back so `ctype_digit($int)` and
 //!    `define('X', fopen(…))` stop being reported.
 //!
-//! 7. **Argument-decided builtins** -- `pathinfo`, `print_r`, `hrtime`,
+//! 8. **Argument-decided builtins** -- `pathinfo`, `print_r`, `hrtime`,
 //!    `microtime`, `getenv`, `mb_convert_encoding` and `abs` each return one
 //!    of several shapes depending on an argument, but the stubs can only
 //!    declare the union of all of them. Each gets a conditional return type
@@ -75,7 +81,7 @@
 //!    branch stops carrying the others. An argument whose value cannot be
 //!    pinned down keeps the union, which is all the call can promise.
 //!
-//! 8. **Key/value array builtins** -- `array_keys`, `array_values`,
+//! 9. **Key/value array builtins** -- `array_keys`, `array_values`,
 //!    `array_search`, `array_key_first`/`array_key_last` and `key` all
 //!    answer in terms of the *caller's* key or value type, which the stubs
 //!    spell out as `int[]|string[]`, `string|int|false` or a bare `array`
@@ -87,13 +93,13 @@
 //!    (`array_filter`'s falsy strip, `array_sum`'s element check) stay in
 //!    `type_engine::variable::array_func_rules`.
 //!
-//! 9. **Benevolent builtins** -- `tempnam`, `curl_init`, `scandir`,
-//!    `mktime` and the rest of [`crate::benevolent_builtins`] declare a
-//!    failure branch that idiomatic PHP never checks. Their return type is
-//!    tagged so the diagnostics stop enforcing that branch. Unlike the
-//!    patches above this one is applied by name lookup rather than a
-//!    hand-written function, because the list runs to a couple of hundred
-//!    entries.
+//! 10. **Benevolent builtins** -- `tempnam`, `curl_init`, `scandir`,
+//!     `mktime` and the rest of [`crate::benevolent_builtins`] declare a
+//!     failure branch that idiomatic PHP never checks. Their return type is
+//!     tagged so the diagnostics stop enforcing that branch. Unlike the
+//!     patches above this one is applied by name lookup rather than a
+//!     hand-written function, because the list runs to a couple of hundred
+//!     entries.
 //!
 //! ### Class patches
 //!
@@ -131,7 +137,13 @@
 //!    with one they report whether the write succeeded. Each gets a
 //!    conditional return type keyed on `$filename`.
 //!
-//! 8. **Benevolent methods** -- the class-level half of function patch 9,
+//! 8. **`ReflectionClass`** -- `newInstanceArgs()` is declared
+//!    `@return T|null` where `newInstance()` is `@return T`, so the same
+//!    instantiation carries a null branch depending on which one built
+//!    it. The method throws instead of returning null, so we drop the
+//!    branch and the two stay in sync.
+//!
+//! 9. **Benevolent methods** -- the class-level half of function patch 10,
 //!    covering `Redis`, `SplFileInfo`, the DOM classes, `PDO::prepare`,
 //!    `DateTime::modify` and `Closure::bind`.
 //!
@@ -183,6 +195,7 @@ pub fn apply_function_stub_patches(func: &mut FunctionInfo) {
         | "preg_filter" => patch_replace_family(func, "$subject", true),
         "str_replace" | "str_ireplace" => patch_replace_family(func, "$subject", false),
         "substr_replace" => patch_replace_family(func, "$string", false),
+        "spl_autoload_register" => patch_spl_autoload_register(func),
         "define" => widen_parameter_to_mixed(func, "$value"),
         name if name.starts_with("ctype_") => widen_parameter_to_mixed(func, "$text"),
         _ => {}
@@ -216,6 +229,32 @@ fn widen_parameter_to_mixed(func: &mut FunctionInfo, param_name: &str) {
         if param.name == param_name {
             param.type_hint = Some(PhpType::mixed());
             param.native_type_hint = Some(PhpType::mixed());
+        }
+    }
+}
+
+/// Spell out `spl_autoload_register`'s autoloader signature.
+///
+/// phpstorm-stubs type the callback as bare `?callable`, so the closure
+/// idiom `spl_autoload_register(function ($class) { … })` leaves
+/// `$class` untyped and every string operation on it widens to the full
+/// union its argument allows.  PHP always calls the autoloader with the
+/// requested class name and ignores whatever it returns, which is
+/// exactly `callable(string): void`.  The nullable wrapper stays: calling
+/// `spl_autoload_register()` with no arguments is still valid.
+fn patch_spl_autoload_register(func: &mut FunctionInfo) {
+    // Expected stub shape: `spl_autoload_register(?callable $callback = null, …)`.
+    if func
+        .parameters
+        .first()
+        .is_none_or(|p| p.name.as_str() != "$callback")
+    {
+        return;
+    }
+    let hint = PhpType::parse("?callable(string): void");
+    for param in func.parameters.make_mut() {
+        if param.name.as_str() == "$callback" {
+            param.type_hint = Some(hint.clone());
         }
     }
 }
@@ -646,6 +685,7 @@ pub fn apply_class_stub_patches(class: &mut ClassInfo) {
         "CallbackFilterIterator" => patch_callback_filter_iterator(class),
         "ArrayIterator" => patch_array_iterator(class),
         "SimpleXMLElement" => patch_simple_xml_element(class),
+        "ReflectionClass" => patch_reflection_class(class),
         _ => {}
     }
     mark_benevolent_methods(class);
@@ -892,6 +932,43 @@ fn patch_simple_xml_element(class: &mut ClassInfo) {
             ),
         );
     }
+}
+
+/// Drop the dead `null` branch from `ReflectionClass::newInstanceArgs()`.
+///
+/// phpstorm-stubs declare it `@return T|null` (mirroring php-src's
+/// vestigial `?object` hint), but the method has thrown a
+/// `ReflectionException` instead of returning null since PHP 5.  The
+/// null branch only makes the result differ from `newInstance()`'s `T`
+/// for no reason, which forces callers to null-check a value that is
+/// never null.  PHPStan's own stub types both as `T`.
+fn patch_reflection_class(class: &mut ClassInfo) {
+    let Some(idx) = class
+        .methods
+        .iter()
+        .position(|m| m.name.as_str() == "newInstanceArgs")
+    else {
+        return;
+    };
+    let non_null_return = class.methods[idx]
+        .return_type
+        .as_ref()
+        .and_then(PhpType::non_null_type);
+    let non_null_native = class.methods[idx]
+        .native_return_type
+        .as_ref()
+        .and_then(PhpType::non_null_type);
+    if non_null_return.is_none() && non_null_native.is_none() {
+        return;
+    }
+    let mut method = (*class.methods[idx]).clone();
+    if non_null_return.is_some() {
+        method.return_type = non_null_return;
+    }
+    if non_null_native.is_some() {
+        method.native_return_type = non_null_native;
+    }
+    class.methods.make_mut()[idx] = std::sync::Arc::new(method);
 }
 
 /// Give a method a conditional return type, provided the stub declares the
@@ -1410,6 +1487,61 @@ mod tests {
                 method.name
             );
         }
+    }
+
+    #[test]
+    fn reflection_class_new_instance_args_loses_its_null_branch() {
+        let mut class = empty_class("ReflectionClass");
+        let mut method =
+            crate::types::MethodInfo::virtual_method("newInstanceArgs", Some("T|null"));
+        method.native_return_type = Some(PhpType::parse("?object"));
+        class.methods.make_mut().push(std::sync::Arc::new(method));
+
+        apply_class_stub_patches(&mut class);
+
+        assert_eq!(class.methods[0].return_type, Some(PhpType::parse("T")));
+        assert_eq!(
+            class.methods[0].native_return_type,
+            Some(PhpType::parse("object"))
+        );
+    }
+
+    #[test]
+    fn reflection_class_leaves_an_already_non_null_return_alone() {
+        let mut class = empty_class("ReflectionClass");
+        let method = crate::types::MethodInfo::virtual_method("newInstanceArgs", Some("T"));
+        class.methods.make_mut().push(std::sync::Arc::new(method));
+
+        apply_class_stub_patches(&mut class);
+
+        assert_eq!(class.methods[0].return_type, Some(PhpType::parse("T")));
+    }
+
+    #[test]
+    fn spl_autoload_register_types_its_callback_parameter() {
+        let mut func = empty_function("spl_autoload_register");
+        func.parameters = vec![param("$callback", "?callable"), param("$throw", "bool")].into();
+
+        apply_function_stub_patches(&mut func);
+
+        assert_eq!(
+            func.parameters[0].type_hint,
+            Some(PhpType::parse("?callable(string): void"))
+        );
+        assert_eq!(func.parameters[1].type_hint, Some(PhpType::parse("bool")));
+    }
+
+    #[test]
+    fn spl_autoload_register_unexpected_shape_not_patched() {
+        let mut func = empty_function("spl_autoload_register");
+        func.parameters = vec![param("$other", "?callable")].into();
+
+        apply_function_stub_patches(&mut func);
+
+        assert_eq!(
+            func.parameters[0].type_hint,
+            Some(PhpType::parse("?callable"))
+        );
     }
 
     #[test]
