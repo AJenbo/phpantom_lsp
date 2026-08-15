@@ -231,7 +231,23 @@ impl Backend {
                 .chars()
                 .all(|c| c.is_alphanumeric() || c == '_')
         {
-            // Try docblock annotation first (@var / @param).
+            // The walker's scope comes first: it knows which guard the
+            // call sits behind, while the backward `@var` scan below
+            // describes the variable at the annotation, before any
+            // narrowing the guard proved.
+            let from_scope = crate::type_engine::variable::resolution::walker_scope_types(
+                arg_text,
+                ctx.cursor_offset,
+                ctx.scope_var_resolver,
+            );
+            if !from_scope.is_empty() {
+                let joined = ResolvedType::types_joined(&from_scope);
+                if joined.extract_value_type(false).is_some() {
+                    return Some(joined);
+                }
+            }
+
+            // Try docblock annotation (@var / @param).
             if let Some(raw) = docblock::find_iterable_raw_type_in_source(
                 ctx.content,
                 ctx.cursor_offset as usize,

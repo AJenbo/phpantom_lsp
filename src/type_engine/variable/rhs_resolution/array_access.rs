@@ -51,12 +51,15 @@ pub(super) fn resolve_rhs_array_access<'b>(
         current_expr
     {
         let base_var = bytes_to_str(base_dv.name).to_string();
-        // When a scope_var_resolver is available (forward walk),
-        // prefer it over the docblock scan.  The forward walk
+        // The forward walker's scope comes before the docblock scan.  It
         // already incorporates @var annotations AND applies
         // condition-based narrowing (e.g. null stripping on array
-        // shape keys through guard clauses).  Falling back to the
-        // raw docblock would discard that narrowing.
+        // shape keys through guard clauses, or the `string` arm an
+        // enclosing `is_array()` ruled out), which the raw docblock
+        // discards.  The two channels the walker publishes it through are
+        // consulted in turn: the resolver it threads down its own call
+        // tree, then the snapshot cache it leaves for the diagnostic
+        // consumers it does not drive.
         let scope_result = if ctx.scope_var_resolver.is_some() {
             let resolved = resolve_var_types(&base_var, ctx, access_offset as u32);
             if resolved.is_empty() {
@@ -65,7 +68,16 @@ pub(super) fn resolve_rhs_array_access<'b>(
                 Some(ResolvedType::types_joined(&resolved))
             }
         } else {
-            None
+            let resolved = crate::type_engine::variable::resolution::walker_scope_types(
+                &base_var,
+                access_offset as u32,
+                None,
+            );
+            if resolved.is_empty() {
+                None
+            } else {
+                Some(ResolvedType::types_joined(&resolved))
+            }
         };
         scope_result
             .or_else(|| {

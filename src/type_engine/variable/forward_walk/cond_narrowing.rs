@@ -2253,10 +2253,14 @@ pub(crate) fn apply_null_narrowing_inverse<'b>(
         narrow_to_null_in_scope(&var_name, scope);
     }
     // When the condition is `!$x` or `empty($x)`, the inverse means
-    // $x is truthy — remove null.
+    // $x is truthy — remove every falsy member, not just `null`.  This
+    // is the same proof the fall-through of `if (!$x) { return; }`
+    // carries, so it strips the same set: an else branch that only lost
+    // `null` leaves `false` in a `string|false` union to reappear at the
+    // merge, undoing a reassignment the taken branch made to repair it.
     if let Some(var_name) = extract_falsy_check_var(condition) {
         seed_synthetic_key_if_needed(&var_name, scope, ctx);
-        strip_null_from_scope(&var_name, scope);
+        strip_falsy_from_scope(&var_name, scope);
     }
     // When the condition is `$x === false`, the inverse (else/guard)
     // means $x is NOT false — strip false only, mirroring the null

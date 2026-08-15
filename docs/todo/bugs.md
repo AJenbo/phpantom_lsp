@@ -34,77 +34,6 @@ No outstanding items.
 
 ## Narrowing
 
-### B51. `instanceof` does not eliminate a class from a union in the guarded branch
-
-**Impact: High · Complexity: High**
-
-```php
-function clip(Decimal|float $value): string
-{
-    if ($value instanceof Decimal) {
-        return $value->format();
-    }
-    return number_format($value, 2);   // reported: got Decimal|float
-}
-
-function imgix(Image|string $imgix): string
-{
-    if (!$imgix instanceof Image) {
-        $imgix = new Image($imgix);   // reported: got Image|string
-    }
-    return $imgix->url();
-}
-```
-
-An `instanceof` check on a union-typed value should remove the checked
-class from the union on the branch where the check fails — whether that
-branch is a separate `else` or the body of a negated
-`!$x instanceof T` check. Neither form narrows today; both leave the
-full pre-check union.
-
-**Fix:** extend the existing `instanceof` narrowing (which already
-handles "rule out the array half of a union", per a prior fix) to also
-subtract the checked class from a union on the negative branch,
-covering both `if/else` and `if (!...)`.
-
-### B52. A variable reassigned inside a guard that catches its "bad" value is not merged as excluding that value
-
-**Impact: Medium · Complexity: High**
-
-```php
-function normalize(): string
-{
-    $value = mb_strrchr('x', '\\');   // string|false
-    if (!$value) {
-        $value = 'fallback';
-    }
-    return $value;   // reported: got string|false
-}
-
-function toArray(array|Status $status): array
-{
-    if (!is_array($status)) {
-        $status = [$status];
-    }
-    foreach ($status as $s) {
-        acceptsStatus($s);   // reported: got Status|array<Status>
-    }
-}
-```
-
-Both examples reassign a variable inside the branch that detects its
-unwanted type (`false`, or "not yet an array"), replacing it with a
-value of the wanted type. After the `if`, every path should agree on the
-wanted type: the branch was either skipped (meaning the value already
-had the wanted type) or taken (meaning it was just reassigned to it).
-The merge instead keeps the original union.
-
-**Fix:** when a branch's only effect is reassigning a variable, and the
-branch condition is the negation of (or implies) the variable having a
-specific type, the post-merge type should be the reassigned type joined
-with the type the variable already had on the skipped path — not the
-pre-branch union.
-
 ### B53. A repeated identical no-argument call is not recognized as consistent within the same truthy-guarded scope
 
 **Impact: Low-Medium · Complexity: Medium-High**
@@ -182,30 +111,6 @@ truthy-narrowing pass keys on; a compilation step that rewrites or
 re-wraps the expression would explain the mismatch with the
 non-Blade case.
 
-### B62. PHPUnit's `assertNotNull`/`assertNotFalse` are not recognized as narrowing assertions
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-/** @var null|array{categories: list<array{id: int}>} $section */
-$section = collect($data)->firstWhere('id', $id);
-self::assertNotNull($section);
-self::assertCount(1, $section['categories']);   // reported: got null|list<...>
-```
-
-`assert()` and `@phpstan-assert` tags already narrow. `phpstan-phpunit`
-maps `Assert::assertNotNull()`/`assertNotFalse()` (and their static
-`self::`/`static::` call forms) to the same `!== null` / `!== false`
-type-specification `assert()` gets, so real PHPStan narrows the
-variable for the rest of the test method. PHPantom doesn't recognize
-these two PHPUnit methods as assertion functions at all.
-
-**Fix:** add `PHPUnit\Framework\Assert::assertNotNull` and
-`::assertNotFalse` (matched by unqualified name, since tests call them
-as `self::`/`static::`/`$this->`) to the assertion-narrowing table
-already used for `assert()`, applying `!== null` / `!== false`
-narrowing to their first argument for the rest of the enclosing scope.
-
 ### B63. `assertInstanceOf`-narrowed return types leak across unrelated call sites of a shared helper
 
 **Impact: Medium · Complexity: High**
@@ -267,37 +172,6 @@ argument-compatibility check, confirm the full union (all three
 members) is what gets compared against, not a narrowed/truncated
 version of it.
 
-### B70. `is_array()` does not narrow a union-typed parameter before an array-dimension fetch
-
-**Impact: Medium · Complexity: High**
-
-```php
-/** @param array{args: array<int, string>, message: string}|string $violationMessage */
-function __construct(array|string $violationMessage)
-{
-    if (is_array($violationMessage)) {
-        $this->args = $violationMessage['args'];   // reported: got array<int,string>|string
-    }
-}
-```
-
-Inside `if (is_array($violationMessage))`, the parameter should be
-narrowed to its `array{...}` shape before the array-dimension fetch
-runs, giving `array<int, string>` for `['args']`. The fetch instead
-appears to read against the pre-narrowed `array|string` union.
-
-The narrowing itself is not the missing part. In the same branch,
-`takesArray($violationMessage)` is accepted, so the scope does hold the
-narrowed `array{...}`; only the dimension fetch reads past it and back
-to the declared parameter type. It reproduces the same way for the
-guard-clause spelling (`if (!is_array($v)) { return; }`), which rules
-out the branch-merge as the cause.
-
-**Fix:** make the array-dimension fetch resolve its base expression
-through the scope the fetch is written in, rather than from the
-subject's declared type. The union arm the guard removed is what leaks
-into the element type.
-
 ### B71. A `continue`-discarded falsy union member is not carried into a variable the value is copied into
 
 **Impact: Low-Medium · Complexity: High**
@@ -330,29 +204,6 @@ value for the rest of the current iteration, apply that narrowing to
 the guarded variable before any subsequent assignment reads from it
 in the same iteration, not just at direct uses of the original variable.
 
-### B72. `!== null` narrowing on a `@var`-annotated variable is not applied before a builtin call
-
-**Impact: Low-Medium · Complexity: Medium-High**
-
-```php
-/** @var null|list<array{version: string}> $cached */
-$cached = Cache::get(self::CACHE_KEY);
-if ($cached !== null) {
-    return array_slice($cached, 0, $limit);   // reported: got null|list<array{version: string}>
-}
-```
-
-The inline `@var` annotation sets `$cached`'s type to
-`null|list<array{...}>`; the immediately following `$cached !== null`
-guard should strip the `null` arm for the rest of the `if` body, same as
-it would for a plain assignment without the annotation. It doesn't, and
-the un-narrowed annotated type reaches `array_slice()`.
-
-**Fix:** check whether inline `@var`-sourced types go through the same
-narrowing pass as inferred types, or whether the annotation is
-re-applied after narrowing runs (which would explain the guard being
-overwritten rather than skipped).
-
 ### B74. `Scope::isInClass()` paired with `getClassReflection()` is not recognized as an assert-if-true pair
 
 **Impact: Low · Complexity: Medium**
@@ -381,6 +232,35 @@ PHPStan-extension-authoring-specific, not general PHP or Laravel code.
 ## Symbol resolution
 
 No outstanding items.
+
+### B77. A one-line function body lets the preceding docblock's `@param` reach the next function
+
+**Impact: Low · Complexity: Medium**
+
+```php
+/** @param array<Status> $s */
+function g3(array $s): void { foreach ($s as $x) { doThing($x); } }
+
+function g4(Status $s): void { doThing($s); }   // reported: got array<Status>
+```
+
+`g4` declares no docblock of its own, so the backward `@param` scan in
+`find_iterable_raw_type_in_source` keeps going and finds `g3`'s, matching
+on the shared parameter name `$s`. The scan does have a sibling-function
+boundary check, but it only fires once it has seen the brace depth rise
+above zero and come back down. A body written entirely on the signature
+line opens and closes on the same line, so the net depth never leaves
+zero and the boundary is never detected.
+
+Reformatting `g3` across multiple lines makes it go away, which is why
+this stays out of sight in PSR-12 code and shows up in fixtures and
+tests, where one-line bodies are the norm.
+
+**Fix:** detect the sibling boundary from the `function` keyword at the
+scan's own depth rather than from a depth excursion, so a body that
+opens and closes on one line still ends the search. The same scan is
+what `resolve_param_type` and the array-literal element inference both
+call, so both inherit the leak.
 
 ## Array types
 

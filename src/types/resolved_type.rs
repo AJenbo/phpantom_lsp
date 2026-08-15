@@ -369,8 +369,37 @@ impl ResolvedType {
         // Compare by FQN (namespace + name) so that same-named classes
         // from different namespaces (e.g. Contracts\Provider vs
         // Concrete\Provider) are correctly distinguished.
-        results.retain(|rt| match &rt.class_info {
-            Some(c) => classes.iter().any(|nc| nc.fqn() == c.fqn()),
+        results.retain_mut(|rt| match &rt.class_info {
+            Some(c) => {
+                if classes.iter().any(|nc| nc.fqn() == c.fqn()) {
+                    return true;
+                }
+                // A definite narrowing concludes the value is one of the
+                // surviving classes outright, so an entry it ruled out
+                // carries nothing worth keeping.
+                if definite {
+                    return false;
+                }
+                // An exclusion only rules out the one class, and the
+                // entry's `type_string` can carry union alternatives the
+                // `class_info` layer `f` operates on never saw: a union
+                // that resolves to exactly one class collapses onto a
+                // single entry, so `Decimal|float` is one `ResolvedType`
+                // whose `class_info` names `Decimal` alone.  Dropping it
+                // would take `float` down with the class the check ruled
+                // out, leaving the guarded branch with no type at all
+                // instead of the half the check proved.
+                let (name, fqn) = (c.name, c.fqn());
+                let ruled_out = |member: &str| member == name || member == fqn;
+                match subtract_classes_from_union(&rt.type_string, &ruled_out) {
+                    Some(rest) => {
+                        rt.type_string = rest;
+                        rt.class_info = None;
+                        true
+                    }
+                    None => false,
+                }
+            }
             // Non-class entries (scalars, shapes) are never affected
             // by narrowing — keep them.
             None => true,
@@ -604,6 +633,46 @@ fn restrict_union_to_classes(ty: &PhpType, survives: &impl Fn(&str) -> bool) -> 
         .filter(|m| union_member_names_class(m, survives))
         .cloned()
         .collect();
+    if kept.is_empty() || kept.len() == members.len() {
+        return None;
+    }
+    // `PhpType::union` does not normalise, so a lone survivor has to be
+    // unwrapped here rather than left as a one-member union.
+    match kept.len() {
+        1 => kept.into_iter().next(),
+        _ => Some(PhpType::union(kept)),
+    }
+}
+
+/// Drop the `type_string` union alternatives that name a class an
+/// *exclusion* narrowing ruled out, returning what is left, or `None`
+/// when nothing is.
+///
+/// The dual of [`restrict_union_to_classes`], and needed for the same
+/// reason: a union resolving to one class collapses onto a single entry
+/// carrying the whole union in its `type_string`, so narrowing on the
+/// `class_info` layer cannot see the alternatives it must preserve.
+fn subtract_classes_from_union(ty: &PhpType, ruled_out: &impl Fn(&str) -> bool) -> Option<PhpType> {
+    // `?Foo` carries the null alternative in the wrapper rather than as
+    // a union member, so ruling `Foo` out leaves a bare `null`.
+    if let TypeKind::Nullable(inner) = ty.kind() {
+        return match subtract_classes_from_union(inner, ruled_out) {
+            Some(rest) => Some(PhpType::nullable(rest)),
+            None if union_member_names_class(inner, ruled_out) => Some(PhpType::null()),
+            None => None,
+        };
+    }
+    let TypeKind::Union(members) = ty.kind() else {
+        return None;
+    };
+    let kept: Vec<PhpType> = members
+        .iter()
+        .filter(|m| !union_member_names_class(m, ruled_out))
+        .cloned()
+        .collect();
+    // Nothing left, or the ruled-out class was never named here and the
+    // union says nothing about what narrowing concluded.  Either way the
+    // caller drops the entry, as it did before this refinement.
     if kept.is_empty() || kept.len() == members.len() {
         return None;
     }

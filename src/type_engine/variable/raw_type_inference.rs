@@ -310,27 +310,39 @@ fn infer_element_type<'b>(
         Expression::Variable(Variable::Direct(dv)) => {
             let var_text = bytes_to_str(dv.name).to_string();
             let offset = value.span().start.offset as usize;
-            // Try iterable docblock first (e.g. `@var list<User> $items`).
-            if let Some(t) =
-                docblock::find_iterable_raw_type_in_source(ctx.content, offset, &var_text)
-            {
-                return Some(crate::util::resolve_php_type_names(&t, ctx.class_loader));
-            }
             // When a scope variable resolver is available (i.e. we are
             // inside the forward walker), read the variable's type
             // directly from the in-progress ScopeState instead of
             // calling the full resolution pipeline which would trigger
             // a recursive method-body walk.
-            if let Some(resolver) = ctx.scope_var_resolver {
+            //
+            // The scope comes before the docblock because it is the only
+            // one of the two that knows where the literal is written: a
+            // `[$x]` inside `if (!is_array($x))` builds an array of the
+            // narrowed `$x`, while the `@param array<T>|T $x` the
+            // docblock states describes `$x` at the top of the function
+            // and would put the ruled-out array arm back in the element.
+            let scope_type = ctx.scope_var_resolver.and_then(|resolver| {
                 let prefixed = if var_text.starts_with('$') {
                     var_text.clone()
                 } else {
                     format!("${}", var_text)
                 };
                 let from_scope = resolver(&prefixed);
-                if !from_scope.is_empty() {
-                    return Some(crate::types::ResolvedType::types_joined(&from_scope));
-                }
+                (!from_scope.is_empty())
+                    .then(|| crate::types::ResolvedType::types_joined(&from_scope))
+            });
+            if let Some(t) = scope_type {
+                return Some(t);
+            }
+            // Iterable docblock (e.g. `@var list<User> $items`) for a
+            // variable the scope has nothing for.
+            if let Some(t) =
+                docblock::find_iterable_raw_type_in_source(ctx.content, offset, &var_text)
+            {
+                return Some(crate::util::resolve_php_type_names(&t, ctx.class_loader));
+            }
+            if ctx.scope_var_resolver.is_some() {
                 return None;
             }
             // Fall back to the full variable type resolution pipeline

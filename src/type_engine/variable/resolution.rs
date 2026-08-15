@@ -2150,16 +2150,57 @@ pub(in crate::type_engine) fn nth_arg_expr<'b>(
     })
 }
 
+/// The types the forward walker knows for `$var_name` at `offset`,
+/// through whichever of its two scope channels is live.
+///
+/// Argument-type resolution reaches for this before its backward
+/// `@var`/`@param` text scan, because the two answer different
+/// questions: the scan describes the variable at its *annotation*, while
+/// the walker's scope describes it at the point of *use*, carrying
+/// whatever the guards in between proved.  `array_slice($cached, …)`
+/// inside `if ($cached !== null)` has to slice the non-null half, not the
+/// `null|list<…>` written above the assignment.
+///
+/// The two channels are the same information reaching different
+/// consumers: `scope_var_resolver` is the in-progress `ScopeState` the
+/// walker threads down its own call tree, and the diagnostic scope cache
+/// is the per-statement recording of it a diagnostic pass leaves behind
+/// for the consumers the walker does not drive directly (the return-type
+/// check among them).  Both are O(1)/O(log N) lookups.
+pub(in crate::type_engine) fn walker_scope_types(
+    var_name: &str,
+    offset: u32,
+    scope_var_resolver: crate::type_engine::resolver::ScopeVarResolverFn<'_>,
+) -> Vec<ResolvedType> {
+    let prefixed = if var_name.starts_with('$') {
+        var_name.to_string()
+    } else {
+        format!("${}", var_name)
+    };
+    if let Some(resolver) = scope_var_resolver {
+        let from_scope = resolver(&prefixed);
+        if !from_scope.is_empty() {
+            return from_scope;
+        }
+    }
+    if super::forward_walk::is_diagnostic_scope_active()
+        && !super::forward_walk::is_building_scopes()
+        && let Some(types) = super::forward_walk::lookup_diagnostic_scope(&prefixed, offset)
+    {
+        return types;
+    }
+    Vec::new()
+}
+
 /// Resolve the raw iterable type of an argument expression.
 ///
-/// Handles `$variable` (via docblock scanning) and delegates to
-/// `resolve_expression_type` for method calls, property access,
-/// etc.
+/// Handles `$variable` (via the walker's scope, then docblock scanning)
+/// and delegates to `resolve_expression_type` for method calls, property
+/// access, etc.
 pub(in crate::type_engine) fn resolve_arg_raw_type<'b>(
     arg_expr: &'b Expression<'b>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<PhpType> {
-    // Direct variable — scan for @var / @param annotation.
     if let Expression::Variable(Variable::Direct(dv)) = arg_expr {
         let var_text = bytes_to_str(dv.name).to_string();
         let offset = arg_expr.span().start.offset as usize;
@@ -2167,11 +2208,16 @@ pub(in crate::type_engine) fn resolve_arg_raw_type<'b>(
             docblock::find_iterable_raw_type_in_source(ctx.content, offset, &var_text)
                 .map(|t| crate::util::resolve_php_type_names(&t, ctx.class_loader));
 
-        // With the forward walker active its scope is a map read, cheap
-        // enough to consult alongside the annotation.  Without it the
-        // fallback below is a full re-resolution of the variable, so an
-        // annotation that already answered is taken as-is.
-        if ctx.scope_var_resolver.is_none()
+        // The scope the forward walker recorded for this position, from
+        // whichever of its two channels is live.  Both are map reads,
+        // cheap enough to consult alongside the annotation.
+        let from_walker = walker_scope_types(&var_text, offset as u32, ctx.scope_var_resolver);
+
+        // Neither channel had it, so the only thing left below is a full
+        // re-resolution of the variable, and an annotation that already
+        // answered is taken as-is.
+        if from_walker.is_empty()
+            && ctx.scope_var_resolver.is_none()
             && let Some(annotated) = from_docblock
         {
             return Some(annotated);
@@ -2182,18 +2228,13 @@ pub(in crate::type_engine) fn resolve_arg_raw_type<'b>(
         // array_pop($users)` where `$users` has no `@var` annotation but was
         // assigned from a method returning `list<User>`.
         //
-        // When a scope_var_resolver is available (forward walker is
-        // active), read from the in-progress ScopeState.  Falling
-        // through to resolve_variable_types would re-enter the
-        // forward walker, causing infinite recursion on patterns
-        // like `$a['k'] = f($a['k'])`.
-        let resolved = if let Some(resolver) = ctx.scope_var_resolver {
-            let prefixed = if var_text.starts_with('$') {
-                var_text.clone()
-            } else {
-                format!("${}", var_text)
-            };
-            resolver(&prefixed)
+        // Only reached when the walker's scope came up empty, and only
+        // without a scope_var_resolver: falling through to
+        // resolve_variable_types while the forward walker is active would
+        // re-enter it, causing infinite recursion on patterns like
+        // `$a['k'] = f($a['k'])`.
+        let resolved = if !from_walker.is_empty() || ctx.scope_var_resolver.is_some() {
+            from_walker
         } else {
             resolve_variable_types(
                 &var_text,
@@ -2217,7 +2258,8 @@ pub(in crate::type_engine) fn resolve_arg_raw_type<'b>(
         match (from_docblock, from_scope) {
             // The annotation is where the walker's own type came from, so
             // when the two disagree the walker has narrowed it since
-            // (`assert($a !== [])` proving `non-empty-array`) and its answer
+            // (`assert($a !== [])` proving `non-empty-array`, or an
+            // `is_array()` guard ruling out the `string` arm) and its answer
             // is the one that describes the value at this call.  Anything
             // wider than the annotation is the walker having lost the
             // generics on the way through, and the annotation still stands.
