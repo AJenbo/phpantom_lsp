@@ -1019,3 +1019,168 @@ function label(?int $buy): void {{
         "the arm above ruled the null out, got: {errors:?}"
     );
 }
+
+// ─── A helper that bails out on its condition proves the other half ─────────
+
+const BAIL_SCAFFOLD: &str = r#"
+class Admin {
+    public function grantPermission(string $name): void {}
+}
+class User {
+    public string $email = '';
+}
+function abort_if(bool $boolean, int $code): void {}
+function abort_unless(bool $boolean, int $code): void {}
+function throw_if(bool $condition, string $exception): void {}
+function throw_unless(bool $condition, string $exception): void {}
+function takesUser(User $user): void {}
+function takesAdmin(Admin $admin): void {}
+"#;
+
+/// `abort_if($user === null, 404)` returns only when the condition was
+/// false, so the null is gone from there on.
+#[test]
+fn abort_if_proves_the_inverse_of_its_condition() {
+    let backend = create_test_backend();
+    let uri = "file:///abort_if_null.php";
+    let content = format!(
+        r#"<?php
+{BAIL_SCAFFOLD}
+function show(?User $user): void {{
+    abort_if($user === null, 404);
+    $user; // <-- here
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(
+        text.contains("$user = User"),
+        "the call returned, so the condition was false, got: {text}"
+    );
+}
+
+/// `abort_unless($user instanceof Admin, 403)` returns only when the
+/// condition held, so the subject is the checked class afterwards.
+#[test]
+fn abort_unless_proves_its_condition() {
+    let backend = create_test_backend();
+    let uri = "file:///abort_unless_instanceof.php";
+    let content = format!(
+        r#"<?php
+{BAIL_SCAFFOLD}
+function show(User|Admin $user): void {{
+    abort_unless($user instanceof Admin, 403);
+    $user; // <-- here
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(text.contains("Admin"), "expected Admin, got: {text}");
+    assert!(
+        !text.contains("User"),
+        "the check rules the other member out, got: {text}"
+    );
+}
+
+/// The narrowing has to reach the member lookups that follow, not just
+/// hover: `grantPermission()` only exists on the proven class.
+#[test]
+fn a_bailing_helper_narrows_the_calls_that_follow_it() {
+    let backend = create_test_backend();
+    let uri = "file:///abort_unless_members.php";
+    let content = format!(
+        r#"<?php
+{BAIL_SCAFFOLD}
+function show(?User $user, User|Admin $account): void {{
+    abort_if($user === null, 404);
+    takesUser($user);
+    abort_unless($account instanceof Admin, 403);
+    takesAdmin($account);
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert!(
+        errors.is_empty(),
+        "both helpers proved what their arguments need, got: {errors:?}"
+    );
+}
+
+/// `throw_if` / `throw_unless` bail out the same way `abort_if` /
+/// `abort_unless` do, so they prove the same thing.
+#[test]
+fn throw_if_and_throw_unless_narrow_like_their_abort_counterparts() {
+    let backend = create_test_backend();
+    let uri = "file:///throw_if_unless.php";
+    let content = format!(
+        r#"<?php
+{BAIL_SCAFFOLD}
+function show(?User $user, User|Admin $account): void {{
+    throw_if($user === null, \RuntimeException::class);
+    takesUser($user);
+    throw_unless($account instanceof Admin, \RuntimeException::class);
+    takesAdmin($account);
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert!(
+        errors.is_empty(),
+        "the throwing helpers prove what their arguments need, got: {errors:?}"
+    );
+}
+
+/// The condition is found by parameter name, so re-ordered named
+/// arguments narrow the same as positional ones.
+#[test]
+fn a_named_condition_argument_narrows_wherever_it_sits() {
+    let backend = create_test_backend();
+    let uri = "file:///abort_if_named.php";
+    let content = format!(
+        r#"<?php
+{BAIL_SCAFFOLD}
+function show(?User $user): void {{
+    abort_if(code: 404, boolean: $user === null);
+    $user; // <-- here
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(
+        text.contains("$user = User"),
+        "the named condition proves the same thing, got: {text}"
+    );
+}
+
+/// A helper reached through a namespace is not the global one, so it
+/// proves nothing about its argument.
+#[test]
+fn a_namespaced_lookalike_proves_nothing() {
+    let backend = create_test_backend();
+    let uri = "file:///abort_if_namespaced.php";
+    let content = format!(
+        r#"<?php
+{BAIL_SCAFFOLD}
+namespace Other {{
+    function abort_if(bool $boolean, int $code): void {{}}
+}}
+namespace App {{
+    function show(?\User $user): void {{
+        \Other\abort_if($user === null, 404);
+        $user; // <-- here
+    }}
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(
+        text.contains("?User"),
+        "a different function proves nothing, got: {text}"
+    );
+}

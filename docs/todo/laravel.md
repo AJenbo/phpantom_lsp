@@ -213,51 +213,6 @@ today and what is still missing.
 
 ---
 
-#### L5. `abort_if`/`abort_unless` type narrowing
-
-**Impact: High · Complexity: Medium-High**
-
-These are the standard guard patterns in Laravel controllers and
-middleware. Without narrowing, variables keep their wider type,
-causing false "unknown member" warnings and missing completions.
-
-After `abort_if($user === null, 404)`, the type of `$user` should
-be narrowed to exclude `null` in subsequent code.  Similarly,
-`abort_unless($user instanceof Admin, 403)` should narrow `$user`
-to `Admin`.
-
-```php
-abort_if($user === null, 404);
-$user->email;  // $user should be non-null here
-
-abort_unless($user instanceof Admin, 403);
-$user->grantPermission('edit');  // $user should be Admin here
-```
-
-Larastan handles this via `AbortIfFunctionTypeSpecifyingExtension`,
-a PHPStan-specific `TypeSpecifyingExtension` mechanism.  The
-framework does **not** annotate these functions with
-`@phpstan-assert` — there are no stubs for this either.
-
-Our guard clause narrowing already handles the pattern
-`if ($x === null) { return; }` + subsequent code, and we support
-`@phpstan-assert-if-true/false`.  However, `abort_if` / `abort_unless`
-/ `throw_if` / `throw_unless` don't follow either pattern: they are
-standalone function calls (not if-conditions) that conditionally
-throw.
-
-**Where to change:** In `type_narrowing.rs`, add special-case
-handling for standalone `abort_if()`, `abort_unless()`, `throw_if()`,
-and `throw_unless()` calls.  When the first argument is a type check
-expression (instanceof, `=== null`, etc.), apply the inverse narrowing
-to subsequent code:
-- `abort_if($x === null, ...)` → narrow `$x` to non-null after
-- `abort_unless($x instanceof Foo, ...)` → narrow `$x` to `Foo` after
-- `throw_if(...)` / `throw_unless(...)` → same logic
-
-This is similar to the existing guard clause narrowing but triggered
-by specific function names rather than `if` + early return.
-
 #### L45. `*_count` properties are offered on every relationship
 
 **Impact: Low-Medium · Complexity: High**

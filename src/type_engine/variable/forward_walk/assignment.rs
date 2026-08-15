@@ -2757,34 +2757,60 @@ pub(crate) fn extract_call_arg_variables<'b>(expr: &'b Expression<'b>) -> Vec<St
     vars
 }
 
-/// The condition expression of an `assert()` call, or `None` when `expr`
-/// is not one.
+/// The guard functions whose first argument is a condition the call
+/// leaves proven, paired with that parameter's name and with whether the
+/// condition still holds once the call returns.
 ///
-/// Matches every spelling PHP accepts for the built-in: unqualified,
-/// fully-qualified (`\assert`), and any letter case.
-fn assert_condition_argument<'b>(expr: &'b Expression<'b>) -> Option<&'b Expression<'b>> {
-    let expr = match expr {
-        Expression::Parenthesized(inner) => inner.expression,
-        other => other,
-    };
-    let Expression::Call(Call::Function(fc)) = expr else {
+/// `assert()` proves its argument true outright.  Laravel's
+/// `abort_unless()` / `throw_unless()` prove it true by bailing out when
+/// it is false, and `abort_if()` / `throw_if()` prove its *negation* the
+/// same way.  Neither the framework nor any stub annotates these four
+/// with `@phpstan-assert`, so the name is the only signal there is; this
+/// is the same set Larastan special-cases.
+const CONDITION_GUARD_FUNCTIONS: [(&str, &str, bool); 5] = [
+    ("assert", "assertion", true),
+    ("abort_if", "boolean", false),
+    ("abort_unless", "boolean", true),
+    ("throw_if", "condition", false),
+    ("throw_unless", "condition", true),
+];
+
+/// The condition a [guard call](CONDITION_GUARD_FUNCTIONS) proves and
+/// whether it holds after the call, or `None` when `expr` is not one.
+///
+/// Matches every spelling PHP accepts: unqualified, fully-qualified
+/// (`\assert`), and any letter case.
+fn guard_call_condition<'b>(expr: &'b Expression<'b>) -> Option<(&'b Expression<'b>, bool)> {
+    let Expression::Call(Call::Function(fc)) = unwrap_parens(expr) else {
         return None;
     };
     let Expression::Identifier(ident) = fc.function else {
         return None;
     };
     let raw = bytes_to_str(ident.value());
-    if !raw
-        .strip_prefix('\\')
-        .unwrap_or(raw)
-        .eq_ignore_ascii_case("assert")
-    {
-        return None;
-    }
-    fc.argument_list.arguments.first().map(|arg| match arg {
+    let called = raw.strip_prefix('\\').unwrap_or(raw);
+    let (_, param, holds_after) = CONDITION_GUARD_FUNCTIONS
+        .iter()
+        .find(|(name, _, _)| called.eq_ignore_ascii_case(name))?;
+
+    // A named argument may sit anywhere in the list, so `abort_if(code:
+    // 404, boolean: $x === null)` still has to reach the condition.
+    let condition = match fc.argument_list.arguments.first()? {
         Argument::Positional(pos) => pos.value,
-        Argument::Named(named) => named.value,
-    })
+        Argument::Named(_) => fc
+            .argument_list
+            .arguments
+            .iter()
+            .find_map(|arg| match arg {
+                Argument::Named(named)
+                    if bytes_to_str(named.name.value).eq_ignore_ascii_case(param) =>
+                {
+                    Some(named.value)
+                }
+                _ => None,
+            })?,
+    };
+    Some((condition, *holds_after))
 }
 
 /// Process assert narrowing (assert($x instanceof Foo), @phpstan-assert, etc.)
@@ -2805,53 +2831,45 @@ pub(crate) fn process_assert_narrowing<'b>(
         return;
     }
 
+    let guard = guard_call_condition(expr);
+
     // ── Handle assert($x instanceof Foo) for variables NOT yet in scope ──
     // When a foreach binds a variable but the iterable element type is
     // unknown, the variable won't be in the scope map.  A subsequent
-    // `assert($x instanceof Foo)` should add it with the asserted type.
-    if let Expression::Call(Call::Function(fc)) = expr
-        && matches!(fc.function, Expression::Identifier(ident) if ident.value() == b"assert")
-        && let Some(arg) = fc.argument_list.arguments.first()
+    // `assert($x instanceof Foo)` (or `abort_unless($x instanceof Foo,
+    // 403)`) should add it with the asserted type.
+    if let Some((condition, true)) = guard
+        && let Expression::Binary(bin) = condition
+        && bin.operator.is_instanceof()
+        && let Expression::Variable(Variable::Direct(dv)) = bin.lhs
     {
-        let arg_expr = match arg {
-            Argument::Positional(pos) => pos.value,
-            Argument::Named(named) => named.value,
-        };
-        if let Expression::Binary(bin) = arg_expr
-            && bin.operator.is_instanceof()
-            && let Expression::Variable(Variable::Direct(dv)) = bin.lhs
-        {
-            let var_name = bytes_to_str(dv.name).to_string();
-            if scope.get(&var_name).is_empty() {
-                // Variable not in scope — seed it with the asserted type.
-                let class_name = match bin.rhs {
-                    Expression::Identifier(ident) => Some(bytes_to_str(ident.value()).to_string()),
-                    Expression::Self_(_) => Some(ctx.current_class.name.to_string()),
-                    Expression::Static(_) => Some(ctx.current_class.name.to_string()),
-                    Expression::Parent(_) => ctx.current_class.parent_class.map(|a| a.to_string()),
-                    _ => None,
-                };
-                if let Some(name) = class_name {
-                    let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                        &PhpType::named(atom(&name)),
-                        &ctx.current_class.name,
-                        ctx.all_classes,
-                        ctx.class_loader,
+        let var_name = bytes_to_str(dv.name).to_string();
+        if scope.get(&var_name).is_empty() {
+            // Variable not in scope — seed it with the asserted type.
+            let class_name = match bin.rhs {
+                Expression::Identifier(ident) => Some(bytes_to_str(ident.value()).to_string()),
+                Expression::Self_(_) => Some(ctx.current_class.name.to_string()),
+                Expression::Static(_) => Some(ctx.current_class.name.to_string()),
+                Expression::Parent(_) => ctx.current_class.parent_class.map(|a| a.to_string()),
+                _ => None,
+            };
+            if let Some(name) = class_name {
+                let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                    &PhpType::named(atom(&name)),
+                    &ctx.current_class.name,
+                    ctx.all_classes,
+                    ctx.class_loader,
+                );
+                if !resolved.is_empty() {
+                    scope.set(
+                        &var_name,
+                        ResolvedType::from_classes_with_hint(resolved, PhpType::named(atom(&name))),
                     );
-                    if !resolved.is_empty() {
-                        scope.set(
-                            &var_name,
-                            ResolvedType::from_classes_with_hint(
-                                resolved,
-                                PhpType::named(atom(&name)),
-                            ),
-                        );
-                    } else {
-                        scope.set(
-                            &var_name,
-                            vec![ResolvedType::from_type_string(PhpType::named(atom(&name)))],
-                        );
-                    }
+                } else {
+                    scope.set(
+                        &var_name,
+                        vec![ResolvedType::from_type_string(PhpType::named(atom(&name)))],
+                    );
                 }
             }
         }
@@ -2893,12 +2911,18 @@ pub(crate) fn process_assert_narrowing<'b>(
 
     // `assert(<condition>)` proves its argument true for everything that
     // follows in the same scope, exactly the way entering `if (<condition>)`
-    // proves it for the block body.  Feeding the argument into the same
-    // pipeline the `if` takes means every guard form is honoured in both
-    // places: `$x !== null`, `$x !== false`, `is_string($x)`, `&&` chains,
-    // and so on.
-    if let Some(condition) = assert_condition_argument(expr) {
-        apply_condition_narrowing(condition, scope, ctx);
+    // proves it for the block body.  `abort_if(<condition>, 404)` and its
+    // siblings prove the same thing about the branch that survives them,
+    // just in the polarity their name picks.  Feeding the argument into the
+    // same pipeline the `if` takes means every guard form is honoured in
+    // both places: `$x !== null`, `$x !== false`, `is_string($x)`, `&&`
+    // chains, and so on.
+    if let Some((condition, holds_after)) = guard {
+        if holds_after {
+            apply_condition_narrowing(condition, scope, ctx);
+        } else {
+            apply_condition_narrowing_inverse(condition, scope, ctx);
+        }
     }
 
     // Apply assert narrowing to each variable in scope.

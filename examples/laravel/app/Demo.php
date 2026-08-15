@@ -17,6 +17,7 @@ use App\Http\Requests\UpdateBakeryRequest;
 use App\Models\Bakery;
 use App\Models\BlogAuthor;
 use App\Models\BlogPost;
+use App\Models\Customer;
 use App\Models\PostCollection;
 use App\Models\Review;
 use App\Models\ReviewCollection;
@@ -828,6 +829,31 @@ class Demo
         auth('admin')->user()->isSuperAdmin();          // → Administrator method
         Auth::guard('admin')->user()->isSuperAdmin();   // → Administrator method
         $request->user('admin')->isSuperAdmin();        // → Administrator method
+    }
+
+
+    // ── Bail-out helpers narrow the code that follows them ──────────────
+
+    public function bailOutGuards(int $id): void
+    {
+        // `abort_if` only returns when its condition was false, so the null
+        // is gone from the next line on: passing `$review` where a Review is
+        // required is accepted here and reported without the guard above it.
+        $review = Review::find($id);
+        abort_if($review === null, 404);
+        $this->repliesTo($review);        // → Review, no longer ?Review
+
+        // `_unless` is the other polarity: it returns when the condition
+        // held, so the check itself is what stands afterwards.
+        $account = Auth::user();
+        abort_unless($account instanceof Customer, 403);
+        $account->isPremium();            // → Customer method
+
+        // throw_if / throw_unless bail out the same way and prove the same
+        // things, and every guard form an `if` understands works here too.
+        $flour = Bakery::findOrFail($id)->flour;   // $fillable, no cast → mixed
+        throw_unless(is_string($flour), \RuntimeException::class);
+        strtoupper($flour);               // → string
     }
 
 

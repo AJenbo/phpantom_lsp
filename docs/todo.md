@@ -156,7 +156,6 @@ unlikely to move the needle for most users.
 | S5  | Language construct signature help and hover                                                                                                                                 | Low         | Medium      |
 |     | **[Laravel](todo/laravel.md)**                                                                                                                                              |             |             |
 | L22 | [Broaden recognized call sites for Laravel string keys](todo/laravel.md#l22-broaden-recognized-call-sites-for-laravel-string-keys)                                          | High        | Medium      |
-| L5  | [`abort_if`/`abort_unless` type narrowing](todo/laravel.md#l5-abort_ifabort_unless-type-narrowing)                                                                          | High        | Medium-High |
 | L24 | [Translation depth: JSON lang files, locales, placeholders](todo/laravel.md#l24-translation-depth-json-lang-files-locales-placeholders)                                     | Medium-High | Medium-High |
 | L46 | [`->can()` on a user model the receiver does not name](todo/laravel.md#l46-can-on-a-user-model-the-receiver-does-not-name)                                                  | Medium-High | Medium-High |
 | L48 | [A factory's `$model` property is ignored](todo/laravel.md#l48-a-factorys-model-property-is-ignored)                                                                        | Medium      | Medium      |
