@@ -63,6 +63,7 @@ mod template_subs;
 pub(crate) use facade_owner::facade_concrete_owner;
 pub(crate) use return_types::{
     MethodReturnCtx, folded_class_constant_type, folded_global_constant_type,
+    resolve_static_access_type,
 };
 pub(crate) use target_cache::{activate_type_engine_caches, try_infer_body_return_type};
 pub(crate) use template_subs::{

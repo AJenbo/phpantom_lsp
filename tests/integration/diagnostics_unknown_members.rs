@@ -12939,3 +12939,40 @@ class WidgetTest {}
         diags.iter().map(|d| &d.message).collect::<Vec<_>>()
     );
 }
+
+/// A member read off a class constant must resolve against the type the
+/// constant holds, not the class that declares the constant: an enum case
+/// stashed in a `const` still exposes `->value`, whether the constant is
+/// untyped, PHP 8.3-typed, read through `self::`/`static::`, or read
+/// through the class name directly.
+#[test]
+fn member_read_off_class_constant_resolves_to_held_type_not_declaring_class() {
+    let backend = create_test_backend();
+    let uri = "file:///const_holds_enum.php";
+    let text = r#"<?php
+enum Kind: string
+{
+    case A = 'a';
+}
+
+class Matrix
+{
+    public const Kind TYPED = Kind::A;
+    public const UNTYPED = Kind::A;
+
+    public function all(): void
+    {
+        echo self::TYPED->value;
+        echo self::UNTYPED->value;
+        echo static::TYPED->value;
+        echo Matrix::TYPED->value;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "`value` on an enum case held in a class constant must not be flagged, got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}

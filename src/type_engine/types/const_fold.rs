@@ -241,12 +241,17 @@ thread_local! {
 }
 
 /// RAII guard for [`FOLDING`].
-struct FoldGuard;
+///
+/// Also used outside this module by [`super::super::call_resolution::resolve_static_access_type`]
+/// to guard its own recursive re-resolution of an untyped constant's
+/// initialiser, which shares the same re-entrancy hazard (a constant
+/// defined in terms of itself) but is not itself a fold.
+pub(crate) struct FoldGuard;
 
 impl FoldGuard {
     /// Claim `key` for folding, or `None` when it is already being folded
     /// further up the stack.
-    fn acquire(key: &str) -> Option<Self> {
+    pub(crate) fn acquire(key: &str) -> Option<Self> {
         FOLDING.with(|stack| {
             let mut stack = stack.borrow_mut();
             if stack.iter().any(|entry| entry == key) {

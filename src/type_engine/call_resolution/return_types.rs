@@ -1962,7 +1962,7 @@ pub(super) fn resolve_chain_declared_return(
 /// Handles enum cases (`MyEnum::Case` → `MyEnum`) and class constants
 /// (`Foo::BAR` → the constant's type hint, or the type inferred from
 /// the constant's initializer value for untyped constants).
-pub(super) fn resolve_static_access_type(text: &str, ctx: &ResolutionCtx<'_>) -> Option<PhpType> {
+pub(crate) fn resolve_static_access_type(text: &str, ctx: &ResolutionCtx<'_>) -> Option<PhpType> {
     let (class_part, _member) = text.split_once("::")?;
 
     // Only accept identifier-like class names (no `$var::`, no whitespace).
@@ -2023,6 +2023,25 @@ pub(super) fn resolve_static_access_type(text: &str, ctx: &ResolutionCtx<'_>) ->
         }
         if let Some(ref hint) = constant.type_hint {
             return Some(hint.clone());
+        }
+
+        // An untyped constant whose initialiser is itself `Class::Case`
+        // holds that case's own enum type — the structural check above
+        // deliberately skips it (an enum case is not a `Literal`), and
+        // there is no declared type hint to fall back to here. Recurse
+        // into this same function on the initialiser text rather than
+        // teaching it a second way to read an enum case; guarded by the
+        // same re-entrancy key `folded_class_constant_type` folds under,
+        // so a constant defined in terms of itself (directly or through
+        // another constant) reports unresolvable instead of recursing
+        // forever.
+        if let Some(ref val) = constant.value {
+            let key = format!("{}::{}", merged.fqn(), _member);
+            let _guard = crate::type_engine::types::const_fold::FoldGuard::acquire(&key)?;
+            let qualified = qualify_class_keyword(val, &merged);
+            if let Some(ty) = resolve_static_access_type(&qualified, ctx) {
+                return Some(ty);
+            }
         }
     }
 

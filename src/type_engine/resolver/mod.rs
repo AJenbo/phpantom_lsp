@@ -462,6 +462,37 @@ fn resolve_target_classes_expr_inner(
                 if !results.is_empty() {
                     return results;
                 }
+            } else {
+                // Otherwise the member is an enum case or class constant.
+                // Resolve it through the same constant-type path the call
+                // resolver uses (`resolve_static_access_type`) instead of
+                // returning the owning class outright: a typed or
+                // inferred class constant holds whatever type its value
+                // is (e.g. an enum case held in a `const Kind TYPED`),
+                // not the type of the class that declares the constant.
+                // An enum case's own class already resolves to itself
+                // through this same path, so no separate case is needed.
+                let mut const_results: Vec<ResolvedType> = Vec::new();
+                for owner in &owner_classes {
+                    let text = format!("{}::{member}", owner.fqn());
+                    if let Some(ty) = super::call_resolution::resolve_static_access_type(&text, ctx)
+                    {
+                        let owning_class_name = owner.fqn().to_string();
+                        let resolved = super::type_resolution::type_hint_to_classes_typed(
+                            &ty,
+                            &owning_class_name,
+                            all_classes,
+                            class_loader,
+                        );
+                        ResolvedType::extend_unique(
+                            &mut const_results,
+                            resolved.into_iter().map(ResolvedType::from_arc).collect(),
+                        );
+                    }
+                }
+                if !const_results.is_empty() {
+                    return const_results;
+                }
             }
 
             owner_classes
