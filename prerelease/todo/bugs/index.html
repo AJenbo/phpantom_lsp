@@ -884,10 +884,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b85-a-magic-constant-is-not-recognised-as-an-arithmetic-operand" class="md-nav__link">
+  <a href="#b86-int-int-reaching-an-int-position-is-reported-in-a-non-strict-file" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B85. A magic constant is not recognised as an arithmetic operand
+        B86. <code>int / int</code> reaching an <code>int</code> position is reported in a non-strict file
       </span>
     </span>
   </a>
@@ -1456,10 +1456,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b85-a-magic-constant-is-not-recognised-as-an-arithmetic-operand" class="md-nav__link">
+  <a href="#b86-int-int-reaching-an-int-position-is-reported-in-a-non-strict-file" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B85. A magic constant is not recognised as an arithmetic operand
+        B86. <code>int / int</code> reaching an <code>int</code> position is reported in a non-strict file
       </span>
     </span>
   </a>
@@ -1537,14 +1537,6 @@ to second-guess upstream output.</p>
 <p>Each entry below carries an <strong>Impact · Complexity</strong> rating using the same
 scale defined in <a href="../../todo/"><code>docs/todo.md</code></a>; that table is also where
 each bug's row lives in the current sprint/backlog.</p>
-<p>The <strong>B85</strong> entry below comes from the 2026-08-15 evening sample-project
-sweep and the re-runs that followed it as the sweep's own findings
-(<strong>B75–B84</strong>) were fixed and cleared. The three diagnostics still
-standing across the ten projects at the time of writing are this one
-plus two genuine findings (<code>int / int</code> returned from an <code>int</code> function),
-which are the sample sources' own to fix. As with every entry here, it
-was isolated in a scratch repro and bisected to the minimal trigger
-shown in its code block.</p>
 <h2 id="crashes">Crashes<a class="headerlink" href="#crashes" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="type-comparison">Type comparison<a class="headerlink" href="#type-comparison" title="Permanent link">&para;</a></h2>
@@ -1554,23 +1546,46 @@ shown in its code block.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="arithmetic">Arithmetic<a class="headerlink" href="#arithmetic" title="Permanent link">&para;</a></h2>
-<h3 id="b85-a-magic-constant-is-not-recognised-as-an-arithmetic-operand">B85. A magic constant is not recognised as an arithmetic operand<a class="headerlink" href="#b85-a-magic-constant-is-not-recognised-as-an-arithmetic-operand" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">function getEndLineOfThisFile(): int</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">{</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    return __LINE__ + 3;   // reported: got int|float</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">}</span>
+<h3 id="b86-int-int-reaching-an-int-position-is-reported-in-a-non-strict-file">B86. <code>int / int</code> reaching an <code>int</code> position is reported in a non-strict file<a class="headerlink" href="#b86-int-int-reaching-an-int-position-is-reported-in-a-non-strict-file" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="cp">&lt;?php</span>   <span class="c1">// no declare(strict_types=1)</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="k">class</span> <span class="nc">Job</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="p">{</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="k">public</span> <span class="nx">int</span> <span class="nv">$timeout</span> <span class="o">=</span> <span class="mi">3600</span><span class="p">;</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="k">public</span> <span class="k">function</span> <span class="fm">__construct</span><span class="p">(</span><span class="nx">int</span> <span class="nv">$max</span><span class="p">)</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="p">{</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>        <span class="nv">$this</span><span class="o">-&gt;</span><span class="na">timeout</span> <span class="o">=</span> <span class="nv">$max</span> <span class="o">/</span> <span class="mi">300</span><span class="p">;</span>      <span class="c1">// reported: expects int, got int|float</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>    <span class="p">}</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>    <span class="k">public</span> <span class="k">function</span> <span class="nf">toWholeDays</span><span class="p">(</span><span class="nx">int</span> <span class="nv">$length</span><span class="p">)</span><span class="o">:</span> <span class="nx">int</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>    <span class="p">{</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>        <span class="k">return</span> <span class="nv">$length</span> <span class="o">/</span> <span class="mi">86400</span><span class="p">;</span>           <span class="c1">// reported: got int|float</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>    <span class="p">}</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="p">}</span>
 </code></pre></div>
-<p><code>__LINE__</code> on its own resolves to <code>int</code> and returns cleanly, but as an
-operand of <code>+</code> it is not classified, so the addition falls back to the
-conservative <code>int|float</code> that a mixed-operand sum produces. Every
-<code>int</code>-typed magic constant (<code>__LINE__</code>) and <code>string</code>-typed one
-(<code>__FILE__</code>, <code>__DIR__</code>, <code>__FUNCTION__</code>, <code>__CLASS__</code>, <code>__METHOD__</code>,
-<code>__NAMESPACE__</code>) should be classified the same way its own type is.</p>
-<p>Sample site: <code>pdepend tests/php/PDepend/Source/AST/ASTCompilationUnitTest.php:293</code>.</p>
-<p><strong>Fix:</strong> classify a magic constant by its own resolved type in the
-binary-operator operand classifier, the way <code>int</code> refinements already
-are.</p>
+<p><code>int / int</code> resolves to <code>int|float</code>, which is correct and deliberate,
+but a file without <code>declare(strict_types=1)</code> coerces the float half on
+the way in, so PHP accepts all three positions (argument, return, and
+typed-property assignment) without a TypeError. The union-argument rule
+in <code>is_type_compatible</code> demands that <em>every</em> member satisfy the
+parameter, so the <code>float</code> half is reported. PHPStan reports none of
+these at level max.</p>
+<p>Two escape hatches next to it already model exactly this juggling:
+<code>numeric</code> → <code>int</code>/<code>float</code>, and <code>string</code> → <code>int</code>/<code>float</code> outside
+<code>strict_types</code>. <code>float</code> → <code>int</code> is the missing one.</p>
+<p>Sample sites: <code>luxplus-shared src/common/DateTime/TimePeriod.php:109</code>
+(<code>toWholeDays()</code>), <code>luxplus-backoffice
+app/Jobs/Elastic/ReindexCustomers.php:23</code> (<code>int $timeout</code>). Both files
+are non-strict, and both were mistaken for genuine findings in the
+2026-08-15 sweep before PHPStan was run on them.</p>
+<p><strong>Fix:</strong> accept <code>float</code> where <code>int</code> is expected when the file is not
+under <code>declare(strict_types=1)</code>, alongside the <code>numeric</code> and <code>string</code>
+hatches. Behind it sits a wider policy question worth deciding
+separately: PHPStan does not report the <em>strict</em> spelling of these
+either, because a union that partly satisfies the target is a "maybe"
+to it, whereas our union-argument rule requires every member to satisfy.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
