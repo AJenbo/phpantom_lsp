@@ -847,6 +847,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Type comparison">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b87-union-argument-compatibility-requires-every-member-to-satisfy-phpstan-requires-only-one" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B87. Union-argument compatibility requires every member to satisfy, PHPStan requires only one
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -879,23 +896,6 @@
       </span>
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="Arithmetic">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b86-int-int-reaching-an-int-position-is-reported-in-a-non-strict-file" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B86. <code>int / int</code> reaching an <code>int</code> position is reported in a non-strict file
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -1419,6 +1419,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Type comparison">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b87-union-argument-compatibility-requires-every-member-to-satisfy-phpstan-requires-only-one" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B87. Union-argument compatibility requires every member to satisfy, PHPStan requires only one
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1451,23 +1468,6 @@
       </span>
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="Arithmetic">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b86-int-int-reaching-an-int-position-is-reported-in-a-non-strict-file" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B86. <code>int / int</code> reaching an <code>int</code> position is reported in a non-strict file
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -1540,52 +1540,31 @@ each bug's row lives in the current sprint/backlog.</p>
 <h2 id="crashes">Crashes<a class="headerlink" href="#crashes" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="type-comparison">Type comparison<a class="headerlink" href="#type-comparison" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b87-union-argument-compatibility-requires-every-member-to-satisfy-phpstan-requires-only-one">B87. Union-argument compatibility requires every member to satisfy, PHPStan requires only one<a class="headerlink" href="#b87-union-argument-compatibility-requires-every-member-to-satisfy-phpstan-requires-only-one" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: High</strong></p>
+<p><code>is_type_compatible</code>'s union-argument rule demands that <em>every</em> member
+of an argument's union type satisfy the parameter before the call is
+accepted; PHPStan treats a union that only <em>partly</em> satisfies the
+target as a "maybe" and stays silent rather than reporting the members
+that don't. This came up while fixing <code>float</code> → <code>int</code> coercion outside
+<code>strict_types</code> (<a href="../../CHANGELOG/"><code>docs/CHANGELOG.md</code></a>): PHPStan does
+not report the <em>strict</em> spelling of that case either (an <code>int|float</code>
+value assigned to <code>int</code> under <code>declare(strict_types=1)</code>), specifically
+because the <code>int</code> half already satisfies the parameter and the union
+rule only needs one member to.</p>
+<p>Whether to relax the union-argument rule to "at least one member
+satisfies" project-wide is a bigger policy change than the escape
+hatch above: it would silence real mismatches where only one union
+member happens to be compatible by accident rather than by design.
+Needs a decision on the tradeoff (and probably a survey of how much
+signal the current "every member" rule catches in <code>projects/*</code>) before
+changing it.</p>
 <h2 id="standard-library-return-types">Standard-library return types<a class="headerlink" href="#standard-library-return-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="arithmetic">Arithmetic<a class="headerlink" href="#arithmetic" title="Permanent link">&para;</a></h2>
-<h3 id="b86-int-int-reaching-an-int-position-is-reported-in-a-non-strict-file">B86. <code>int / int</code> reaching an <code>int</code> position is reported in a non-strict file<a class="headerlink" href="#b86-int-int-reaching-an-int-position-is-reported-in-a-non-strict-file" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="cp">&lt;?php</span>   <span class="c1">// no declare(strict_types=1)</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="k">class</span> <span class="nc">Job</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="p">{</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="k">public</span> <span class="nx">int</span> <span class="nv">$timeout</span> <span class="o">=</span> <span class="mi">3600</span><span class="p">;</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="k">public</span> <span class="k">function</span> <span class="fm">__construct</span><span class="p">(</span><span class="nx">int</span> <span class="nv">$max</span><span class="p">)</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="p">{</span>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>        <span class="nv">$this</span><span class="o">-&gt;</span><span class="na">timeout</span> <span class="o">=</span> <span class="nv">$max</span> <span class="o">/</span> <span class="mi">300</span><span class="p">;</span>      <span class="c1">// reported: expects int, got int|float</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>    <span class="p">}</span>
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>    <span class="k">public</span> <span class="k">function</span> <span class="nf">toWholeDays</span><span class="p">(</span><span class="nx">int</span> <span class="nv">$length</span><span class="p">)</span><span class="o">:</span> <span class="nx">int</span>
-<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>    <span class="p">{</span>
-<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>        <span class="k">return</span> <span class="nv">$length</span> <span class="o">/</span> <span class="mi">86400</span><span class="p">;</span>           <span class="c1">// reported: got int|float</span>
-<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>    <span class="p">}</span>
-<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="p">}</span>
-</code></pre></div>
-<p><code>int / int</code> resolves to <code>int|float</code>, which is correct and deliberate,
-but a file without <code>declare(strict_types=1)</code> coerces the float half on
-the way in, so PHP accepts all three positions (argument, return, and
-typed-property assignment) without a TypeError. The union-argument rule
-in <code>is_type_compatible</code> demands that <em>every</em> member satisfy the
-parameter, so the <code>float</code> half is reported. PHPStan reports none of
-these at level max.</p>
-<p>Two escape hatches next to it already model exactly this juggling:
-<code>numeric</code> → <code>int</code>/<code>float</code>, and <code>string</code> → <code>int</code>/<code>float</code> outside
-<code>strict_types</code>. <code>float</code> → <code>int</code> is the missing one.</p>
-<p>Sample sites: <code>luxplus-shared src/common/DateTime/TimePeriod.php:109</code>
-(<code>toWholeDays()</code>), <code>luxplus-backoffice
-app/Jobs/Elastic/ReindexCustomers.php:23</code> (<code>int $timeout</code>). Both files
-are non-strict, and both were mistaken for genuine findings in the
-2026-08-15 sweep before PHPStan was run on them.</p>
-<p><strong>Fix:</strong> accept <code>float</code> where <code>int</code> is expected when the file is not
-under <code>declare(strict_types=1)</code>, alongside the <code>numeric</code> and <code>string</code>
-hatches. Behind it sits a wider policy question worth deciding
-separately: PHPStan does not report the <em>strict</em> spelling of these
-either, because a union that partly satisfies the target is a "maybe"
-to it, whereas our union-argument rule requires every member to satisfy.</p>
+<p>No outstanding items.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
