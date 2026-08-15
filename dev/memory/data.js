@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786773086454,
+  "lastUpdate": 1786774291754,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -21997,6 +21997,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 77.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "758e90f2031afce8425c5f989dfa3653fcd6d09f",
+          "message": "The type engine itself now knows that a class is an `object` and that a\n`Traversable` is `iterable`",
+          "timestamp": "2026-08-15T07:55:26+02:00",
+          "tree_id": "46bf744fa147a3857c52784a06b0cf7310c75bb8",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/758e90f2031afce8425c5f989dfa3653fcd6d09f"
+        },
+        "date": 1786774285891,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 81.3,
             "unit": "MiB"
           }
         ]
