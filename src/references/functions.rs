@@ -143,7 +143,11 @@ impl Backend {
         &self,
         target_fqn: &str,
         target_short: &str,
-        include_declaration: bool,
+        // Unlike `FunctionCall`, `ConstantReference` carries no
+        // `is_definition` flag (a global constant's declaration site
+        // shares its span kind with a use of it), so there is no
+        // declaration span to exclude here.
+        _include_declaration: bool,
     ) -> Vec<Location> {
         let mut locations = Vec::new();
 
@@ -169,11 +173,6 @@ impl Backend {
 
             let has_potential_match = symbol_map.spans.iter().any(|span| match &span.kind {
                 SymbolKind::ConstantReference { name } => constant_matches(name, span.start),
-                SymbolKind::MemberDeclaration { name, is_static }
-                    if include_declaration && name == target_short && *is_static =>
-                {
-                    true
-                }
                 _ => false,
             });
 
@@ -191,11 +190,6 @@ impl Backend {
             for span in &symbol_map.spans {
                 let matched = match &span.kind {
                     SymbolKind::ConstantReference { name } => constant_matches(name, span.start),
-                    SymbolKind::MemberDeclaration { name, is_static }
-                        if include_declaration && name == target_short && *is_static =>
-                    {
-                        true
-                    }
                     _ => false,
                 };
 

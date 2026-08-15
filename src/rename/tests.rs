@@ -4656,6 +4656,50 @@ echo BAR;
 }
 
 #[tokio::test]
+async fn rename_global_constant_leaves_a_same_named_class_constant_alone() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test/const_collision.php").unwrap();
+    let text = "<?php
+namespace App;
+
+const BAR = 1;
+
+class Holder
+{
+    public const BAR = 2;
+}
+
+echo BAR;
+echo Holder::BAR;
+";
+
+    open_file(&backend, &uri, text).await;
+
+    let (line, character) = line_char_of(text, "const BAR = 1;");
+    let edit = rename(&backend, &uri, line, character + 6, "QUX")
+        .await
+        .expect("a global constant declaration should rename");
+    let result = apply_edits(text, &edits_for_uri(&edit, &uri));
+
+    assert!(
+        result.contains("const QUX = 1;"),
+        "the global declaration takes the new name, got: {result}"
+    );
+    assert!(
+        result.contains("echo QUX;"),
+        "the global constant's use takes the new name, got: {result}"
+    );
+    assert!(
+        result.contains("public const BAR = 2;"),
+        "an unrelated class constant of the same short name must not rename, got: {result}"
+    );
+    assert!(
+        result.contains("echo Holder::BAR;"),
+        "the class constant's own use must not rename, got: {result}"
+    );
+}
+
+#[tokio::test]
 async fn rename_constant_leaves_an_explicit_alias_alone() {
     let backend = Backend::new_test();
     let uri = Url::parse("file:///test/const_alias.php").unwrap();
