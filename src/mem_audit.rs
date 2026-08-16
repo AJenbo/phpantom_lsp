@@ -1611,6 +1611,9 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
     probe("laravel_provider_resources", &mut || {
         *backend.laravel_provider_resources.write() = Default::default()
     });
+    probe("laravel_provider_scans", &mut || {
+        *backend.laravel_provider_scans.write() = Default::default()
+    });
     probe("laravel_string_key_cache", &mut || {
         *backend.laravel_string_key_cache.write() = Default::default()
     });

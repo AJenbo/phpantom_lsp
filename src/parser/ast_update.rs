@@ -302,6 +302,12 @@ impl Backend {
         // files that mention neither `Gate` nor `$policies`.
         self.refresh_laravel_gates(uri, content);
 
+        // Keep the container bindings, package config files, view and
+        // translation directories, route files, and component namespaces
+        // coherent with edits to the providers that register them.  Cheap
+        // no-op for every file that is not a registered service provider.
+        self.refresh_laravel_provider_resources(uri, content);
+
         match result {
             Some(changed) => changed,
             None => {

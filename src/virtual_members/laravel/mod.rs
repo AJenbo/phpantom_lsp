@@ -172,7 +172,8 @@ pub(crate) use path_helpers::{
     collect_path_helper_links, is_path_helper, path_helper_base, resolve_path_helper_definition,
 };
 pub(crate) use provider_resources::{
-    ProviderIdentity, ProviderOrigin, ProviderResources, extract_provider_resources,
+    ProviderIdentity, ProviderOrigin, ProviderResources, ProviderScan, ProviderScans,
+    extract_provider_resources,
 };
 pub(crate) use request_fields::{request_fields_at_position, resolve_request_field_definition};
 pub(crate) use route_names::{RouteEntry, enumerate_all_routes, route_uri_parameters};

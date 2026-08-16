@@ -713,11 +713,22 @@ pub struct Backend {
     ///
     /// [`build_laravel_date_class`]: crate::Backend::build_laravel_date_class
     pub(crate) laravel_date_seed_uris: Arc<RwLock<std::collections::HashSet<String>>>,
+    /// What the project's registered service providers register: container
+    /// bindings, package config files, view and translation directories, route
+    /// files, and Blade component namespaces, merged across every provider.
+    ///
+    /// Built by [`build_provider_resources`](crate::Backend::build_provider_resources)
+    /// and republished by
+    /// [`refresh_laravel_provider_resources`](crate::Backend::refresh_laravel_provider_resources)
+    /// when a provider is edited.
+    pub(crate) laravel_provider_resources: Arc<RwLock<virtual_members::laravel::ProviderResources>>,
+    /// The per-provider scans the merged table above was built from, so an
+    /// edit to one provider rebuilds the merge without re-reading the rest.
+    pub(crate) laravel_provider_scans: Arc<RwLock<virtual_members::laravel::ProviderScans>>,
     /// Cached Laravel string key enumerations (route names, config keys,
     /// view names, translation keys).  `None` = not yet computed.
     /// Invalidated when a file in `routes/`, `config/`, `resources/views/`,
     /// or `lang/` is updated.
-    pub(crate) laravel_provider_resources: Arc<RwLock<virtual_members::laravel::ProviderResources>>,
     pub(crate) laravel_string_key_cache: Arc<RwLock<LaravelStringKeyCache>>,
     /// Compute-once guards for `laravel_string_key_cache`; see
     /// [`LaravelStringKeyBuildLocks`].
@@ -1045,6 +1056,9 @@ impl Backend {
             laravel_provider_resources: Arc::new(RwLock::new(
                 virtual_members::laravel::ProviderResources::default(),
             )),
+            laravel_provider_scans: Arc::new(RwLock::new(
+                virtual_members::laravel::ProviderScans::default(),
+            )),
             laravel_string_key_cache: Arc::new(RwLock::new(LaravelStringKeyCache::default())),
             laravel_string_key_build_locks: Arc::new(LaravelStringKeyBuildLocks::default()),
             schema_index: Arc::new(RwLock::new(
@@ -1144,6 +1158,9 @@ impl Backend {
             laravel_date_seed_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
             laravel_provider_resources: Arc::new(RwLock::new(
                 virtual_members::laravel::ProviderResources::default(),
+            )),
+            laravel_provider_scans: Arc::new(RwLock::new(
+                virtual_members::laravel::ProviderScans::default(),
             )),
             laravel_string_key_cache: Arc::new(RwLock::new(LaravelStringKeyCache::default())),
             laravel_string_key_build_locks: Arc::new(LaravelStringKeyBuildLocks::default()),
@@ -1779,6 +1796,7 @@ impl Backend {
             laravel_date_class: Arc::clone(&self.laravel_date_class),
             laravel_date_seed_uris: Arc::clone(&self.laravel_date_seed_uris),
             laravel_provider_resources: Arc::clone(&self.laravel_provider_resources),
+            laravel_provider_scans: Arc::clone(&self.laravel_provider_scans),
             laravel_string_key_cache: Arc::clone(&self.laravel_string_key_cache),
             laravel_string_key_build_locks: Arc::clone(&self.laravel_string_key_build_locks),
             schema_index: Arc::clone(&self.schema_index),

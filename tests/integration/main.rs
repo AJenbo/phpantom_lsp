@@ -166,6 +166,7 @@ mod laravel_macro_facade;
 mod laravel_macros;
 mod laravel_morph_map;
 mod laravel_path_helpers;
+mod laravel_provider_refresh;
 mod laravel_references;
 mod laravel_request_input;
 mod laravel_request_keys;

@@ -14,9 +14,10 @@ use mago_syntax::cst::*;
 use super::const_eval::{ClassContext, Scope, const_string};
 use super::view_data::{SharedViewVar, ViewComposer, ViewDataRegistration, view_data_registration};
 use crate::atom::bytes_to_str;
+use crate::ci_map::CiSet;
 use crate::names::OwnedResolvedNames;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ProviderResource {
     pub path: PathBuf,
     pub namespace: String,
@@ -43,7 +44,7 @@ pub(crate) enum ProviderOrigin {
 }
 
 /// The provider a scan is reading, as far as binding precedence goes.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ProviderIdentity {
     /// The provider class's FQN.
     pub fqn: String,
@@ -74,7 +75,7 @@ impl ProviderIdentity {
 /// The concrete class behind a container key, with the provider that put it
 /// there so a provider scanned later is weighed against it rather than
 /// overwriting it outright.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Binding {
     pub class: String,
     /// Where the registration that produced this binding is written, so the
@@ -85,7 +86,7 @@ pub(crate) struct Binding {
 
 /// The registration a container key came from: the provider file it is
 /// written in, and the byte offset the key itself starts at.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BindingSite {
     /// The service provider file holding the registration.
     pub path: PathBuf,
@@ -96,14 +97,14 @@ pub(crate) struct BindingSite {
 
 /// An `alias('other-key', 'key')` entry: the key it stands for, and the
 /// provider that named it, so precedence applies to aliases too.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Alias {
     target: String,
     site: BindingSite,
     provider: Arc<ProviderIdentity>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ProviderResources {
     pub config_files: Vec<ProviderResource>,
     pub view_dirs: Vec<ProviderResource>,
@@ -240,6 +241,95 @@ impl ProviderResources {
         for (key, binding) in resolved {
             self.record_binding(key, binding);
         }
+    }
+}
+
+/// One provider file's own registrations, before they are merged with every
+/// other provider's.
+#[derive(Debug)]
+pub(crate) struct ProviderScan {
+    /// The provider file the registrations were read from.
+    pub uri: String,
+    pub identity: Arc<ProviderIdentity>,
+    pub resources: ProviderResources,
+}
+
+/// The per-provider scans the merged resource table was built from.
+///
+/// Keeping each provider's own registrations means an edit to one provider
+/// re-parses that file alone: the merged table is rebuilt from the cached
+/// scans rather than by re-reading every registered provider, which on a real
+/// application is hundreds of files.
+#[derive(Debug, Default)]
+pub(crate) struct ProviderScans {
+    /// The scans in registration order.  [`ProviderResources::merge`] settles
+    /// a key two providers bind by that order, so it has to be preserved.
+    scans: Vec<ProviderScan>,
+    /// Every registered provider's FQN, including the ones that had no file to
+    /// scan, so a provider written after the list that names it is recognised
+    /// the moment its class appears.
+    registered: CiSet,
+    /// Whether the full scan has run.  Until it has there is no table to keep
+    /// coherent, and a single-file refresh would publish a table holding only
+    /// the edited provider's registrations.
+    built: bool,
+}
+
+impl ProviderScans {
+    pub fn record(&mut self, scan: ProviderScan) {
+        self.scans.push(scan);
+    }
+
+    pub fn record_registered(&mut self, fqn: &str) {
+        self.registered.insert(fqn);
+    }
+
+    pub fn mark_built(&mut self) {
+        self.built = true;
+    }
+
+    pub fn is_built(&self) -> bool {
+        self.built
+    }
+
+    /// Whether `fqn` names a registered provider, whether or not its file was
+    /// resolvable when the full scan ran.
+    pub fn is_registered(&self, fqn: &str) -> bool {
+        self.registered.contains(fqn)
+    }
+
+    pub fn scan_for(&self, uri: &str) -> Option<&ProviderScan> {
+        self.scans.iter().find(|scan| scan.uri == uri)
+    }
+
+    /// Replace one provider's registrations, leaving every other scan in
+    /// place.  Returns `false` when the provider is no longer part of the
+    /// table (a rebuild raced this refresh).
+    pub fn replace(
+        &mut self,
+        uri: &str,
+        identity: Arc<ProviderIdentity>,
+        resources: ProviderResources,
+    ) -> bool {
+        let Some(scan) = self.scans.iter_mut().find(|scan| scan.uri == uri) else {
+            return false;
+        };
+        scan.identity = identity;
+        scan.resources = resources;
+        true
+    }
+
+    /// The merged table every consumer reads, with aliases resolved against
+    /// the complete set of bindings.
+    pub fn merged(&self) -> ProviderResources {
+        let mut merged = ProviderResources::default();
+        for scan in &self.scans {
+            merged.merge(scan.resources.clone());
+        }
+        // Every provider has been scanned, so an alias can now be pointed at
+        // the binding it stands for regardless of which provider made it.
+        merged.resolve_aliases();
+        merged
     }
 }
 
