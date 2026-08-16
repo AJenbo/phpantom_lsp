@@ -1872,6 +1872,21 @@ impl Backend {
         let mut content = self.get_file_content(uri)?;
         let mut pos = position;
 
+        // A request can arrive before the file's first parse has published
+        // a symbol map: an editor fires hover the instant it opens a file
+        // (tower-lsp may run the request handler before `did_open` finishes
+        // `update_ast`), and a raw LSP client may query a file it never
+        // opened at all, ahead of background indexing.  Without the map the
+        // handler answers null or falls back to poorer resolution, so the
+        // same request succeeds or fails with the indexing timing.  Parse
+        // now from the content we already fetched.  The parse publishes the
+        // map, so a file passes through here once; a file the parser panics
+        // on publishes nothing and is retried, which is the same work its
+        // next keystroke would do anyway.
+        if !self.symbol_maps.read().contains_key(uri) {
+            self.update_ast(uri, &content);
+        }
+
         // If this is a Blade file, use the virtual PHP content and translate the position.
         if self.is_blade_file(uri)
             && let Some(virtual_content) = self.blade_virtual_content.read().get(uri)

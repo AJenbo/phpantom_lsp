@@ -1499,6 +1499,108 @@ namespace Illuminate\Contracts\Database\Eloquent {
     );
 }
 
+/// A member's own declaration site answers nothing, for the same reason
+/// a class declaration does: the signature is on the line under the
+/// cursor and the docblock is on the lines above it, so the popup would
+/// only repeat what is already on screen.  Where a member is declared
+/// relative to the one it overrides is a code lens (or an `#[Override]`
+/// attribute), not a hover.
+#[test]
+fn hover_member_declaration_sites_return_none() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Base {
+    public function run(): void {}
+}
+class Product extends Base {
+    /** The maximum quantity per order. */
+    public const MAX_QTY = 10;
+
+    /** The stock keeping unit. */
+    public string $sku = '';
+
+    /** Does the thing. */
+    public function run(): void {}
+}
+enum Status: string {
+    case Paid = 'paid';
+}
+"#;
+
+    for (what, line, character) in [
+        ("class constant", 6u32, 19u32),
+        ("property", 9, 20),
+        ("method", 12, 22),
+        ("enum case", 15, 10),
+    ] {
+        let hover = hover_at(&backend, uri, content, line, character);
+        assert!(
+            hover.is_none(),
+            "should not show hover on the {what} declaration site, got: {hover:?}"
+        );
+    }
+}
+
+/// A request can arrive before the file has ever been parsed: an editor
+/// fires hover the instant it opens a file, and a raw LSP client can ask
+/// about a file it never opened at all, ahead of background indexing.
+/// The answer must not depend on how far indexing has got.
+#[tokio::test]
+async fn hover_answers_a_file_that_was_never_opened_or_indexed() {
+    use tower_lsp::LanguageServer;
+
+    let (backend, dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[(
+            "src/Product.php",
+            r#"<?php
+
+namespace App;
+
+class Product
+{
+    /**
+     * The sale price in minor units.
+     */
+    public function saleMinor(): int
+    {
+        return 0;
+    }
+}
+
+$product = new Product();
+$product->saleMinor();
+"#,
+        )],
+    );
+
+    // Deliberately no `initialized()` and no `did_open`: the file exists
+    // only on disk, exactly as it does for a request that beats the
+    // index to it.
+    let uri = Url::from_file_path(dir.path().join("src/Product.php")).unwrap();
+    let hover = backend
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 16,
+                    character: 14,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .unwrap()
+        .expect("hover on a file the server has not parsed yet");
+
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("The sale price in minor units."),
+        "an unparsed file should be parsed on the spot, got: {text}"
+    );
+}
+
 #[test]
 fn hover_abstract_class() {
     let backend = create_test_backend();
