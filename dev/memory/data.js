@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786901824277,
+  "lastUpdate": 1786921651918,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -23051,6 +23051,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 74.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "6803a9cb3e83919ddfdcad9e2cfca8d0cc9bb7fe",
+          "message": "Hover no longer depends on indexing timing",
+          "timestamp": "2026-08-17T00:50:28+02:00",
+          "tree_id": "6c4aa61fdc87ad44a5efae2e3c13e28224b1d2d0",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/6803a9cb3e83919ddfdcad9e2cfca8d0cc9bb7fe"
+        },
+        "date": 1786921645726,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 77.7,
             "unit": "MiB"
           }
         ]
