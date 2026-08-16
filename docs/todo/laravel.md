@@ -553,11 +553,6 @@ name), `Lang::has()`, and the typed config accessors (`Config::string()`,
   `LaravelStringKey` spans instead of the current definition-only
   ad-hoc fallback, so references (and completion/diagnostics)
   work uniformly.
-- **Container alias strings** — `app('cache')` already resolves to the
-  concrete class for member completion via the alias tables; wire
-  go-to-definition and hover on the string itself to that resolved
-  class. No new data needed. Provider-registered binding names stay out
-  of scope (see the table at the top).
 
 #### L24. Translation depth: JSON lang files, locales, placeholders
 

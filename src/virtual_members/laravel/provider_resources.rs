@@ -811,12 +811,16 @@ pub(in crate::virtual_members::laravel) fn is_app_container_expr(expr: &Expressi
 /// Covers the shapes a service provider writes: the class itself
 /// (`bind('foo', Foo::class)`), a ready-made instance
 /// (`instance('foo', new Foo())`), and the usual factory
-/// (`singleton('foo', fn () => new Foo())` or its closure equivalent, whose
-/// first `return` decides the type).  A factory whose body says nothing falls
-/// back to its declared return type, which is the author's own statement of
-/// what the key holds.  A factory that hands back anything else (a container
-/// lookup, a variable, a conditional) yields `None`: guessing there would bind
-/// the key to a class the application never resolves.
+/// (`singleton('foo', fn () => new Foo())` or its closure equivalent).
+///
+/// A factory that declares a return type is taken at its word, the way a
+/// method's declared return type decides what a call to it yields: a factory
+/// written `function (): Gateway { return new StripeGateway(); }` binds the
+/// contract its author named, not the implementation behind it.  Only an
+/// undeclared factory is read from its body, whose first `return` decides the
+/// type.  A factory that declares nothing and hands back anything else (a
+/// container lookup, a variable, a conditional) yields `None`: guessing there
+/// would bind the key to a class the application never resolves.
 fn binding_concrete(
     expr: Option<&Expression<'_>>,
     resolved: &OwnedResolvedNames,
@@ -828,10 +832,14 @@ fn binding_concrete(
             _ => None,
         },
         Expression::Access(Access::ClassConstant(_)) => class_string_fqn(expr, resolved),
-        Expression::ArrowFunction(arrow) => binding_concrete(Some(arrow.expression), resolved)
-            .or_else(|| declared_factory_return(arrow.return_type_hint.as_ref(), resolved)),
-        Expression::Closure(closure) => closure_binding_concrete(closure, resolved)
-            .or_else(|| declared_factory_return(closure.return_type_hint.as_ref(), resolved)),
+        Expression::ArrowFunction(arrow) => {
+            declared_factory_return(arrow.return_type_hint.as_ref(), resolved)
+                .or_else(|| binding_concrete(Some(arrow.expression), resolved))
+        }
+        Expression::Closure(closure) => {
+            declared_factory_return(closure.return_type_hint.as_ref(), resolved)
+                .or_else(|| closure_binding_concrete(closure, resolved))
+        }
         Expression::Parenthesized(inner) => binding_concrete(Some(inner.expression), resolved),
         _ => None,
     }
@@ -839,8 +847,10 @@ fn binding_concrete(
 
 /// The class a factory's own `: Concrete` return type names.
 ///
-/// Nothing but a plain class name counts: a union, an intersection, or a
-/// built-in type does not name one class the key holds.
+/// Nothing but a single class name counts: a union, an intersection, or a
+/// built-in type does not name one class the key holds.  A nullable hint
+/// (`?Concrete`) still names one, since a container that hands back `null`
+/// for the key has nothing else it could be resolved as.
 fn declared_factory_return(
     return_type_hint: Option<&FunctionLikeReturnTypeHint<'_>>,
     resolved: &OwnedResolvedNames,
@@ -1553,6 +1563,55 @@ mod tests {
                     $this->app->singleton('sentry', function ($app): HubAdapter {\n\
                         return $app->make('sentry.factory')->build();\n\
                     });\n\
+                }\n\
+            }\n";
+        let resources = scan_sentry_provider(content);
+        assert_eq!(
+            resources.bindings.get("sentry").map(|b| b.class.as_str()),
+            Some("Sentry\\Laravel\\HubAdapter")
+        );
+    }
+
+    #[test]
+    fn a_declared_return_type_beats_the_class_the_factory_body_builds() {
+        // A declared return type decides what a call yields everywhere else,
+        // and a container factory is no different: an author who writes the
+        // contract means the contract, so binding the implementation behind it
+        // would offer members the application never asked for.
+        let content = "<?php\n\
+            namespace Sentry\\Laravel;\n\
+            class ServiceProvider extends BaseServiceProvider {\n\
+                public function register(): void {\n\
+                    $this->app->singleton('sentry', function (): HubInterface {\n\
+                        return new HubAdapter();\n\
+                    });\n\
+                    $this->app->singleton('sentry.hub', fn (): HubInterface => new HubAdapter());\n\
+                }\n\
+            }\n";
+        let resources = scan_sentry_provider(content);
+        assert_eq!(
+            resources.bindings.get("sentry").map(|b| b.class.as_str()),
+            Some("Sentry\\Laravel\\HubInterface")
+        );
+        assert_eq!(
+            resources
+                .bindings
+                .get("sentry.hub")
+                .map(|b| b.class.as_str()),
+            Some("Sentry\\Laravel\\HubInterface"),
+            "an arrow function's hint decides the same way"
+        );
+    }
+
+    /// A hint that names no single class leaves the body to decide, so the
+    /// flip above costs nothing where the declaration says nothing.
+    #[test]
+    fn a_factory_whose_hint_names_no_class_still_binds_from_its_body() {
+        let content = "<?php\n\
+            namespace Sentry\\Laravel;\n\
+            class ServiceProvider extends BaseServiceProvider {\n\
+                public function register(): void {\n\
+                    $this->app->singleton('sentry', fn (): static => new HubAdapter());\n\
                 }\n\
             }\n";
         let resources = scan_sentry_provider(content);
