@@ -1498,8 +1498,14 @@ pub(super) fn resolve_method_call_on_receiver<'b>(
             return vec![ResolvedType::from_type_string(shape)];
         }
         if let Some(accessor) = input_accessor
-            && let Some(result) =
-                try_resolve_request_accessor_type(owner, accessor, argument_list, &arg_refs, ctx)
+            && let Some(result) = try_resolve_request_accessor_type(
+                owner,
+                accessor,
+                &method_name,
+                argument_list,
+                &arg_refs,
+                ctx,
+            )
         {
             return result;
         }
@@ -2557,24 +2563,40 @@ fn try_resolve_trans_method_type(
 fn try_resolve_request_accessor_type(
     owner: &ClassInfo,
     accessor: crate::virtual_members::laravel::request_input::InputAccessor,
+    method_name: &str,
     argument_list: &ArgumentList<'_>,
     arg_refs: &[&str],
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<Vec<ResolvedType>> {
     use crate::virtual_members::laravel::request_input;
 
+    // The accessor is declared on `Illuminate\Http\Request`, while the
+    // receiver is usually an app's own `FormRequest` subclass that never
+    // redeclares it, so its parameters have to be found by walking the
+    // parent chain rather than reading `owner`'s own members.
+    let method = crate::type_engine::types::narrowing::find_method_in_chain_where(
+        owner,
+        method_name,
+        ctx.class_loader,
+        &|_| true,
+        &mut Vec::new(),
+        0,
+    )?;
+    let bound_text = crate::call_args::bind_text_args_to_params(&method.parameters, arg_refs);
+    let bound_exprs = crate::call_args::bind_args_to_params(&method.parameters, argument_list);
+
     // The default only decides the missing-key branch, so it is resolved
     // only once a keyed call has been established.
     let default_type = || {
-        let argument = argument_list.arguments.get(1)?;
-        let resolved = resolve_rhs_expression(argument.value(), ctx);
+        let expr = bound_exprs.get(1).copied().flatten()?;
+        let resolved = resolve_rhs_expression(expr, ctx);
         (!resolved.is_empty()).then(|| ResolvedType::types_joined(&resolved))
     };
     let ty = request_input::resolve_accessor_type(
         owner,
         accessor,
         &request_input::AccessorArgs {
-            key: arg_refs.first().copied(),
+            key: bound_text.first().and_then(|k| k.as_deref()),
             default_type: &default_type,
         },
         ctx.content,

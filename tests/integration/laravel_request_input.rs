@@ -397,3 +397,60 @@ async fn a_narrowed_upload_keeps_its_class() {
         "the upload's own members resolve, got: {hover}"
     );
 }
+
+// ─── named arguments ────────────────────────────────────────────────────────
+
+/// `file(key: 'photos')` names its key argument, so the key still has to be
+/// read as `'photos'` rather than as whichever positional slot it lands in.
+#[tokio::test]
+async fn a_named_key_argument_still_supplies_the_key() {
+    let hover = hover_text(&controller(
+        "    public function store(StorePostRequest $request): void\n\
+         \x20   {\n\
+         \x20       $photos = $request->file(key: 'photos');\n\
+         \x20       $phot§os;\n\
+         \x20   }",
+    ))
+    .await;
+    assert!(
+        hover.contains("list<UploadedFile>") && hover.contains("null"),
+        "a named key argument names the same field as a positional one, got: {hover}"
+    );
+}
+
+/// `header(default: 'x')` supplies only the default, so the call is still the
+/// keyless form and returns the whole header bag rather than a plain string.
+#[tokio::test]
+async fn a_named_default_argument_alone_leaves_the_call_keyless() {
+    let hover = hover_text(&controller(
+        "    public function show(Request $request): void\n\
+         \x20   {\n\
+         \x20       $all = $request->header(default: 'x');\n\
+         \x20       $a§ll;\n\
+         \x20   }",
+    ))
+    .await;
+    assert!(
+        hover.contains("array<string,"),
+        "a default-only call has no key, so it stays the whole bag, got: {hover}"
+    );
+}
+
+/// A `FormRequest` subclass never redeclares `file()`, so its parameters have
+/// to be found by walking up to `Illuminate\Http\Request` rather than reading
+/// only the receiver's own members.
+#[tokio::test]
+async fn a_named_key_argument_resolves_through_a_form_request_subclass() {
+    let hover = hover_text(&controller(
+        "    public function store(StorePostRequest $request): void\n\
+         \x20   {\n\
+         \x20       $cover = $request->file(key: 'cover');\n\
+         \x20       $co§ver;\n\
+         \x20   }",
+    ))
+    .await;
+    assert!(
+        hover.contains("UploadedFile") && hover.contains("null") && !hover.contains("list<"),
+        "a named key still resolves through the FormRequest subclass, got: {hover}"
+    );
+}

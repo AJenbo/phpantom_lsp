@@ -174,9 +174,22 @@ fn resolve_request_accessor_at_call(
 
     let accessor = request_input::input_accessor(method_name)?;
     let receiver = owners.iter().find_map(|rt| rt.class_info.as_ref())?;
+    // The accessor is declared on `Illuminate\Http\Request`, while the
+    // receiver is usually an app's own `FormRequest` subclass that never
+    // redeclares it, so its parameters have to be found by walking the
+    // parent chain rather than reading `receiver`'s own members.
+    let method = crate::type_engine::types::narrowing::find_method_in_chain_where(
+        receiver,
+        method_name,
+        ctx.class_loader,
+        &|_| true,
+        &mut Vec::new(),
+        0,
+    )?;
     let args = split_text_args(text_args);
+    let bound = crate::call_args::bind_text_args_to_params(&method.parameters, &args);
     let default_type = || {
-        let text = args.get(1)?;
+        let text = bound.get(1)?.as_deref()?;
         let resolved =
             crate::type_engine::resolver::resolve_target_classes(text, AccessKind::Arrow, ctx);
         (!resolved.is_empty()).then(|| ResolvedType::types_joined(&resolved))
@@ -185,7 +198,7 @@ fn resolve_request_accessor_at_call(
         receiver,
         accessor,
         &request_input::AccessorArgs {
-            key: args.first().copied(),
+            key: bound.first().and_then(|k| k.as_deref()),
             default_type: &default_type,
         },
         ctx.content,
