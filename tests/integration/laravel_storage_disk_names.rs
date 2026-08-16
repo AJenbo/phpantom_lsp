@@ -200,7 +200,7 @@ class DiskConsumer {}
 }
 
 #[tokio::test]
-async fn every_storage_context_navigates_and_hovers_as_its_full_config_key() {
+async fn every_storage_context_navigates_and_hovers_as_a_storage_disk() {
     let source = r#"<?php
 use Illuminate\Support\Facades\Storage;
 
@@ -247,11 +247,7 @@ class DiskConsumer {}
         let HoverContents::Markup(markup) = hover.contents else {
             panic!("expected markdown hover");
         };
-        assert!(
-            markup
-                .value
-                .contains("**Config** `filesystems.disks.archive`")
-        );
+        assert!(markup.value.contains("**Storage disk** `archive`"));
         assert!(markup.value.contains("config/filesystems.php"));
     }
 }
@@ -274,30 +270,30 @@ class DiskConsumer {}
     let mut diagnostics = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), source, &mut diagnostics);
 
-    let invalid_config = diagnostics
+    let invalid_disks = diagnostics
         .iter()
         .filter(|diagnostic| {
             matches!(
                 &diagnostic.code,
-                Some(NumberOrString::String(code)) if code == "invalid_laravel_config"
+                Some(NumberOrString::String(code)) if code == "invalid_laravel_storage_disk"
             )
         })
         .collect::<Vec<_>>();
-    assert_eq!(invalid_config.len(), 2, "got: {invalid_config:#?}");
+    assert_eq!(invalid_disks.len(), 2, "got: {invalid_disks:#?}");
 
-    let messages = invalid_config
+    let messages = invalid_disks
         .iter()
         .map(|diagnostic| diagnostic.message.as_str())
         .collect::<Vec<_>>();
     assert!(
         messages
             .iter()
-            .any(|message| message.contains("filesystems.disks.missing-disk"))
+            .any(|message| message.contains("storage disk: 'missing-disk'"))
     );
     assert!(
         messages
             .iter()
-            .any(|message| message.contains("filesystems.disks.missing-attribute"))
+            .any(|message| message.contains("storage disk: 'missing-attribute'"))
     );
     for optional_or_written in [
         "testing",
