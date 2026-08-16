@@ -61,8 +61,9 @@ impl Backend {
         }
 
         // Laravel config fallback: declaration sites in config/*.php
-        if let Some(loc) =
-            laravel::resolve_config_key_definition_fallback(self, uri, content, position)
+        if self.resolved_class_cache.read().is_laravel()
+            && let Some(loc) =
+                laravel::resolve_config_key_definition_fallback(self, uri, content, position)
         {
             return vec![loc];
         }
@@ -449,6 +450,9 @@ impl Backend {
             }
 
             SymbolKind::LaravelStringKey { kind, key, .. } => {
+                if !self.resolved_class_cache.read().is_laravel() {
+                    return None;
+                }
                 let locs = laravel::resolve_laravel_string_key(self, kind, key, uri);
                 if locs.is_empty() { None } else { Some(locs) }
             }

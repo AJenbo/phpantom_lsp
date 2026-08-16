@@ -510,6 +510,9 @@ impl Backend {
             }
 
             SymbolKind::LaravelStringKey { kind, key, .. } => {
+                if !self.resolved_class_cache.read().is_laravel() {
+                    return None;
+                }
                 self.hover_laravel_string_key(kind, key, uri)
             }
 

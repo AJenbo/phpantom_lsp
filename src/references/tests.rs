@@ -2818,3 +2818,49 @@ async fn test_member_references_through_property_receivers() {
         );
     }
 }
+
+// ─── Laravel string-key gating (non-Laravel projects) ──────────────────────
+
+/// A non-Laravel project can define its own `config()` function (common in
+/// home-grown micro-frameworks). `SymbolKind::LaravelStringKey` spans are
+/// extracted by name match alone, so find-references must not treat the two
+/// calls below as Laravel config-key references unless the project is
+/// actually classified as Laravel.
+#[tokio::test]
+async fn laravel_string_key_references_gated_on_is_laravel() {
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                   // L0
+        "function demo(): void {\n", // L1
+        "    config('app.name');\n", // L2
+        "    config('app.name');\n", // L3
+        "}\n",                       // L4
+    );
+    let (line, character) = line_char_of(text, "'app.name'");
+
+    let laravel_backend = Backend::new_test();
+    laravel_backend
+        .resolved_class_cache
+        .write()
+        .set_laravel(true);
+    open_file(&laravel_backend, &uri, text).await;
+    let laravel_locs = find_references(&laravel_backend, &uri, line, character + 2, true).await;
+    assert!(
+        laravel_locs.len() >= 2,
+        "expected both config('app.name') calls to be found on a Laravel project, got {}",
+        laravel_locs.len()
+    );
+
+    let plain_backend = Backend::new_test();
+    plain_backend
+        .resolved_class_cache
+        .write()
+        .set_laravel(false);
+    open_file(&plain_backend, &uri, text).await;
+    let plain_locs = find_references(&plain_backend, &uri, line, character + 2, true).await;
+    assert!(
+        plain_locs.is_empty(),
+        "a non-Laravel project's own config() must not produce Laravel string-key \
+         references, got {plain_locs:?}"
+    );
+}

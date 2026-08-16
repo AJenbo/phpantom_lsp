@@ -101,8 +101,9 @@ impl Backend {
 
         // Fallback for declaration sites in config/*.php
         let start_laravel = std::time::Instant::now();
-        if let Some(locations) =
-            laravel::find_config_references(self, uri, content, position, include_declaration)
+        if self.resolved_class_cache.read().is_laravel()
+            && let Some(locations) =
+                laravel::find_config_references(self, uri, content, position, include_declaration)
         {
             tracing::info!(
                 "Find References: found Laravel config references in {:?}",
@@ -342,6 +343,9 @@ impl Backend {
             SymbolKind::NamespaceDeclaration { .. } => Vec::new(),
 
             SymbolKind::LaravelStringKey { kind, key, .. } => {
+                if !self.resolved_class_cache.read().is_laravel() {
+                    return Vec::new();
+                }
                 let snapshot = if include_declaration
                     && matches!(kind, crate::symbol_map::LaravelStringKind::Config)
                 {
