@@ -1312,17 +1312,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l28-path-helper-links-and-completion" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L28. Path helper links and completion
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l29-livewire-and-volt-component-names" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2031,17 +2020,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         L27. Legacy <code>Controller@method</code> action strings
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#l28-path-helper-links-and-completion" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L28. Path helper links and completion
       </span>
     </span>
   </a>
@@ -2860,16 +2838,6 @@ Split on <code>@</code>, resolve the class through normal resolution (honoring a
 group namespace prefix), and provide completion, go-to-definition, and
 an unknown-action diagnostic. Low priority: the string form is
 discouraged since Laravel 8.</p>
-<h4 id="l28-path-helper-links-and-completion">L28. Path helper links and completion<a class="headerlink" href="#l28-path-helper-links-and-completion" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<p><code>base_path('...')</code>, <code>app_path()</code>, <code>config_path()</code>, <code>database_path()</code>,
-<code>lang_path()</code>, <code>public_path()</code>, <code>resource_path()</code>, and <code>storage_path()</code>
-map to fixed conventional directories under the project root. Provide
-go-to-definition (or a document link) on the string argument when the
-target exists, and path-segment completion from the directory listing.
-The Laravel LSP boots the app to learn the base paths and only links
-arguments that resolve to an existing <em>file</em>; convention gives us the
-same statically, and we can also handle directories.</p>
 <h4 id="l29-livewire-and-volt-component-names">L29. Livewire and Volt component names<a class="headerlink" href="#l29-livewire-and-volt-component-names" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low (Livewire projects only) · Complexity: Low</strong></p>
 <p>The component index (class components under <code>app/Livewire/</code>, nested
