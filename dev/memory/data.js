@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786838379649,
+  "lastUpdate": 1786841799651,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -22847,6 +22847,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 76.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "DarkGhostHunter@Gmail.com",
+            "name": "Italo",
+            "username": "DarkGhostHunter"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e6ab2e3c6080550e34eafba08c7f197cc910d5c9",
+          "message": "Switch to thinLTO optimization (2% faster execution)",
+          "timestamp": "2026-08-16T02:39:52+02:00",
+          "tree_id": "080e544e9f128389b68de76a189a6ad716aa00af",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/e6ab2e3c6080550e34eafba08c7f197cc910d5c9"
+        },
+        "date": 1786841793334,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 72.9,
             "unit": "MiB"
           }
         ]
