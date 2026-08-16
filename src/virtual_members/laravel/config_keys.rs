@@ -939,6 +939,35 @@ return array_merge(
         assert!(content.contains("'disk'"));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn config_content_uses_an_open_buffer_through_a_symlink_alias() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().unwrap();
+        let real_dir = dir.path().join("package/resources");
+        let linked_dir = dir.path().join("linked-resources");
+        let target = real_dir.join("settings.php");
+        std::fs::create_dir_all(&real_dir).unwrap();
+        std::fs::write(&target, "<?php return ['source' => 'disk'];\n").unwrap();
+        symlink(&real_dir, &linked_dir).unwrap();
+
+        let backend = Backend::new_test();
+        let target_uri = Url::from_file_path(&target).unwrap();
+        let buffered = Arc::new("<?php return ['source' => 'buffer'];\n".to_string());
+        backend
+            .open_files
+            .write()
+            .insert(target_uri.to_string(), Arc::clone(&buffered));
+
+        let aliased_path = linked_dir.join("settings.php");
+        let (uri, content) = backend
+            .laravel_config_file_content(&aliased_path)
+            .expect("the canonical path should find the open buffer");
+        assert_eq!(uri, target_uri);
+        assert!(Arc::ptr_eq(&content, &buffered));
+    }
+
     #[test]
     fn unreadable_config_sources_are_ignored_at_every_precedence_layer() {
         let dir = tempfile::tempdir().unwrap();
