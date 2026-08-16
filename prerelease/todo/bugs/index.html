@@ -928,6 +928,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#b2-a-request-accessor-written-with-named-arguments-loses-its-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B2. A request accessor written with named arguments loses its key
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#b1-editing-a-service-provider-does-not-re-scan-what-it-registers" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1511,6 +1522,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#b2-a-request-accessor-written-with-named-arguments-loses-its-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B2. A request accessor written with named arguments loses its key
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#b1-editing-a-service-provider-does-not-re-scan-what-it-registers" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1576,6 +1598,34 @@ each bug's row lives in the current sprint/backlog.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
+<h4 id="b2-a-request-accessor-written-with-named-arguments-loses-its-key">B2. A request accessor written with named arguments loses its key<a class="headerlink" href="#b2-a-request-accessor-written-with-named-arguments-loses-its-key" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<p><code>header()</code>, <code>query()</code>, <code>cookie()</code>, <code>input()</code>, <code>post()</code>, and <code>file()</code>
+each declare one union spanning every way of calling them, and the
+call's own arguments are what pick a member. Both resolution paths read
+<code>$key</code> and <code>$default</code> off the call by position, so a named argument is
+read as whichever slot it happens to sit in:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">$photos = $request-&gt;file(key: &#39;photos&#39;);   // list&lt;UploadedFile&gt;|null</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">                                           // resolves as UploadedFile|null</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">$all = $request-&gt;header(default: &#39;x&#39;);     // the whole HeaderBag</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">                                           // resolves as a plain string</span>
+</code></pre></div>
+<p>The key text is <code>key: 'photos'</code>, which no string literal unquotes to, so
+the validation rules that decide between one upload and a list are never
+consulted, and a call that supplies only a default is read as if that
+default were the key.</p>
+<p>The argument texts reaching both sites keep their <code>name:</code> labels on
+purpose, so that <code>bind_text_args_to_params</code> can route them; these two
+sites just never call it. The AST counterpart (<code>bind_args_to_params</code>)
+covers the default's expression the same way.</p>
+<p><strong>Where to look:</strong> <code>try_resolve_request_accessor_type</code> in
+<code>type_engine/variable/rhs_resolution/calls.rs</code> and
+<code>resolve_request_accessor_at_call</code> in
+<code>type_engine/call_resolution/return_types.rs</code>. Binding needs the
+accessor's declared parameters, and the <code>ClassInfo</code> both sites hold is
+the receiver's own class rather than an inheritance-merged one, so
+<code>get_method_ci("file")</code> on an app's <code>FormRequest</code> subclass finds
+nothing: the lookup has to walk the parent chain.</p>
 <h4 id="b1-editing-a-service-provider-does-not-re-scan-what-it-registers">B1. Editing a service provider does not re-scan what it registers<a class="headerlink" href="#b1-editing-a-service-provider-does-not-re-scan-what-it-registers" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <p><code>build_provider_resources</code> runs once, at <code>initialized</code>, and in the

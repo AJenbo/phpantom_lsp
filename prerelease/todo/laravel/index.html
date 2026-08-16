@@ -1367,17 +1367,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l41-conditional-return-types-on-url-and-its-sibling-helpers" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L41. Conditional return types on <code>url()</code> and its sibling helpers
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l44-sibling-resource-registrations-and-degenerate-resource-names" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2064,17 +2053,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         L39. Unused view and translation key detection
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#l41-conditional-return-types-on-url-and-its-sibling-helpers" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L41. Conditional return types on <code>url()</code> and its sibling helpers
       </span>
     </span>
   </a>
@@ -2891,34 +2869,15 @@ translation keys. Surface as an opt-in workspace report
 always-on diagnostics — dynamic construction (<code>view("emails.$type")</code>)
 makes "unused" inherently a heuristic, so it must read as "no static
 reference found," never as an error.</p>
-<h4 id="l41-conditional-return-types-on-url-and-its-sibling-helpers">L41. Conditional return types on <code>url()</code> and its sibling helpers<a class="headerlink" href="#l41-conditional-return-types-on-url-and-its-sibling-helpers" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<p><code>url()</code> returns the generator or a string depending on whether it got a
-path:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">/** @return ($path is null ? \Illuminate\Contracts\Routing\UrlGenerator : string) */</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">function url($path = null, $parameters = [], $secure = null);</span>
-</code></pre></div>
-<p>We resolve the call to the contract regardless of the argument, so a
-string result is typed as <code>UrlGenerator</code>. Real-world fallout is
-<code>assertSame(url('/login'), $response-&gt;getTargetUrl())</code> reporting a
-mismatch (four sites in one sample project), though the diagnostic only
-fires there because of B4.</p>
-<p>This is the same shape as the <code>view()</code> helper, which is now resolved
-precisely. <code>route()</code>, <code>secure_url()</code>, <code>action()</code>, and <code>redirect()</code> are
-worth auditing in the same pass, as is <code>app()</code> (<code>($abstract is null ?
-Application : mixed)</code>).</p>
-<p><strong>Where to look:</strong> the helper interception next to <code>view()</code> in
-<code>type_engine/call_resolution/return_types.rs</code> and the matching branch in
-<code>type_engine/variable/rhs_resolution/calls.rs</code>.</p>
 <h4 id="l44-sibling-resource-registrations-and-degenerate-resource-names">L44. Sibling resource registrations and degenerate resource names<a class="headerlink" href="#l44-sibling-resource-registrations-and-degenerate-resource-names" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
 <p><code>Route::resource()</code> and <code>Route::apiResource()</code> are recognized, but the
 registrations that generate route names the same way are not, so every
 <code>route()</code> call naming one is reported as an unknown route:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">Route::resources([&#39;photos&#39; =&gt; PhotoController::class]);</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">Route::apiResources([&#39;photos&#39; =&gt; PhotoController::class]);</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">Route::singleton(&#39;profile&#39;, ProfileController::class);</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">Route::apiSingleton(&#39;profile&#39;, ProfileController::class);</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">Route::resources([&#39;photos&#39; =&gt; PhotoController::class]);</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">Route::apiResources([&#39;photos&#39; =&gt; PhotoController::class]);</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">Route::singleton(&#39;profile&#39;, ProfileController::class);</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">Route::apiSingleton(&#39;profile&#39;, ProfileController::class);</span>
 </code></pre></div>
 <p><code>resources()</code> / <code>apiResources()</code> expand to the same seven (or five)
 conventional names per entry. <code>singleton()</code> generates <code>show</code>, <code>edit</code>, and
