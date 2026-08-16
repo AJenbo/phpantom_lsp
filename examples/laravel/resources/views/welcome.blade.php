@@ -22,6 +22,12 @@
     @if($user)
         <p>Hello, {{ $user->name }}!</p>
         <p>Email: {{ $user->email }}</p>
+
+        {{-- A raw echo opens at its own single brace, so what it holds is
+             PHP like any other expression: bio() is an @method on
+             BlogAuthor and completes, hovers, and navigates here. The only
+             difference from the escaped form is the missing e() call. --}}
+        <p>{!! $user->bio() !!}</p>
     @endif
 
     {{-- The inline @php(…) directive assigns just like the block form:

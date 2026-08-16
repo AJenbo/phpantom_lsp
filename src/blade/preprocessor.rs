@@ -5,7 +5,11 @@ use super::source_map::BladeSourceMap;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Mode {
     Html,
-    Php,
+    /// PHP expression/statement content scanned for the `}}` / `!!}` echo
+    /// terminators and `@endphp`. The `bool` is true when the mode was
+    /// entered through a raw `{!! … !!}` echo, whose emitted `echo` has no
+    /// `e(` wrapper and so must be closed with a bare `;` instead of `);`.
+    Php(bool),
     /// A raw `<?php` / `<?=` / `<?` tag embedded directly in the template
     /// (i.e. not via `@php`/`@endphp`). Content is passed through verbatim
     /// with no directive/echo scanning, and the mode ends at `?>`. The
@@ -362,6 +366,22 @@ pub fn preprocess_with_vars(
 
     let lines: Vec<&str> = content.lines().collect();
 
+    // The last line holding each echo terminator, computed once so an echo
+    // opener can ask "is there a terminator anywhere after me?" without
+    // rescanning the rest of the file per opener (an opener with none
+    // would otherwise cost O(file) each, O(file²) across a file of them).
+    let last_escaped_echo_close = lines.iter().rposition(|l| l.contains("}}"));
+    let last_raw_echo_close = lines.iter().rposition(|l| l.contains("!!}"));
+    // Whether the echo currently open in `Mode::Php` has no terminator
+    // anywhere ahead of it. Blade compiles an unpaired opener as literal
+    // text, but masking it would break completion inside an echo that is
+    // simply not finished being typed yet, so the expression is kept and
+    // closed at end of line instead: one line degrades rather than the
+    // whole rest of the template being swallowed as PHP. Line-scoped:
+    // reset at the top of each line, since an echo it applies to never
+    // survives the line that opened it.
+    let mut echo_closes_at_eol;
+
     for (line_idx, line) in lines.iter().enumerate() {
         let mut processed = String::new();
         let mut adjustments = vec![(0, 0)]; // (blade_utf16_col, php_utf16_col)
@@ -370,8 +390,10 @@ pub fn preprocess_with_vars(
         let line_chars: Vec<char> = line.chars().collect();
         let mut buffer = String::new();
 
+        echo_closes_at_eol = false;
+
         if mode == Mode::Html && in_php_directive_block {
-            mode = Mode::Php;
+            mode = Mode::Php(false);
         }
 
         let mut char_idx = 0;
@@ -461,18 +483,35 @@ pub fn preprocess_with_vars(
             let mut next_mode = mode;
 
             if mode == Mode::Html {
-                if remaining.starts_with(&['{', '{']) {
+                if remaining.starts_with(&['{', '{'])
+                    && !remaining[1..].starts_with(&['{', '!', '!'])
+                {
                     let is_comment = remaining.starts_with(&['{', '{', '-', '-']);
-                    let is_raw = remaining.starts_with(&['{', '{', '!', '!']);
                     replacement = if is_comment {
                         " /* ".to_string()
-                    } else if is_raw {
-                        " echo (".to_string()
                     } else {
                         " echo e(".to_string()
                     };
-                    match_len = if is_comment || is_raw { 4 } else { 2 };
-                    next_mode = if is_comment { Mode::Comment } else { Mode::Php };
+                    match_len = if is_comment { 4 } else { 2 };
+                    next_mode = if is_comment {
+                        Mode::Comment
+                    } else {
+                        echo_closes_at_eol = !contains_seq(&remaining[2..], &['}', '}'])
+                            && last_escaped_echo_close.is_none_or(|last| last <= line_idx);
+                        Mode::Php(false)
+                    };
+                } else if remaining.starts_with(&['{', '!', '!']) {
+                    // `{!! … !!}` outputs unescaped, so it compiles to a
+                    // naked `echo` with no `e()` wrapper. Blade matches its
+                    // echo tags longest-opening-first, so in `{{!! … !!}}`
+                    // the raw echo starts at the second `{` and the outer
+                    // braces are literal text — the guard above keeps the
+                    // first `{` from being read as an escaped echo instead.
+                    replacement = " echo ".to_string();
+                    match_len = 3;
+                    next_mode = Mode::Php(true);
+                    echo_closes_at_eol = !contains_seq(&remaining[3..], &['!', '!', '}'])
+                        && last_raw_echo_close.is_none_or(|last| last <= line_idx);
                 } else if remaining.starts_with(&['<', '?', 'p', 'h', 'p']) {
                     // Raw <?php tag embedded directly in the template (not via @php).
                     match_len = 5;
@@ -534,7 +573,7 @@ pub fn preprocess_with_vars(
                             let after_php = rest_str[3..].trim_start();
                             if !after_php.starts_with('(') {
                                 in_php_directive_block = true;
-                                next_mode = Mode::Php;
+                                next_mode = Mode::Php(false);
                                 replacement = "".to_string();
                             } else {
                                 replacement = format!(" {} ", translate_directive(directive));
@@ -766,7 +805,7 @@ pub fn preprocess_with_vars(
                             }
                         } else {
                             replacement = format!(" {}; ", translate_directive(directive));
-                            next_mode = Mode::Php;
+                            next_mode = Mode::Php(false);
                         }
                     }
                 } else if remaining.starts_with(&[':'])
@@ -848,14 +887,19 @@ pub fn preprocess_with_vars(
                     match_len = 2;
                     next_mode = Mode::Html;
                 }
-            } else if mode == Mode::Php {
-                if remaining.starts_with(&['}', '}']) || remaining.starts_with(&['!', '!', '}']) {
+            } else if let Mode::Php(raw_echo) = mode {
+                // Each echo form only closes at its own terminator: `!!}`
+                // ends a raw echo and `}}` an escaped one, exactly as
+                // Blade's compiler matches them. A raw echo opened a bare
+                // `echo ` with no `e(`, so there is no call to close, only
+                // the statement.
+                if raw_echo && remaining.starts_with(&['!', '!', '}']) {
+                    replacement = "; ".to_string();
+                    match_len = 3;
+                    next_mode = Mode::Html;
+                } else if !raw_echo && remaining.starts_with(&['}', '}']) {
                     replacement = "); ".to_string();
-                    match_len = if remaining.starts_with(&['!', '!', '}']) {
-                        3
-                    } else {
-                        2
-                    };
+                    match_len = 2;
                     next_mode = Mode::Html;
                 } else if remaining.starts_with(&['@', 'e', 'n', 'd', 'p', 'h', 'p']) {
                     in_php_directive_block = false;
@@ -1042,6 +1086,29 @@ pub fn preprocess_with_vars(
             buffer.push(ch);
             char_idx += 1;
             current_utf16_col += ch.len_utf16() as u32;
+        }
+
+        // An echo opener with nothing left in the file that could close it
+        // is literal text to Blade, but masking it would break completion
+        // inside an echo that is simply not finished being typed yet. Keep
+        // the expression and close it at end of line instead, so at most
+        // one line degrades rather than every later line being emitted as
+        // PHP and the wrapper's closing brace landing inside the unclosed
+        // echo.
+        if let Mode::Php(raw_echo) = mode
+            && echo_closes_at_eol
+        {
+            flush_buffer(
+                &mut processed,
+                &mut buffer,
+                mode,
+                current_utf16_col,
+                &mut adjustments,
+            );
+            processed.push_str(if raw_echo { "; " } else { "); " });
+            adjustments.push((current_utf16_col, utf16_count(&processed) as u32));
+            mode = Mode::Html;
+            in_string = None;
         }
 
         // A bound-attribute expression whose closing quote is on a later
@@ -1667,6 +1734,11 @@ fn bound_attr_open_len(rem: &[char]) -> Option<usize> {
         Some('"') | Some('\'') => Some(i + 1),
         _ => None,
     }
+}
+
+/// Whether `needle` occurs anywhere in `haystack`.
+fn contains_seq(haystack: &[char], needle: &[char]) -> bool {
+    haystack.windows(needle.len()).any(|w| w == needle)
 }
 
 /// Whether a bound attribute delimited by `quote` closes on a line after
@@ -2793,6 +2865,101 @@ mod tests {
         assert!(
             php.contains("echo e( \"}} \" );"),
             "Failed to parse braces inside string: {}",
+            php
+        );
+    }
+
+    /// A raw `{!! … !!}` echo compiles to a naked `echo` with no `e()`
+    /// wrapper, and it starts at `{!!`, not `{{!!`: `{!! $v !!}` after a
+    /// `<?php $v = …; ?>` block must count as a use of `$v`.
+    #[test]
+    fn test_preprocess_raw_echo_single_brace() {
+        let content = "<?php\n$acmeProfile = \"xxx\";\n?>\n\n{!! $acmeProfile !!}\n";
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("echo  $acmeProfile ;"),
+            "raw echo should emit a naked echo of the expression: {}",
+            php
+        );
+    }
+
+    /// Blade matches echo tags longest-opening-first, so `{{!! $v !!}}` is
+    /// a literal `{`, a raw echo of `$v`, and a literal `}` — not an
+    /// escaped echo of `!! $v !!`.
+    #[test]
+    fn test_preprocess_raw_echo_wrapped_in_extra_braces() {
+        let content = "{{!! $html !!}}";
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("echo  $html ;"),
+            "the raw echo inside the extra braces should still compile: {}",
+            php
+        );
+        assert!(
+            !php.contains("echo e("),
+            "the outer braces are literal text, not an escaped echo: {}",
+            php
+        );
+    }
+
+    #[test]
+    fn test_preprocess_raw_and_escaped_echo_close_independently() {
+        let content = "{!! $html !!} and {{ $safe }}";
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("echo  $html ;"),
+            "raw echo emits without e(): {}",
+            php
+        );
+        assert!(
+            php.contains("echo e( $safe );"),
+            "escaped echo still wraps in e(): {}",
+            php
+        );
+    }
+
+    /// An echo opener that nothing in the rest of the file closes must not
+    /// swallow every later line as PHP: it is closed at end of line, so at
+    /// most one line degrades and the rest of the template still parses.
+    #[test]
+    fn test_preprocess_unterminated_echo_opener_is_closed_at_end_of_line() {
+        let content = "<script>if (a) {!!b}</script>\n{{ $after }}\n<p>plain markup</p>\n";
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("echo e( $after );"),
+            "the echo on the next line must still compile: {}",
+            php
+        );
+        assert!(
+            !php.contains("plain markup"),
+            "later markup must be masked as HTML, not emitted as PHP: {}",
+            php
+        );
+        // The unclosed echo must be closed as a statement rather than
+        // left to swallow the wrapper function's closing brace.
+        assert!(
+            php.contains("echo b}</script>; "),
+            "the opener's own line degrades and is closed at its end: {}",
+            php
+        );
+    }
+
+    /// A half-typed echo is not an unpaired opener when a terminator exists
+    /// further down (e.g. the user is typing inside an echo whose `!!}` is
+    /// already there, or another echo's terminator follows): the expression
+    /// must stay open so completion keeps working mid-edit.
+    #[test]
+    fn test_preprocess_echo_spanning_lines_stays_open() {
+        let content = "{{ $user\n    ->name }}\n";
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("echo e( $user"),
+            "the multi-line echo must open: {}",
+            php
+        );
+        assert!(
+            php.contains("->name );"),
+            "the multi-line echo must close at its own terminator: {}",
             php
         );
     }
