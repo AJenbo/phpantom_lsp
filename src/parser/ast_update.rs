@@ -2047,6 +2047,50 @@ RateLimiter::for('api', fn () => null);
     }
 
     #[test]
+    fn an_aliased_provider_config_path_invalidates_config_cache() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let package = dir.path().join("package");
+        let path = package.join("resources/settings.php");
+        std::fs::create_dir_all(path.parent().unwrap()).expect("create resources directory");
+        std::fs::create_dir_all(package.join("alias")).expect("create alias directory");
+        std::fs::write(&path, "<?php return ['stores' => []];").expect("write provider config");
+
+        // Service-provider paths and editor URIs can use different lexical
+        // spellings for the same file. The exact-path fast path must fall
+        // through to canonical comparison in that case.
+        let registered = package.join("alias/../resources/settings.php");
+        assert_ne!(registered, path);
+        assert_eq!(
+            registered.canonicalize().expect("canonical provider path"),
+            path.canonicalize().expect("canonical editor path")
+        );
+
+        let backend = Backend::new_test();
+        backend
+            .laravel_provider_resources
+            .write()
+            .config_files
+            .push(crate::virtual_members::laravel::ProviderResource {
+                path: registered,
+                namespace: "cache".to_string(),
+            });
+        {
+            let mut cache = backend.laravel_string_key_cache.write();
+            cache.config_generation = 17;
+            cache.config_keys = Some(Arc::new(vec!["cache.stores.old".to_string()]));
+            cache.config_open_prefixes = Some(Arc::new(Vec::new()));
+        }
+
+        let uri = crate::util::path_to_uri(&path);
+        backend.update_ast(&uri, "<?php return ['stores' => ['new' => []]];");
+
+        let cache = backend.laravel_string_key_cache.read();
+        assert_eq!(cache.config_generation, 18);
+        assert!(cache.config_keys.is_none());
+        assert!(cache.config_open_prefixes.is_none());
+    }
+
+    #[test]
     fn an_absent_same_named_path_is_not_a_registered_provider_config() {
         let dir = tempfile::tempdir().expect("tempdir");
         let registered = dir.path().join("package/resources/settings.php");
