@@ -1143,6 +1143,19 @@ class Demo
         // replacement rather than the default it swapped out.
         app('pastry.oven')->bake('croissant');                  // → BakeryService
         app('pastry.oven.supplier')->supply(12);                // → CroissantSupplier
+
+        // A provider may list its registrations in the `$bindings` /
+        // `$singletons` arrays Laravel reads off it instead of writing them
+        // out in register(), and a factory whose body builds something
+        // PHPantom cannot follow still declares what it hands back.  All
+        // three are in DemoServiceProvider.
+        app('pastry.counter')->counted('croissant');            // → int
+        app('pastry.plain-oven')->bake('rye');                  // → string
+        app('pastry.tally')->tally()->counted('bun');           // → int
+
+        // Hover any of these keys to see the class it resolves to and the
+        // provider that registered it, and go-to-definition to jump to the
+        // registration itself.
     }
 
 

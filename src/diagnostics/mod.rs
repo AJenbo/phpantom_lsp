@@ -261,6 +261,26 @@ use crate::Backend;
 pub(crate) type SlowDiagnosticObserver<'a> =
     &'a mut dyn FnMut(&'static str, std::time::Duration) -> bool;
 
+/// The [`crate::symbol_map::LaravelStringKind`]s
+/// [`Backend::collect_invalid_laravel_string_key_diagnostics`] can judge.
+///
+/// The kinds it cannot are dropped when the spans are gathered rather than
+/// carried to the check and skipped there, so the reason each one is left
+/// alone is written once: a Blade section or stack name is judged by the
+/// Blade pass, which knows the templates around the one it is written in,
+/// and a container binding key is judged by nothing at all, since anything
+/// can be bound at runtime.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CheckedStringKind {
+    Route,
+    Config,
+    View,
+    Trans,
+    Command,
+    MorphAlias,
+    GateAbility,
+}
+
 // ── Shared helpers ──────────────────────────────────────────────────────────
 
 impl Backend {
@@ -576,6 +596,9 @@ impl Backend {
     /// Emit a warning for each `LaravelStringKey` span whose key does
     /// not resolve to any declaration (typo in route name, config key,
     /// view name, or translation key).
+    ///
+    /// Only the kinds this pass can judge reach the check itself; see
+    /// [`CheckedStringKind`].
     fn collect_invalid_laravel_string_key_diagnostics(
         &self,
         uri: &str,
@@ -599,7 +622,7 @@ impl Backend {
         let mut has_command = false;
         let mut has_morph_alias = false;
         let mut has_gate_ability = false;
-        let key_spans: Vec<(LaravelStringKind, String, u32, u32)> = {
+        let key_spans: Vec<(CheckedStringKind, String, u32, u32)> = {
             let Some(symbol_map) = self.symbol_maps.read().get(uri).cloned() else {
                 return;
             };
@@ -624,21 +647,46 @@ impl Backend {
                         if *is_write || *is_optional {
                             return None;
                         }
-                        match kind {
-                            LaravelStringKind::Route => has_route = true,
-                            LaravelStringKind::Config => has_config = true,
-                            LaravelStringKind::View => has_view = true,
-                            LaravelStringKind::Trans => has_trans = true,
-                            LaravelStringKind::Command => has_command = true,
-                            LaravelStringKind::MorphAlias => has_morph_alias = true,
-                            LaravelStringKind::GateAbility => has_gate_ability = true,
+                        let checked = match kind {
+                            LaravelStringKind::Route => {
+                                has_route = true;
+                                CheckedStringKind::Route
+                            }
+                            LaravelStringKind::Config => {
+                                has_config = true;
+                                CheckedStringKind::Config
+                            }
+                            LaravelStringKind::View => {
+                                has_view = true;
+                                CheckedStringKind::View
+                            }
+                            LaravelStringKind::Trans => {
+                                has_trans = true;
+                                CheckedStringKind::Trans
+                            }
+                            LaravelStringKind::Command => {
+                                has_command = true;
+                                CheckedStringKind::Command
+                            }
+                            LaravelStringKind::MorphAlias => {
+                                has_morph_alias = true;
+                                CheckedStringKind::MorphAlias
+                            }
+                            LaravelStringKind::GateAbility => {
+                                has_gate_ability = true;
+                                CheckedStringKind::GateAbility
+                            }
                             // A section or stack name is judged against the
                             // templates that render the one it is written
                             // in, which the Blade pass below has and this
-                            // one does not.
-                            LaravelStringKind::Section | LaravelStringKind::Stack => return None,
-                        }
-                        Some((kind.clone(), key.clone(), span.start, span.end))
+                            // one does not.  And anything at all can be bound
+                            // at runtime, so an unrecognised container key
+                            // proves nothing.
+                            LaravelStringKind::Section
+                            | LaravelStringKind::Stack
+                            | LaravelStringKind::ContainerBinding => return None,
+                        };
+                        Some((checked, key.clone(), span.start, span.end))
                     } else {
                         None
                     }
@@ -748,7 +796,7 @@ impl Backend {
                 // An ability is judged against the model the check names, so
                 // it reports which model rather than the shared
                 // "Unknown <kind>: '<key>'" message the others share.
-                LaravelStringKind::GateAbility => {
+                CheckedStringKind::GateAbility => {
                     if !gate_ability_space_is_open
                         && !gate_abilities.is_empty()
                         && let Some(message) =
@@ -769,7 +817,7 @@ impl Backend {
                     }
                     continue;
                 }
-                LaravelStringKind::Route => {
+                CheckedStringKind::Route => {
                     // A package with no routes of its own, whose names are
                     // registered by the host application, cannot be judged:
                     // the valid set is unknown, not empty.  Installed
@@ -781,7 +829,7 @@ impl Backend {
                     }
                     (route_keys.contains(key), "route", "invalid_laravel_route")
                 }
-                LaravelStringKind::Config => {
+                CheckedStringKind::Config => {
                     // Only judge a key whose config file we actually read.
                     // An unknown root means the file never reached us, so
                     // the key cannot be wrong as far as we can tell, while
@@ -797,10 +845,10 @@ impl Backend {
                             .any(|k| k.starts_with(&format!("{}.", key)));
                     (valid, "config key", "invalid_laravel_config")
                 }
-                LaravelStringKind::View => {
+                CheckedStringKind::View => {
                     (view_keys.contains(key), "view", "invalid_laravel_view")
                 }
-                LaravelStringKind::Trans => {
+                CheckedStringKind::Trans => {
                     // When no translation files are found at all, skip trans
                     // diagnostics entirely.  This avoids false positives in
                     // non-Laravel projects (WordPress, GetText) that also use
@@ -814,7 +862,7 @@ impl Backend {
                             .any(|k| k.starts_with(&format!("{}.", key)));
                     (valid, "translation key", "invalid_laravel_trans")
                 }
-                LaravelStringKind::Command => {
+                CheckedStringKind::Command => {
                     // When no commands were indexed at all, skip command
                     // diagnostics entirely.  The scan is heuristic (it relies
                     // on the `*Command` naming convention), so an empty index
@@ -829,8 +877,7 @@ impl Backend {
                         "invalid_laravel_command",
                     )
                 }
-                LaravelStringKind::Section | LaravelStringKind::Stack => continue,
-                LaravelStringKind::MorphAlias => {
+                CheckedStringKind::MorphAlias => {
                     let Some(aliases) = &morph_aliases else {
                         continue;
                     };

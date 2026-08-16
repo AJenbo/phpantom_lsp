@@ -10,8 +10,11 @@ use App\Support\BakeryService;
 use App\Support\CarbonMixin;
 use App\Support\CollectionMixin;
 use App\Support\CroissantSupplier;
+use App\Support\PastryCounter;
+use App\Support\PlainOven;
 use App\View\Composers\SidebarComposer;
 use Carbon\CarbonImmutable;
+use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Support\Collection;
@@ -25,6 +28,21 @@ use League\Flysystem\Local\LocalFilesystemAdapter;
 
 class DemoServiceProvider extends BaseDemoServiceProvider
 {
+    /**
+     * Laravel reads these two arrays off the provider itself and applies them
+     * once register() has run, so a key listed here binds exactly as a
+     * `bind()` / `singleton()` call would.  Hover either key where it is
+     * resolved and PHPantom reports the class; go-to-definition jumps back to
+     * the entry below.
+     */
+    public array $bindings = [
+        'pastry.counter' => PastryCounter::class,
+    ];
+
+    public array $singletons = [
+        'pastry.plain-oven' => PlainOven::class,
+    ];
+
     public function register(): void
     {
         // A container key is not always written as a literal.  This one lives
@@ -42,6 +60,14 @@ class DemoServiceProvider extends BaseDemoServiceProvider
         // `alias()` takes its arguments the other way round from `bind()`:
         // the second one is the new name, the first is what it stands for.
         $this->app->alias(CroissantSupplier::class, static::$abstract . '.supplier');
+
+        // A factory that hands back whatever something else builds says
+        // nothing PHPantom can follow, but it does declare what comes out.
+        // The declared return type is the author's own statement of what the
+        // key holds, so that is what it resolves to.
+        $this->app->singleton('pastry.tally', function (Application $app): PastryCounter {
+            return $app->make('pastry.counter')->tally();
+        });
     }
 
     public function boot(): void

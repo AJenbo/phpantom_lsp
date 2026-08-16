@@ -763,19 +763,37 @@ fn collect_namespaced_trans_shapes_from_locale_dir(
 
 // ─── Completion ─────────────────────────────────────────────────────────────
 
-impl Backend {
-    /// Try Laravel string key completion.
-    ///
-    /// Detects the cursor inside the first string argument of `route()`,
-    /// `config()`, `view()`, `__()`, etc. and offers matching key names.
-    pub(crate) fn try_laravel_string_key_completion(
-        &self,
-        content: &str,
-        position: Position,
-    ) -> Option<CompletionResponse> {
-        let ctx = detect_laravel_string_key_context(content, position)?;
+/// The icon an editor shows beside a completed string key: whatever the key
+/// names is what it should look like.
+fn string_key_item_kind(kind: &LaravelStringKind) -> CompletionItemKind {
+    match kind {
+        LaravelStringKind::Config => CompletionItemKind::PROPERTY,
+        LaravelStringKind::View => CompletionItemKind::FILE,
+        LaravelStringKind::Trans => CompletionItemKind::TEXT,
+        LaravelStringKind::MorphAlias => CompletionItemKind::ENUM_MEMBER,
+        LaravelStringKind::GateAbility => CompletionItemKind::METHOD,
+        LaravelStringKind::Route
+        | LaravelStringKind::Command
+        | LaravelStringKind::Section
+        | LaravelStringKind::Stack
+        | LaravelStringKind::ContainerBinding => CompletionItemKind::VALUE,
+    }
+}
 
-        let mut candidates = match ctx.kind {
+impl Backend {
+    /// Every name a string key of `kind` could be, unfiltered.
+    ///
+    /// Three kinds have no list to offer. A Blade section or stack name is
+    /// completed from the raw template instead
+    /// (`crate::completion::handler::blade_block_name`): what a name may be
+    /// depends on the layouts above the file, and the edit has to land in
+    /// Blade coordinates rather than in the virtual PHP this detection reads.
+    /// A container binding key is written where a class name is equally
+    /// valid, which ordinary class completion already offers, and the set of
+    /// keys is open besides — a list of them would read as the whole answer
+    /// when it is not.
+    fn string_key_candidates(&self, kind: &LaravelStringKind) -> Vec<String> {
+        match kind {
             LaravelStringKind::Route => self.cached_route_names(),
             LaravelStringKind::Config => self.cached_config_keys(),
             LaravelStringKind::View => self.cached_view_names(),
@@ -787,13 +805,24 @@ impl Backend {
                 aliases
             }
             LaravelStringKind::GateAbility => self.cached_gate_abilities(),
-            // Section and stack names are completed from the raw template
-            // instead (`crate::completion::handler::blade_block_name`):
-            // what a name may be depends on the layouts above the file,
-            // and the edit has to land in Blade coordinates rather than
-            // the virtual PHP this detection reads.
-            LaravelStringKind::Section | LaravelStringKind::Stack => Vec::new(),
-        };
+            LaravelStringKind::Section
+            | LaravelStringKind::Stack
+            | LaravelStringKind::ContainerBinding => Vec::new(),
+        }
+    }
+
+    /// Try Laravel string key completion.
+    ///
+    /// Detects the cursor inside the first string argument of `route()`,
+    /// `config()`, `view()`, `__()`, etc. and offers matching key names.
+    pub(crate) fn try_laravel_string_key_completion(
+        &self,
+        content: &str,
+        position: Position,
+    ) -> Option<CompletionResponse> {
+        let ctx = detect_laravel_string_key_context(content, position)?;
+
+        let mut candidates = self.string_key_candidates(&ctx.kind);
 
         // For config-backed attributes like #[Database('mysql')], filter
         // to sub-keys under the relevant config prefix and strip it so
@@ -838,18 +867,7 @@ impl Backend {
             })
             .enumerate()
             .map(|(i, name)| {
-                let kind = match ctx.kind {
-                    LaravelStringKind::Route => CompletionItemKind::VALUE,
-                    LaravelStringKind::Config => CompletionItemKind::PROPERTY,
-                    LaravelStringKind::View => CompletionItemKind::FILE,
-                    LaravelStringKind::Trans => CompletionItemKind::TEXT,
-                    LaravelStringKind::Command => CompletionItemKind::VALUE,
-                    LaravelStringKind::MorphAlias => CompletionItemKind::ENUM_MEMBER,
-                    LaravelStringKind::GateAbility => CompletionItemKind::METHOD,
-                    LaravelStringKind::Section | LaravelStringKind::Stack => {
-                        CompletionItemKind::VALUE
-                    }
-                };
+                let kind = string_key_item_kind(&ctx.kind);
                 CompletionItem {
                     label: name.clone(),
                     kind: Some(kind),
@@ -878,6 +896,50 @@ impl Backend {
 mod tests {
     use super::*;
     use tower_lsp::lsp_types::Position;
+
+    /// Three kinds are recorded as spans but completed from somewhere else,
+    /// or not at all, so they must offer nothing here rather than an empty
+    /// list dressed up as the answer.
+    #[test]
+    fn the_kinds_completed_elsewhere_offer_no_candidates() {
+        let backend = crate::test_fixtures::make_backend();
+        for kind in [
+            LaravelStringKind::Section,
+            LaravelStringKind::Stack,
+            LaravelStringKind::ContainerBinding,
+        ] {
+            assert!(
+                backend.string_key_candidates(&kind).is_empty(),
+                "{kind:?} should offer no candidates"
+            );
+        }
+    }
+
+    /// Whatever a key names decides the icon beside it.
+    #[test]
+    fn a_string_key_is_iconed_by_what_it_names() {
+        use tower_lsp::lsp_types::CompletionItemKind;
+        for (kind, expected) in [
+            (LaravelStringKind::Config, CompletionItemKind::PROPERTY),
+            (LaravelStringKind::View, CompletionItemKind::FILE),
+            (LaravelStringKind::Trans, CompletionItemKind::TEXT),
+            (
+                LaravelStringKind::MorphAlias,
+                CompletionItemKind::ENUM_MEMBER,
+            ),
+            (LaravelStringKind::GateAbility, CompletionItemKind::METHOD),
+            (LaravelStringKind::Route, CompletionItemKind::VALUE),
+            (LaravelStringKind::Command, CompletionItemKind::VALUE),
+            (LaravelStringKind::Section, CompletionItemKind::VALUE),
+            (LaravelStringKind::Stack, CompletionItemKind::VALUE),
+            (
+                LaravelStringKind::ContainerBinding,
+                CompletionItemKind::VALUE,
+            ),
+        ] {
+            assert_eq!(string_key_item_kind(&kind), expected, "for {kind:?}");
+        }
+    }
 
     #[test]
     fn detects_route_call() {

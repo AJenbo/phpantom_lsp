@@ -215,6 +215,48 @@ async fn hover_over_x_with_extra_files(extra: &[(&str, &str)], consumer: &str) -
     }
 }
 
+/// Open a consumer and hover the container key inside `needle`, returning the
+/// hover text for the string literal itself rather than for the value it
+/// produces.
+async fn hover_over_key(extra: &[(&str, &str)], consumer: &str, key: &str) -> String {
+    let mut files = base_files();
+    files.extend_from_slice(extra);
+    files.push(("src/Consumer.php", consumer));
+    let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, &files);
+    let uri = Url::from_file_path(dir.path().join("src/Consumer.php")).unwrap();
+
+    backend.initialized(InitializedParams {}).await;
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: consumer.to_string(),
+            },
+        })
+        .await;
+
+    let position = position_of(consumer, key);
+    let hover = backend
+        .handle_hover(uri.as_str(), consumer, position)
+        .expect("hover should resolve");
+    match &hover.contents {
+        HoverContents::Markup(markup) => markup.value.clone(),
+        _ => panic!("expected MarkupContent"),
+    }
+}
+
+/// The position of the first character of `needle` in `content`.
+fn position_of(content: &str, needle: &str) -> Position {
+    let idx = content.find(needle).expect("needle should be present");
+    let prefix = &content[..idx];
+    Position {
+        line: prefix.bytes().filter(|b| *b == b'\n').count() as u32,
+        character: prefix.rsplit('\n').next().unwrap().len() as u32,
+    }
+}
+
 fn consumer(body: &str) -> String {
     format!(
         "<?php\nnamespace App;\nclass Consumer {{\n    public function go(): void {{\n        $x = {body};\n        $x;\n    }}\n}}\n"
@@ -288,6 +330,398 @@ async fn an_unbound_string_key_stays_unresolved() {
     assert!(
         !text.contains("nothing.binds.this"),
         "an unbound key must not be reported as a class, got: {text}"
+    );
+}
+
+/// A provider that lists its registrations in the `$bindings` / `$singletons`
+/// arrays Laravel reads instead of writing them out in `register()`.
+const ARRAY_BINDING_PROVIDER_PHP: &str = r#"<?php
+namespace App;
+
+use App\Support\Clock;
+use App\Support\FeatureFlags;
+use Sentry\State\HubInterface;
+use Sentry\Client;
+
+class ArrayBindingProvider
+{
+    public array $bindings = [
+        'array.clock' => Clock::class,
+        HubInterface::class => Client::class,
+    ];
+
+    public $singletons = [
+        'array.flags' => FeatureFlags::class,
+    ];
+}
+"#;
+
+const PROVIDERS_WITH_ARRAYS_PHP: &str = "<?php\nreturn [\n    App\\AppServiceProvider::class,\n    Sentry\\Laravel\\ServiceProvider::class,\n    App\\ArrayBindingProvider::class,\n];\n";
+
+fn array_binding_files() -> [(&'static str, &'static str); 2] {
+    [
+        ("src/ArrayBindingProvider.php", ARRAY_BINDING_PROVIDER_PHP),
+        ("bootstrap/providers.php", PROVIDERS_WITH_ARRAYS_PHP),
+    ]
+}
+
+/// Laravel applies a provider's `$bindings` array itself, so the keys in it
+/// bind exactly as a `bind()` call in `register()` would.
+#[tokio::test]
+async fn a_bindings_array_entry_resolves_to_its_class() {
+    let text =
+        hover_over_x_with_extra_files(&array_binding_files(), &consumer("app('array.clock')"))
+            .await;
+    assert!(
+        text.contains("Clock"),
+        "expected the $bindings entry 'array.clock' to resolve to Clock, got: {text}"
+    );
+}
+
+/// `$singletons` is read the same way.
+#[tokio::test]
+async fn a_singletons_array_entry_resolves_to_its_class() {
+    let text =
+        hover_over_x_with_extra_files(&array_binding_files(), &consumer("app('array.flags')"))
+            .await;
+    assert!(
+        text.contains("FeatureFlags"),
+        "expected the $singletons entry 'array.flags' to resolve to FeatureFlags, got: {text}"
+    );
+}
+
+/// A `$bindings` entry keyed by a contract binds a name that already resolves
+/// on its own, and the contract is what the application declared it wants:
+/// asking for it must not hand back the concrete behind it.
+#[tokio::test]
+async fn a_bindings_array_entry_keyed_by_a_contract_keeps_the_contract() {
+    let text = hover_over_x_with_extra_files(
+        &array_binding_files(),
+        &consumer("app(\\Sentry\\State\\HubInterface::class)"),
+    )
+    .await;
+    assert!(
+        text.contains("HubInterface"),
+        "expected the contract to stay the type, got: {text}"
+    );
+    assert!(
+        !text.contains("Client"),
+        "the concrete behind the contract must not replace it, got: {text}"
+    );
+}
+
+/// A factory whose body builds nothing recognisable still says what it hands
+/// back when it declares a return type.
+#[tokio::test]
+async fn a_factory_resolves_through_its_declared_return_type() {
+    const TYPED_FACTORY_PROVIDER_PHP: &str = r#"<?php
+namespace App;
+
+use App\Support\Clock;
+
+class TypedFactoryProvider
+{
+    public function register(): void
+    {
+        $this->app->singleton('typed.clock', function ($app): Clock {
+            return $app->make(self::class)->build();
+        });
+    }
+}
+"#;
+    const PROVIDERS_WITH_TYPED_PHP: &str = "<?php\nreturn [\n    App\\AppServiceProvider::class,\n    Sentry\\Laravel\\ServiceProvider::class,\n    App\\TypedFactoryProvider::class,\n];\n";
+
+    let extra = [
+        ("src/TypedFactoryProvider.php", TYPED_FACTORY_PROVIDER_PHP),
+        ("bootstrap/providers.php", PROVIDERS_WITH_TYPED_PHP),
+    ];
+    let text = hover_over_x_with_extra_files(&extra, &consumer("app('typed.clock')")).await;
+    assert!(
+        text.contains("Clock"),
+        "expected the declared return type to settle the binding, got: {text}"
+    );
+}
+
+/// Hovering the key itself reports what it resolves to and which provider
+/// registered it, rather than describing the value the call produces.
+#[tokio::test]
+async fn hovering_a_container_key_reports_its_binding() {
+    let source = consumer("app('sentry')");
+    let text = hover_over_key(&[], &source, "sentry');").await;
+    assert!(
+        text.contains("Resolves to `Sentry\\HubAdapter`"),
+        "expected the hover to name the bound class, got: {text}"
+    );
+    assert!(
+        text.contains("AppServiceProvider.php"),
+        "expected the hover to name the registering provider, got: {text}"
+    );
+}
+
+/// A key the framework declares in its own core alias table has no
+/// registration of its own, so its class is all it has to show.
+#[tokio::test]
+async fn hovering_a_core_alias_reports_only_its_class() {
+    let source = consumer("app('app')");
+    let text = hover_over_key(&[], &source, "app');").await;
+    assert!(
+        text.contains("Illuminate\\Foundation\\Application"),
+        "expected the core alias to resolve to the application, got: {text}"
+    );
+    assert!(
+        !text.contains("Registered in"),
+        "a core alias has no provider registration to name, got: {text}"
+    );
+}
+
+/// A key nothing binds is described as the container key it is, without
+/// claiming a class it does not resolve to.
+#[tokio::test]
+async fn hovering_an_unbound_container_key_claims_nothing() {
+    let source = consumer("app('nothing.binds.this')");
+    let text = hover_over_key(&[], &source, "nothing.binds.this');").await;
+    assert!(
+        text.contains("**Container** `nothing.binds.this`"),
+        "expected the key to be named as a container key, got: {text}"
+    );
+    assert!(
+        !text.contains("Resolves to"),
+        "an unbound key must not claim a class, got: {text}"
+    );
+    assert!(
+        !text.contains("Registered in"),
+        "an unbound key has no registration, got: {text}"
+    );
+}
+
+/// Go-to-definition on a key nothing binds offers nothing rather than
+/// guessing at a registration.
+#[tokio::test]
+async fn goto_definition_on_an_unbound_container_key_offers_nothing() {
+    let source = consumer("app('nothing.binds.this')");
+    let response = goto_definition_on_key(&source, "nothing.binds.this');").await;
+    assert!(
+        response.is_none(),
+        "expected no definition for an unbound key, got: {response:?}"
+    );
+}
+
+/// Open a consumer and run go-to-definition on the container key inside
+/// `needle`.
+async fn goto_definition_on_key(consumer: &str, needle: &str) -> Option<GotoDefinitionResponse> {
+    let mut files = base_files();
+    files.push(("src/Consumer.php", consumer));
+    let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, &files);
+    let uri = Url::from_file_path(dir.path().join("src/Consumer.php")).unwrap();
+
+    backend.initialized(InitializedParams {}).await;
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: consumer.to_string(),
+            },
+        })
+        .await;
+
+    backend
+        .goto_definition(GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: position_of(consumer, needle),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap()
+}
+
+/// Go-to-definition on the key lands on the registration that bound it.
+#[tokio::test]
+async fn goto_definition_on_a_container_key_lands_on_its_registration() {
+    let source = consumer("app('sentry')");
+    let response = goto_definition_on_key(&source, "sentry');")
+        .await
+        .expect("the key should navigate");
+
+    let locations = match response {
+        GotoDefinitionResponse::Array(locations) => locations,
+        GotoDefinitionResponse::Scalar(location) => vec![location],
+        GotoDefinitionResponse::Link(_) => panic!("expected plain locations"),
+    };
+    let registration = &locations[0];
+    assert!(
+        registration.uri.path().ends_with("AppServiceProvider.php"),
+        "expected the registration site first, got: {:?}",
+        locations
+    );
+    let provider_line = APP_SERVICE_PROVIDER
+        .lines()
+        .position(|line| line.contains("singleton('sentry'"))
+        .expect("the fixture should register 'sentry'") as u32;
+    assert_eq!(
+        registration.range.start.line, provider_line,
+        "expected the line the key is bound on, got: {:?}",
+        locations
+    );
+    assert!(
+        locations
+            .iter()
+            .any(|location| location.uri.path().ends_with("HubAdapter.php")),
+        "expected the bound class to be offered too, got: {:?}",
+        locations
+    );
+}
+
+/// A core alias has no registration of its own, so go-to-definition offers
+/// the class alone rather than nothing.
+#[tokio::test]
+async fn goto_definition_on_a_core_alias_offers_the_class_alone() {
+    let source = consumer("app('app')");
+    let response = goto_definition_on_key(&source, "app');")
+        .await
+        .expect("the core alias should navigate");
+    let locations = match response {
+        GotoDefinitionResponse::Array(locations) => locations,
+        GotoDefinitionResponse::Scalar(location) => vec![location],
+        GotoDefinitionResponse::Link(_) => panic!("expected plain locations"),
+    };
+    assert_eq!(locations.len(), 1, "got: {locations:?}");
+    assert!(
+        locations[0].uri.path().ends_with("Application.php"),
+        "expected the bound class, got: {locations:?}"
+    );
+}
+
+/// A key bound to a class the project does not actually have still navigates
+/// to the registration: that is where the mistake is.
+#[tokio::test]
+async fn goto_definition_falls_back_to_the_registration_alone() {
+    const GHOST_PROVIDER_PHP: &str = r#"<?php
+namespace App;
+
+class GhostServiceProvider
+{
+    public function register(): void
+    {
+        $this->app->singleton('ghost', fn () => new \App\Missing\Ghost());
+    }
+}
+"#;
+    const PROVIDERS_WITH_GHOST_PHP: &str = "<?php\nreturn [\n    App\\AppServiceProvider::class,\n    Sentry\\Laravel\\ServiceProvider::class,\n    App\\GhostServiceProvider::class,\n];\n";
+
+    let source = consumer("app('ghost')");
+    let mut files = base_files();
+    files.push(("src/GhostServiceProvider.php", GHOST_PROVIDER_PHP));
+    files.push(("bootstrap/providers.php", PROVIDERS_WITH_GHOST_PHP));
+    files.push(("src/Consumer.php", &source));
+    let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, &files);
+    let uri = Url::from_file_path(dir.path().join("src/Consumer.php")).unwrap();
+
+    backend.initialized(InitializedParams {}).await;
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: source.clone(),
+            },
+        })
+        .await;
+
+    let response = backend
+        .goto_definition(GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: position_of(&source, "ghost');"),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap()
+        .expect("the registration should still navigate");
+
+    let locations = match response {
+        GotoDefinitionResponse::Array(locations) => locations,
+        GotoDefinitionResponse::Scalar(location) => vec![location],
+        GotoDefinitionResponse::Link(_) => panic!("expected plain locations"),
+    };
+    assert_eq!(locations.len(), 1, "got: {locations:?}");
+    assert!(
+        locations[0]
+            .uri
+            .path()
+            .ends_with("GhostServiceProvider.php"),
+        "expected the registration, got: {locations:?}"
+    );
+}
+
+/// Find-references on a container key collects every call that asks for it,
+/// however the call is spelled, plus the registration that bound it.
+#[tokio::test]
+async fn find_references_on_a_container_key_collects_every_call() {
+    const USAGES_PHP: &str = r#"<?php
+namespace App;
+class Usages
+{
+    public function go(): void
+    {
+        app('sentry');
+        resolve('sentry');
+        app()->make('sentry');
+        \Illuminate\Support\Facades\App::make('sentry');
+        app('clock');
+    }
+}
+"#;
+    let mut files = base_files();
+    files.push(("src/Usages.php", USAGES_PHP));
+    let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, &files);
+    let uri = Url::from_file_path(dir.path().join("src/Usages.php")).unwrap();
+
+    backend.initialized(InitializedParams {}).await;
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: USAGES_PHP.to_string(),
+            },
+        })
+        .await;
+
+    let locations = backend
+        .references(ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier::new(uri.clone()),
+                position: position_of(USAGES_PHP, "sentry');"),
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+            context: ReferenceContext {
+                include_declaration: true,
+            },
+        })
+        .await
+        .unwrap()
+        .unwrap_or_default();
+
+    let usages = locations.iter().filter(|l| l.uri == uri).count();
+    assert_eq!(
+        usages, 4,
+        "expected all four spellings of the 'sentry' lookup and not the 'clock' one, got: {locations:?}"
+    );
+    assert!(
+        locations
+            .iter()
+            .any(|l| l.uri.path().ends_with("AppServiceProvider.php")),
+        "expected the registration among the references, got: {locations:?}"
     );
 }
 

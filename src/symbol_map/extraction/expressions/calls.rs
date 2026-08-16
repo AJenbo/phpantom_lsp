@@ -164,6 +164,10 @@ fn extract_call<'a>(
                         || name_clean.eq_ignore_ascii_case("trans_choice")
                     {
                         Some(crate::symbol_map::LaravelStringKind::Trans)
+                    } else if name_clean.eq_ignore_ascii_case("app")
+                        || name_clean.eq_ignore_ascii_case("resolve")
+                    {
+                        Some(crate::symbol_map::LaravelStringKind::ContainerBinding)
                     } else {
                         None
                     };
@@ -222,6 +226,17 @@ fn extract_call<'a>(
                 }
                 if is_laravel_config_repository_call(method_call.object, &member_name) {
                     try_emit_laravel_config_key_span(
+                        &member_name,
+                        &method_call.argument_list,
+                        ctx.content,
+                        &mut ctx.spans,
+                    );
+                }
+                // `$this->app->singleton('payments', …)` registers a container
+                // key and `app()->make('payments')` asks for one.  Gated on the
+                // receiver: `make` and `bind` say nothing on their own.
+                if is_laravel_container_expr(method_call.object) {
+                    try_emit_container_key_span(
                         &member_name,
                         &method_call.argument_list,
                         ctx.content,
@@ -533,6 +548,18 @@ fn extract_call<'a>(
                 {
                     try_emit_laravel_string_span(
                         crate::symbol_map::LaravelStringKind::Trans,
+                        &static_call.argument_list,
+                        ctx.content,
+                        &mut ctx.spans,
+                    );
+                }
+                // `App::make('payments')` and the registrations written
+                // against the same facade.
+                if clean_subject.eq_ignore_ascii_case("App")
+                    || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\App")
+                {
+                    try_emit_container_key_span(
+                        &member_name,
                         &static_call.argument_list,
                         ctx.content,
                         &mut ctx.spans,

@@ -658,6 +658,22 @@ impl Backend {
                 ("Morph type", detail)
             }
             LaravelStringKind::GateAbility => ("Ability", self.gate_ability_detail(key)),
+            LaravelStringKind::ContainerBinding => {
+                let detail = match self.container_binding_target(key) {
+                    Some(target) => {
+                        let mut detail = format!("Resolves to `{}`", target.fqn);
+                        if let Some(rel) = target
+                            .site
+                            .and_then(|site| self.workspace_relative_path(&site.uri))
+                        {
+                            detail.push_str(&format!("\n\nRegistered in `{}`", rel));
+                        }
+                        detail
+                    }
+                    None => "Container binding".to_string(),
+                };
+                ("Container", detail)
+            }
         };
 
         Some(make_hover(format!("**{}** `{}`\n\n{}", label, key, detail)))

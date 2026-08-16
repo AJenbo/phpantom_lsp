@@ -483,6 +483,11 @@ pub(crate) enum LaravelStringKind {
     /// Blade `@can` directive checks.  Resolves against `Gate::define()`
     /// registrations and the methods of the relevant model's policy.
     GateAbility,
+    /// A service-container binding key: the string `app('payments')`,
+    /// `resolve('payments')`, `App::make('payments')`, or
+    /// `$this->app->make('payments')` asks the container for, and the one a
+    /// service provider registers it under.
+    ContainerBinding,
 }
 
 /// The model a gate check names, recorded alongside its ability span.
