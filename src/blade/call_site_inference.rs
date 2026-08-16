@@ -178,6 +178,26 @@ fn join_call_site_types(types: Vec<PhpType>) -> PhpType {
     }
 }
 
+/// The canonical spelling of a template path, for comparing against a
+/// canonical view root.
+///
+/// A template that has just been deleted has no canonical form of its
+/// own, so its directory is canonicalized instead: the file still has to
+/// resolve to the view name it had, or the callers that render it are
+/// left holding a name nothing answers to.
+fn canonical_path_for_comparison(path: &std::path::Path) -> std::path::PathBuf {
+    if let Ok(canonical) = path.canonicalize() {
+        return canonical;
+    }
+    match (
+        path.parent().and_then(|parent| parent.canonicalize().ok()),
+        path.file_name(),
+    ) {
+        (Some(parent), Some(name)) => parent.join(name),
+        _ => path.to_path_buf(),
+    }
+}
+
 impl Backend {
     /// Compute the variables to inject into a Blade template's virtual
     /// PHP: the members of the class backing a component view (see
@@ -907,21 +927,44 @@ impl Backend {
             }
         };
 
-        // `path` came from a file URI and is absolute; a view root can
-        // be relative when the workspace root was given relative (the
-        // analyse CLI passes `--project-root` through as-is), so
-        // canonicalize each root before comparing.
-        for root in self.laravel_view_roots() {
-            let root = root.canonicalize().unwrap_or(root);
-            if let Ok(rel) = path.strip_prefix(&root) {
-                push_name(rel, "");
+        // Each root is tried against the raw spelling first, so the common
+        // case costs no filesystem calls, and only falls back to canonical
+        // spellings when the raw ones do not line up.  Canonicalizing the
+        // template instead of trying it raw would lose one that is itself
+        // a symlink into a shared directory, since that resolves out of
+        // the view root it sits under.
+        let canonical = std::cell::OnceCell::new();
+        let mut match_root = |root: &std::path::Path, namespace: &str| {
+            if let Ok(rel) = path.strip_prefix(root) {
+                push_name(rel, namespace);
+                return;
             }
+            // A view root can be relative when the workspace root was
+            // given relative (the analyse CLI passes `--project-root`
+            // through as-is), while `path` came from a file URI and is
+            // always absolute.
+            let Ok(root) = root.canonicalize() else {
+                return;
+            };
+            if let Ok(rel) = path.strip_prefix(&root) {
+                push_name(rel, namespace);
+                return;
+            }
+            // The workspace itself can be reached under an alias: macOS
+            // exposes the same directory through both `/var` and
+            // `/private/var`, so a canonical root and a raw template path
+            // describe the same tree under two names.
+            let canonical = canonical.get_or_init(|| canonical_path_for_comparison(&path));
+            if let Ok(rel) = canonical.strip_prefix(&root) {
+                push_name(rel, namespace);
+            }
+        };
+
+        for root in self.laravel_view_roots() {
+            match_root(&root, "");
         }
         for res in &self.laravel_provider_resources.read().view_dirs {
-            let res_path = res.path.canonicalize().unwrap_or_else(|_| res.path.clone());
-            if let Ok(rel) = path.strip_prefix(&res_path) {
-                push_name(rel, &res.namespace);
-            }
+            match_root(&res.path, &res.namespace);
         }
         names
     }
@@ -2070,6 +2113,9 @@ mod tests {
     use crate::php_type::PhpType;
     use tower_lsp::lsp_types::Url;
 
+    #[cfg(unix)]
+    use std::os::unix::fs::symlink;
+
     /// The joined union's member order must not depend on the order the
     /// call sites were visited in, since that order comes from a
     /// `HashMap` snapshot and varies across runs.
@@ -2158,5 +2204,57 @@ mod tests {
             scope.vars.iter().all(|(name, _)| name != "excluded"),
             "non-candidate caller must be skipped: {scope:?}"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn view_name_resolution_normalizes_aliased_file_paths() {
+        let dir = tempfile::tempdir().expect("failed to create test workspace");
+        let real_root = dir.path().join("real-project");
+        let linked_root = dir.path().join("linked-project");
+        let views = real_root.join("resources/views");
+        std::fs::create_dir_all(&views).expect("failed to create view directory");
+        symlink(&real_root, &linked_root).expect("failed to create workspace alias");
+
+        let real_template = views.join("shop.blade.php");
+        std::fs::write(&real_template, "").expect("failed to write view");
+        let linked_template = linked_root.join("resources/views/shop.blade.php");
+        let linked_uri =
+            Url::from_file_path(&linked_template).expect("view path should become a file URI");
+        let backend = Backend::new_test_with_workspace(linked_root, Vec::new());
+
+        assert_eq!(
+            backend.view_names_for_blade_uri(linked_uri.as_str()),
+            vec!["shop"]
+        );
+
+        std::fs::remove_file(real_template).expect("failed to remove view");
+        assert_eq!(
+            backend.view_names_for_blade_uri(linked_uri.as_str()),
+            vec!["shop"]
+        );
+    }
+
+    /// A template that is itself a symlink into a shared directory is
+    /// still addressable by the name it has inside the view root.
+    #[cfg(unix)]
+    #[test]
+    fn view_name_resolution_keeps_symlinked_templates() {
+        let dir = tempfile::tempdir().expect("failed to create test workspace");
+        let root = dir.path().join("project");
+        let views = root.join("resources/views");
+        let shared = dir.path().join("shared");
+        std::fs::create_dir_all(&views).expect("failed to create view directory");
+        std::fs::create_dir_all(&shared).expect("failed to create shared directory");
+
+        let shared_template = shared.join("shop.blade.php");
+        std::fs::write(&shared_template, "").expect("failed to write view");
+        let template = views.join("shop.blade.php");
+        symlink(&shared_template, &template).expect("failed to link view into the root");
+
+        let uri = Url::from_file_path(&template).expect("view path should become a file URI");
+        let backend = Backend::new_test_with_workspace(root, Vec::new());
+
+        assert_eq!(backend.view_names_for_blade_uri(uri.as_str()), vec!["shop"]);
     }
 }
