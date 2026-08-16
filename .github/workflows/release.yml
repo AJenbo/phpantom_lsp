@@ -101,6 +101,7 @@ jobs:
       - name: Build
         shell: bash
         env:
+          CARGO_PROFILE_RELEASE_LTO: "thin"
           # Embed the tag as the version explicitly; actions/checkout
           # fetches a shallow clone, so `git describe` may not see it.
           PHPANTOM_GIT_VERSION: ${{ env.RELEASE_TAG }}
