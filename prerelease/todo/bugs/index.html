@@ -924,6 +924,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Miscellaneous">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b1-editing-a-service-provider-does-not-re-scan-what-it-registers" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B1. Editing a service provider does not re-scan what it registers
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
     </ul>
@@ -1490,6 +1507,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Miscellaneous">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b1-editing-a-service-provider-does-not-re-scan-what-it-registers" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B1. Editing a service provider does not re-scan what it registers
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
     </ul>
@@ -1542,7 +1576,28 @@ each bug's row lives in the current sprint/backlog.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h4 id="b1-editing-a-service-provider-does-not-re-scan-what-it-registers">B1. Editing a service provider does not re-scan what it registers<a class="headerlink" href="#b1-editing-a-service-provider-does-not-re-scan-what-it-registers" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p><code>build_provider_resources</code> runs once, at <code>initialized</code>, and in the
+<code>analyze</code> CLI. Nothing re-runs it when a provider file changes, so
+everything the scan recovers goes stale for the rest of the session:
+a container binding written now needs a restart before <code>app('key')</code>
+resolves, hovers, or navigates, and the same applies to the view
+directories, translation directories, route files, config files, and
+component namespaces a provider registers.</p>
+<p>Every other provider-derived table already has its per-file
+counterpart (<code>refresh_laravel_gates</code>, <code>refresh_laravel_morph_map</code>,
+<code>refresh_laravel_command_index</code>, <code>refresh_laravel_macros</code>,
+<code>refresh_laravel_storage_drivers</code>); provider resources are the one
+table without one. A <code>refresh_laravel_provider_resources(uri,
+content)</code> on the same didChange/didSave path closes it.</p>
+<p>Re-scanning a single file is not enough on its own: the binding table
+is merged across every provider and its precedence depends on which
+provider outranks which, so the refresh has to rebuild the merged set
+rather than patch one file's entries into it. It must also reset
+<code>laravel_aliases</code> and clear the class-not-found cache, the way
+<code>build_provider_resources</code> already does, or the keys it just learned
+stay unresolvable.</p>
 
 
 

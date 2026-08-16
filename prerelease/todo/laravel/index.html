@@ -1356,17 +1356,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l36-container-binding-registrations-from-service-providers" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L36. Container binding registrations from service providers
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l39-unused-view-and-translation-key-detection" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2071,17 +2060,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l36-container-binding-registrations-from-service-providers" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L36. Container binding registrations from service providers
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l39-unused-view-and-translation-key-detection" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2227,7 +2205,7 @@ within the same impact tier.</p>
 <tbody>
 <tr>
 <td>Container bindings registered dynamically or conditionally</td>
-<td>Binding names or targets computed at runtime (variables, environment switches, loops) cannot be recovered statically. Literal <code>bind('name', Target::class)</code>-style registrations in app and package service providers <strong>are</strong> in scope — see L36. Names in the framework's own <code>registerCoreContainerAliases()</code> and the app's alias config already resolve via parsing.</td>
+<td>Binding names or targets computed at runtime (variables, environment switches, loops) cannot be recovered statically. Literal <code>bind('name', Target::class)</code>-style registrations in app and package service providers are recovered, as are the <code>$bindings</code> / <code>$singletons</code> arrays. Names in the framework's own <code>registerCoreContainerAliases()</code> and the app's alias config already resolve via parsing.</td>
 </tr>
 <tr>
 <td>Facade <code>getFacadeAccessor()</code> with string aliases</td>
@@ -2787,11 +2765,6 @@ name), <code>Lang::has()</code>, and the typed config accessors (<code>Config::s
   <code>LaravelStringKey</code> spans instead of the current definition-only
   ad-hoc fallback, so references (and completion/diagnostics)
   work uniformly.</li>
-<li><strong>Container alias strings</strong> — <code>app('cache')</code> already resolves to the
-  concrete class for member completion via the alias tables; wire
-  go-to-definition and hover on the string itself to that resolved
-  class. No new data needed. Provider-registered binding names stay out
-  of scope (see the table at the top).</li>
 </ul>
 <h4 id="l24-translation-depth-json-lang-files-locales-placeholders">L24. Translation depth: JSON lang files, locales, placeholders<a class="headerlink" href="#l24-translation-depth-json-lang-files-locales-placeholders" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Medium-High · Complexity: Medium-High</strong></p>
@@ -2906,27 +2879,6 @@ pass:</p>
 <p>Each family gets the full string-kind treatment for free once wired
 as a <code>LaravelStringKey</code>: completion, go-to-definition (jump to the
 config entry), hover, diagnostics, and references.</p>
-<h4 id="l36-container-binding-registrations-from-service-providers">L36. Container binding registrations from service providers<a class="headerlink" href="#l36-container-binding-registrations-from-service-providers" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<p><code>$this-&gt;app-&gt;bind('payments', StripeGateway::class)</code>, <code>bindIf()</code>,
-<code>singleton()</code>, <code>singletonIf()</code>, <code>scoped()</code>, <code>scopedIf()</code>, <code>instance()</code>,
-and <code>alias()</code> calls in <code>register()</code>/<code>boot()</code> of app and package service
-providers are already scanned for literal <code>(string name, target)</code> pairs
-and merged into the alias table, so <code>app('payments')-&gt;charge()</code>
-resolves members, and the string gets go-to-definition (the
-registration site) and hover. Binding precedence follows what the
-container would actually end up holding: an application's registration
-replaces a framework default, and a subclass provider's replaces its
-parent's.</p>
-<p>The remaining gap is the declarative form: a provider's <code>$bindings</code> /
-<code>$singletons</code> array properties (<code>protected array $bindings =
-['payments' =&gt; StripeGateway::class];</code>) are not read at all, so a
-package that registers that way instead of calling
-<code>bind()</code>/<code>singleton()</code> in <code>register()</code> stays invisible.</p>
-<p>Interface targets follow the declared-types philosophy unchanged: a
-binding <code>bind(Gateway::class, StripeGateway::class)</code> does <strong>not</strong>
-retype <code>app(Gateway::class)</code> to the concrete — the contract is the
-interface.</p>
 <h4 id="l39-unused-view-and-translation-key-detection">L39. Unused view and translation key detection<a class="headerlink" href="#l39-unused-view-and-translation-key-detection" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
 <p>The reverse of the invalid-key diagnostics: keys that are <em>declared</em>
