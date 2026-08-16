@@ -12,11 +12,12 @@ use super::docblock::{
     extract_docblock_symbols_covering, get_docblock_text_with_offset, is_navigable_type,
 };
 use super::{
-    CallSite, ClassRefContext, DocblockMemberRef, SelfStaticParentKind, SubjectText, SymbolKind,
-    SymbolMap, SymbolSpan, TemplateParamDef, UntypedClosureSite, VarDefKind, VarDefSite,
-    ViewReceiverClass, ViewReceiverSite,
+    CallSite, ClassRefContext, DocblockMemberRef, LaravelResourceReceiverSite,
+    SelfStaticParentKind, SubjectText, SymbolKind, SymbolMap, SymbolSpan, TemplateParamDef,
+    UntypedClosureSite, VarDefKind, VarDefSite, ViewReceiverClass, ViewReceiverSite,
 };
 use crate::atom::{bytes_to_str, literal_bytes_to_str};
+use crate::names::OwnedResolvedNames;
 use crate::util::strip_fqn_prefix;
 
 // ─── Extraction context ─────────────────────────────────────────────────────
@@ -70,14 +71,25 @@ struct ExtractionCtx<'a> {
     trivias: &'a [Trivia<'a>],
     /// The full source text of the file being extracted.
     content: &'a str,
+    /// Semantic names resolved by `mago-names` for this file. Production
+    /// indexing supplies this so Laravel-specific syntax never guesses from
+    /// an alias or a namespace-local homonym. Syntax-only unit tests leave it
+    /// absent and retain the legacy textual fallback.
+    resolved_names: Option<&'a OwnedResolvedNames>,
     /// Closures and arrow functions passed as arguments to callable-typed
     /// parameters, used by inlay hints.
     untyped_closure_sites: Vec<UntypedClosureSite>,
     /// Render sites whose receiver only a type settles, left for
     /// `Backend::typed_receiver_view_spans` to confirm.
     view_receiver_sites: Vec<ViewReceiverSite>,
+    /// Resource-name sites whose receiver/enclosing class is type-dependent.
+    resource_receiver_sites: Vec<LaravelResourceReceiverSite>,
     /// The model argument of each authorization check that named one.
     gate_subjects: Vec<crate::symbol_map::GateSubject>,
+    /// Whether this file registers a rate limiter under a name that cannot be
+    /// recovered statically. One such registration makes the known-name set
+    /// open, so unknown-name diagnostics must stand down project-wide.
+    has_dynamic_rate_limiter: bool,
     /// Current conditional nesting depth (if/else, switch, while, for, etc.).
     /// Incremented when entering a conditional block, decremented when leaving.
     cond_nesting_depth: u16,
@@ -104,6 +116,14 @@ struct ExtractionCtx<'a> {
     /// being extracted.  It is what gives `@covers ::name` on a test method
     /// a subject; without one that shape names a global function.
     covers_default_class: Option<crate::atom::Atom>,
+}
+
+impl<'a> ExtractionCtx<'a> {
+    /// Return the semantic name attached to the identifier beginning at
+    /// `offset`, when the production name-resolution pass supplied one.
+    fn resolved_name_at(&self, offset: u32) -> Option<&'a str> {
+        self.resolved_names.and_then(|names| names.get(offset))
+    }
 }
 
 mod class_like;
@@ -145,7 +165,29 @@ fn descend_unhandled<'a>(node: Node<'a, 'a>, ctx: &mut ExtractionCtx<'a>, scope_
 ///
 /// Walks every statement recursively and emits [`SymbolSpan`] entries for
 /// every navigable symbol occurrence.
+#[cfg(test)]
 pub(crate) fn extract_symbol_map(program: &Program<'_>, content: &str) -> SymbolMap {
+    extract_symbol_map_inner(program, content, None)
+}
+
+/// Build a [`SymbolMap`] using the semantic names produced by `mago-names`.
+///
+/// Laravel facade, middleware, and contextual-attribute extraction uses these
+/// names to recognise imports and aliases without mistaking a same-named
+/// application class for a framework class.
+pub(crate) fn extract_symbol_map_with_resolved_names(
+    program: &Program<'_>,
+    content: &str,
+    resolved_names: &OwnedResolvedNames,
+) -> SymbolMap {
+    extract_symbol_map_inner(program, content, Some(resolved_names))
+}
+
+fn extract_symbol_map_inner(
+    program: &Program<'_>,
+    content: &str,
+    resolved_names: Option<&OwnedResolvedNames>,
+) -> SymbolMap {
     let mut ctx = ExtractionCtx {
         spans: Vec::new(),
         var_defs: Vec::new(),
@@ -163,9 +205,12 @@ pub(crate) fn extract_symbol_map(program: &Program<'_>, content: &str) -> Symbol
         instance_method_scopes: Vec::new(),
         trivias: program.trivia.as_slice(),
         content,
+        resolved_names,
         untyped_closure_sites: Vec::new(),
         view_receiver_sites: Vec::new(),
+        resource_receiver_sites: Vec::new(),
         gate_subjects: Vec::new(),
+        has_dynamic_rate_limiter: false,
         cond_nesting_depth: 0,
         cond_block_end_stack: Vec::new(),
         has_laravel_container_attrs: None,
@@ -261,6 +306,7 @@ pub(crate) fn extract_symbol_map(program: &Program<'_>, content: &str) -> Symbol
     ctx.switch_scopes.sort_by_key(|s| s.0);
     ctx.static_method_scopes.sort_by_key(|s| s.0);
     ctx.view_receiver_sites.sort_by_key(|s| s.start);
+    ctx.resource_receiver_sites.sort_by_key(|s| s.start);
 
     let mut member_access_indices: crate::atom::AtomMap<Vec<usize>> =
         crate::atom::AtomMap::default();
@@ -291,7 +337,9 @@ pub(crate) fn extract_symbol_map(program: &Program<'_>, content: &str) -> Symbol
         instance_method_scopes: ctx.instance_method_scopes,
         untyped_closure_sites: ctx.untyped_closure_sites,
         view_receiver_sites: ctx.view_receiver_sites,
+        resource_receiver_sites: ctx.resource_receiver_sites,
         gate_subjects: ctx.gate_subjects,
+        has_dynamic_rate_limiter: ctx.has_dynamic_rate_limiter,
         source_len: u32::try_from(content.len()).unwrap_or(u32::MAX),
     }
 }

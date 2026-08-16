@@ -887,9 +887,20 @@ impl Backend {
         let Ok(url) = tower_lsp::lsp_types::Url::parse(uri) else {
             return Vec::new();
         };
-        let Ok(path) = url.to_file_path() else {
+        let Ok(mut path) = url.to_file_path() else {
             return Vec::new();
         };
+
+        // Roots are canonicalized below, so normalize the file side once as
+        // well. macOS exposes the same temporary directory through `/var`
+        // and `/private/var`; comparing only one canonical side makes every
+        // template under that alias appear to sit outside its view root.
+        path = path.canonicalize().unwrap_or_else(|_| {
+            path.parent()
+                .and_then(|parent| parent.canonicalize().ok())
+                .and_then(|parent| path.file_name().map(|name| parent.join(name)))
+                .unwrap_or(path)
+        });
 
         let mut names = Vec::new();
         let mut push_name = |rel: &std::path::Path, namespace: &str| {

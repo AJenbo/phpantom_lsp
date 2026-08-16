@@ -26,17 +26,25 @@ use Database\Factories\BlogAuthorFactory;
 use Database\Factories\EditorialFactory;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Http\Request;
+use Illuminate\Notifications\Messages\BroadcastMessage;
+use Illuminate\Queue\Middleware\RateLimited;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\App;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Broadcast;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Lang;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Facades\Response;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schedule;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\View;
@@ -834,6 +842,39 @@ class Demo
     }
 
 
+    // ── Config-backed named resources and source-defined names ─────────
+
+    public function namedLaravelResources(): void
+    {
+        // Each string completes from its own config subtree. Hover names the
+        // resource family, Ctrl+Click opens that entry, and references include
+        // both resource calls and direct config() access to the same entry.
+        auth('admin');
+        Auth::guard('admin');
+        Cache::store('memory');
+        Log::channel('daily');
+        Log::stack(['daily', 'stderr']);
+        Storage::disk('pantry');
+        DB::connection('mysql');
+        Queue::connection('redis');
+        Mail::mailer('transactional');
+        Broadcast::connection('internal');
+        config('cache.stores.memory');
+
+        // Receiver types disambiguate connection strings. Queue names remain
+        // free-form, so PHPantom learns them from literals without diagnosing
+        // a name it has not seen before.
+        (new BroadcastMessage([]))
+            ->onConnection('redis')
+            ->onQueue('mail');
+
+        // The limiter is registered in DemoServiceProvider. Its name resolves
+        // from both middleware parameters and queue middleware constructors.
+        Route::middleware(['auth:admin', 'throttle:uploads']);
+        new RateLimited('uploads');
+    }
+
+
     // ── Cache::remember() — closure return type binding ─────────────────
 
     public function cacheRemember(): void
@@ -1089,8 +1130,11 @@ class Demo
     {
         // fake() declares the Filesystem contract but always builds a
         // FilesystemAdapter, so the adapter-only assertion helpers resolve.
+        // Disk names complete from config/filesystems.php and navigate back
+        // to their entries anywhere the Storage facade accepts one.
         Storage::fake('avatars')->assertExists('me.png');
         Storage::persistentFake('logs')->assertMissing('old.log');
+        Storage::forgetDisk(['avatars', 'logs']);
     }
 
 

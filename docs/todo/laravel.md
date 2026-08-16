@@ -582,18 +582,6 @@ still partially lack:
   empty string as the value). No fix when the group file itself doesn't
   exist yet; that case still just diagnoses.
 
-#### L25. Storage disk name strings
-
-**Impact: Low-Medium · Complexity: Low**
-
-`Storage::disk('...')` and the `#[Storage]` container attribute already
-complete against `filesystems.disks.*`, navigate to the disk's entry in
-`config/filesystems.php`, and flag an unknown disk. `Storage::fake()`,
-`persistentFake()`, and `forgetDisk()` still name a disk with none of
-that: their return type is patched to `FilesystemAdapter`, but the
-disk-name argument itself gets no completion, go-to-definition, or
-diagnostic.
-
 #### L27. Legacy `Controller@method` action strings
 
 **Impact: Low · Complexity: Low**
@@ -649,43 +637,6 @@ files across every locale plus all usages; renaming a route name
 updates the `->name()` declaration and all usages; highlight and
 semantic tokens reuse the existing spans. Renaming a view name implies
 moving the Blade file — defer that one until the rest is in place.
-
-#### L32. Config-backed named-resource strings
-
-**Impact: Medium · Complexity: Medium**
-
-L25 (storage disks) is one instance of a general pattern: a method
-argument names an entry under a known config subtree, and the config
-scanner already parses those files. Auth guards (`auth('...')`,
-`Auth::guard()`, `->middleware('auth:web')`), cache stores
-(`Cache::store()`), log channels (`Log::channel()`), and storage disks
-(L25) already complete against their config subtree — but all of them
-route through the generic `LaravelStringKind::Config` kind rather than
-a dedicated one, so they get completion plus the shared config
-diagnostics/go-to-definition and nothing family-specific (a "cache
-store" hovers with the same generic wording as any other config key).
-`Log::stack()` (array values) isn't recognized at all. Generalize into
-a declarative table of `(trigger context, config path)` pairs so each
-new family is one table row, and cover the rest of the family in one
-pass:
-
-- **Database connections** — `DB::connection()`, `->connection()` /
-  `$connection` on models and jobs → `database.connections.*`.
-- **Queue connections and queues** — `Queue::connection()`,
-  `->onConnection()` → `queue.connections.*`; `->onQueue()` names are
-  free-form (completion from literals seen elsewhere, no diagnostic).
-- **Mailers** — `Mail::mailer()` → `mail.mailers.*`.
-- **Broadcast connections** — `Broadcast::connection()` →
-  `broadcasting.connections.*`.
-- **Rate limiter names** — not config-backed: registered via
-  `RateLimiter::for('name', …)` in providers. Scan literal
-  registrations (same shape as the macro scanner) and validate
-  `throttle:name` middleware parameters and `new RateLimited('name')`
-  against the set.
-
-Each family gets the full string-kind treatment for free once wired
-as a `LaravelStringKey`: completion, go-to-definition (jump to the
-config entry), hover, diagnostics, and references.
 
 #### L39. Unused view and translation key detection
 

@@ -312,17 +312,36 @@ pub(super) fn extract_from_attribute_lists<'a>(
                 // the file to import from the Illuminate namespace;
                 // that check is cached once per file to avoid repeated
                 // linear scans.
-                if let Some(kind) = resolve_laravel_container_attr(
-                    class_name,
+                let semantic_class_name = ctx
+                    .resolved_name_at(attr.name.span().start.offset)
+                    .unwrap_or(class_name);
+                if let Some(attribute) = resolve_laravel_container_attr(
+                    semantic_class_name,
+                    ctx.resolved_names.is_none(),
                     &mut ctx.has_laravel_container_attrs,
                     ctx.content,
                 ) {
-                    try_emit_laravel_string_span_partial(
-                        kind,
-                        arg_list,
-                        ctx.content,
-                        &mut ctx.spans,
-                    );
+                    match attribute {
+                        LaravelContainerAttribute::Resource(trigger) => {
+                            try_emit_laravel_config_resource_span_partial_for_parameter(
+                                trigger.kind,
+                                trigger.access,
+                                arg_list,
+                                trigger.argument,
+                                ctx.content,
+                                &mut ctx.spans,
+                            );
+                        }
+                        LaravelContainerAttribute::Config => {
+                            try_emit_laravel_string_span_partial_for_parameter(
+                                crate::symbol_map::LaravelStringKind::Config,
+                                arg_list,
+                                "key",
+                                ctx.content,
+                                &mut ctx.spans,
+                            );
+                        }
+                    }
                 }
 
                 // PHPUnit coverage attributes: #[CoversMethod(Foo::class,
@@ -562,6 +581,8 @@ pub(super) fn extract_from_trait_precedence_adaptation<'a>(
 pub(super) fn extract_from_method<'a>(method: &'a Method<'a>, ctx: &mut ExtractionCtx<'a>) {
     // Method name — declaration site span for find-references and rename.
     let is_static = method.modifiers.iter().any(|m| m.is_static());
+    let extracts_promoted_connection =
+        !is_static && method.name.value.eq_ignore_ascii_case(b"__construct");
     ctx.spans.push(SymbolSpan {
         start: method.name.span.start.offset,
         end: method.name.span.end.offset,
@@ -668,6 +689,10 @@ pub(super) fn extract_from_method<'a>(method: &'a Method<'a>, ctx: &mut Extracti
             let s = bytes_to_str(param.variable.name);
             s.strip_prefix('$').unwrap_or(s).to_string()
         };
+        let promoted_connection = extracts_promoted_connection
+            && param.is_promoted_property()
+            && !param.modifiers.iter().any(|modifier| modifier.is_static())
+            && name.eq_ignore_ascii_case("connection");
         let param_offset = param.variable.span.start.offset;
         // Emit a Variable span so the symbol map covers the parameter
         // token itself (needed for GTD-from-parameter-to-type-hint).
@@ -688,6 +713,14 @@ pub(super) fn extract_from_method<'a>(method: &'a Method<'a>, ctx: &mut Extracti
             block_end: ctx.cond_block_end_stack.last().copied().unwrap_or(u32::MAX),
         });
         if let Some(ref default) = param.default_value {
+            if promoted_connection {
+                record_laravel_resource_receiver_expr(
+                    crate::symbol_map::LaravelResourceReceiverRule::ConnectionProperty,
+                    default.value,
+                    ctx.content,
+                    &mut ctx.resource_receiver_sites,
+                );
+            }
             extract_from_expression(default.value, ctx, method_scope_start);
         }
     }
@@ -743,6 +776,10 @@ pub(super) fn extract_inline_docblock(
 }
 
 pub(super) fn extract_from_property<'a>(property: &Property<'a>, ctx: &mut ExtractionCtx<'a>) {
+    let property_is_static = property
+        .modifiers()
+        .iter()
+        .any(|modifier| modifier.is_static());
     match property {
         Property::Plain(plain) => extract_from_attribute_lists(&plain.attribute_lists, ctx, 0),
         Property::Hooked(hooked) => extract_from_attribute_lists(&hooked.attribute_lists, ctx, 0),
@@ -770,6 +807,7 @@ pub(super) fn extract_from_property<'a>(property: &Property<'a>, ctx: &mut Extra
                     s.strip_prefix('$').unwrap_or(s).to_string()
                 };
                 let var_offset = var.span.start.offset;
+                let is_connection = !property_is_static && name.eq_ignore_ascii_case("connection");
                 ctx.spans.push(SymbolSpan {
                     start: var_offset,
                     end: var.span.end.offset,
@@ -790,6 +828,14 @@ pub(super) fn extract_from_property<'a>(property: &Property<'a>, ctx: &mut Extra
                 // references like `Foo::class` in property defaults
                 // produce navigable spans.
                 if let PropertyItem::Concrete(concrete) = item {
+                    if is_connection {
+                        record_laravel_resource_receiver_expr(
+                            crate::symbol_map::LaravelResourceReceiverRule::ConnectionProperty,
+                            concrete.value,
+                            ctx.content,
+                            &mut ctx.resource_receiver_sites,
+                        );
+                    }
                     extract_from_expression(concrete.value, ctx, 0);
                 }
             }
@@ -801,6 +847,7 @@ pub(super) fn extract_from_property<'a>(property: &Property<'a>, ctx: &mut Extra
                 s.strip_prefix('$').unwrap_or(s).to_string()
             };
             let var_offset = var.span.start.offset;
+            let is_connection = !property_is_static && name.eq_ignore_ascii_case("connection");
             ctx.spans.push(SymbolSpan {
                 start: var_offset,
                 end: var.span.end.offset,
@@ -818,6 +865,14 @@ pub(super) fn extract_from_property<'a>(property: &Property<'a>, ctx: &mut Extra
                 block_end: ctx.cond_block_end_stack.last().copied().unwrap_or(u32::MAX),
             });
             if let PropertyItem::Concrete(concrete) = &hooked.item {
+                if is_connection {
+                    record_laravel_resource_receiver_expr(
+                        crate::symbol_map::LaravelResourceReceiverRule::ConnectionProperty,
+                        concrete.value,
+                        ctx.content,
+                        &mut ctx.resource_receiver_sites,
+                    );
+                }
                 extract_from_expression(concrete.value, ctx, 0);
             }
         }

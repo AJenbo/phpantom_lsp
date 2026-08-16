@@ -70,6 +70,16 @@ where
         .and_then(|inner| inner.ok())
 }
 
+fn uri_parse_lock(backend: &Backend, uri: &str) -> Arc<tokio::sync::Mutex<()>> {
+    let mut locks = backend.did_change_parse_locks.lock();
+    if let Some(lock) = locks.get(uri) {
+        return Arc::clone(lock);
+    }
+    let lock = Arc::new(tokio::sync::Mutex::new(()));
+    locks.insert(uri.to_owned(), Arc::clone(&lock));
+    lock
+}
+
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
@@ -646,18 +656,23 @@ impl LanguageServer for Backend {
         let uri = doc.uri.to_string();
         let text = Arc::new(doc.text);
 
+        let parse_lock = uri_parse_lock(self, &uri);
+        let parse_guard = Arc::clone(&parse_lock).lock_owned().await;
+
+        self.open_files
+            .write()
+            .insert(uri.clone(), Arc::clone(&text));
+
         // Track files opened with languageId "blade" so they get
         // Blade preprocessing even without a .blade.php extension.
         if doc.language_id == "blade" && !crate::blade::is_blade_file(&uri) {
             self.blade_uris.write().insert(uri.clone());
         }
 
-        self.open_files
-            .write()
-            .insert(uri.clone(), Arc::clone(&text));
-
         // Parse and update AST map, use map, and namespace map
         self.update_ast(&uri, &text);
+        drop(parse_guard);
+        drop(parse_lock);
 
         // Opening a Blade template is the discrete point where its
         // call-site variable inference runs (update_ast itself only
@@ -744,6 +759,15 @@ impl LanguageServer for Backend {
         // keystroke; `update_ast` already tolerates stale maps when
         // incomplete code cannot be parsed.
         if self.sync_ast_updates {
+            let _parse_guard = uri_parse_lock(self, &uri).lock_owned().await;
+            let is_latest_text = self
+                .open_files
+                .read()
+                .get(&uri)
+                .is_some_and(|current| Arc::ptr_eq(current, &text));
+            if !is_latest_text {
+                return;
+            }
             self.update_ast(&uri, &text);
             self.schedule_diagnostics(uri.clone());
         } else {
@@ -751,16 +775,9 @@ impl LanguageServer for Backend {
             tokio::spawn(async move {
                 let refresh_backend = backend.clone_for_blocking();
                 let uri_for_diagnostics = uri.clone();
+                let parse_guard = uri_parse_lock(&backend, &uri).lock_owned().await;
                 let result = tokio::task::spawn_blocking(move || {
-                    let parse_lock = {
-                        let mut locks = backend.did_change_parse_locks.lock();
-                        Arc::clone(
-                            locks
-                                .entry(uri.clone())
-                                .or_insert_with(|| Arc::new(parking_lot::Mutex::new(()))),
-                        )
-                    };
-                    let _parse_guard = parse_lock.lock();
+                    let _parse_guard = parse_guard;
                     let is_latest_text = backend
                         .open_files
                         .read()
@@ -818,29 +835,98 @@ impl LanguageServer for Backend {
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri.to_string();
 
-        self.open_files.write().remove(&uri);
-        self.did_change_parse_locks.lock().remove(&uri);
-        self.clear_declaration_baseline(&uri);
+        let parse_lock = uri_parse_lock(self, &uri);
+        // Remove the buffer before the first await so a later didOpen queues
+        // behind this close instead of being mistaken for the file we close.
+        let closed_buffer = self.open_files.write().remove(&uri);
+        let parse_guard = Arc::clone(&parse_lock).lock_owned().await;
+        let close_backend = self.clone_for_blocking();
+        let close_uri = uri.clone();
+        let close_applied = match tokio::task::spawn_blocking(move || {
+            // Serialise with didOpen and every didChange parse for this URI.
+            // A didChange handler may have published its buffer before its
+            // queued parse acquired the guard, so withdraw that buffer too.
+            let _parse_guard = parse_guard;
+            let closed_buffer = close_backend
+                .open_files
+                .write()
+                .remove(&close_uri)
+                .or(closed_buffer);
+            let disk_content = close_backend.get_file_content_arc(&close_uri);
+            let Some(disk_content) = disk_content else {
+                close_backend.clear_file_maps_and_source_strings(&close_uri);
+                return true;
+            };
 
-        // Drop coalescing state for this file so the maps don't grow unbounded
-        // across an editing session.
-        let suffix = format!("\u{0}{uri}");
+            let saved_state_is_current = closed_buffer
+                .as_deref()
+                .is_some_and(|buffer| buffer.as_str() == disk_content.as_str())
+                && close_backend
+                    .symbol_map_for(&close_uri)
+                    .is_some_and(|map| map.matches_source(&disk_content));
+            if !saved_state_is_current {
+                // Restore every index and Laravel side effect through the same
+                // pipeline as an ordinary edit. The loaded disk source remains
+                // authoritative while this guard is held.
+                close_backend.update_ast(&close_uri, &disk_content);
+            }
+
+            // Queue names are type-dependent and may not have been requested
+            // while the file was open. Materialize them before dropping the
+            // disk map; direct Config/RateLimiter contributions were published
+            // by update_ast (or already match on the clean-close fast path).
+            if let Some(map) = close_backend.symbol_map_for(&close_uri) {
+                close_backend.typed_receiver_view_spans_for(&close_uri, &map);
+            }
+            close_backend.clear_file_maps(&close_uri);
+            true
+        })
+        .await
         {
+            Ok(applied) => applied,
+            Err(err) => {
+                tracing::error!("PHPantom: didClose source refresh failed: {}", err);
+                false
+            }
+        };
+        if !close_applied {
+            return;
+        }
+
+        // didOpen may have been waiting for the per-URI guard. In that case it
+        // owns a strong reference and/or has already republished the buffer,
+        // so keep both its lock entry and its freshly opened state.
+        {
+            let open_files = self.open_files.read();
+            if open_files.contains_key(&uri) {
+                return;
+            }
+            let mut locks = self.did_change_parse_locks.lock();
+            let can_remove = locks.get(&uri).is_some_and(|stored| {
+                Arc::ptr_eq(stored, &parse_lock) && Arc::strong_count(&parse_lock) == 2
+            });
+            if can_remove {
+                locks.remove(&uri);
+            }
+            drop(locks);
+            self.clear_declaration_baseline(&uri);
+
+            // Drop coalescing state for this file so the maps don't grow
+            // unbounded across an editing session.
+            let suffix = format!("\u{0}{uri}");
             let coalesce = &self.whole_file_coalesce;
             coalesce.latest.lock().retain(|k, _| !k.ends_with(&suffix));
             coalesce.locks.lock().retain(|k, _| !k.ends_with(&suffix));
             coalesce.last.lock().retain(|k, _| !k.ends_with(&suffix));
-        }
 
-        // Clean up Blade preprocessor state for the closed file.
-        if self.is_blade_file(&uri) {
-            self.blade_virtual_content.write().remove(&uri);
-            self.blade_source_maps.write().remove(&uri);
-            self.blade_uris.write().remove(&uri);
-            self.blade_injected_vars.write().remove(&uri);
+            // Clean up Blade preprocessor state for the closed file.
+            if self.is_blade_file(&uri) {
+                self.blade_virtual_content.write().remove(&uri);
+                self.blade_source_maps.write().remove(&uri);
+                self.blade_uris.write().remove(&uri);
+                self.blade_injected_vars.write().remove(&uri);
+            }
         }
-
-        self.clear_file_maps(&uri);
 
         // Clear diagnostics so stale warnings don't linger after the file is closed
         self.clear_diagnostics_for_file(&uri).await;
@@ -854,6 +940,7 @@ impl LanguageServer for Backend {
 
         if let Some(text) = params.text {
             let text = Arc::new(text);
+            let _parse_guard = uri_parse_lock(self, &uri).lock_owned().await;
             self.open_files
                 .write()
                 .insert(uri.clone(), Arc::clone(&text));
@@ -1726,6 +1813,40 @@ fn wrap_locations(locations: Vec<Location>) -> Option<GotoDefinitionResponse> {
 mod tests {
     use super::*;
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn asynchronous_changes_publish_under_the_uri_parse_lock() {
+        let mut backend = Backend::new_test();
+        backend.sync_ast_updates = false;
+        let url = Url::parse("file:///async-change.php").unwrap();
+        let uri = url.to_string();
+        backend
+            .open_files
+            .write()
+            .insert(uri.clone(), Arc::new("<?php".to_string()));
+
+        backend
+            .did_change(DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier {
+                    uri: url,
+                    version: 2,
+                },
+                content_changes: vec![TextDocumentContentChangeEvent {
+                    range: None,
+                    range_length: None,
+                    text: "<?php class AsyncChange {}".to_string(),
+                }],
+            })
+            .await;
+
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while backend.symbol_map_for(&uri).is_none() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("background parse should publish the new symbol map");
+    }
+
     #[test]
     fn type_hierarchy_registration_includes_php_document_selector() {
         let registration = type_hierarchy_registration();
@@ -1739,6 +1860,117 @@ mod tests {
         assert_eq!(options["documentSelector"][0]["language"], "php");
         assert!(options["documentSelector"][0].get("scheme").is_none());
         assert!(options["documentSelector"][0].get("pattern").is_none());
+    }
+
+    #[test]
+    fn removing_the_last_provider_resource_invalidates_string_key_caches() {
+        let backend = Backend::new_test();
+        let mut old = crate::virtual_members::laravel::ProviderResources::default();
+        old.config_files
+            .push(crate::virtual_members::laravel::ProviderResource {
+                path: std::path::PathBuf::from("/project/vendor/package/config.php"),
+                namespace: "package".to_string(),
+            });
+        *backend.laravel_provider_resources.write() = old;
+        {
+            let mut cache = backend.laravel_string_key_cache.write();
+            cache.config_generation = 7;
+            cache.config_keys = Some(Arc::new(vec!["package.enabled".to_string()]));
+        }
+
+        backend.publish_provider_resources(Default::default());
+
+        let cache = backend.laravel_string_key_cache.read();
+        assert_eq!(cache.config_generation, 8);
+        assert!(cache.config_keys.is_none());
+    }
+
+    #[test]
+    fn removing_the_last_provider_binding_invalidates_aliases() {
+        let backend = Backend::new_test();
+        let content = r#"<?php
+class AppServiceProvider {
+    public function register(): void {
+        $this->app->singleton('sentry', fn (): HubAdapter => new HubAdapter());
+    }
+}
+"#;
+        let old = crate::virtual_members::laravel::extract_provider_resources(
+            content,
+            std::path::Path::new("/project/app/Providers/AppServiceProvider.php"),
+            std::path::Path::new("/project"),
+            Default::default(),
+            Default::default(),
+        );
+        assert!(!old.bindings.is_empty());
+        *backend.laravel_provider_resources.write() = old;
+        *backend.laravel_aliases.write() = Some(Default::default());
+
+        backend.publish_provider_resources(Default::default());
+
+        assert!(backend.laravel_aliases.read().is_none());
+    }
+
+    #[test]
+    fn provider_rate_limiters_use_semantic_facade_aliases() {
+        let backend = Backend::new_test();
+        let uri = "file:///vendor/acme/src/AcmeServiceProvider.php";
+        let content = r#"<?php
+namespace Acme;
+use Illuminate\Support\Facades\RateLimiter as Limiter;
+Limiter::for('vendor-api', fn () => null);
+"#;
+        let contribution = backend.provider_rate_limiter_contributions(uri, content);
+        backend
+            .laravel_source_strings
+            .write()
+            .set_provider_contributions(uri, contribution);
+
+        let index = backend.laravel_source_strings.read();
+        assert_eq!(index.rate_limiter_names(), ["vendor-api"]);
+        let definitions = index.rate_limiter_definitions("vendor-api");
+        assert_eq!(definitions.len(), 1);
+        assert_eq!(definitions[0].uri.as_ref(), uri);
+    }
+
+    #[test]
+    fn provider_rate_limiters_reject_application_homonyms_and_track_dynamic_names() {
+        let backend = Backend::new_test();
+        let uri = "file:///app/Providers/AppServiceProvider.php";
+        let local = r#"<?php
+namespace App\Providers;
+class RateLimiter {}
+RateLimiter::for('not-laravel', fn () => null);
+"#;
+        let contribution = backend.provider_rate_limiter_contributions(uri, local);
+        backend
+            .laravel_source_strings
+            .write()
+            .set_provider_contributions(uri, contribution);
+        assert!(
+            backend
+                .laravel_source_strings
+                .read()
+                .rate_limiter_names()
+                .is_empty()
+        );
+
+        let dynamic = r#"<?php
+namespace App\Providers;
+use Illuminate\Support\Facades\RateLimiter as Limiter;
+Limiter::for($name, fn () => null);
+"#;
+        let contribution = backend.provider_rate_limiter_contributions(uri, dynamic);
+        backend
+            .laravel_source_strings
+            .write()
+            .set_provider_contributions(uri, contribution);
+        assert!(
+            backend
+                .laravel_source_strings
+                .read()
+                .rate_limiter_space_is_open()
+        );
     }
 }
 
@@ -2012,6 +2244,7 @@ impl Backend {
 
         let mut index = crate::virtual_members::laravel::LaravelMacroIndex::default();
         let mut drivers = crate::virtual_members::laravel::LaravelStorageDriverIndex::default();
+        let mut rate_limiters = Vec::new();
         let mut candidate_uris: std::collections::HashSet<String> =
             std::collections::HashSet::new();
         let mut provider_uris: Vec<String> = Vec::new();
@@ -2104,6 +2337,10 @@ impl Backend {
                 seeds.insert(uri.clone(), Vec::new());
                 continue;
             };
+            rate_limiters.push((
+                uri.clone(),
+                self.provider_rate_limiter_contributions(uri, &content),
+            ));
             scan_content(&mut index, &mut mixin_uris, uri.clone(), &content);
             scan_storage_drivers(&mut drivers, uri, &content);
 
@@ -2133,6 +2370,9 @@ impl Backend {
 
         drivers.rebuild();
         self.store_laravel_storage_drivers(drivers);
+        self.laravel_source_strings
+            .write()
+            .replace_provider_contributions(rate_limiters);
 
         index.rebuild();
         let has_macros = !index.is_empty();
@@ -2634,6 +2874,14 @@ impl Backend {
         if self.laravel_date_seed_uris.read().contains(uri) {
             self.build_laravel_date_class();
         }
+        let is_registered_provider = !self.is_laravel_provider_list_uri(uri)
+            && self.laravel_macro_seeds.read().contains_key(uri);
+        if is_registered_provider {
+            let contribution = self.provider_rate_limiter_contributions(uri, content);
+            self.laravel_source_strings
+                .write()
+                .set_provider_contributions(uri, contribution);
+        }
         // A `Macroable::mixin()` registration pulls its macros from another
         // file and records that file as a dependency.  Because those macros are
         // keyed under the registration site (not the mixin class) and the mixin
@@ -2711,6 +2959,40 @@ impl Backend {
         ["bootstrap/providers.php", "config/app.php"]
             .iter()
             .any(|rel| crate::util::path_to_uri(&root.join(rel)) == uri)
+    }
+
+    /// Parse the rare registered-provider file that can define rate limiters.
+    /// The byte gate keeps ordinary provider scans allocation-free; matching
+    /// files use the same semantic name resolver as normal workspace parsing
+    /// so imported facade aliases work and application homonyms do not.
+    fn provider_rate_limiter_contributions(
+        &self,
+        uri: &str,
+        content: &str,
+    ) -> crate::laravel_string_index::LaravelSourceStringContributions {
+        const TOKEN: &[u8] = b"RateLimiter";
+        if !content
+            .as_bytes()
+            .windows(TOKEN.len())
+            .any(|window| window.eq_ignore_ascii_case(TOKEN))
+        {
+            return Default::default();
+        }
+
+        crate::util::catch_panic_unwind_safe("provider_rate_limiters", uri, None, || {
+            let arena = mago_allocator::LocalArena::new();
+            let file_id = mago_database::file::FileId::new(b"provider.php");
+            let program =
+                mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
+            let resolver = mago_names::resolver::NameResolver::new(&arena);
+            let resolved = resolver.resolve(program);
+            let resolved = crate::names::OwnedResolvedNames::from_resolved(&resolved);
+            let map = crate::symbol_map::extract_symbol_map_with_resolved_names(
+                program, content, &resolved,
+            );
+            crate::laravel_string_index::LaravelSourceStringContributions::from_symbol_map(&map)
+        })
+        .unwrap_or_default()
     }
 
     pub(crate) fn build_provider_resources(&self) {
@@ -2812,33 +3094,48 @@ impl Backend {
         &self,
         resources: crate::virtual_members::laravel::ProviderResources,
     ) {
-        let has_string_key_sources = resources.config_files.len()
-            + resources.view_dirs.len()
-            + resources.trans_dirs.len()
-            + resources.route_files.len()
-            + resources.class_component_namespaces.len()
-            > 0;
-        let has_bindings = !resources.bindings.is_empty();
-        *self.laravel_provider_resources.write() = resources;
+        let has_string_key_sources =
+            |resources: &crate::virtual_members::laravel::ProviderResources| {
+                !resources.config_files.is_empty()
+                    || !resources.view_dirs.is_empty()
+                    || !resources.trans_dirs.is_empty()
+                    || !resources.route_files.is_empty()
+                    || !resources.class_component_namespaces.is_empty()
+                    || !resources.anonymous_component_namespaces.is_empty()
+                    || !resources.anonymous_component_paths.is_empty()
+                    || resources.custom_translation_loader
+            };
+        let (invalidate_string_keys, invalidate_aliases) = {
+            let mut current = self.laravel_provider_resources.write();
+            let invalidate_string_keys =
+                has_string_key_sources(&current) || has_string_key_sources(&resources);
+            let invalidate_aliases = !current.bindings.is_empty() || !resources.bindings.is_empty();
+            *current = resources;
+            (invalidate_string_keys, invalidate_aliases)
+        };
 
         // The shared and composed template variables are resolved from these
         // registrations, so the previous scan's set is stale whether or not
         // any other resource count moved.
         self.laravel_string_key_cache.write().shared_view_vars = None;
 
-        if has_string_key_sources {
+        if invalidate_string_keys {
             let mut cache = self.laravel_string_key_cache.write();
+            cache.config_generation = cache.config_generation.wrapping_add(1);
             cache.config_keys = None;
+            cache.config_open_prefixes = None;
             cache.config_trees = None;
             cache.view_names = None;
             cache.trans_keys = None;
+            cache.trans_key_shapes = None;
             cache.routes = None;
             cache.blade_discovery = None;
+            cache.blade_blocks = None;
         }
 
         // The provider bindings overlay the core container alias table, which
         // an earlier resolution may already have built without them.
-        if has_bindings {
+        if invalidate_aliases {
             *self.laravel_aliases.write() = None;
             self.clear_class_not_found_cache();
         }

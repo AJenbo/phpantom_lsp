@@ -550,7 +550,7 @@ impl Backend {
 
         // 2. Package config files from service providers.
         for res in &self.laravel_provider_resources.read().config_files {
-            if let Ok(content) = std::fs::read_to_string(&res.path)
+            if let Some((_, content)) = self.laravel_config_file_content(&res.path)
                 && let Some(tree) = parse_config_tree(&content)
             {
                 merge(res.namespace.clone(), tree);
@@ -571,7 +571,7 @@ impl Backend {
                     let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
                         continue;
                     };
-                    if let Ok(content) = std::fs::read_to_string(&path)
+                    if let Some((_, content)) = self.laravel_config_file_content(&path)
                         && let Some(tree) = parse_config_tree(&content)
                     {
                         merge(stem.to_string(), tree);

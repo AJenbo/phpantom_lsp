@@ -1,5 +1,5 @@
 use super::docblock::is_navigable_type;
-use super::extraction::extract_symbol_map;
+use super::extraction::{extract_symbol_map, extract_symbol_map_with_resolved_names};
 use super::*;
 
 // ── SymbolMap::lookup tests ─────────────────────────────────────────
@@ -135,6 +135,16 @@ fn parse_and_extract(php: &str) -> SymbolMap {
     let file_id = mago_database::file::FileId::new(b"test.php");
     let program = mago_syntax::parser::parse_file_content(&arena, file_id, php.as_bytes());
     extract_symbol_map(program, php)
+}
+
+fn parse_and_extract_semantic(php: &str) -> SymbolMap {
+    let arena = mago_allocator::LocalArena::new();
+    let file_id = mago_database::file::FileId::new(b"test.php");
+    let program = mago_syntax::parser::parse_file_content(&arena, file_id, php.as_bytes());
+    let resolver = mago_names::resolver::NameResolver::new(&arena);
+    let resolved = resolver.resolve(program);
+    let owned = crate::names::OwnedResolvedNames::from_resolved(&resolved);
+    extract_symbol_map_with_resolved_names(program, php, &owned)
 }
 
 #[test]
@@ -4397,6 +4407,515 @@ fn real_member_access_is_not_marked_as_array_callable() {
     }
 }
 
+// ── Config-backed resource key spans ────────────────────────────────
+
+fn resource_keys(map: &SymbolMap, resource: LaravelConfigResource) -> Vec<(String, bool, bool)> {
+    map.spans
+        .iter()
+        .filter_map(|span| match &span.kind {
+            SymbolKind::LaravelStringKey {
+                kind: LaravelStringKind::ConfigResource(span_resource),
+                key,
+                is_write,
+                is_optional,
+                ..
+            } if *span_resource == resource => Some((key.clone(), *is_write, *is_optional)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn every_storage_disk_method_records_the_short_resource_name() {
+    for (method, is_write, is_optional) in [
+        ("disk", false, false),
+        ("fake", true, false),
+        ("persistentFake", true, false),
+        ("forgetDisk", false, true),
+    ] {
+        let php = format!("<?php\nStorage::{method}('archive');\n");
+        let map = parse_and_extract(&php);
+        assert_eq!(
+            resource_keys(&map, LaravelConfigResource::StorageDisk),
+            vec![("archive".to_string(), is_write, is_optional)],
+            "Storage::{method}() should name the configured disk"
+        );
+
+        let offset = php.find("archive").unwrap() as u32;
+        let span = map.lookup(offset).expect("disk name should have a span");
+        assert_eq!(span.start, offset);
+        assert_eq!(span.end, offset + "archive".len() as u32);
+    }
+}
+
+#[test]
+fn fully_qualified_storage_facade_records_a_disk_key() {
+    let map =
+        parse_and_extract("<?php\n\\Illuminate\\Support\\Facades\\Storage::fake('archive');\n");
+    assert_eq!(
+        resource_keys(&map, LaravelConfigResource::StorageDisk),
+        vec![("archive".to_string(), true, false,)]
+    );
+}
+
+#[test]
+fn storage_container_attribute_records_the_short_resource_name() {
+    let map = parse_and_extract(
+        "<?php\nuse Illuminate\\Container\\Attributes\\Storage;\n#[Storage('archive')]\nclass C {}\n",
+    );
+    assert_eq!(
+        resource_keys(&map, LaravelConfigResource::StorageDisk),
+        vec![("archive".to_string(), false, false,)]
+    );
+}
+
+#[test]
+fn other_storage_arguments_are_not_disk_keys() {
+    for call in [
+        "Storage::fake()",
+        "Storage::extend('archive', fn () => null)",
+        "OtherStorage::fake('archive')",
+    ] {
+        let map = parse_and_extract(&format!("<?php\n{call};\n"));
+        assert!(
+            resource_keys(&map, LaravelConfigResource::StorageDisk).is_empty(),
+            "`{call}` should not record a disk-name string"
+        );
+    }
+}
+
+#[test]
+fn forget_disk_records_each_literal_array_value() {
+    let map = parse_and_extract(
+        "<?php\nStorage::forgetDisk(['archive', 'backup', $dynamic, ...$more]);\n",
+    );
+    assert_eq!(
+        resource_keys(&map, LaravelConfigResource::StorageDisk),
+        vec![
+            ("archive".to_string(), false, true),
+            ("backup".to_string(), false, true),
+        ]
+    );
+}
+
+#[test]
+fn every_direct_named_resource_trigger_uses_its_own_family() {
+    for (php, resource, expected) in [
+        (
+            "<?php auth('web');",
+            LaravelConfigResource::AuthGuard,
+            "web",
+        ),
+        (
+            "<?php Auth::guard('admin');",
+            LaravelConfigResource::AuthGuard,
+            "admin",
+        ),
+        (
+            "<?php Cache::store('redis');",
+            LaravelConfigResource::CacheStore,
+            "redis",
+        ),
+        (
+            "<?php Log::channel('daily');",
+            LaravelConfigResource::LogChannel,
+            "daily",
+        ),
+        (
+            "<?php DB::connection('mysql');",
+            LaravelConfigResource::DatabaseConnection,
+            "mysql",
+        ),
+        (
+            "<?php Queue::connection('sqs');",
+            LaravelConfigResource::QueueConnection,
+            "sqs",
+        ),
+        (
+            "<?php Mail::mailer('postmark');",
+            LaravelConfigResource::Mailer,
+            "postmark",
+        ),
+        (
+            "<?php Broadcast::connection('pusher');",
+            LaravelConfigResource::BroadcastConnection,
+            "pusher",
+        ),
+    ] {
+        let map = parse_and_extract(php);
+        assert_eq!(
+            resource_keys(&map, resource),
+            vec![(expected.to_string(), false, false)],
+            "{php}"
+        );
+    }
+}
+
+#[test]
+fn log_stack_records_short_and_legacy_array_values_only() {
+    for php in [
+        "<?php Log::stack(['daily', 'stderr', $dynamic]);",
+        "<?php Log::stack(array('daily', 'stderr', $dynamic));",
+    ] {
+        let map = parse_and_extract(php);
+        assert_eq!(
+            resource_keys(&map, LaravelConfigResource::LogChannel),
+            vec![
+                ("daily".to_string(), false, false),
+                ("stderr".to_string(), false, false),
+            ]
+        );
+    }
+    assert!(
+        resource_keys(
+            &parse_and_extract("<?php Log::stack('daily');"),
+            LaravelConfigResource::LogChannel,
+        )
+        .is_empty()
+    );
+}
+
+#[test]
+fn every_named_container_attribute_records_a_short_resource_name() {
+    for (attribute, resource) in [
+        ("Auth", LaravelConfigResource::AuthGuard),
+        ("Authenticated", LaravelConfigResource::AuthGuard),
+        ("Cache", LaravelConfigResource::CacheStore),
+        ("Log", LaravelConfigResource::LogChannel),
+        ("Storage", LaravelConfigResource::StorageDisk),
+        ("Database", LaravelConfigResource::DatabaseConnection),
+        ("DB", LaravelConfigResource::DatabaseConnection),
+    ] {
+        let php = format!(
+            "<?php\n#[\\Illuminate\\Container\\Attributes\\{attribute}('named')] class C {{}}"
+        );
+        assert_eq!(
+            resource_keys(&parse_and_extract(&php), resource),
+            vec![("named".to_string(), false, false)],
+            "{attribute}"
+        );
+    }
+}
+
+#[test]
+fn middleware_parameters_get_individual_payload_spans() {
+    let php = "<?php Route::middleware(['auth:web,admin', 'throttle:api', 'can:update,post', 'throttle:60|120,1', 'throttle:property,1']);";
+    let map = parse_and_extract(php);
+    assert_eq!(
+        resource_keys(&map, LaravelConfigResource::AuthGuard),
+        vec![
+            ("web".to_string(), false, false),
+            ("admin".to_string(), false, false),
+        ]
+    );
+    let mut keys = map
+        .spans
+        .iter()
+        .filter_map(|span| match &span.kind {
+            SymbolKind::LaravelStringKey { kind, key, .. }
+                if matches!(
+                    kind,
+                    LaravelStringKind::RateLimiter | LaravelStringKind::GateAbility
+                ) =>
+            {
+                Some((span, *kind, key.as_str()))
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    keys.sort_by_key(|(span, _, _)| span.start);
+    assert_eq!(
+        keys.iter()
+            .map(|(_, kind, key)| (*kind, *key))
+            .collect::<Vec<_>>(),
+        vec![
+            (LaravelStringKind::RateLimiter, "api"),
+            (LaravelStringKind::GateAbility, "update"),
+        ]
+    );
+    for (span, _, key) in keys {
+        assert_eq!(&php[span.start as usize..span.end as usize], key);
+    }
+}
+
+#[test]
+fn throttle_middleware_keeps_numeric_names_optional_but_digit_prefixed_names_required() {
+    let php = r#"<?php
+namespace App;
+use Illuminate\Support\Facades\Route as LaravelRoute;
+LaravelRoute::middleware(
+    options: ['ignored'],
+    middleware: ['throttle:2fa', 'throttle:60', 'throttle:60,1'],
+);
+"#;
+    let map = parse_and_extract_semantic(php);
+    let limiters = map
+        .spans
+        .iter()
+        .filter_map(|span| match &span.kind {
+            SymbolKind::LaravelStringKey {
+                kind: LaravelStringKind::RateLimiter,
+                key,
+                is_optional,
+                ..
+            } => Some((key.as_str(), *is_optional)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(limiters, vec![("2fa", false), ("60", true)]);
+}
+
+#[test]
+fn rate_limiter_registrations_reads_and_dynamic_names_are_distinguished() {
+    let php = "<?php RateLimiter::for('api', fn () => null); new RateLimited('api'); new \\Illuminate\\Queue\\Middleware\\RateLimitedWithRedis('api'); RateLimiter::for($dynamic, fn () => null); RateLimiter::for(); new RateLimited();";
+    let map = parse_and_extract(php);
+    let occurrences = map
+        .spans
+        .iter()
+        .filter_map(|span| match &span.kind {
+            SymbolKind::LaravelStringKey {
+                kind: LaravelStringKind::RateLimiter,
+                key,
+                is_write,
+                ..
+            } => Some((key.as_str(), *is_write)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        occurrences,
+        vec![("api", true), ("api", false), ("api", false)]
+    );
+    assert!(map.has_dynamic_rate_limiter);
+}
+
+#[test]
+fn type_dependent_calls_and_connection_properties_are_candidates_not_guesses() {
+    let php = "<?php class Job { protected $connection = 'redis'; function run($manager, $job) { $manager->connection(options: [], connection: 'mysql'); $job->onConnection(delay: 1, connection: 'sqs'); $job?->onQueue(delay: 1, queue: 'high'); } } class StaticConnection { protected static $connection = 'ignored'; }";
+    let map = parse_and_extract(php);
+    assert!(
+        map.spans.iter().all(|span| !matches!(
+            span.kind,
+            SymbolKind::LaravelStringKey {
+                kind: LaravelStringKind::ConfigResource(_) | LaravelStringKind::QueueName,
+                ..
+            }
+        )),
+        "receiver types are unavailable during syntax extraction"
+    );
+    assert_eq!(map.resource_receiver_sites.len(), 4);
+    assert_eq!(
+        map.resource_receiver_sites
+            .iter()
+            .map(|site| (site.rule, site.key.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            (LaravelResourceReceiverRule::ConnectionProperty, "redis"),
+            (LaravelResourceReceiverRule::ConnectionMethod, "mysql"),
+            (LaravelResourceReceiverRule::QueueableConnection, "sqs"),
+            (LaravelResourceReceiverRule::QueueName, "high"),
+        ]
+    );
+}
+
+#[test]
+fn unrelated_namespaced_facades_do_not_create_resource_spans() {
+    let php = "<?php \\Acme\\Storage::disk('archive'); \\Acme\\DB::connection('mysql');";
+    let map = parse_and_extract(php);
+    assert!(map.spans.iter().all(|span| !matches!(
+        span.kind,
+        SymbolKind::LaravelStringKey {
+            kind: LaravelStringKind::ConfigResource(_),
+            ..
+        }
+    )));
+}
+
+#[test]
+fn semantic_facade_aliases_cover_every_named_resource_without_matching_local_homonyms() {
+    let php = r#"<?php
+namespace App;
+use Illuminate\Support\Facades\Auth as LaravelAuth;
+use Illuminate\Support\Facades\Cache as LaravelCache;
+use Illuminate\Support\Facades\Log as LaravelLog;
+use Illuminate\Support\Facades\Storage as LaravelStorage;
+use Illuminate\Support\Facades\DB as LaravelDB;
+use Illuminate\Support\Facades\Queue as LaravelQueue;
+use Illuminate\Support\Facades\Mail as LaravelMail;
+use Illuminate\Support\Facades\Broadcast as LaravelBroadcast;
+class Auth {}
+class Cache {}
+class Log {}
+class Storage {}
+class DB {}
+class Queue {}
+class Mail {}
+class Broadcast {}
+LaravelAuth::guard(name: 'admin');
+LaravelCache::store(name: 'redis');
+LaravelLog::stack(channel: 'ignored', channels: ['daily', 'stderr']);
+LaravelStorage::fake(config: [], disk: 'testing');
+LaravelDB::connection(name: 'mysql');
+LaravelQueue::connection(name: 'sqs');
+LaravelMail::mailer(name: 'postmark');
+LaravelBroadcast::connection(name: 'pusher');
+Auth::guard('bad');
+Cache::store('bad');
+Log::channel('bad');
+Storage::disk('bad');
+DB::connection('bad');
+Queue::connection('bad');
+Mail::mailer('bad');
+Broadcast::connection('bad');
+"#;
+    let map = parse_and_extract_semantic(php);
+
+    for (resource, expected) in [
+        (LaravelConfigResource::AuthGuard, vec!["admin"]),
+        (LaravelConfigResource::CacheStore, vec!["redis"]),
+        (LaravelConfigResource::LogChannel, vec!["daily", "stderr"]),
+        (LaravelConfigResource::StorageDisk, vec!["testing"]),
+        (LaravelConfigResource::DatabaseConnection, vec!["mysql"]),
+        (LaravelConfigResource::QueueConnection, vec!["sqs"]),
+        (LaravelConfigResource::Mailer, vec!["postmark"]),
+        (LaravelConfigResource::BroadcastConnection, vec!["pusher"]),
+    ] {
+        assert_eq!(
+            resource_keys(&map, resource)
+                .iter()
+                .map(|(key, _, _)| key.as_str())
+                .collect::<Vec<_>>(),
+            expected,
+            "{resource:?}"
+        );
+    }
+}
+
+#[test]
+fn semantic_container_attribute_aliases_select_named_parameters_and_reject_homonyms() {
+    let php = r#"<?php
+namespace App;
+use Illuminate\Container\Attributes\Auth as LaravelAuth;
+use Illuminate\Container\Attributes\Cache as LaravelCache;
+use Illuminate\Container\Attributes\Log as LaravelLog;
+use Illuminate\Container\Attributes\Storage as LaravelStorage;
+use Illuminate\Container\Attributes\Database as LaravelDatabase;
+use Illuminate\Container\Attributes\Config as LaravelConfig;
+class Storage {}
+#[LaravelAuth(guard: 'admin')]
+#[LaravelCache(memo: true, store: 'redis')]
+#[LaravelLog(name: 'prefixed', channel: 'daily')]
+#[LaravelStorage(disk: 's3')]
+#[LaravelDatabase(connection: 'mysql')]
+#[LaravelConfig(default: null, key: 'app.name')]
+class Service {}
+#[Storage(disk: 'bad')]
+class OtherService {}
+"#;
+    let map = parse_and_extract_semantic(php);
+
+    for (resource, expected) in [
+        (LaravelConfigResource::AuthGuard, "admin"),
+        (LaravelConfigResource::CacheStore, "redis"),
+        (LaravelConfigResource::LogChannel, "daily"),
+        (LaravelConfigResource::StorageDisk, "s3"),
+        (LaravelConfigResource::DatabaseConnection, "mysql"),
+    ] {
+        assert_eq!(
+            resource_keys(&map, resource),
+            vec![(expected.to_string(), false, false)],
+            "{resource:?}"
+        );
+    }
+    assert!(map.spans.iter().any(|span| matches!(
+        &span.kind,
+        SymbolKind::LaravelStringKey {
+            kind: LaravelStringKind::Config,
+            key,
+            ..
+        } if key == "app.name"
+    )));
+}
+
+#[test]
+fn semantic_route_and_rate_limiter_classes_accept_aliases_and_reject_homonyms() {
+    let php = r#"<?php
+namespace App;
+use Illuminate\Support\Facades\Route as LaravelRoute;
+use Illuminate\Support\Facades\RateLimiter as LaravelRateLimiter;
+use Illuminate\Queue\Middleware\RateLimited as LaravelRateLimited;
+use Illuminate\Queue\Middleware\RateLimitedWithRedis as RedisRateLimited;
+class Route {}
+class RateLimiter {}
+class RateLimited {}
+LaravelRoute::middleware(['auth:web', 'throttle:api']);
+\Illuminate\Support\Facades\Route::middleware('auth:admin');
+LaravelRateLimiter::for(callback: fn () => null, name: 'api');
+new LaravelRateLimited(limiterName: 'api');
+new RedisRateLimited(connection: 'redis', limiterName: 'api');
+Route::middleware(['auth:bad', 'throttle:bad']);
+RateLimiter::for('bad', fn () => null);
+new RateLimited(limiterName: 'bad');
+"#;
+    let map = parse_and_extract_semantic(php);
+
+    assert_eq!(
+        resource_keys(&map, LaravelConfigResource::AuthGuard)
+            .iter()
+            .map(|(key, _, _)| key.as_str())
+            .collect::<Vec<_>>(),
+        vec!["web", "admin"]
+    );
+    let occurrences = map
+        .spans
+        .iter()
+        .filter_map(|span| match &span.kind {
+            SymbolKind::LaravelStringKey {
+                kind: LaravelStringKind::RateLimiter,
+                key,
+                is_write,
+                ..
+            } => Some((key.as_str(), *is_write)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        occurrences,
+        vec![
+            ("api", false),
+            ("api", true),
+            ("api", false),
+            ("api", false)
+        ]
+    );
+    assert!(!map.has_dynamic_rate_limiter);
+}
+
+#[test]
+fn semantic_config_facade_alias_uses_the_named_key_and_rejects_a_local_config_class() {
+    let php = r#"<?php
+namespace App;
+use Illuminate\Support\Facades\Config as LaravelConfig;
+class Config {}
+LaravelConfig::get(default: null, key: 'app.name');
+Config::get('app.env');
+"#;
+    let map = parse_and_extract_semantic(php);
+    let keys = map
+        .spans
+        .iter()
+        .filter_map(|span| match &span.kind {
+            SymbolKind::LaravelStringKey {
+                kind: LaravelStringKind::Config,
+                key,
+                ..
+            } => Some(key.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(keys, vec!["app.name"]);
+}
+
 // ── Container binding key spans ─────────────────────────────────────
 
 /// Every `ContainerBinding` key the map records, with whether the call
@@ -4699,6 +5218,47 @@ fn a_gate_chain_is_followed_to_its_root_within_the_depth_bound() {
     }
 }
 
+#[test]
+fn semantic_facade_chains_accept_aliases_and_fqns_but_reject_local_homonyms() {
+    let php = r#"<?php
+namespace App;
+use Illuminate\Support\Facades\Gate as LaravelGate;
+use Illuminate\Support\Facades\Route as LaravelRoute;
+class Gate {}
+class Route {}
+LaravelGate::forUser($user)->allows('gate-alias');
+\Illuminate\Support\Facades\Gate::forUser($user)->allows('gate-fqn');
+Gate::forUser($user)->allows('gate-local');
+LaravelRoute::get('/alias', $action)->can('route-alias', 'post');
+\Illuminate\Support\Facades\Route::get('/fqn', $action)->can('route-fqn', 'post');
+Route::get('/local', $action)->can('route-local', 'post');
+LaravelRoute::get('/middleware', $action)->middleware(
+    options: ['ignored'],
+    middleware: ['auth:web', 'can:middleware-alias'],
+);
+Route::get('/local-middleware', $action)->middleware(
+    options: ['ignored'],
+    middleware: ['auth:bad', 'can:middleware-local'],
+);
+"#;
+    let map = parse_and_extract_semantic(php);
+
+    assert_eq!(
+        ability_keys(&map),
+        vec![
+            "gate-alias",
+            "gate-fqn",
+            "route-alias",
+            "route-fqn",
+            "middleware-alias",
+        ]
+    );
+    assert_eq!(
+        resource_keys(&map, LaravelConfigResource::AuthGuard),
+        vec![("web".to_string(), false, false)]
+    );
+}
+
 /// `$this->authorizeForUser($user, 'ability', $model)` puts the user first,
 /// shifting the ability and the model along by one.
 #[test]
@@ -4768,6 +5328,7 @@ fn other_middleware_records_no_ability() {
         "",
         "''",
         "'auth'",
+        "'signed:argument'",
         "$middleware",
         "'can:'",
         "['can:update', $x]",

@@ -700,7 +700,16 @@ pub(crate) fn discover_user_files(
     source_dirs.sort();
     source_dirs.dedup();
 
-    let vendor_dirs: Vec<PathBuf> = backend.workspace.vendor_dir_paths.lock().clone();
+    // The walker compares canonical entry paths below.  Canonicalize the
+    // registered roots once as well so path aliases such as macOS's `/var`
+    // -> `/private/var` do not let vendor files through.
+    let vendor_dirs = backend.workspace.vendor_dir_paths.lock().clone();
+    let mut vendor_dirs: Vec<PathBuf> = vendor_dirs
+        .into_iter()
+        .map(|path| path.canonicalize().unwrap_or(path))
+        .collect();
+    vendor_dirs.sort_unstable();
+    vendor_dirs.dedup();
 
     // When an explicit path filter points outside all PSR-4 source
     // directories (e.g. into vendor/), walk the filter path directly

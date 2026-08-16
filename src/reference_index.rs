@@ -31,6 +31,12 @@ pub(crate) enum ReferenceIndexKey {
         kind: LaravelStringKind,
         key: String,
     },
+    /// A string behind a type-dependent Laravel receiver. The exact family
+    /// is confirmed lazily; one coarse key avoids indexing the same site as
+    /// every database, queue, and broadcast possibility.
+    LaravelResourceCandidate {
+        key: String,
+    },
 }
 
 impl ReferenceIndexKey {
@@ -40,7 +46,9 @@ impl ReferenceIndexKey {
         match self {
             Self::Class(s) | Self::Function(s) | Self::Constant(s) => s.capacity(),
             Self::Member { name, .. } => name.capacity(),
-            Self::LaravelString { key, .. } => key.capacity(),
+            Self::LaravelString { key, .. } | Self::LaravelResourceCandidate { key } => {
+                key.capacity()
+            }
         }
     }
 }
@@ -316,6 +324,14 @@ impl Backend {
                 false,
             ));
         }
+        for site in &symbol_map.resource_receiver_sites {
+            entries.push((
+                ReferenceIndexKey::LaravelResourceCandidate {
+                    key: site.key.clone(),
+                },
+                false,
+            ));
+        }
 
         if let Some(classes) = self.symbols.uri_classes_index.read().get(uri).cloned() {
             for class in classes {
@@ -411,13 +427,37 @@ impl Backend {
                 )]
             }
             SymbolKind::LaravelStringKey { kind, key, .. } => {
-                vec![(
+                let mut keys = vec![(
                     ReferenceIndexKey::LaravelString {
-                        kind: kind.clone(),
+                        kind: *kind,
                         key: key.to_string(),
                     },
                     true,
-                )]
+                )];
+                match kind {
+                    LaravelStringKind::ConfigResource(resource) => keys.push((
+                        ReferenceIndexKey::LaravelString {
+                            kind: LaravelStringKind::Config,
+                            key: crate::symbol_map::laravel_resources::config_key(*resource, key),
+                        },
+                        false,
+                    )),
+                    LaravelStringKind::Config => {
+                        if let Some((resource, short)) =
+                            crate::symbol_map::laravel_resources::resource_from_config_key(key)
+                        {
+                            keys.push((
+                                ReferenceIndexKey::LaravelString {
+                                    kind: LaravelStringKind::ConfigResource(resource),
+                                    key: short.to_string(),
+                                },
+                                false,
+                            ));
+                        }
+                    }
+                    _ => {}
+                }
+                keys
             }
             _ => Vec::new(),
         }
@@ -587,7 +627,9 @@ mod tests {
 
     use super::*;
     use crate::Backend;
-    use crate::symbol_map::{SymbolMap, SymbolSpan};
+    use crate::symbol_map::{
+        LaravelResourceReceiverRule, LaravelResourceReceiverSite, SymbolMap, SymbolSpan,
+    };
 
     #[test]
     fn candidate_lookup_is_disabled_until_workspace_is_indexed() {
@@ -659,6 +701,33 @@ mod tests {
                 key: "app.name".to_string(),
             },
             uri,
+        );
+    }
+
+    #[test]
+    fn typed_laravel_resource_site_has_one_coarse_index_entry() {
+        let backend = Backend::new_test();
+        let map = SymbolMap {
+            resource_receiver_sites: vec![LaravelResourceReceiverSite {
+                start: 10,
+                end: 15,
+                key: "redis".to_string(),
+                rule: LaravelResourceReceiverRule::ConnectionMethod,
+            }],
+            ..SymbolMap::default()
+        };
+
+        let entries =
+            backend.reference_entries_for_symbol_map("file:///project/app/Consumer.php", &map);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entries[0],
+            (
+                ReferenceIndexKey::LaravelResourceCandidate {
+                    key: "redis".to_string(),
+                },
+                false,
+            )
         );
     }
 

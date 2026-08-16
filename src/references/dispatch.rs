@@ -342,18 +342,25 @@ impl Backend {
             SymbolKind::NamespaceDeclaration { .. } => Vec::new(),
 
             SymbolKind::LaravelStringKey { kind, key, .. } => {
-                let snapshot = if include_declaration
-                    && matches!(kind, crate::symbol_map::LaravelStringKind::Config)
-                {
-                    self.user_file_symbol_maps()
+                // Config declarations are resolved separately from their
+                // config files below. Usage discovery can therefore stay on
+                // the exact reference-index slice even when declarations are
+                // requested, rather than reading every project file.
+                let typed_key = if *kind == crate::symbol_map::LaravelStringKind::Config {
+                    crate::symbol_map::laravel_resources::resource_from_config_key(key)
+                        .map_or(key.as_str(), |(_, short)| short)
                 } else {
-                    self.user_file_symbol_maps_for_reference_keys(&[
-                        ReferenceIndexKey::LaravelString {
-                            kind: kind.clone(),
-                            key: key.to_string(),
-                        },
-                    ])
+                    key.as_str()
                 };
+                let snapshot = self.user_file_symbol_maps_for_reference_keys(&[
+                    ReferenceIndexKey::LaravelString {
+                        kind: *kind,
+                        key: key.to_string(),
+                    },
+                    ReferenceIndexKey::LaravelResourceCandidate {
+                        key: typed_key.to_string(),
+                    },
+                ]);
                 laravel::find_laravel_string_key_references(
                     self,
                     kind,

@@ -15,7 +15,7 @@ use crate::atom::{Atom, atom, bytes_to_str};
 use crate::ci_map::CiMap;
 use crate::names::OwnedResolvedNames;
 use crate::php_type::PhpType;
-use crate::symbol_map::{SymbolMap, extract_symbol_map};
+use crate::symbol_map::{SymbolMap, extract_symbol_map_with_resolved_names};
 use crate::types::{
     ClassInfo, DefineInfo, DocblockMembers, FunctionInfo, MethodInfo, NamespaceSpan, TypeAliasDef,
 };
@@ -255,9 +255,10 @@ impl Backend {
             content.to_string()
         };
 
+        let is_provider_config = self.is_provider_config_uri(uri);
         self.laravel_string_key_cache
             .write()
-            .invalidate_for_uri(uri, content);
+            .invalidate_for_uri(uri, content, is_provider_config);
         self.refresh_blade_discovery(uri);
         self.refresh_blade_block_index(uri, content);
 
@@ -267,9 +268,10 @@ impl Backend {
         // entire parse + extraction in `catch_unwind` so a parser panic
         // doesn't crash the LSP server and produce a zombie process.
         //
-        // On panic the file is simply skipped — no maps are updated, and
-        // the user gets stale (but not missing) completions until the
-        // file is saved in a parseable state.
+        // On panic the structural maps are left untouched, so ordinary
+        // completions can keep using their last coherent snapshot. Source-
+        // registered Laravel names are withdrawn below because their latest
+        // contribution could not be parsed.
         let content_owned = content_to_parse;
         let uri_owned = uri.to_string();
 
@@ -308,9 +310,14 @@ impl Backend {
         // no-op for every file that is not a registered service provider.
         self.refresh_laravel_provider_resources(uri, content);
 
+        self.finish_ast_update(uri, result)
+    }
+
+    fn finish_ast_update(&self, uri: &str, result: Option<bool>) -> bool {
         match result {
             Some(changed) => changed,
             None => {
+                self.laravel_source_strings.write().remove(uri);
                 // Parser panicked — store a single "Parse failed" error
                 // so the syntax-error diagnostic collector can report it.
                 self.parse_errors.write().insert(
@@ -413,6 +420,12 @@ impl Backend {
         drop(open_uris);
 
         if !failures.is_empty() {
+            {
+                let mut index = self.laravel_source_strings.write();
+                for (uri, _) in &failures {
+                    index.remove(uri);
+                }
+            }
             let mut parse_errors = self.parse_errors.write();
             for (uri, errors) in failures {
                 parse_errors.insert(uri, errors);
@@ -821,7 +834,11 @@ impl Backend {
 
             // Build the precomputed symbol map while the AST is still alive.
             // This must happen before the `Program` (and its arena) are dropped.
-            let symbol_map = Arc::new(extract_symbol_map(program, content));
+            let symbol_map = Arc::new(extract_symbol_map_with_resolved_names(
+                program,
+                content,
+                &owned_resolved,
+            ));
 
             // For files without any explicit namespace blocks, synthesize a
             // single span covering the entire file with the detected namespace
@@ -1317,18 +1334,39 @@ impl Backend {
             }
         }
 
+        // Extracting direct Laravel names sorts, deduplicates, and clones
+        // their strings. Keep that work outside the small shared-index lock.
+        let source_string_contributions = prepared
+            .iter()
+            .map(|update| {
+                crate::laravel_string_index::LaravelSourceStringContributions::from_symbol_map(
+                    &update.symbol_map,
+                )
+            })
+            .collect::<Vec<_>>();
         let reference_items: Vec<(String, Arc<SymbolMap>)> = prepared
             .iter()
             .map(|update| (update.uri.clone(), Arc::clone(&update.symbol_map)))
             .collect();
-        self.reindex_references_for_symbol_maps_batch(reference_items);
 
+        // Publish every new map before advancing the source-name generation.
+        // A queue-name reader that observes the new generation is therefore
+        // guaranteed to scan at least these maps, never their predecessors.
         {
             let mut symbol_maps = self.symbol_maps.write();
             for update in prepared {
                 symbol_maps.insert(update.uri, update.symbol_map);
             }
         }
+
+        {
+            let mut index = self.laravel_source_strings.write();
+            for ((uri, _), contributions) in reference_items.iter().zip(source_string_contributions)
+            {
+                index.set_symbol_map_contributions(uri, contributions);
+            }
+        }
+        self.reindex_references_for_symbol_maps_batch(reference_items);
 
         changed
     }
@@ -1900,10 +1938,136 @@ impl Backend {
     }
 }
 
+impl Backend {
+    /// Whether a URI is one of the arbitrary config paths registered by a
+    /// service provider. These files need not live below a `config/`
+    /// directory, so the conventional path check cannot identify them.
+    fn is_provider_config_uri(&self, uri: &str) -> bool {
+        let resources = self.laravel_provider_resources.read();
+        if resources.config_files.is_empty() {
+            return false;
+        }
+        let Some(edited_path) = tower_lsp::lsp_types::Url::parse(uri)
+            .ok()
+            .and_then(|url| url.to_file_path().ok())
+        else {
+            return false;
+        };
+
+        let edited_file_name = edited_path.file_name();
+        let mut candidates = Vec::new();
+        for resource in &resources.config_files {
+            if resource.path == edited_path {
+                return true;
+            }
+            if resource.path.file_name() == edited_file_name {
+                candidates.push(resource.path.clone());
+            }
+        }
+        drop(resources);
+        if candidates.is_empty() {
+            return false;
+        }
+        let Ok(edited_path) = edited_path.canonicalize() else {
+            return false;
+        };
+        candidates.into_iter().any(|candidate| {
+            candidate
+                .canonicalize()
+                .is_ok_and(|path| path == edited_path)
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::Backend;
+
+    #[test]
+    fn a_failed_parse_withdraws_its_laravel_source_contributions() {
+        let backend = Backend::new_test();
+        let uri = "file:///app/Providers/AppServiceProvider.php";
+        backend.update_ast(
+            uri,
+            r#"<?php
+use Illuminate\Support\Facades\RateLimiter;
+RateLimiter::for('api', fn () => null);
+"#,
+        );
+        assert_eq!(
+            backend.laravel_source_strings.read().rate_limiter_names(),
+            ["api"]
+        );
+
+        assert!(!backend.finish_ast_update(uri, None));
+        assert!(
+            backend
+                .laravel_source_strings
+                .read()
+                .rate_limiter_names()
+                .is_empty()
+        );
+        assert_eq!(
+            backend.parse_errors.read().get(uri).unwrap(),
+            &vec![("Parse failed (internal error)".to_string(), 0, 0)]
+        );
+    }
+
+    #[test]
+    fn provider_config_outside_config_directory_invalidates_config_cache() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("package/resources/settings.php");
+        std::fs::create_dir_all(path.parent().unwrap()).expect("create resources directory");
+        std::fs::write(&path, "<?php return ['stores' => []];").expect("write provider config");
+
+        let backend = Backend::new_test();
+        backend
+            .laravel_provider_resources
+            .write()
+            .config_files
+            .push(crate::virtual_members::laravel::ProviderResource {
+                path: path.clone(),
+                namespace: "cache".to_string(),
+            });
+        {
+            let mut cache = backend.laravel_string_key_cache.write();
+            cache.config_generation = 41;
+            cache.config_keys = Some(Arc::new(vec!["cache.stores.old".to_string()]));
+            cache.config_open_prefixes = Some(Arc::new(Vec::new()));
+        }
+
+        let uri = crate::util::path_to_uri(&path);
+        backend.update_ast(&uri, "<?php return ['stores' => ['new' => []]];");
+
+        let cache = backend.laravel_string_key_cache.read();
+        assert_eq!(cache.config_generation, 42);
+        assert!(cache.config_keys.is_none());
+        assert!(cache.config_open_prefixes.is_none());
+    }
+
+    #[test]
+    fn an_absent_same_named_path_is_not_a_registered_provider_config() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let registered = dir.path().join("package/resources/settings.php");
+        std::fs::create_dir_all(registered.parent().unwrap()).expect("create resources directory");
+        std::fs::write(&registered, "<?php return [];").expect("write provider config");
+
+        let backend = Backend::new_test();
+        backend
+            .laravel_provider_resources
+            .write()
+            .config_files
+            .push(crate::virtual_members::laravel::ProviderResource {
+                path: registered,
+                namespace: "package".to_string(),
+            });
+
+        assert!(!backend.is_provider_config_uri("not a URI"));
+        let absent = dir.path().join("missing/settings.php");
+        let uri = crate::util::path_to_uri(&absent);
+        assert!(!backend.is_provider_config_uri(&uri));
+    }
 
     /// Changing a function's parameter type should cause `update_ast` to
     /// return `true` (signature changed), triggering cross-file

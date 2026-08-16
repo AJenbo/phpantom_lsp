@@ -244,6 +244,7 @@ mod hover;
 mod indexing;
 pub(crate) mod inheritance;
 mod inlay_hints;
+mod laravel_string_index;
 /// LSP JSON-RPC dispatch for the wasm build, which has no tower-lsp transport.
 /// Kept free of any target-specific code so the marshalling in `wasm_wasi` is
 /// the only thing a future non-WASI wasm target would have to replace.
@@ -336,7 +337,12 @@ pub(crate) struct LaravelStringKeyCache {
     /// `Arc` because both the name list and the parameter names of one route
     /// are read from it, and cloning the whole table per read would be waste.
     pub routes: Option<std::sync::Arc<Vec<crate::virtual_members::laravel::RouteEntry>>>,
-    pub config_keys: Option<Vec<String>>,
+    pub config_keys: Option<Arc<Vec<String>>>,
+    /// Config subtrees whose child names are supplied by runtime expressions.
+    /// Kept parallel to `config_keys` and filled under the same build lock.
+    pub config_open_prefixes: Option<Arc<Vec<String>>>,
+    /// Revision used to reject a config scan that finishes after invalidation.
+    pub config_generation: u64,
     pub view_names: Option<Vec<String>>,
     pub trans_keys: Option<Vec<String>>,
     /// Every translation key mapped to whether it names a group (nested
@@ -399,7 +405,7 @@ pub(crate) struct LaravelStringKeyBuildLocks {
 }
 
 impl LaravelStringKeyCache {
-    fn invalidate_for_uri(&mut self, uri: &str, content: &str) {
+    fn invalidate_for_uri(&mut self, uri: &str, content: &str, is_provider_config: bool) {
         // Abilities come from `Gate::define()` calls and from the methods of
         // every policy class, so an edit to either invalidates the set.  The
         // token is `Gate::` rather than `Gate` so an unrelated `Gateway` does
@@ -412,8 +418,10 @@ impl LaravelStringKeyCache {
         if uri.contains("/routes/") {
             self.routes = None;
         }
-        if uri.contains("/config/") {
+        if uri.contains("/config/") || is_provider_config {
+            self.config_generation = self.config_generation.wrapping_add(1);
             self.config_keys = None;
+            self.config_open_prefixes = None;
             self.config_trees = None;
         }
         // View roots are configurable via `config/view.php`, so a Blade
@@ -514,14 +522,14 @@ pub struct Backend {
     /// (caught by `catch_unwind`), a single "Parse failed" entry is
     /// stored instead.
     pub(crate) parse_errors: Arc<RwLock<HashMap<String, Vec<ParseErrorEntry>>>>,
-    /// Per-URI locks for background `didChange` parses.
+    /// Per-URI locks for editor-buffer lifecycle updates and parses.
     ///
     /// `didChange` handlers offload parsing to blocking tasks.  Without a
     /// per-file lock, an older parse can finish after a newer edit and publish
     /// stale symbol state.  These locks serialize parse commits per URI; the
     /// handler also verifies that the captured text is still current before
     /// updating shared maps.
-    pub(crate) did_change_parse_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
+    pub(crate) did_change_parse_locks: Arc<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
     /// Coalescing state for expensive whole-file requests. See
     /// [`WholeFileCoalesce`] for why this exists.
     pub(crate) whole_file_coalesce: Arc<WholeFileCoalesce>,
@@ -730,6 +738,9 @@ pub struct Backend {
     /// Invalidated when a file in `routes/`, `config/`, `resources/views/`,
     /// or `lang/` is updated.
     pub(crate) laravel_string_key_cache: Arc<RwLock<LaravelStringKeyCache>>,
+    /// Incremental source registrations for rate-limiters and free-form queue
+    /// names. Updated per parsed URI, so completion never rescans the workspace.
+    pub(crate) laravel_source_strings: Arc<RwLock<laravel_string_index::LaravelSourceStringIndex>>,
     /// Compute-once guards for `laravel_string_key_cache`; see
     /// [`LaravelStringKeyBuildLocks`].
     pub(crate) laravel_string_key_build_locks: Arc<LaravelStringKeyBuildLocks>,
@@ -1060,6 +1071,9 @@ impl Backend {
                 virtual_members::laravel::ProviderScans::default(),
             )),
             laravel_string_key_cache: Arc::new(RwLock::new(LaravelStringKeyCache::default())),
+            laravel_source_strings: Arc::new(RwLock::new(
+                laravel_string_index::LaravelSourceStringIndex::default(),
+            )),
             laravel_string_key_build_locks: Arc::new(LaravelStringKeyBuildLocks::default()),
             schema_index: Arc::new(RwLock::new(
                 virtual_members::laravel::database_schema::SchemaIndex::default(),
@@ -1163,6 +1177,9 @@ impl Backend {
                 virtual_members::laravel::ProviderScans::default(),
             )),
             laravel_string_key_cache: Arc::new(RwLock::new(LaravelStringKeyCache::default())),
+            laravel_source_strings: Arc::new(RwLock::new(
+                laravel_string_index::LaravelSourceStringIndex::default(),
+            )),
             laravel_string_key_build_locks: Arc::new(LaravelStringKeyBuildLocks::default()),
             schema_index: Arc::new(RwLock::new(
                 virtual_members::laravel::database_schema::SchemaIndex::default(),
@@ -1694,7 +1711,7 @@ impl Backend {
                 vec![uri_str.as_str(), canonical_uri.as_str()]
             };
             for uri in spellings {
-                self.clear_file_maps(uri);
+                self.clear_file_maps_and_source_strings(uri);
                 self.symbols.uri_classes_index.write().remove(uri);
                 self.parsed_uris.write().remove(uri);
                 // The global_functions/global_defines entries for these URIs
@@ -1798,6 +1815,7 @@ impl Backend {
             laravel_provider_resources: Arc::clone(&self.laravel_provider_resources),
             laravel_provider_scans: Arc::clone(&self.laravel_provider_scans),
             laravel_string_key_cache: Arc::clone(&self.laravel_string_key_cache),
+            laravel_source_strings: Arc::clone(&self.laravel_source_strings),
             laravel_string_key_build_locks: Arc::clone(&self.laravel_string_key_build_locks),
             schema_index: Arc::clone(&self.schema_index),
             member_completion_cache: Arc::clone(&self.member_completion_cache),

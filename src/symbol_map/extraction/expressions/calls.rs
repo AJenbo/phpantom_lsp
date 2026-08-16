@@ -54,10 +54,33 @@ pub(super) fn extract_instantiation_expr<'a>(
         // `Content` is too plain a class name to key on alone, so the short
         // spelling is only read inside a mailable.
         let clean_class = strip_fqn_prefix(&class_text);
+        let semantic_class = ctx
+            .resolved_name_at(inst.class.span().start.offset)
+            .map(strip_fqn_prefix)
+            .unwrap_or(clean_class);
         if clean_class.eq_ignore_ascii_case("Illuminate\\Mail\\Mailables\\Content")
             || (ctx.in_mailable && clean_class.eq_ignore_ascii_case("Content"))
         {
             try_emit_mailable_content_view_spans(args, ctx.content, &mut ctx.spans);
+        }
+        if matches_laravel_class(
+            semantic_class,
+            "Illuminate\\Queue\\Middleware",
+            "RateLimited",
+        ) || matches_laravel_class(
+            semantic_class,
+            "Illuminate\\Queue\\Middleware",
+            "RateLimitedWithRedis",
+        ) {
+            try_emit_laravel_string_span_with_access_for_parameter(
+                crate::symbol_map::LaravelStringKind::RateLimiter,
+                false,
+                false,
+                args,
+                "limiterName",
+                ctx.content,
+                &mut ctx.spans,
+            );
         }
         if !class_text.is_empty() {
             emit_call_site(
@@ -179,6 +202,19 @@ fn extract_call<'a>(
                             &mut ctx.spans,
                         );
                     }
+                    if let Some(trigger) =
+                        crate::symbol_map::laravel_resources::function_trigger(name_clean)
+                    {
+                        try_emit_laravel_config_resource_span_for_parameter(
+                            trigger.kind,
+                            trigger.shape,
+                            trigger.access,
+                            &func_call.argument_list,
+                            trigger.argument,
+                            ctx.content,
+                            &mut ctx.spans,
+                        );
+                    }
                     // The Blade preprocessor lowers `@can`/`@cannot`/`@canany`
                     // to this call so the ability string is extracted here
                     // like any other authorization check.
@@ -232,6 +268,7 @@ fn extract_call<'a>(
                         &mut ctx.spans,
                     );
                 }
+                record_typed_laravel_resource_call(&member_name, &method_call.argument_list, ctx);
                 // `$this->app->singleton('payments', …)` registers a container
                 // key and `app()->make('payments')` asks for one.  Gated on the
                 // receiver: `make` and `bind` say nothing on their own.
@@ -413,6 +450,7 @@ fn extract_call<'a>(
                         &mut ctx.spans,
                     );
                 }
+                record_typed_laravel_resource_call(&member_name, &method_call.argument_list, ctx);
                 // Use `->` so resolve_callable handles it the same
                 // as regular method calls.
                 emit_call_site(
@@ -482,8 +520,11 @@ fn extract_call<'a>(
                     },
                 });
                 let clean_subject = strip_fqn_prefix(&subject_text);
-                if (clean_subject.eq_ignore_ascii_case("Config")
-                    || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\Config"))
+                let semantic_subject = ctx
+                    .resolved_name_at(class_span.start.offset)
+                    .map(strip_fqn_prefix)
+                    .unwrap_or(clean_subject);
+                if matches_laravel_facade(semantic_subject, "Config")
                     && is_config_repository_method(&member_name)
                 {
                     try_emit_laravel_config_key_span(
@@ -492,6 +533,38 @@ fn extract_call<'a>(
                         ctx.content,
                         &mut ctx.spans,
                     );
+                }
+                if let Some(trigger) = crate::symbol_map::laravel_resources::static_method_trigger(
+                    semantic_subject,
+                    &member_name,
+                ) {
+                    try_emit_laravel_config_resource_span_for_parameter(
+                        trigger.kind,
+                        trigger.shape,
+                        trigger.access,
+                        &static_call.argument_list,
+                        trigger.argument,
+                        ctx.content,
+                        &mut ctx.spans,
+                    );
+                }
+                if matches_laravel_facade(semantic_subject, "RateLimiter")
+                    && member_name.eq_ignore_ascii_case("for")
+                {
+                    match argument_expr_for_parameter(&static_call.argument_list, 0, "name") {
+                        Some(argument @ Expression::Literal(literal::Literal::String(_))) => {
+                            push_laravel_string_span(
+                                crate::symbol_map::LaravelStringKind::RateLimiter,
+                                true,
+                                false,
+                                argument,
+                                ctx.content,
+                                &mut ctx.spans,
+                            );
+                        }
+                        Some(_) => ctx.has_dynamic_rate_limiter = true,
+                        None => {}
+                    }
                 }
                 // The `View` facade proxies the view factory, so every
                 // factory method that names a template does so here too.
@@ -580,7 +653,7 @@ fn extract_call<'a>(
                 // parameter of a route registration.
                 if is_gate_facade(clean_subject) {
                     emit_gate_facade_ability_spans(&member_name, &static_call.argument_list, ctx);
-                } else if clean_subject.eq_ignore_ascii_case("Route")
+                } else if matches_laravel_facade(semantic_subject, "Route")
                     && member_name.eq_ignore_ascii_case("middleware")
                 {
                     try_emit_can_middleware_spans(
@@ -638,6 +711,49 @@ fn extract_call<'a>(
 }
 
 // ─── Authorization gate abilities ───────────────────────────────────────────
+
+/// Record a resource name whose family depends on the instance receiver's
+/// resolved type. Ordinary and null-safe calls share this hot name check.
+fn record_typed_laravel_resource_call<'a>(
+    member_name: &str,
+    argument_list: &'a ArgumentList<'a>,
+    ctx: &mut ExtractionCtx<'a>,
+) {
+    let resource_rule = if member_name.eq_ignore_ascii_case("connection") {
+        Some((
+            crate::symbol_map::LaravelResourceReceiverRule::ConnectionMethod,
+            "connection",
+            Some("name"),
+        ))
+    } else if let Some(trigger) =
+        crate::symbol_map::laravel_resources::instance_method_trigger(member_name)
+        && trigger.kind == crate::symbol_map::LaravelConfigResource::QueueConnection
+    {
+        Some((
+            crate::symbol_map::LaravelResourceReceiverRule::QueueableConnection,
+            trigger.argument,
+            None,
+        ))
+    } else if member_name.eq_ignore_ascii_case("onQueue") {
+        Some((
+            crate::symbol_map::LaravelResourceReceiverRule::QueueName,
+            "queue",
+            None,
+        ))
+    } else {
+        None
+    };
+    if let Some((rule, parameter, alternate_parameter)) = resource_rule {
+        record_laravel_resource_receiver_site(
+            rule,
+            argument_list,
+            parameter,
+            alternate_parameter,
+            ctx.content,
+            &mut ctx.resource_receiver_sites,
+        );
+    }
+}
 
 /// Emit ability spans for a `Gate::<method>(…)` static call.
 ///
@@ -741,14 +857,16 @@ fn emit_gate_ability_spans_for_method<'a>(
         return;
     }
 
-    if is_middleware && (receiver_is_this || chain_roots_at_route_facade(object)) {
+    if is_middleware
+        && (receiver_is_this || chain_roots_at_route_facade(object, ctx.resolved_names))
+    {
         try_emit_can_middleware_spans(argument_list, ctx.content, &mut ctx.spans);
         return;
     }
 
     // A route registration's `->can('update', 'post')` names a route
     // parameter, not a model, in its second argument.
-    if is_can && chain_roots_at_route_facade(object) {
+    if is_can && chain_roots_at_route_facade(object, ctx.resolved_names) {
         try_emit_gate_ability_spans(
             argument_list,
             0,
@@ -764,9 +882,9 @@ fn emit_gate_ability_spans_for_method<'a>(
     let is_check = if is_can {
         receiver_is_user_like(object)
     } else if member_name.eq_ignore_ascii_case("authorize") {
-        receiver_is_this || chain_roots_at_gate(object)
+        receiver_is_this || chain_roots_at_gate(object, ctx.resolved_names)
     } else {
-        chain_roots_at_gate(object)
+        chain_roots_at_gate(object, ctx.resolved_names)
     };
     if !is_check {
         return;

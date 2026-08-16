@@ -196,7 +196,9 @@ thread_local! {
 }
 
 fn variant_name(t: &PhpType) -> &'static str {
-    match t.kind() {
+    match t.raw_kind() {
+        TypeKind::Benevolent(_) => "Benevolent",
+        TypeKind::ListShape(_) => "ListShape",
         TypeKind::Named(_) => "Named",
         TypeKind::StaticType(_) => "StaticType",
         TypeKind::ThisType(_) => "ThisType",
@@ -246,7 +248,11 @@ fn ty(t: &PhpType) -> Sz {
     // The node's own `Arc` allocation: control block plus the enum.
     z.add(ARC + size_of::<TypeKind>());
 
-    match t.kind() {
+    match t.raw_kind() {
+        TypeKind::Benevolent(b) | TypeKind::ListShape(b) => {
+            z.slot(1);
+            z += ty(b);
+        }
         TypeKind::Named(_) | TypeKind::StaticType(_) | TypeKind::ThisType(_) => {}
         TypeKind::Nullable(b) | TypeKind::Array(b) | TypeKind::KeyOf(b) | TypeKind::ValueOf(b) => {
             z.slot(1);
@@ -1319,6 +1325,13 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
             for site in &sm.view_receiver_sites {
                 sym.add(site.key.capacity());
             }
+            sym.add(
+                sm.resource_receiver_sites.capacity()
+                    * size_of::<crate::symbol_map::LaravelResourceReceiverSite>(),
+            );
+            for site in &sm.resource_receiver_sites {
+                sym.add(site.key.capacity());
+            }
         }
     }
     eprintln!(
@@ -1436,11 +1449,14 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
     let mut laravel_keys = Sz::default();
     {
         let c = backend.laravel_string_key_cache.read();
-        for v in [&c.config_keys, &c.view_names, &c.trans_keys]
-            .into_iter()
-            .flatten()
-        {
-            laravel_keys += vs(v);
+        if let Some(keys) = &c.config_keys {
+            laravel_keys += vs(keys);
+        }
+        if let Some(prefixes) = &c.config_open_prefixes {
+            laravel_keys += vs(prefixes);
+        }
+        for values in [&c.view_names, &c.trans_keys].into_iter().flatten() {
+            laravel_keys += vs(values);
         }
         if let Some(routes) = &c.routes {
             laravel_keys
@@ -1482,6 +1498,41 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
             }
         }
     }
+    laravel_keys.add(backend.laravel_source_strings.read().audit_heap());
+    let mut typed_receiver_cache = Sz::default();
+    let mut n_typed_receiver_spans = 0usize;
+    let n_typed_receiver_entries;
+    {
+        use crate::blade::typed_receiver::TypedReceiverSpansState;
+
+        let cache = backend.typed_receiver_view_spans_cache.read();
+        n_typed_receiver_entries = cache.len();
+        typed_receiver_cache += map_buckets::<
+            String,
+            crate::blade::typed_receiver::TypedReceiverSpans,
+        >(cache.capacity());
+        for (uri, entry) in cache.iter() {
+            typed_receiver_cache.add(uri.capacity());
+            // A dead weak reference still keeps the Arc allocation itself
+            // resident, although the SymbolMap's owned fields are gone.
+            if entry.symbol_map.strong_count() == 0 {
+                typed_receiver_cache.add(ARC + size_of::<crate::symbol_map::SymbolMap>());
+            }
+            match &entry.state {
+                TypedReceiverSpansState::Pending(_) => typed_receiver_cache.add(ARC),
+                TypedReceiverSpansState::Ready(spans) => {
+                    typed_receiver_cache.add(ARC + VEC_HDR);
+                    typed_receiver_cache
+                        .add(spans.capacity() * size_of::<crate::symbol_map::SymbolSpan>());
+                    n_typed_receiver_spans += spans.len();
+                    for span in spans.iter() {
+                        typed_receiver_cache.add(span.kind.audit_heap());
+                    }
+                }
+                TypedReceiverSpansState::Invalidated => {}
+            }
+        }
+    }
     let mut blade = Sz::default();
     let n_blade;
     {
@@ -1509,9 +1560,12 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
         }
     }
     eprintln!(
-        "── stub/autoload/uri-globals/negative caches {:.1} MB | laravel string keys {:.1} MB | blade virtual content: {} files {:.1} MB",
+        "── stub/autoload/uri-globals/negative caches {:.1} MB | laravel string keys {:.1} MB | typed receiver cache: {} files, {} spans, {:.1} MB | blade virtual content: {} files {:.1} MB",
         mb(misc.bytes),
         mb(laravel_keys.bytes),
+        n_typed_receiver_entries,
+        n_typed_receiver_spans,
+        mb(typed_receiver_cache.bytes),
         n_blade,
         mb(blade.bytes),
     );
@@ -1553,6 +1607,7 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
         + open.bytes
         + misc.bytes
         + laravel_keys.bytes
+        + typed_receiver_cache.bytes
         + blade.bytes
         + runner_content_bytes
         + ustr::total_allocated();
@@ -1616,6 +1671,12 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
     });
     probe("laravel_string_key_cache", &mut || {
         *backend.laravel_string_key_cache.write() = Default::default()
+    });
+    probe("laravel_source_strings", &mut || {
+        *backend.laravel_source_strings.write() = Default::default()
+    });
+    probe("typed_receiver_view_spans_cache", &mut || {
+        backend.typed_receiver_view_spans_cache.write().clear()
     });
     probe("member_completion_cache", &mut || {
         backend.member_completion_cache.lock().clear()

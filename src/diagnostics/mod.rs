@@ -274,11 +274,50 @@ pub(crate) type SlowDiagnosticObserver<'a> =
 enum CheckedStringKind {
     Route,
     Config,
+    ConfigResource(crate::symbol_map::LaravelConfigResource),
     View,
     Trans,
     Command,
     MorphAlias,
     GateAbility,
+    RateLimiter,
+}
+
+fn sorted_config_keys_contain(keys: &[String], key: &str) -> bool {
+    keys.binary_search_by(|candidate| candidate.as_str().cmp(key))
+        .is_ok()
+}
+
+fn sorted_config_keys_have_prefix(keys: &[String], prefix: &str) -> bool {
+    let index = keys.partition_point(|candidate| candidate.as_str() < prefix);
+    keys.get(index)
+        .is_some_and(|candidate| candidate.starts_with(prefix))
+}
+
+fn sorted_config_keys_contain_key_or_child(keys: &[String], key: &str) -> bool {
+    let index = keys.partition_point(|candidate| candidate.as_str() < key);
+    keys.get(index).is_some_and(|candidate| {
+        candidate == key
+            || candidate
+                .strip_prefix(key)
+                .is_some_and(|suffix| suffix.starts_with('.'))
+    })
+}
+
+fn config_key_is_in_open_subtree(open_prefixes: &[String], key: &str) -> bool {
+    let mut prefix = key;
+    loop {
+        if open_prefixes
+            .binary_search_by(|candidate| candidate.as_str().cmp(prefix))
+            .is_ok()
+        {
+            return true;
+        }
+        let Some(separator) = prefix.rfind('.') else {
+            return false;
+        };
+        prefix = &prefix[..separator];
+    }
 }
 
 // ── Shared helpers ──────────────────────────────────────────────────────────
@@ -622,77 +661,89 @@ impl Backend {
         let mut has_command = false;
         let mut has_morph_alias = false;
         let mut has_gate_ability = false;
-        let key_spans: Vec<(CheckedStringKind, String, u32, u32)> = {
-            let Some(symbol_map) = self.symbol_maps.read().get(uri).cloned() else {
-                return;
-            };
-            let extra = self.typed_receiver_view_spans_for(uri, &symbol_map);
-            symbol_map
-                .spans
-                .iter()
-                .chain(extra.iter())
-                .filter_map(|span| {
-                    if let SymbolKind::LaravelStringKey {
-                        kind,
-                        key,
-                        is_write,
-                        is_optional,
-                    } = &span.kind
-                    {
-                        // A write declares the key it names, so there is
-                        // nothing to check it against, and an optional key
-                        // is one the call is written to do without: an
-                        // `@includeFirst` candidate that names nothing is
-                        // why the directive takes a list at all.
-                        if *is_write || *is_optional {
-                            return None;
-                        }
-                        let checked = match kind {
-                            LaravelStringKind::Route => {
-                                has_route = true;
-                                CheckedStringKind::Route
-                            }
-                            LaravelStringKind::Config => {
-                                has_config = true;
-                                CheckedStringKind::Config
-                            }
-                            LaravelStringKind::View => {
-                                has_view = true;
-                                CheckedStringKind::View
-                            }
-                            LaravelStringKind::Trans => {
-                                has_trans = true;
-                                CheckedStringKind::Trans
-                            }
-                            LaravelStringKind::Command => {
-                                has_command = true;
-                                CheckedStringKind::Command
-                            }
-                            LaravelStringKind::MorphAlias => {
-                                has_morph_alias = true;
-                                CheckedStringKind::MorphAlias
-                            }
-                            LaravelStringKind::GateAbility => {
-                                has_gate_ability = true;
-                                CheckedStringKind::GateAbility
-                            }
-                            // A section or stack name is judged against the
-                            // templates that render the one it is written
-                            // in, which the Blade pass below has and this
-                            // one does not.  And anything at all can be bound
-                            // at runtime, so an unrecognised container key
-                            // proves nothing.
-                            LaravelStringKind::Section
-                            | LaravelStringKind::Stack
-                            | LaravelStringKind::ContainerBinding => return None,
-                        };
-                        Some((checked, key.clone(), span.start, span.end))
-                    } else {
-                        None
-                    }
-                })
-                .collect()
+        let mut has_rate_limiter = false;
+        let Some(symbol_map) = self.symbol_maps.read().get(uri).cloned() else {
+            return;
         };
+        // Queue names deliberately have no closed-set diagnostic. Avoid the
+        // shared type-resolution pass when they are the only typed receiver
+        // candidates in this file.
+        let needs_typed_diagnostic_spans = !symbol_map.view_receiver_sites.is_empty()
+            || symbol_map
+                .resource_receiver_sites
+                .iter()
+                .any(|site| site.rule != crate::symbol_map::LaravelResourceReceiverRule::QueueName);
+        let extra = needs_typed_diagnostic_spans
+            .then(|| self.typed_receiver_view_spans_for(uri, &symbol_map));
+        // The map and optional typed-span Arc outlive this list, so borrow key
+        // text rather than allocating a String for every diagnostic candidate.
+        let mut key_spans: Vec<(CheckedStringKind, &str, u32, u32)> = Vec::new();
+        for span in symbol_map
+            .spans
+            .iter()
+            .chain(extra.iter().flat_map(|spans| spans.iter()))
+        {
+            let SymbolKind::LaravelStringKey {
+                kind,
+                key,
+                is_write,
+                is_optional,
+            } = &span.kind
+            else {
+                continue;
+            };
+            // A write declares the key it names, so there is nothing to check
+            // it against. An optional key is one the call is written to do
+            // without, such as an `@includeFirst` candidate.
+            if *is_write || *is_optional {
+                continue;
+            }
+            let checked = match kind {
+                LaravelStringKind::Route => {
+                    has_route = true;
+                    CheckedStringKind::Route
+                }
+                LaravelStringKind::Config => {
+                    has_config = true;
+                    CheckedStringKind::Config
+                }
+                LaravelStringKind::ConfigResource(resource) => {
+                    has_config = true;
+                    CheckedStringKind::ConfigResource(*resource)
+                }
+                LaravelStringKind::View => {
+                    has_view = true;
+                    CheckedStringKind::View
+                }
+                LaravelStringKind::Trans => {
+                    has_trans = true;
+                    CheckedStringKind::Trans
+                }
+                LaravelStringKind::Command => {
+                    has_command = true;
+                    CheckedStringKind::Command
+                }
+                LaravelStringKind::MorphAlias => {
+                    has_morph_alias = true;
+                    CheckedStringKind::MorphAlias
+                }
+                LaravelStringKind::GateAbility => {
+                    has_gate_ability = true;
+                    CheckedStringKind::GateAbility
+                }
+                LaravelStringKind::RateLimiter => {
+                    has_rate_limiter = true;
+                    CheckedStringKind::RateLimiter
+                }
+                // A section or stack name is judged against its render tree,
+                // and runtime container/queue names are open-ended.
+                LaravelStringKind::Section
+                | LaravelStringKind::Stack
+                | LaravelStringKind::ContainerBinding
+                | LaravelStringKind::QueueName => continue,
+            };
+            key_spans.push((checked, key, span.start, span.end));
+        }
 
         if !has_route
             && !has_config
@@ -701,6 +752,7 @@ impl Backend {
             && !has_command
             && !has_morph_alias
             && !has_gate_ability
+            && !has_rate_limiter
         {
             return;
         }
@@ -716,19 +768,14 @@ impl Backend {
         } else {
             HashSet::new()
         };
-        let config_keys: HashSet<String> = if has_config {
-            self.cached_config_keys().into_iter().collect()
+        let (config_keys, config_open_prefixes) = if has_config {
+            self.cached_config_metadata()
         } else {
-            HashSet::new()
+            (
+                std::sync::Arc::new(Vec::new()),
+                std::sync::Arc::new(Vec::new()),
+            )
         };
-        // The config files we managed to enumerate keys from, by name.  A
-        // key whose root segment names none of them lives in a file we
-        // cannot see (a library whose config is supplied by the host
-        // application), so nothing about it is knowable.
-        let config_roots: HashSet<&str> = config_keys
-            .iter()
-            .map(|key| key.split('.').next().unwrap_or(key.as_str()))
-            .collect();
         let view_keys: HashSet<String> = if has_view {
             self.cached_view_names().into_iter().collect()
         } else {
@@ -790,8 +837,14 @@ impl Backend {
         } else {
             HashSet::new()
         };
+        // One read guard serves all config-resource and limiter checks in this
+        // file. This avoids cloning the limiter set and avoids a lock/unlock
+        // pair for every string occurrence.
+        let source_strings =
+            (has_config || has_rate_limiter).then(|| self.laravel_source_strings.read());
 
         for (kind, key, start, end) in &key_spans {
+            let key = *key;
             let (valid, label, code) = match kind {
                 // An ability is judged against the model the check names, so
                 // it reports which model rather than the shared
@@ -834,16 +887,46 @@ impl Backend {
                     // An unknown root means the file never reached us, so
                     // the key cannot be wrong as far as we can tell, while
                     // a typo inside a file we did read is still caught.
-                    if !config_roots.contains(key.split('.').next().unwrap_or(key.as_str())) {
+                    let root = key.split('.').next().unwrap_or(key);
+                    if !sorted_config_keys_contain_key_or_child(&config_keys, root) {
+                        continue;
+                    }
+                    if config_key_is_in_open_subtree(&config_open_prefixes, key) {
                         continue;
                     }
                     // Config keys may be partial prefixes (e.g. `config('app')`)
                     // which are valid even without a direct match.
-                    let valid = config_keys.contains(key)
-                        || config_keys
-                            .iter()
-                            .any(|k| k.starts_with(&format!("{}.", key)));
+                    let runtime_resource_exists =
+                        crate::symbol_map::laravel_resources::resource_from_config_key(key)
+                            .is_some_and(|(resource, name)| {
+                                source_strings.as_ref().is_some_and(|index| {
+                                    index.has_runtime_config_resource(resource, name)
+                                })
+                            });
+                    let valid = runtime_resource_exists
+                        || sorted_config_keys_contain_key_or_child(&config_keys, key);
                     (valid, "config key", "invalid_laravel_config")
+                }
+                CheckedStringKind::ConfigResource(resource) => {
+                    let descriptor = crate::symbol_map::laravel_resources::descriptor(*resource);
+                    // A missing subtree means discovery found no declaration
+                    // source for this family, not that every runtime-provided
+                    // name is invalid.
+                    if !sorted_config_keys_have_prefix(&config_keys, descriptor.config_prefix) {
+                        continue;
+                    }
+                    let full_key = crate::symbol_map::laravel_resources::config_key(*resource, key);
+                    if config_key_is_in_open_subtree(&config_open_prefixes, &full_key) {
+                        continue;
+                    }
+                    (
+                        sorted_config_keys_contain(&config_keys, &full_key)
+                            || source_strings.as_ref().is_some_and(|index| {
+                                index.has_runtime_config_resource(*resource, key)
+                            }),
+                        descriptor.label,
+                        descriptor.diagnostic_code,
+                    )
                 }
                 CheckedStringKind::View => {
                     (view_keys.contains(key), "view", "invalid_laravel_view")
@@ -885,6 +968,19 @@ impl Backend {
                         aliases.contains(key),
                         "morph type",
                         "invalid_laravel_morph_alias",
+                    )
+                }
+                CheckedStringKind::RateLimiter => {
+                    let index = source_strings
+                        .as_ref()
+                        .expect("rate limiter spans acquire the source-name index");
+                    if !index.has_rate_limiters() || index.rate_limiter_space_is_open() {
+                        continue;
+                    }
+                    (
+                        index.has_rate_limiter(key),
+                        "rate limiter",
+                        "invalid_laravel_rate_limiter",
                     )
                 }
             };
@@ -1711,6 +1807,22 @@ pub(crate) fn offset_range_to_lsp_range(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_symbol_map_has_no_laravel_string_diagnostics() {
+        let backend = Backend::new_test();
+        let mut diagnostics = Vec::new();
+
+        // A file may close after diagnostics are scheduled but before the
+        // slow Laravel pass reaches it.
+        backend.collect_invalid_laravel_string_key_diagnostics(
+            "file:///closed.php",
+            "<?php route('missing');",
+            &mut diagnostics,
+        );
+
+        assert!(diagnostics.is_empty());
+    }
 
     #[test]
     fn test_offset_range_to_lsp_range_ignores_prologue() {

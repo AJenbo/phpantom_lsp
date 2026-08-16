@@ -14,12 +14,14 @@ use App\Support\PastryCounter;
 use App\Support\PlainOven;
 use App\View\Composers\SidebarComposer;
 use Carbon\CarbonImmutable;
+use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\View;
 use Illuminate\View\View as ViewInstance;
@@ -92,6 +94,11 @@ class DemoServiceProvider extends BaseDemoServiceProvider
         // BlogPost's abilities are PublishingPolicy's public methods, not
         // those of an App\Policies\BlogPostPolicy that does not exist.
         Gate::policy(BlogPost::class, PublishingPolicy::class);
+
+        // Named limiters are source-defined rather than config-backed.
+        // PHPantom indexes this registration so the name completes and
+        // navigates from route or queue middleware.
+        RateLimiter::for('uploads', fn () => Limit::perMinute(60));
 
         // A macro registered here becomes a real method on Collection:
         // it autocompletes, hovers with this signature, and type-checks.

@@ -6,23 +6,38 @@ use super::*;
 
 /// Namespace prefix for Laravel's container-injection attributes.
 pub(super) const LARAVEL_CONTAINER_ATTR_NS: &str = "Illuminate\\Container\\Attributes\\";
-/// Short (non-FQN) names of the container-injection attributes.
-pub(super) const LARAVEL_CONTAINER_ATTR_NAMES: &[&str] = &[
-    "Config",
-    "Database",
-    "DB",
-    "Cache",
-    "Log",
-    "Storage",
-    "Auth",
-    "Authenticated",
-];
+
+/// Whether a semantically resolved class is either the global short name or
+/// the exact class inside `namespace`. The global spelling preserves support
+/// for Laravel's runtime aliases; any other namespace is rejected.
+pub(super) fn matches_laravel_class(class_name: &str, namespace: &str, short: &str) -> bool {
+    let class_name = class_name.trim_start_matches('\\');
+    if class_name.eq_ignore_ascii_case(short) {
+        return true;
+    }
+    class_name
+        .rsplit_once('\\')
+        .is_some_and(|(actual_namespace, actual_short)| {
+            actual_namespace.eq_ignore_ascii_case(namespace)
+                && actual_short.eq_ignore_ascii_case(short)
+        })
+}
+
+/// Whether a semantically resolved class names one Laravel facade.
+pub(super) fn matches_laravel_facade(class_name: &str, short: &str) -> bool {
+    matches_laravel_class(class_name, "Illuminate\\Support\\Facades", short)
+}
+
+/// Laravel-specific payload carried by a contextual attribute.
+pub(super) enum LaravelContainerAttribute {
+    Config,
+    Resource(crate::symbol_map::laravel_resources::ResourceTriggerMatch),
+}
 
 /// Check whether an attribute class name refers to a Laravel container
 /// attribute (`Config`, `Database`, `Cache`, `Log`, `Storage`, `Auth`,
-/// `Authenticated`).  Returns the corresponding [`LaravelStringKind`] if
-/// so — always `Config` since all container attributes resolve to config
-/// sub-keys.
+/// `Authenticated`). Returns the corresponding generic or resource-specific
+/// [`LaravelContainerAttribute`] payload.
 ///
 /// FQN names (containing `\`) are matched directly against
 /// `Illuminate\Container\Attributes\*`.  Short names require the file to
@@ -30,26 +45,34 @@ pub(super) const LARAVEL_CONTAINER_ATTR_NAMES: &[&str] = &[
 /// `import_cache` to avoid repeated linear scans of the file content.
 pub(super) fn resolve_laravel_container_attr(
     class_name: &str,
+    allow_short_import_heuristic: bool,
     import_cache: &mut Option<bool>,
     content: &str,
-) -> Option<crate::symbol_map::LaravelStringKind> {
-    if class_name.contains('\\') {
-        let stripped = class_name.strip_prefix(LARAVEL_CONTAINER_ATTR_NS)?;
-        if LARAVEL_CONTAINER_ATTR_NAMES.contains(&stripped) {
-            return Some(crate::symbol_map::LaravelStringKind::Config);
+) -> Option<LaravelContainerAttribute> {
+    let short = if class_name.contains('\\') {
+        let class_name = class_name.trim_start_matches('\\');
+        let prefix = class_name.get(..LARAVEL_CONTAINER_ATTR_NS.len())?;
+        if !prefix.eq_ignore_ascii_case(LARAVEL_CONTAINER_ATTR_NS) {
+            return None;
         }
-        return None;
-    }
-    if !LARAVEL_CONTAINER_ATTR_NAMES.contains(&class_name) {
-        return None;
-    }
-    let has_import = *import_cache
-        .get_or_insert_with(|| content.contains("use Illuminate\\Container\\Attributes\\"));
-    if has_import {
-        Some(crate::symbol_map::LaravelStringKind::Config)
+        class_name.get(LARAVEL_CONTAINER_ATTR_NS.len()..)?
     } else {
-        None
+        if !allow_short_import_heuristic {
+            return None;
+        }
+        let has_import = *import_cache
+            .get_or_insert_with(|| content.contains("use Illuminate\\Container\\Attributes\\"));
+        if !has_import {
+            return None;
+        }
+        class_name
+    };
+
+    if short.eq_ignore_ascii_case("Config") {
+        return Some(LaravelContainerAttribute::Config);
     }
+    crate::symbol_map::laravel_resources::attribute_trigger(short)
+        .map(LaravelContainerAttribute::Resource)
 }
 
 /// If the first argument of `argument_list` is a non-empty, non-interpolated
@@ -69,6 +92,23 @@ pub(super) fn try_emit_laravel_string_span(
     emit_laravel_string_span(kind, false, 0, argument_list, content, spans);
 }
 
+/// Emit a literal selected by its PHP parameter name, falling back to its
+/// positional slot when the call does not use named arguments.
+pub(super) fn try_emit_laravel_string_span_with_access_for_parameter(
+    kind: crate::symbol_map::LaravelStringKind,
+    is_write: bool,
+    is_optional: bool,
+    argument_list: &ArgumentList<'_>,
+    parameter: &str,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    let Some(expr) = argument_expr_for_parameter(argument_list, 0, parameter) else {
+        return;
+    };
+    push_laravel_string_span(kind, is_write, is_optional, expr, content, spans);
+}
+
 /// The [`try_emit_laravel_string_span`] variant for a helper that does not
 /// lead with its key: `Route::view('/about', 'pages.about')` names the URI
 /// first and the template second.
@@ -80,6 +120,97 @@ pub(super) fn try_emit_laravel_string_span_at(
     spans: &mut Vec<SymbolSpan>,
 ) {
     emit_laravel_string_span(kind, false, index, argument_list, content, spans);
+}
+
+/// Emit a config-backed resource name from a parameter selected by name or
+/// positional slot.
+pub(super) fn try_emit_laravel_config_resource_span_for_parameter(
+    resource: crate::symbol_map::LaravelConfigResource,
+    shape: crate::symbol_map::laravel_resources::ResourceArgumentShape,
+    access: crate::symbol_map::laravel_resources::ResourceAccess,
+    argument_list: &ArgumentList<'_>,
+    parameter: &str,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    let Some(expr) = argument_expr_for_parameter(argument_list, 0, parameter) else {
+        return;
+    };
+    let elements = match expr {
+        Expression::Array(array) if shape.accepts_array() => Some(&array.elements),
+        Expression::LegacyArray(array) if shape.accepts_array() => Some(&array.elements),
+        _ => None,
+    };
+
+    if let Some(elements) = elements {
+        for element in elements.iter() {
+            let value = match element {
+                ArrayElement::KeyValue(value) => value.value,
+                ArrayElement::Value(value) => value.value,
+                ArrayElement::Variadic(_) | ArrayElement::Missing(_) => continue,
+            };
+            push_laravel_string_span(
+                crate::symbol_map::LaravelStringKind::ConfigResource(resource),
+                access.is_write(),
+                access.is_optional(),
+                value,
+                content,
+                spans,
+            );
+        }
+    } else if shape.accepts_scalar() {
+        push_laravel_string_span(
+            crate::symbol_map::LaravelStringKind::ConfigResource(resource),
+            access.is_write(),
+            access.is_optional(),
+            expr,
+            content,
+            spans,
+        );
+    }
+}
+
+/// Record a type-dependent Laravel resource name from a call's first argument.
+pub(super) fn record_laravel_resource_receiver_site(
+    rule: crate::symbol_map::LaravelResourceReceiverRule,
+    argument_list: &ArgumentList<'_>,
+    parameter: &str,
+    alternate_parameter: Option<&str>,
+    content: &str,
+    sites: &mut Vec<crate::symbol_map::LaravelResourceReceiverSite>,
+) {
+    let expr = argument_expr_for_parameter(argument_list, 0, parameter).or_else(|| {
+        alternate_parameter
+            .and_then(|alternate| argument_expr_for_parameter(argument_list, 0, alternate))
+    });
+    let Some(expr) = expr else {
+        return;
+    };
+    record_laravel_resource_receiver_expr(rule, expr, content, sites);
+}
+
+/// Record a type-dependent Laravel resource name from one literal expression.
+pub(super) fn record_laravel_resource_receiver_expr(
+    rule: crate::symbol_map::LaravelResourceReceiverRule,
+    expr: &Expression<'_>,
+    content: &str,
+    sites: &mut Vec<crate::symbol_map::LaravelResourceReceiverSite>,
+) {
+    let Expression::Literal(literal::Literal::String(string)) = expr else {
+        return;
+    };
+    let start = string.span.start.offset + 1;
+    let end = string.span.end.offset - 1;
+    if start >= end || end as usize > content.len() {
+        return;
+    }
+    let key = &content[start as usize..end as usize];
+    sites.push(crate::symbol_map::LaravelResourceReceiverSite {
+        start,
+        end,
+        key: key.to_string(),
+        rule,
+    });
 }
 
 /// Emit the section- or stack-name span for one of the marker calls the
@@ -123,11 +254,12 @@ pub(super) fn try_emit_laravel_config_key_span(
     content: &str,
     spans: &mut Vec<SymbolSpan>,
 ) {
-    emit_laravel_string_span(
+    try_emit_laravel_string_span_with_access_for_parameter(
         crate::symbol_map::LaravelStringKind::Config,
         member_name.eq_ignore_ascii_case("set"),
-        0,
+        false,
         argument_list,
+        "key",
         content,
         spans,
     );
@@ -148,7 +280,7 @@ fn emit_laravel_string_span(
 }
 
 /// Emit the span for one string-literal expression that names a key.
-fn push_laravel_string_span(
+pub(super) fn push_laravel_string_span(
     kind: crate::symbol_map::LaravelStringKind,
     is_write: bool,
     is_optional: bool,
@@ -190,11 +322,13 @@ fn push_laravel_string_span(
         inner_end = inner_start + name_len as u32;
     }
 
+    let key = normalised_key(kind, key);
+
     spans.push(SymbolSpan {
         start: inner_start,
         end: inner_end,
         kind: SymbolKind::LaravelStringKey {
-            key: normalised_key(kind.clone(), key),
+            key,
             kind,
             is_write,
             is_optional,
@@ -229,7 +363,7 @@ pub(super) fn try_emit_laravel_view_span_at(
     // working as intended rather than a typo.
     for element in elements.iter() {
         if let ArrayElement::Value(value) = element {
-            push_laravel_string_span(kind.clone(), false, true, value.value, content, spans);
+            push_laravel_string_span(kind, false, true, value.value, content, spans);
         }
     }
 }
@@ -715,8 +849,11 @@ const FACADE_CHAIN_DEPTH: usize = 4;
 
 /// Whether an instance-method chain roots at the `Gate` facade, as
 /// `Gate::forUser($user)->allows('update', $post)` does.
-pub(super) fn chain_roots_at_gate(expr: &Expression<'_>) -> bool {
-    chain_roots_at_facade(expr, FACADE_CHAIN_DEPTH, &|name| is_gate_facade(name))
+pub(super) fn chain_roots_at_gate(
+    expr: &Expression<'_>,
+    resolved_names: Option<&crate::names::OwnedResolvedNames>,
+) -> bool {
+    chain_roots_at_facade(expr, FACADE_CHAIN_DEPTH, resolved_names, "Gate")
 }
 
 /// Whether an instance-method chain roots at the `Route` facade, as
@@ -724,28 +861,36 @@ pub(super) fn chain_roots_at_gate(expr: &Expression<'_>) -> bool {
 ///
 /// The `can()` there names an ability, but its second argument is a *route
 /// parameter* name rather than a model, so no model subject is recorded.
-pub(super) fn chain_roots_at_route_facade(expr: &Expression<'_>) -> bool {
-    chain_roots_at_facade(expr, FACADE_CHAIN_DEPTH, &|name| {
-        name.eq_ignore_ascii_case("Route")
-    })
+pub(super) fn chain_roots_at_route_facade(
+    expr: &Expression<'_>,
+    resolved_names: Option<&crate::names::OwnedResolvedNames>,
+) -> bool {
+    chain_roots_at_facade(expr, FACADE_CHAIN_DEPTH, resolved_names, "Route")
 }
 
 /// Walk at most `depth` links down a method chain looking for a static call
-/// whose class satisfies `is_facade`.
+/// whose semantically resolved class names `facade`.
 fn chain_roots_at_facade(
     expr: &Expression<'_>,
     depth: usize,
-    is_facade: &dyn Fn(&str) -> bool,
+    resolved_names: Option<&crate::names::OwnedResolvedNames>,
+    facade: &str,
 ) -> bool {
     if depth == 0 {
         return false;
     }
     match expr {
         Expression::Call(Call::Method(mc)) => {
-            chain_roots_at_facade(mc.object, depth - 1, is_facade)
+            chain_roots_at_facade(mc.object, depth - 1, resolved_names, facade)
         }
         Expression::Call(Call::StaticMethod(sc)) => {
-            is_facade(strip_fqn_prefix(&expr_to_subject_text(sc.class)))
+            if let Some(resolved_names) = resolved_names {
+                resolved_names
+                    .get(sc.class.span().start.offset)
+                    .is_some_and(|name| matches_laravel_facade(name, facade))
+            } else {
+                matches_laravel_facade(strip_fqn_prefix(&expr_to_subject_text(sc.class)), facade)
+            }
         }
         _ => false,
     }
@@ -921,39 +1066,48 @@ fn gate_model_subject(
     }
 }
 
-/// Emit gate-ability spans for the `can:ability,Model` entries of a
-/// `middleware(...)` argument, which Laravel accepts as a single string or an
-/// array of them.
+/// Emit navigable parameters embedded in Laravel middleware strings.
+///
+/// Handles `can:ability,Model`, `auth:guard[,guard]`, and a named
+/// `throttle:limiter`; Laravel accepts each as one string or an array value.
 pub(super) fn try_emit_can_middleware_spans(
     argument_list: &ArgumentList<'_>,
     content: &str,
     spans: &mut Vec<SymbolSpan>,
 ) {
-    let Some(first_arg) = argument_list.arguments.iter().next() else {
+    let Some(middleware) = argument_expr_for_parameter(argument_list, 0, "middleware") else {
         return;
     };
-    match first_arg.value() {
+    match middleware {
         Expression::Array(array) => {
             for element in array.elements.iter() {
-                if let ArrayElement::Value(value) = element {
-                    push_can_middleware_span(value.value, content, spans);
-                }
+                let value = match element {
+                    ArrayElement::KeyValue(value) => value.value,
+                    ArrayElement::Value(value) => value.value,
+                    ArrayElement::Variadic(_) | ArrayElement::Missing(_) => continue,
+                };
+                push_middleware_parameter_spans(value, content, spans);
             }
         }
         Expression::LegacyArray(array) => {
             for element in array.elements.iter() {
-                if let ArrayElement::Value(value) = element {
-                    push_can_middleware_span(value.value, content, spans);
-                }
+                let value = match element {
+                    ArrayElement::KeyValue(value) => value.value,
+                    ArrayElement::Value(value) => value.value,
+                    ArrayElement::Variadic(_) | ArrayElement::Missing(_) => continue,
+                };
+                push_middleware_parameter_spans(value, content, spans);
             }
         }
-        expr => push_can_middleware_span(expr, content, spans),
+        expr => push_middleware_parameter_spans(expr, content, spans),
     }
 }
 
-/// Push a gate-ability span covering just the ability part of a
-/// `'can:update,post'` middleware string.
-fn push_can_middleware_span(expr: &Expression<'_>, content: &str, spans: &mut Vec<SymbolSpan>) {
+fn push_middleware_parameter_spans(
+    expr: &Expression<'_>,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
     let Expression::Literal(literal::Literal::String(s)) = expr else {
         return;
     };
@@ -963,22 +1117,69 @@ fn push_can_middleware_span(expr: &Expression<'_>, content: &str, spans: &mut Ve
         return;
     }
     let text = &content[inner_start as usize..inner_end as usize];
-    let Some(rest) = text.strip_prefix("can:") else {
+    let Some((alias, parameters)) = text.split_once(':') else {
         return;
     };
-    let ability = rest.split(',').next().unwrap_or(rest);
-    if ability.is_empty() {
+    let parameter_start = inner_start + alias.len() as u32 + 1;
+
+    if alias.eq_ignore_ascii_case("can") {
+        let ability = parameters.split(',').next().unwrap_or(parameters);
+        push_embedded_string_span(
+            crate::symbol_map::LaravelStringKind::GateAbility,
+            ability,
+            parameter_start,
+            false,
+            spans,
+        );
+    } else if alias.eq_ignore_ascii_case("auth") {
+        let mut offset = parameter_start;
+        for guard in parameters.split(',') {
+            push_embedded_string_span(
+                crate::symbol_map::LaravelStringKind::ConfigResource(
+                    crate::symbol_map::LaravelConfigResource::AuthGuard,
+                ),
+                guard,
+                offset,
+                false,
+                spans,
+            );
+            offset += guard.len() as u32 + 1;
+        }
+    } else if alias.eq_ignore_ascii_case("throttle") {
+        // A comma supplies the legacy decay argument. A lone numeric value is
+        // ambiguous: it can be an inline limit or a registered limiter name,
+        // so keep it navigable without diagnosing it. Other single values,
+        // including digit-prefixed names such as `2fa`, are ordinary names.
+        if !parameters.contains(',') {
+            push_embedded_string_span(
+                crate::symbol_map::LaravelStringKind::RateLimiter,
+                parameters,
+                parameter_start,
+                parameters.as_bytes().iter().all(u8::is_ascii_digit),
+                spans,
+            );
+        }
+    }
+}
+
+fn push_embedded_string_span(
+    kind: crate::symbol_map::LaravelStringKind,
+    key: &str,
+    start: u32,
+    is_optional: bool,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    if key.is_empty() {
         return;
     }
-    let start = inner_start + "can:".len() as u32;
     spans.push(SymbolSpan {
         start,
-        end: start + ability.len() as u32,
+        end: start + key.len() as u32,
         kind: SymbolKind::LaravelStringKey {
-            kind: crate::symbol_map::LaravelStringKind::GateAbility,
-            key: ability.to_string(),
+            kind,
+            key: key.to_string(),
             is_write: false,
-            is_optional: false,
+            is_optional,
         },
     });
 }
@@ -1018,24 +1219,17 @@ pub(super) fn try_emit_command_own_param_span(
     });
 }
 
-/// If the first argument of `argument_list` is a non-empty, non-interpolated
-/// string literal, push a [`SymbolKind::LaravelStringKey`] span covering the
-/// string content (inside the quotes) onto `spans`.
-///
-/// Called by the `config()` function-call extractor and the
-/// `Config::get()` / `Config::set()` static-call extractor so that
-/// find-references and go-to-definition for Laravel config keys can use
-/// the pre-built symbol map instead of re-parsing every file on demand.
-pub(super) fn try_emit_laravel_string_span_partial(
+/// Partial-argument-list counterpart of named parameter selection.
+pub(super) fn try_emit_laravel_string_span_partial_for_parameter(
     kind: crate::symbol_map::LaravelStringKind,
     argument_list: &PartialArgumentList<'_>,
+    parameter: &str,
     content: &str,
     spans: &mut Vec<SymbolSpan>,
 ) {
-    let Some(first_arg) = argument_list.arguments.iter().next() else {
-        return;
-    };
-    let Some(Expression::Literal(literal::Literal::String(s))) = first_arg.value() else {
+    let Some(Expression::Literal(literal::Literal::String(s))) =
+        partial_argument_expr_for_parameter(argument_list, 0, parameter)
+    else {
         return;
     };
     let inner_start = s.span.start.offset + 1;
@@ -1057,12 +1251,82 @@ pub(super) fn try_emit_laravel_string_span_partial(
         start: inner_start,
         end: inner_end,
         kind: SymbolKind::LaravelStringKey {
-            key: normalised_key(kind.clone(), key),
+            key: normalised_key(kind, key),
             kind,
             is_write: false,
             is_optional: false,
         },
     });
+}
+
+/// Attribute counterpart of named parameter selection for config resources.
+pub(super) fn try_emit_laravel_config_resource_span_partial_for_parameter(
+    resource: crate::symbol_map::LaravelConfigResource,
+    access: crate::symbol_map::laravel_resources::ResourceAccess,
+    argument_list: &PartialArgumentList<'_>,
+    parameter: &str,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    let Some(expr) = partial_argument_expr_for_parameter(argument_list, 0, parameter) else {
+        return;
+    };
+    push_laravel_string_span(
+        crate::symbol_map::LaravelStringKind::ConfigResource(resource),
+        access.is_write(),
+        access.is_optional(),
+        expr,
+        content,
+        spans,
+    );
+}
+
+/// Select a call argument by its declared parameter name, or by positional
+/// index when the call uses positional syntax.
+pub(super) fn argument_expr_for_parameter<'a>(
+    argument_list: &ArgumentList<'a>,
+    positional_index: usize,
+    parameter: &str,
+) -> Option<&'a Expression<'a>> {
+    for argument in argument_list.arguments.iter() {
+        if let Argument::Named(named) = argument
+            && bytes_to_str(named.name.value).eq_ignore_ascii_case(parameter)
+        {
+            return Some(named.value);
+        }
+    }
+
+    argument_list
+        .arguments
+        .iter()
+        .filter_map(|argument| match argument {
+            Argument::Positional(positional) => Some(positional.value),
+            Argument::Named(_) => None,
+        })
+        .nth(positional_index)
+}
+
+fn partial_argument_expr_for_parameter<'a>(
+    argument_list: &PartialArgumentList<'a>,
+    positional_index: usize,
+    parameter: &str,
+) -> Option<&'a Expression<'a>> {
+    for argument in argument_list.arguments.iter() {
+        if let PartialArgument::Named(named) = argument
+            && bytes_to_str(named.name.value).eq_ignore_ascii_case(parameter)
+        {
+            return Some(named.value);
+        }
+    }
+
+    argument_list
+        .arguments
+        .iter()
+        .filter_map(|argument| match argument {
+            PartialArgument::Positional(positional) => Some(positional.value),
+            _ => None,
+        })
+        .nth(positional_index)
 }
 
 /// If `argument_list` starts with a plain, non-empty string literal, push a
@@ -1537,5 +1801,106 @@ pub(super) fn laravel_route_scan_expr(
             });
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn extract(content: &str) -> crate::symbol_map::SymbolMap {
+        let arena = mago_allocator::LocalArena::new();
+        let file_id = mago_database::file::FileId::new(b"laravel-extraction.php");
+        let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
+        super::super::extract_symbol_map(program, content)
+    }
+
+    #[test]
+    fn short_container_attributes_require_the_laravel_import() {
+        let mut import_cache = None;
+        assert!(
+            resolve_laravel_container_attr(
+                "Storage",
+                true,
+                &mut import_cache,
+                "<?php class Example {}",
+            )
+            .is_none()
+        );
+        assert_eq!(import_cache, Some(false));
+    }
+
+    #[test]
+    fn resource_extraction_handles_hooked_properties_and_array_edge_elements() {
+        let content = r#"<?php
+use Illuminate\Container\Attributes\Storage;
+
+#[Storage(foo: 'ignored')]
+class InvalidAttributeArgument {}
+
+#[Storage(disk: 'archive')]
+class ValidAttributeArgument {}
+
+class HookedJob
+{
+    public string $connection = 'redis' {
+        get => $this->connection;
+    }
+}
+
+$dynamic = 'runtime';
+$job->onQueue($dynamic);
+Storage::disk(foo: 'ignored');
+
+$spread = [];
+Route::middleware([
+    'primary' => 'auth:web',
+    ...$spread,
+]);
+Route::middleware(array(
+    'primary' => 'auth:admin',
+    ...$spread,
+));
+Route::middleware('throttle:60,1');
+"#;
+        let map = extract(content);
+
+        assert!(map.resource_receiver_sites.iter().any(|site| {
+            site.key == "redis"
+                && site.rule == crate::symbol_map::LaravelResourceReceiverRule::ConnectionProperty
+        }));
+        assert!(
+            map.resource_receiver_sites
+                .iter()
+                .all(|site| site.key != "runtime")
+        );
+
+        let laravel_keys: Vec<_> = map
+            .spans
+            .iter()
+            .filter_map(|span| match &span.kind {
+                SymbolKind::LaravelStringKey { key, kind, .. } => Some((key.as_str(), *kind)),
+                _ => None,
+            })
+            .collect();
+        assert!(laravel_keys.contains(&(
+            "archive",
+            crate::symbol_map::LaravelStringKind::ConfigResource(
+                crate::symbol_map::LaravelConfigResource::StorageDisk,
+            ),
+        )));
+        assert!(laravel_keys.contains(&(
+            "web",
+            crate::symbol_map::LaravelStringKind::ConfigResource(
+                crate::symbol_map::LaravelConfigResource::AuthGuard,
+            ),
+        )));
+        assert!(laravel_keys.contains(&(
+            "admin",
+            crate::symbol_map::LaravelStringKind::ConfigResource(
+                crate::symbol_map::LaravelConfigResource::AuthGuard,
+            ),
+        )));
+        assert!(laravel_keys.iter().all(|(key, _)| *key != "60"));
     }
 }

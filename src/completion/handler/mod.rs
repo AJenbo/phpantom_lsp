@@ -372,8 +372,12 @@ impl Backend {
                         string_ctx,
                         StringContext::InStringLiteral | StringContext::NotInString
                     )
-                    && let Some(response) =
-                        self.try_laravel_string_key_completion(&content, position)
+                    && let Some(response) = self.try_laravel_string_key_completion_in_file(
+                        uri.as_str(),
+                        &content,
+                        position,
+                        &ctx,
+                    )
                 {
                     return Ok(Some(response));
                 }

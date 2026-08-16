@@ -308,13 +308,28 @@ impl Backend {
         self.symbol_maps.read().get(uri).cloned()
     }
 
-    /// Remove a file's entries from every per-URI map populated while it
-    /// was open (`uri_classes_index`, `symbol_maps`, `file_imports`,
+    /// Remove a file's transient entries from every per-URI map populated
+    /// while it was open (`uri_classes_index`, `symbol_maps`, `file_imports`,
     /// `resolved_names`, `file_namespaces`, `parse_errors`), plus the
     /// reference index.
     ///
-    /// Called from `did_close` to clean up state when a file is closed.
+    /// Source-defined Laravel names survive because closing an on-disk file
+    /// does not remove its declarations from the project. A true filesystem
+    /// removal must use
+    /// [`clear_file_maps_and_source_strings`](Self::clear_file_maps_and_source_strings).
     pub(crate) fn clear_file_maps(&self, uri: &str) {
+        self.clear_file_maps_inner(uri, false);
+    }
+
+    /// Remove all per-file maps, including source-defined Laravel names.
+    ///
+    /// This is the destructive counterpart used when the underlying file was
+    /// actually deleted rather than merely closed in the editor.
+    pub(crate) fn clear_file_maps_and_source_strings(&self, uri: &str) {
+        self.clear_file_maps_inner(uri, true);
+    }
+
+    fn clear_file_maps_inner(&self, uri: &str, remove_source_strings: bool) {
         // uri_classes_index is redundant with fqn_class_index once indexing
         // is complete — GTD falls back to fqn_uri_index + parse_and_cache_file
         // when the uri_classes_index entry is missing.
@@ -322,6 +337,11 @@ impl Backend {
         self.symbol_maps.write().remove(uri);
         self.evict_typed_receiver_view_spans(uri);
         self.evict_reference_index_uri(uri);
+        // Removing the map before advancing the source-name generation keeps
+        // a lazy queue scan from observing the old map under the new value.
+        if remove_source_strings {
+            self.laravel_source_strings.write().remove(uri);
+        }
         self.file_imports.write().remove(uri);
         self.resolved_names.write().remove(uri);
         self.file_namespaces.write().remove(uri);

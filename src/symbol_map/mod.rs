@@ -28,11 +28,14 @@
 
 pub(crate) mod docblock;
 mod extraction;
+pub(crate) mod laravel_resources;
 
 use crate::atom::Atom;
 use crate::php_type::PhpType;
 
+#[cfg(test)]
 pub(crate) use extraction::extract_symbol_map;
+pub(crate) use extraction::extract_symbol_map_with_resolved_names;
 
 // ─── Data structures ────────────────────────────────────────────────────────
 
@@ -390,8 +393,9 @@ pub(crate) enum SymbolKind {
         is_write: bool,
         /// Whether the call tolerates the key naming nothing, as one
         /// candidate of an `@includeFirst(['custom.header', 'partials.header'])`
-        /// does: the directive renders whichever exists, so a candidate that
-        /// does not is the point rather than a mistake.
+        /// or a disk passed to `Storage::forgetDisk()` does. The operation is
+        /// explicitly allowed to proceed without a declaration, so absence is
+        /// not a typo.
         is_optional: bool,
     },
 
@@ -445,16 +449,40 @@ impl SymbolKind {
     }
 }
 
+/// A Laravel resource whose short name is declared under a config subtree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum LaravelConfigResource {
+    /// A guard under `auth.guards`.
+    AuthGuard,
+    /// A cache store under `cache.stores`.
+    CacheStore,
+    /// A logging channel under `logging.channels`.
+    LogChannel,
+    /// A filesystem disk under `filesystems.disks`.
+    StorageDisk,
+    /// A database connection under `database.connections`.
+    DatabaseConnection,
+    /// A queue connection under `queue.connections`.
+    QueueConnection,
+    /// A configured mailer under `mail.mailers`.
+    Mailer,
+    /// A broadcast connection under `broadcasting.connections`.
+    BroadcastConnection,
+}
+
 /// Identifies the category of a [`SymbolKind::LaravelStringKey`] span.
 ///
 /// Adding a new Laravel navigation feature only requires adding a variant
 /// here and updating the extraction and dispatch paths — the exhaustive
 /// match arms in `highlight`, `hover`, `rename`, `semantic_tokens`, and
 /// `type_definition` do not need to change.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum LaravelStringKind {
     /// A `config('dot.key')` or `Config::get('dot.key')` call.
     Config,
+    /// A short name whose declaration is a direct child of a known config
+    /// subtree, such as a storage disk or database connection.
+    ConfigResource(LaravelConfigResource),
     /// A `view('name')` or `View::make('name')` call.
     View,
     /// A `route('name')` call.
@@ -488,6 +516,18 @@ pub(crate) enum LaravelStringKind {
     /// `$this->app->make('payments')` asks the container for, and the one a
     /// service provider registers it under.
     ContainerBinding,
+    /// A source-registered rate limiter used by `throttle:name` middleware
+    /// and queue rate-limiting middleware.
+    RateLimiter,
+    /// An application-defined queue name passed to `onQueue()`.
+    QueueName,
+}
+
+impl LaravelStringKind {
+    /// Whether this key resolves through Laravel's config index.
+    pub(crate) fn is_config_backed(self) -> bool {
+        matches!(self, Self::Config | Self::ConfigResource(_))
+    }
 }
 
 /// The model a gate check names, recorded alongside its ability span.
@@ -571,6 +611,70 @@ impl ViewReceiverSite {
                 kind: LaravelStringKind::View,
                 is_write: false,
                 is_optional: self.is_optional,
+            },
+        }
+    }
+}
+
+/// A Laravel string call/property whose resource family is determined by the
+/// enclosing class or the receiver's resolved type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LaravelResourceReceiverRule {
+    /// `->connection()` may name a database, queue, or broadcast connection.
+    ConnectionMethod,
+    /// `->onConnection()` names a queue connection on queueable objects.
+    QueueableConnection,
+    /// `->onQueue()` names an application-defined queue on queueable objects.
+    QueueName,
+    /// A class `$connection` default names a database connection on models
+    /// and a queue connection on queueable jobs.
+    ConnectionProperty,
+}
+
+impl LaravelResourceReceiverRule {
+    /// Coarse reference-index keys this unresolved site may contribute under.
+    pub(crate) fn candidate_kinds(self) -> &'static [LaravelStringKind] {
+        use LaravelConfigResource::{BroadcastConnection, DatabaseConnection, QueueConnection};
+        use LaravelStringKind::{ConfigResource, QueueName};
+        match self {
+            Self::ConnectionMethod => &[
+                ConfigResource(DatabaseConnection),
+                ConfigResource(QueueConnection),
+                ConfigResource(BroadcastConnection),
+            ],
+            Self::QueueableConnection => &[ConfigResource(QueueConnection)],
+            Self::QueueName => &[QueueName],
+            Self::ConnectionProperty => &[
+                ConfigResource(DatabaseConnection),
+                ConfigResource(QueueConnection),
+            ],
+        }
+    }
+}
+
+/// One unresolved config-resource/queue-name literal, stored until the shared
+/// type engine can classify its receiver without guessing from a method name.
+#[derive(Debug, Clone)]
+pub(crate) struct LaravelResourceReceiverSite {
+    pub start: u32,
+    pub end: u32,
+    pub key: String,
+    pub rule: LaravelResourceReceiverRule,
+}
+
+impl LaravelResourceReceiverSite {
+    pub(crate) fn to_span(&self, kind: LaravelStringKind) -> SymbolSpan {
+        SymbolSpan {
+            start: self.start,
+            end: self.end,
+            kind: SymbolKind::LaravelStringKey {
+                key: self.key.clone(),
+                kind,
+                is_write: false,
+                // Queue names are deliberately open; the diagnostic dispatcher
+                // ignores their kind, but preserving the semantics here makes
+                // the span safe for any future generic validator.
+                is_optional: kind == LaravelStringKind::QueueName,
             },
         }
     }
@@ -862,10 +966,17 @@ pub(crate) struct SymbolMap {
     /// a mailable through something other than the spellings
     /// [`SymbolKind::LaravelStringKey`] is emitted for.
     pub view_receiver_sites: Vec<ViewReceiverSite>,
+    /// Config-resource and queue-name literals whose receiver/enclosing class
+    /// must be resolved before their Laravel string kind is known.
+    pub resource_receiver_sites: Vec<LaravelResourceReceiverSite>,
     /// The model argument of each gate check that named one, keyed back to
     /// its ability span by [`GateSubject::ability_start`].  Empty for every
     /// file that performs no authorization checks.
     pub gate_subjects: Vec<GateSubject>,
+    /// Whether a `RateLimiter::for()` call in this file registers a name that
+    /// is not a plain literal. This keeps rate-limiter diagnostics conservative
+    /// when the project's complete name set cannot be enumerated.
+    pub has_dynamic_rate_limiter: bool,
     /// Byte length of the source text this map was extracted from, or
     /// `u32::MAX` for a file larger than 4 GiB (whose offsets do not fit
     /// in the `u32` fields above anyway).
