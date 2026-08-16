@@ -378,6 +378,18 @@ impl Backend {
                     return Ok(Some(response));
                 }
 
+                // ── Path helper completion ──────────────────────────────
+                // `base_path('|')` and friends complete a segment at a time
+                // from the directory the argument has reached.
+                if is_laravel
+                    && matches!(string_ctx, StringContext::InStringLiteral)
+                    && let Some(code) = code_ctx.as_ref()
+                    && let Some(response) =
+                        self.try_path_helper_completion(&content, position, code)
+                {
+                    return Ok(Some(response));
+                }
+
                 // ── Route parameter completion ──────────────────────────
                 // The keys of `route('users.show', ['|' => 1])` are the URI
                 // parameters of the named route.

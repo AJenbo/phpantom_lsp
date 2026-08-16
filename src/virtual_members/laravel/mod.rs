@@ -122,6 +122,7 @@ mod macros;
 mod model_extraction;
 pub(crate) mod morph_map;
 pub(crate) mod patches;
+mod path_helpers;
 mod pivots;
 mod provider_resources;
 mod relationships;
@@ -167,6 +168,9 @@ pub(crate) use model_extraction::{
 };
 pub(crate) use morph_map::{LaravelMorphMapIndex, MorphMapEntry, MorphMapScan, scan_morph_map};
 pub(crate) use patches::STORAGE_FACADE_FQN;
+pub(crate) use path_helpers::{
+    collect_path_helper_links, is_path_helper, path_helper_base, resolve_path_helper_definition,
+};
 pub(crate) use provider_resources::{
     ProviderIdentity, ProviderOrigin, ProviderResources, extract_provider_resources,
 };

@@ -1,7 +1,8 @@
 //! Document Link (`textDocument/documentLink`) support.
 //!
 //! Provides clickable links for `require` / `require_once` / `include` /
-//! `include_once` paths that resolve to existing files on disk.
+//! `include_once` paths that resolve to existing files on disk, and for the
+//! arguments of Laravel's path helpers (`base_path('routes/web.php')`).
 
 use std::path::{Path, PathBuf};
 
@@ -55,6 +56,22 @@ impl Backend {
                         data: None,
                     });
                 }
+            }
+        }
+
+        for (start, end, target) in
+            crate::virtual_members::laravel::collect_path_helper_links(self, content, program)
+        {
+            if let Ok(target_url) = Url::from_file_path(&target) {
+                links.push(DocumentLink {
+                    range: Range {
+                        start: offset_to_position(content, start),
+                        end: offset_to_position(content, end),
+                    },
+                    target: Some(target_url),
+                    tooltip: Some(target.display().to_string()),
+                    data: None,
+                });
             }
         }
 
@@ -389,7 +406,7 @@ fn normalize_and_resolve(file_dir: &Path, path_str: &str) -> PathBuf {
 }
 
 /// Manually normalize a path by resolving `.` and `..` components.
-fn normalize_path(path: &Path) -> PathBuf {
+pub(crate) fn normalize_path(path: &Path) -> PathBuf {
     let mut components = Vec::new();
     for component in path.components() {
         match component {

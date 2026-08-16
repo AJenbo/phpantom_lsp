@@ -612,19 +612,6 @@ group namespace prefix), and provide completion, go-to-definition, and
 an unknown-action diagnostic. Low priority: the string form is
 discouraged since Laravel 8.
 
-#### L28. Path helper links and completion
-
-**Impact: Low · Complexity: Low**
-
-`base_path('...')`, `app_path()`, `config_path()`, `database_path()`,
-`lang_path()`, `public_path()`, `resource_path()`, and `storage_path()`
-map to fixed conventional directories under the project root. Provide
-go-to-definition (or a document link) on the string argument when the
-target exists, and path-segment completion from the directory listing.
-The Laravel LSP boots the app to learn the base paths and only links
-arguments that resolve to an existing *file*; convention gives us the
-same statically, and we can also handle directories.
-
 #### L29. Livewire and Volt component names
 
 **Impact: Low (Livewire projects only) · Complexity: Low**
