@@ -24,6 +24,15 @@ use App\Models\ReviewCollection;
 use Database\Factories\AnnotatedPostFactory;
 use Database\Factories\BlogAuthorFactory;
 use Database\Factories\EditorialFactory;
+use Illuminate\Container\Attributes\Auth as InjectAuth;
+use Illuminate\Container\Attributes\Authenticated as InjectAuthenticated;
+use Illuminate\Container\Attributes\Cache as InjectCache;
+use Illuminate\Container\Attributes\Database as InjectDatabase;
+use Illuminate\Container\Attributes\Log as InjectLog;
+use Illuminate\Container\Attributes\Storage as InjectStorage;
+use Illuminate\Contracts\Broadcasting\Factory as BroadcastFactory;
+use Illuminate\Contracts\Queue\Factory as QueueFactory;
+use Illuminate\Database\ConnectionResolverInterface;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Http\Request;
 use Illuminate\Notifications\Messages\BroadcastMessage;
@@ -844,6 +853,19 @@ class Demo
 
     // ── Config-backed named resources and source-defined names ─────────
 
+    public function injectedNamedResources(
+        #[InjectAuth(guard: 'admin')] mixed $guard,
+        #[InjectAuthenticated(guard: 'admin')] mixed $user,
+        #[InjectCache(memo: true, store: 'memory')] mixed $cache,
+        #[InjectLog(channel: 'daily')] mixed $logger,
+        #[InjectStorage(disk: 'pantry')] mixed $disk,
+        #[InjectDatabase(connection: 'mysql')] mixed $database,
+    ): void
+    {
+        // Contextual-attribute arguments complete and navigate against the
+        // same family-specific config entries as their facade counterparts.
+    }
+
     public function namedLaravelResources(): void
     {
         // Each string completes from its own config subtree. Hover names the
@@ -872,6 +894,19 @@ class Demo
         // from both middleware parameters and queue middleware constructors.
         Route::middleware(['auth:admin', 'throttle:uploads']);
         new RateLimited('uploads');
+    }
+
+    public function typedNamedResourceConnections(
+        ConnectionResolverInterface $database,
+        QueueFactory $queues,
+        BroadcastFactory $broadcasts,
+    ): void
+    {
+        // All three contracts expose connection(), so the receiver type picks
+        // the database, queue, or broadcasting config subtree respectively.
+        $database->connection('mysql');
+        $queues->connection('redis');
+        $broadcasts->connection('internal');
     }
 
 
