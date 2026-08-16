@@ -607,14 +607,12 @@ fn resolve_target_classes_expr_inner(
                 if classes.iter().any(|c| !c.template_params.is_empty()) || hint_names_a_class {
                     return ResolvedType::from_classes_with_hint(classes, h);
                 }
-                // `object`/`?object` is the "any object" escape hatch: no
-                // concrete class matches it, but the base chain and method
-                // lookup above have already determined that.  Surface it as
-                // a type-string-only candidate instead of dropping it, so
-                // callers that need to detect a bare `object` return (e.g.
-                // `resolve_subject_outcome`'s stdClass synthesis) don't have
-                // to re-resolve the callee's base chain a second time.
-                if classes.is_empty() && h.is_object() {
+                // A scalar conditional branch (and the `object`/`?object`
+                // escape hatch) has no concrete class to carry it. Surface
+                // it as a type-string-only candidate instead of dropping it,
+                // so every consumer sees the branch selected at this call
+                // site rather than re-reading the callable's broader union.
+                if classes.is_empty() && (h.is_object() || h.all_members_primitive_scalar()) {
                     return vec![ResolvedType::from_type_string(h)];
                 }
             }

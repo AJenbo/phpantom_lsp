@@ -9080,6 +9080,82 @@ async fn test_chained_new_expression_propagates_constructor_generics() {
     }
 }
 
+#[tokio::test]
+async fn test_named_constructor_argument_skips_an_omitted_template_binding() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///named_constructor_generic.php").unwrap();
+    let marked = r#"<?php
+/**
+ * @template TIgnored
+ * @template TValue
+ */
+class NamedBox {
+    /**
+     * @param TIgnored $ignored
+     * @param TValue $value
+     */
+    public function __construct($ignored = null, $value = null) {}
+
+    /** @return TValue */
+    public function get() {}
+}
+
+class NamedProduct {
+    public function productOnly(): void {}
+}
+
+function demo() {
+    (new NamedBox(value: new NamedProduct()))->get()->§
+}
+"#;
+    let cursor = marked.find('§').expect("test source needs a cursor");
+    let before = &marked[..cursor];
+    let position = Position {
+        line: before.matches('\n').count() as u32,
+        character: before.rsplit('\n').next().unwrap_or("").chars().count() as u32,
+    };
+    let text = marked.replace('§', "");
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text,
+            },
+        })
+        .await;
+
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+    let items = match result {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => Vec::new(),
+    };
+    let method_names: Vec<&str> = items
+        .iter()
+        .filter(|item| item.kind == Some(CompletionItemKind::METHOD))
+        .map(|item| item.filter_text.as_deref().unwrap_or(&item.label))
+        .collect();
+
+    assert!(
+        method_names.contains(&"productOnly"),
+        "the named value argument should bind TValue despite the omitted first parameter, got: {method_names:?}"
+    );
+}
+
 /// Chained instantiation with a string literal: `(new Box("hello"))->get()`
 /// should infer T=string so that `get()` returns `string`.
 #[tokio::test]

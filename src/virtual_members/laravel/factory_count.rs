@@ -68,9 +68,10 @@ pub(crate) fn chain_count(receiver: &SubjectExpr) -> FactoryCount {
                 } else {
                     None
                 };
-                let first_arg = args
-                    .as_ref()
-                    .and_then(|args| args.first().map(|arg| arg.trim()));
+                let first_arg = args.as_ref().and_then(|args| {
+                    args.first()
+                        .map(|arg| crate::call_args::text_arg_value(arg))
+                });
                 if let Some(state) = instance_count_state(method, first_arg, &|| None) {
                     return state;
                 }
@@ -84,9 +85,10 @@ pub(crate) fn chain_count(receiver: &SubjectExpr) -> FactoryCount {
                 } else {
                     None
                 };
-                let first_arg = args
-                    .as_ref()
-                    .and_then(|args| args.first().map(|arg| arg.trim()));
+                let first_arg = args.as_ref().and_then(|args| {
+                    args.first()
+                        .map(|arg| crate::call_args::text_arg_value(arg))
+                });
                 return static_count_state(method, first_arg, &|| None);
             }
             _ => return FactoryCount::Unknown,

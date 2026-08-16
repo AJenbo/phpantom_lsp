@@ -3347,6 +3347,38 @@ fn argument_less_view_helper_still_resolves_to_the_factory() {
     );
 }
 
+#[test]
+fn scalar_conditional_function_return_survives_template_binding() {
+    // A templated wrapper binds its return from the shared text-based call
+    // resolver.  The selected `string` branch must not be replaced by the
+    // loadable class from the helper's broader native union.
+    let php = r#"<?php
+interface UrlGenerator {}
+
+/**
+ * @return ($path is null ? UrlGenerator : string)
+ */
+function url(?string $path = null, mixed $parameters = [], ?bool $secure = null): UrlGenerator|string {}
+
+/**
+ * @template T
+ * @param T $value
+ * @return T
+ */
+function identity(mixed $value): mixed {}
+
+function loginUrl(): string {
+    return identity(url('/login'));
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_return_error(&diags),
+        "url('/login') should keep the selected string branch through template binding, got: {}",
+        return_error_messages(&diags).join("; ")
+    );
+}
+
 // ─── match ($x::class) arm narrowing ────────────────────────────────────────
 
 #[test]

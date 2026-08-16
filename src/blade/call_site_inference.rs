@@ -107,10 +107,15 @@ pub(crate) struct BladeScope {
     pub components: Vec<(String, crate::blade::preprocessor::ComponentTarget)>,
 }
 
-/// User files that render Blade views, with their symbol maps.  Shared
-/// across a whole refresh pass so the workspace is walked once, not once
-/// per template.
-pub(crate) type ViewCallerSnapshot = Vec<(String, Arc<SymbolMap>)>;
+/// User files that render Blade views, with their symbol maps. Shared across
+/// a whole refresh pass so the workspace is walked once, not once per
+/// template. Headless analysis also carries a compact per-view candidate
+/// index because it deliberately does not build the workspace reference
+/// index used by the editor.
+pub(crate) struct ViewCallerSnapshot {
+    files: Vec<(String, Arc<SymbolMap>)>,
+    local_candidates: Option<HashMap<String, Vec<usize>>>,
+}
 
 /// Every Blade file's raw source, snapshotted once per refresh pass.
 ///
@@ -248,7 +253,7 @@ impl Backend {
             .collect();
         let own_snapshot;
         let snapshot = match shared {
-            Some(shared) => shared.as_slice(),
+            Some(shared) => shared.files.as_slice(),
             None => {
                 // Never trigger (or wait on) workspace indexing from here:
                 // this runs while a Blade file is being opened or a
@@ -261,19 +266,30 @@ impl Backend {
             }
         };
         // A shared snapshot holds every file in the workspace that renders
-        // any view, so the ones that name *this* template are picked out of
-        // it the same way the per-template snapshot was built: by asking the
-        // reference index.  Without it, every template would read every
-        // other template's spans.  `None` while the index is still being
-        // built, which falls back to reading the snapshot whole.
-        let candidates = shared.and_then(|_| self.reference_candidate_uris_for_keys(&keys));
+        // any view. Use its compact local index during headless analysis and
+        // the workspace reference index in the editor, so each template only
+        // reads callers that can name it. Before editor indexing completes,
+        // `None` conservatively reads the parsed snapshot whole.
+        let local_candidates = shared.and_then(|snapshot| snapshot.local_candidates.as_ref());
+        let candidates = shared
+            .filter(|_| local_candidates.is_none())
+            .and_then(|_| self.reference_candidate_uris_for_keys(&keys));
 
         // Union the variables from every call site, per name.
         let mut merged: HashMap<String, Vec<PhpType>> = HashMap::new();
-        for (file_uri, snapshot_map) in snapshot {
+        for (snapshot_index, (file_uri, snapshot_map)) in snapshot.iter().enumerate() {
             // A template must not feed itself: a recursive `@include` names
             // the template the spans it would be read from belong to.
             if file_uri == uri {
+                continue;
+            }
+            if let Some(local_candidates) = local_candidates
+                && !view_names.iter().any(|name| {
+                    local_candidates
+                        .get(name)
+                        .is_some_and(|indices| indices.binary_search(&snapshot_index).is_ok())
+                })
+            {
                 continue;
             }
             if let Some(candidates) = &candidates
@@ -587,7 +603,7 @@ impl Backend {
     fn view_caller_snapshot(&self) -> ViewCallerSnapshot {
         let vendor_prefixes = self.workspace.vendor_uri_prefixes.lock().clone();
         let maps = self.symbol_maps.read();
-        let mut snapshot: ViewCallerSnapshot = maps
+        let mut files: Vec<(String, Arc<SymbolMap>)> = maps
             .iter()
             .filter(|(uri, map)| {
                 !uri.starts_with("phpantom-stub://")
@@ -609,8 +625,37 @@ impl Backend {
         // Deterministic order so the whole inference pass (and its
         // per-name type unions) is reproducible across runs, not just
         // the caller's `HashMap` iteration order.
-        snapshot.sort_by(|(a, _), (b, _)| a.cmp(b));
-        snapshot
+        files.sort_by(|(a, _), (b, _)| a.cmp(b));
+
+        let local_candidates = self.skip_reference_index.then(|| {
+            let mut candidates: HashMap<String, Vec<usize>> = HashMap::new();
+            for (index, (_, map)) in files.iter().enumerate() {
+                let mut names: Vec<&str> = map
+                    .spans
+                    .iter()
+                    .filter_map(|span| match &span.kind {
+                        SymbolKind::LaravelStringKey {
+                            kind: LaravelStringKind::View,
+                            key,
+                            ..
+                        } => Some(key.as_str()),
+                        _ => None,
+                    })
+                    .chain(map.view_receiver_sites.iter().map(|site| site.key.as_str()))
+                    .collect();
+                names.sort_unstable();
+                names.dedup();
+                for name in names {
+                    candidates.entry(name.to_string()).or_default().push(index);
+                }
+            }
+            candidates
+        });
+
+        ViewCallerSnapshot {
+            files,
+            local_candidates,
+        }
     }
 
     /// Every known Blade file's raw source, for the component-tag scan in
@@ -953,9 +998,25 @@ impl Backend {
                             expr,
                         } => {
                             let span = expr.span();
-                            let ty = crate::type_engine::variable::foreach_resolution::resolve_expression_type(
-                                expr, &var_ctx,
-                            )
+                            // A bare variable needs the public variable
+                            // resolver's `@var` precedence. The generic RHS
+                            // resolver deliberately skips that outer layer
+                            // because it is also used inside the forward walk.
+                            let ty = match expr {
+                                Expression::Variable(Variable::Direct(dv)) => crate::type_engine::variable::resolution::resolve_variable_php_type(
+                                    bytes_to_str(dv.name),
+                                    content,
+                                    site.offset,
+                                    Some(current_class),
+                                    &file_ctx.classes,
+                                    &class_loader,
+                                    Some(self),
+                                    Loaders::with_function(Some(&function_loader_cl)),
+                                ),
+                                _ => crate::type_engine::variable::foreach_resolution::resolve_expression_type(
+                                    expr, &var_ctx,
+                                ),
+                            }
                             .unwrap_or_else(PhpType::mixed);
                             (name, key_range, (span.start.offset, span.end.offset), ty)
                         }
@@ -2004,8 +2065,10 @@ fn is_variable_name(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::join_call_site_types;
+    use crate::Backend;
     use crate::atom::atom;
     use crate::php_type::PhpType;
+    use tower_lsp::lsp_types::Url;
 
     /// The joined union's member order must not depend on the order the
     /// call sites were visited in, since that order comes from a
@@ -2021,6 +2084,79 @@ mod tests {
         assert_eq!(
             forward, backward,
             "joining the same types in reverse order must produce the same union string"
+        );
+    }
+
+    #[test]
+    fn headless_view_snapshot_builds_local_candidates() {
+        let mut backend = Backend::new_test();
+        backend.skip_reference_index = true;
+        let uri = "file:///project/app/Controller.php";
+        backend.update_ast(uri, "<?php\nview('shop', ['item' => new Item()]);\n");
+
+        let snapshot = backend.view_caller_snapshot();
+        let candidates = snapshot
+            .local_candidates
+            .as_ref()
+            .and_then(|by_view| by_view.get("shop"))
+            .expect("headless refresh should index the view caller locally");
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(snapshot.files[candidates[0]].0, uri);
+    }
+
+    #[test]
+    fn headless_inference_skips_non_candidate_callers() {
+        let dir = tempfile::tempdir().expect("failed to create test workspace");
+        let root = dir
+            .path()
+            .canonicalize()
+            .expect("test workspace should canonicalize");
+        let views = root.join("resources/views");
+        let app = root.join("app");
+        std::fs::create_dir_all(&views).expect("failed to create view directory");
+        std::fs::create_dir_all(&app).expect("failed to create app directory");
+
+        let target = views.join("shop.blade.php");
+        let matching = app.join("MatchingController.php");
+        let unrelated = app.join("UnrelatedController.php");
+        let matching_source = "<?php\nview('shop', ['kept' => 1]);\n";
+        let unrelated_source = "<?php\nview('other', ['excluded' => 2]);\n";
+        std::fs::write(&target, "").expect("failed to write target view");
+        std::fs::write(&matching, matching_source).expect("failed to write matching caller");
+        std::fs::write(&unrelated, unrelated_source).expect("failed to write unrelated caller");
+
+        let mut backend = Backend::new_test_with_workspace(root, Vec::new());
+        backend.skip_reference_index = true;
+        for (path, source) in [(&matching, matching_source), (&unrelated, unrelated_source)] {
+            let uri = Url::from_file_path(path).expect("caller path should become a file URI");
+            backend.update_ast(uri.as_str(), source);
+        }
+
+        let snapshot = backend.view_caller_snapshot();
+        let by_view = snapshot
+            .local_candidates
+            .as_ref()
+            .expect("headless snapshot should carry local candidates");
+        assert_eq!(snapshot.files.len(), 2);
+        assert_eq!(by_view.get("shop").map(Vec::len), Some(1));
+        assert_eq!(by_view.get("other").map(Vec::len), Some(1));
+
+        let target_uri = Url::from_file_path(target).expect("target path should become a file URI");
+        assert_eq!(
+            backend.view_names_for_blade_uri(target_uri.as_str()),
+            vec!["shop"]
+        );
+        let scope =
+            backend.compute_blade_injected_vars(target_uri.as_str(), "", Some(&snapshot), None);
+
+        assert!(
+            scope.vars.iter().any(|(name, _)| name == "kept"),
+            "matching caller should contribute its data: {scope:?}"
+        );
+        assert!(
+            scope.vars.iter().all(|(name, _)| name != "excluded"),
+            "non-candidate caller must be skipped: {scope:?}"
         );
     }
 }

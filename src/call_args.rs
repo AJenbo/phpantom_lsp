@@ -141,6 +141,11 @@ fn split_named_text_arg(arg: &str) -> (Option<&str>, &str) {
     (None, trimmed)
 }
 
+/// Return an argument's value text with any leading `name:` label removed.
+pub(crate) fn text_arg_value(arg: &str) -> &str {
+    split_named_text_arg(arg).1
+}
+
 /// Bind already-split textual arguments to parameters by PHP's rules.
 ///
 /// This is the text-source counterpart of [`bind_args_to_params`], used by
@@ -236,6 +241,18 @@ mod tests {
             is_reference: false,
             closure_this_type: None,
         }
+    }
+
+    #[test]
+    fn text_arg_value_strips_only_named_argument_labels() {
+        assert_eq!(text_arg_value("path: null"), "null");
+        assert_eq!(text_arg_value("array: ['x:y']"), "['x:y']");
+        assert_eq!(text_arg_value("Foo::class"), "Foo::class");
+        assert_eq!(
+            text_arg_value("$flag ? 'a:b' : 'c:d'"),
+            "$flag ? 'a:b' : 'c:d'"
+        );
+        assert_eq!(text_arg_value("'key: value'"), "'key: value'");
     }
 
     #[test]

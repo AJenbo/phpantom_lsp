@@ -702,33 +702,6 @@ always-on diagnostics — dynamic construction (`view("emails.$type")`)
 makes "unused" inherently a heuristic, so it must read as "no static
 reference found," never as an error.
 
-#### L41. Conditional return types on `url()` and its sibling helpers
-
-**Impact: Medium · Complexity: Medium**
-
-`url()` returns the generator or a string depending on whether it got a
-path:
-
-```php
-/** @return ($path is null ? \Illuminate\Contracts\Routing\UrlGenerator : string) */
-function url($path = null, $parameters = [], $secure = null);
-```
-
-We resolve the call to the contract regardless of the argument, so a
-string result is typed as `UrlGenerator`. Real-world fallout is
-`assertSame(url('/login'), $response->getTargetUrl())` reporting a
-mismatch (four sites in one sample project), though the diagnostic only
-fires there because of B4.
-
-This is the same shape as the `view()` helper, which is now resolved
-precisely. `route()`, `secure_url()`, `action()`, and `redirect()` are
-worth auditing in the same pass, as is `app()` (`($abstract is null ?
-Application : mixed)`).
-
-**Where to look:** the helper interception next to `view()` in
-`type_engine/call_resolution/return_types.rs` and the matching branch in
-`type_engine/variable/rhs_resolution/calls.rs`.
-
 #### L44. Sibling resource registrations and degenerate resource names
 
 **Impact: Low-Medium · Complexity: Medium**

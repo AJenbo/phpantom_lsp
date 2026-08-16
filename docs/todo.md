@@ -102,6 +102,7 @@ unlikely to move the needle for most users.
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Medium      |
 |     | **[Bugs](todo/bugs.md)**                                                                                                                                                    |             |             |
 | B1  | [Editing a service provider does not re-scan what it registers](todo/bugs.md#b1-editing-a-service-provider-does-not-re-scan-what-it-registers)                              | Medium      | Medium      |
+| B2  | [A request accessor written with named arguments loses its key](todo/bugs.md#b2-a-request-accessor-written-with-named-arguments-loses-its-key)                              | Low         | Low         |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |
@@ -162,7 +163,6 @@ unlikely to move the needle for most users.
 | L46 | [`->can()` on a user model the receiver does not name](todo/laravel.md#l46-can-on-a-user-model-the-receiver-does-not-name)                                                  | Medium-High | Medium-High |
 | L30 | [Eloquent attribute-array key completion](todo/laravel.md#l30-eloquent-attribute-array-key-completion)                                                                      | Medium      | Medium      |
 | L32 | [Config-backed named-resource strings](todo/laravel.md#l32-config-backed-named-resource-strings) (log channels, cache stores, guards, connections, rate limiters)           | Medium      | Medium      |
-| L41 | [Conditional return types on `url()` and its sibling helpers](todo/laravel.md#l41-conditional-return-types-on-url-and-its-sibling-helpers)                                  | Medium      | Medium      |
 | L49 | [Unguarded Eloquent mass assignment diagnostic](todo/laravel.md#l49-unguarded-eloquent-mass-assignment-diagnostic)                                                          | Medium      | Medium      |
 | L17 | [Additional string contexts without booting](todo/laravel.md#l17-additional-string-contexts-without-booting) (middleware, assets, validation, Inertia)                     | Medium      | Medium-High |
 | L25 | [Storage disk name strings](todo/laravel.md#l25-storage-disk-name-strings)                                                                                                  | Low-Medium  | Low         |

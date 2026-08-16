@@ -206,11 +206,15 @@ fn resolve_validated_shape_at_call(
 
     let call = validated_shape::shape_bearing_method(method_name)?;
     let receiver = owners.iter().find_map(|rt| rt.class_info.as_ref())?;
+    let mut args = split_text_args(text_args);
+    for arg in &mut args {
+        *arg = crate::call_args::text_arg_value(arg);
+    }
 
     validated_shape::resolve_shape_at_call(
         receiver,
         call,
-        &split_text_args(text_args),
+        &args,
         &|| validated_shape::safe_source_class(base, ctx),
         ctx.content,
         ctx.cursor_offset,
@@ -262,7 +266,8 @@ fn auth_guard_name(base: &SubjectExpr, user_args: &str) -> Option<String> {
 /// not a single-quoted or double-quoted string literal.
 fn first_string_literal_arg(args_text: &str) -> Option<String> {
     let first = split_text_args(args_text).into_iter().next()?;
-    crate::text_scan::unquote_php_string(first.trim()).map(str::to_string)
+    crate::text_scan::unquote_php_string(crate::call_args::text_arg_value(first))
+        .map(str::to_string)
 }
 
 fn replace_support_carbon_return(ty: &PhpType, configured_class: &str) -> Option<PhpType> {
@@ -1011,14 +1016,21 @@ impl Backend {
                                 );
                             // The collapsed conditional is the call's real
                             // type; report it even when it names no class
-                            // (`list<string>`, an array shape), or callers
-                            // that need the type string rather than a
+                            // (`string`, `list<string>`, an array shape), or
+                            // callers that need the type string rather than a
                             // `ClassInfo` fall back to the declared
                             // `array`/`mixed` below.
-                            if let Some(ref mut hint_out) = return_type_hint_out {
-                                **hint_out = Some(parsed_ty);
-                            }
-                            if !classes.is_empty() {
+                            //
+                            // A branch that collapsed to bare `mixed` decided
+                            // nothing, though.  The function-level `@template`
+                            // substitution below still binds the parameter's
+                            // default, which is what makes an argument-less
+                            // `app()` its `Application::class` default rather
+                            // than `mixed`, so leave the answer to it.
+                            if !classes.is_empty() || !parsed_ty.is_mixed() {
+                                if let Some(ref mut hint_out) = return_type_hint_out {
+                                    **hint_out = Some(parsed_ty);
+                                }
                                 return classes;
                             }
                         }
@@ -1241,12 +1253,13 @@ impl Backend {
                 if let Some(ctor) = ctor_ref
                     && !ctor.template_bindings.is_empty()
                 {
-                    let arg_texts: Vec<String> =
-                        crate::type_engine::conditional_resolution::split_text_args(text_args)
-                            .into_iter()
-                            .map(|s| s.to_string())
-                            .collect();
+                    let arg_texts =
+                        crate::type_engine::conditional_resolution::split_text_args(text_args);
                     if !arg_texts.is_empty() {
+                        let bound_args = crate::call_args::bind_text_args_to_params(
+                            &ctor.parameters,
+                            &arg_texts,
+                        );
                         let mut subs = std::collections::HashMap::new();
                         for (tpl_name, param_name) in &ctor.template_bindings {
                             let param_idx = match ctor
@@ -1257,10 +1270,11 @@ impl Backend {
                                 Some(idx) => idx,
                                 None => continue,
                             };
-                            let arg_text = match arg_texts.get(param_idx) {
-                                Some(text) => text.trim(),
-                                None => continue,
-                            };
+                            let arg_text =
+                                match bound_args.get(param_idx).and_then(Option::as_deref) {
+                                    Some(text) => text,
+                                    None => continue,
+                                };
                             let param_hint = ctor
                                 .parameters
                                 .get(param_idx)
@@ -2623,12 +2637,17 @@ mod cast_tests {
 
 #[cfg(test)]
 mod auth_guard_tests {
-    use super::{auth_guard_name, first_string_literal_arg, replace_support_carbon_return};
+    use super::{
+        auth_guard_name, first_string_literal_arg, replace_support_carbon_return,
+        resolve_validated_shape_at_call,
+    };
     use crate::Backend;
     use crate::atom::atom;
     use crate::php_type::PhpType;
     use crate::test_fixtures::{make_class, make_method};
+    use crate::type_engine::resolver::ResolutionCtx;
     use crate::type_engine::subject_expr::SubjectExpr;
+    use crate::types::ResolvedType;
     use std::sync::Arc;
 
     #[test]
@@ -2653,6 +2672,45 @@ mod auth_guard_tests {
         assert_eq!(first_string_literal_arg(""), None);
         assert_eq!(first_string_literal_arg("$guard"), None);
         assert_eq!(first_string_literal_arg("GUARD_NAME"), None);
+    }
+
+    #[test]
+    fn named_validate_rules_are_normalized_before_shape_resolution() {
+        let mut request = make_class("Request");
+        request.file_namespace = Some(atom("Illuminate\\Http"));
+        let request = Arc::new(request);
+        let classes = vec![Arc::clone(&request)];
+        let class_loader = |name: &str| {
+            (name.trim_start_matches('\\') == "Illuminate\\Http\\Request")
+                .then(|| Arc::clone(&request))
+        };
+        assert!(class_loader("\\Illuminate\\Http\\Request").is_some());
+        let ctx = ResolutionCtx {
+            current_class: None,
+            all_classes: &classes,
+            content: "",
+            cursor_offset: 0,
+            class_loader: &class_loader,
+            backend: None,
+            laravel_macro_this_resolver: None,
+            resolved_class_cache: None,
+            function_loader: None,
+            scope_var_resolver: None,
+            is_in_static_method: false,
+            preserve_static: false,
+        };
+        let owners = vec![ResolvedType::from_arc(Arc::clone(&request))];
+
+        let shape = resolve_validated_shape_at_call(
+            &SubjectExpr::parse("$request"),
+            "validate",
+            "rules: ['title' => 'required|string']",
+            &owners,
+            &ctx,
+        )
+        .expect("the named rules argument should produce a validated shape");
+
+        assert_eq!(shape.to_string(), "array{title: string}");
     }
 
     #[test]
