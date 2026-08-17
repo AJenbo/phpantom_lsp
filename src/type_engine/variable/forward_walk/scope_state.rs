@@ -854,6 +854,68 @@ pub(crate) fn seed_params<'b>(
     }
 }
 
+/// Seed a fresh scope for a property hook body.
+///
+/// A hook body is a method body in every way the walker cares about:
+/// `$this` is the enclosing instance (a hook can never be static), and a
+/// `set` hook receives the assigned value as a parameter.  When a `set`
+/// hook writes no parameter list of its own, PHP still gives it a `$value`
+/// typed as the property, so seed that from `property_hint`.
+pub(crate) fn seed_property_hook_scope(
+    property_hint: Option<&Hint<'_>>,
+    hook: &PropertyHook<'_>,
+    ctx: &ForwardWalkCtx<'_>,
+) -> ScopeState {
+    let mut scope = ScopeState::new();
+    seed_this(&mut scope, ctx.current_class);
+
+    if let Some(params) = &hook.parameter_list {
+        seed_params(
+            &mut scope,
+            params.parameters.iter(),
+            hook.span().start.offset,
+            None,
+            false,
+            ctx,
+        );
+    } else if hook.name.value.eq_ignore_ascii_case(b"set") {
+        seed_implicit_set_value(&mut scope, property_hint, ctx);
+    }
+
+    seed_superglobals(&mut scope);
+    scope
+}
+
+/// Seed the `$value` a `set` hook receives when it declares no parameter
+/// list.  Its type is the property's own declared type.
+fn seed_implicit_set_value(
+    scope: &mut ScopeState,
+    property_hint: Option<&Hint<'_>>,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    let Some(hint) = property_hint else {
+        scope.set_empty("$value");
+        return;
+    };
+
+    let hint_type = extract_hint_type(hint);
+    let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+        &hint_type,
+        &ctx.current_class.name,
+        ctx.all_classes,
+        ctx.class_loader,
+    );
+
+    if resolved.is_empty() {
+        scope.seed("$value", vec![ResolvedType::from_type_string(hint_type)]);
+    } else {
+        scope.seed(
+            "$value",
+            ResolvedType::from_classes_with_hint(resolved, hint_type),
+        );
+    }
+}
+
 /// Finish the type operators a declared type reads through a constant, or
 /// `None` when it has none to finish.
 ///

@@ -13093,3 +13093,193 @@ class Matrix
         diags.iter().map(|d| &d.message).collect::<Vec<_>>()
     );
 }
+
+/// A property hook body is its own scope: `$this` is the class that
+/// declares the hook, not whichever body the diagnostic walk visited
+/// last.  Without a walk of its own, the scope snapshot in force inside
+/// the hook was the previous method's, so every `$this->member` written
+/// in a hook was flagged against the wrong class.
+#[test]
+fn property_hook_body_resolves_this_against_its_own_class() {
+    let backend = create_test_backend();
+    let uri = "file:///hook_this.php";
+    let text = r#"<?php
+class Price
+{
+    public function format(): string
+    {
+        return '0';
+    }
+}
+
+class Item
+{
+    public string $label {
+        get {
+            $p = $this->price;
+            return $p->format();
+        }
+        set(Price $value) {
+            $this->stored = $value->format();
+        }
+    }
+
+    public string $short {
+        get => $this->price->format();
+    }
+
+    public Price $price;
+    public string $stored;
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "members read through `$this` inside a property hook must resolve, got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+/// `Base::$prop::get()` is the PHP 8.4 spelling for invoking a property's
+/// hook.  It parses as a static method call on a static property access,
+/// but neither half is static: `$prop` is an instance property and `get`
+/// names its hook, so reading it literally reported both as missing
+/// members of the parent class.
+#[test]
+fn parent_hook_invocation_is_not_a_static_member_lookup() {
+    let backend = create_test_backend();
+    let uri = "file:///parent_hook.php";
+    let text = r#"<?php
+class Base
+{
+    public string $label {
+        get => 'base';
+    }
+
+    public string $tag {
+        get => 'tag';
+        set { $this->tag = $value; }
+    }
+}
+
+class Child extends Base
+{
+    public string $label {
+        get => parent::$label::get() . '!';
+    }
+
+    public string $tag {
+        get => parent::$tag::get();
+        set { parent::$tag::set($value); }
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "a parent hook invocation must not be read as a static member lookup, got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+/// A constructor-promoted property's hooks live in the parameter list
+/// rather than as a `Property::Hooked` class member, so they need the same
+/// scope seeding: `$this` is the declaring class and a `set` hook receives
+/// `$value` typed as the property.
+#[test]
+fn promoted_property_hook_body_resolves_this_against_its_own_class() {
+    let backend = create_test_backend();
+    let uri = "file:///promoted_hook_this.php";
+    let text = r#"<?php
+class Price
+{
+    public function format(): string
+    {
+        return '0';
+    }
+}
+
+class Item
+{
+    public string $stored = '';
+
+    public function __construct(
+        public Price $price,
+        public Price $latest {
+            get => $this->price;
+            set {
+                $this->stored = $value->format();
+            }
+        },
+    ) {}
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "members read inside a promoted property's hook must resolve, got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+/// A hook on an untyped property still gets a working scope.  There is no
+/// hint to type the implicit `$value` from, so it is recorded as existing
+/// without a type rather than left out of scope entirely.
+#[test]
+fn untyped_hooked_property_body_reports_nothing() {
+    let backend = create_test_backend();
+    let uri = "file:///untyped_hook.php";
+    let text = r#"<?php
+class Config
+{
+    public $foo = 'test' {
+        set {
+            $this->foo = $value;
+        }
+    }
+
+    public $bar = !false {
+        set {
+            $this->bar = $value;
+        }
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "an untyped hooked property must not report anything, got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+/// Walking hook bodies must not blunt the diagnostics inside them.  A
+/// `self::$prop` write where `$prop` is an instance property is a real
+/// error (PHP fatals with "Access to undeclared static property"), and it
+/// stays reported now that the body is analysed.
+#[test]
+fn a_static_write_to_an_instance_property_inside_a_hook_is_still_reported() {
+    let backend = create_test_backend();
+    let uri = "file:///hook_static_write.php";
+    let text = r#"<?php
+class Counter
+{
+    public int $counter {
+        get {
+            return $this->counter + 1;
+        }
+        set {
+            self::$counter = $value;
+        }
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert_eq!(
+        diags.len(),
+        1,
+        "self::$counter names no static property, got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+    assert_eq!(diags[0].range.start.line, 8);
+}

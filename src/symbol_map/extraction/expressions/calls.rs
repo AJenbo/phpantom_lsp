@@ -71,6 +71,72 @@ pub(super) fn extract_instantiation_expr<'a>(
     }
 }
 
+// ─── Property hook invocation: `Base::$prop::get()` ─────────────────────────
+
+/// Extract `Base::$prop::get()` / `Base::$prop::set($v)`, the PHP 8.4
+/// spelling for calling a property's hook directly.
+///
+/// It parses as a static method call on a static property access, but
+/// neither half is static: `$prop` is an *instance* property of `Base`,
+/// and `get`/`set` names its hook rather than a method. Reading it
+/// literally reports both as missing members of `Base`. The navigable
+/// parts are the class and the property, so those get spans and the
+/// accessor gets none — the same way `Foo::class` leaves `class` alone.
+///
+/// Returns whether the call had this shape and was extracted here.
+fn extract_property_hook_call<'a>(
+    static_call: &'a StaticMethodCall<'a>,
+    ctx: &mut ExtractionCtx<'a>,
+    scope_start: u32,
+) -> bool {
+    let ClassLikeMemberSelector::Identifier(accessor) = &static_call.method else {
+        return false;
+    };
+    if !accessor.value.eq_ignore_ascii_case(b"get") && !accessor.value.eq_ignore_ascii_case(b"set")
+    {
+        return false;
+    }
+    let Expression::Access(access) = static_call.class else {
+        return false;
+    };
+    let Access::StaticProperty(property_access) = access else {
+        return false;
+    };
+    let Variable::Direct(variable) = &property_access.property else {
+        return false;
+    };
+
+    let class_span = property_access.class.span();
+    let subject_text = SubjectText::new(
+        expr_to_subject_text(property_access.class),
+        class_span.start.offset,
+        class_span.end.offset,
+        ctx.content,
+    );
+    emit_class_expr_span(property_access.class, ctx, scope_start);
+
+    let property_name = {
+        let s = bytes_to_str(variable.name);
+        crate::atom::atom(s.strip_prefix('$').unwrap_or(s))
+    };
+    ctx.spans.push(SymbolSpan {
+        start: variable.span.start.offset,
+        end: variable.span.end.offset,
+        kind: SymbolKind::MemberAccess {
+            subject_text,
+            member_name: property_name,
+            is_static: false,
+            is_method_call: false,
+            docblock_ref: DocblockMemberRef::No,
+            is_array_callable: false,
+            is_nullsafe: false,
+        },
+    });
+
+    extract_from_arguments(&static_call.argument_list.arguments, ctx, scope_start);
+    true
+}
+
 // ─── Function / method / static calls ───────────────────────────────────────
 
 pub(super) fn extract_call_expr<'a>(
@@ -444,6 +510,10 @@ fn extract_call<'a>(
             extract_from_arguments(&method_call.argument_list.arguments, ctx, scope_start);
         }
         Call::StaticMethod(static_call) => {
+            if extract_property_hook_call(static_call, ctx, scope_start) {
+                return;
+            }
+
             let subject_text = expr_to_subject_text(static_call.class);
             emit_class_expr_span(static_call.class, ctx, scope_start);
 

@@ -1202,15 +1202,44 @@ fn try_resolve_in_nested_function(
     }
 }
 
-/// Locate the enclosing method for the cursor position and delegate to
-/// the forward walker.  For abstract methods (no body), returns the
-/// parameter type hint directly.
+/// Locate the enclosing method or property hook for the cursor position
+/// and delegate to the forward walker.  For abstract methods (no body),
+/// returns the parameter type hint directly.
 fn resolve_variable_in_members<'b>(
     members: impl Iterator<Item = &'b ClassLikeMember<'b>>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
     for member in members {
+        if let ClassLikeMember::Property(Property::Hooked(hooked)) = member {
+            let hooks_span = hooked.hook_list.span();
+            if ctx.cursor_offset < hooks_span.start.offset
+                || ctx.cursor_offset > hooks_span.end.offset
+            {
+                continue;
+            }
+            return resolve_variable_in_property_hooks(
+                hooked.hint.as_ref(),
+                &hooked.hook_list,
+                ctx,
+            );
+        }
+
         if let ClassLikeMember::Method(method) = member {
+            // A constructor-promoted property's hooks sit in the parameter
+            // list, outside the method body checked below.
+            for param in method.parameter_list.parameters.iter() {
+                let Some(hooks) = &param.hooks else {
+                    continue;
+                };
+                let hooks_span = hooks.span();
+                if ctx.cursor_offset < hooks_span.start.offset
+                    || ctx.cursor_offset > hooks_span.end.offset
+                {
+                    continue;
+                }
+                return resolve_variable_in_property_hooks(param.hint.as_ref(), hooks, ctx);
+            }
+
             // ── Concrete method: delegate entirely to the forward walker ──
             if let MethodBody::Concrete(block) = &method.body {
                 let blk_start = block.left_brace.start.offset;
@@ -1276,6 +1305,55 @@ fn resolve_variable_in_members<'b>(
             return resolve_abstract_method_param(method, ctx);
         }
     }
+    vec![]
+}
+
+/// Resolve a variable read from inside a `get`/`set` hook body.
+///
+/// A hook body is a function body: `$this` is the enclosing instance, a
+/// `set` hook takes the assigned value as `$value` (declared or implicit),
+/// and a block-bodied hook can assign locals of its own.  The forward
+/// walker answers all three, the same way it does for a method body.
+fn resolve_variable_in_property_hooks(
+    property_hint: Option<&Hint<'_>>,
+    hook_list: &PropertyHookList<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Vec<ResolvedType> {
+    for hook in hook_list.hooks.iter() {
+        let PropertyHookBody::Concrete(body) = &hook.body else {
+            continue;
+        };
+
+        let body_span = body.span();
+        if ctx.cursor_offset < body_span.start.offset || ctx.cursor_offset > body_span.end.offset {
+            continue;
+        }
+
+        let fw_ctx = super::forward_walk::ForwardWalkCtx {
+            current_class: ctx.current_class,
+            all_classes: ctx.all_classes,
+            content: ctx.content,
+            cursor_offset: ctx.cursor_offset,
+            class_loader: ctx.class_loader,
+            backend: ctx.backend,
+            loaders: ctx.loaders,
+            resolved_class_cache: ctx.resolved_class_cache,
+            enclosing_return_type: None,
+            top_level_scope: ctx.top_level_scope.clone(),
+        };
+
+        let mut scope = super::forward_walk::seed_property_hook_scope(property_hint, hook, &fw_ctx);
+        if let PropertyHookConcreteBody::Block(block) = body {
+            // Suspend snapshot recording for the same reason
+            // `resolve_in_method_body` does: this is a transient lookup,
+            // not the authoritative scope build.
+            let _suspend = super::forward_walk::suspend_snapshot_recording();
+            super::forward_walk::walk_body_forward(block.statements.iter(), &mut scope, &fw_ctx);
+        }
+
+        return scope.get(ctx.var_name).to_vec();
+    }
+
     vec![]
 }
 

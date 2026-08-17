@@ -1770,6 +1770,20 @@ function runDemoAssertions(): void
     assert(str_starts_with($magicConst->describe(), MagicConstantDemo::class . '::describe'), '__METHOD__ names the class and the method');
     assert(class_exists($magicConst->ownName()), '__CLASS__ is a class-string');
 
+    // ── Property hook bodies ────────────────────────────────────────────
+    $hooked = new HookedGtdDemo();
+    assert($hooked->formatted === 'gtd', 'an expression-bodied get hook reads through $this');
+    assert($hooked->labelled === 'gtd', 'a block-bodied get hook keeps its local across statements');
+    $hooked->declaredWrite = new GtdTarget();
+    assert($hooked->lastSeen === 'gtd', 'a declared set($value) receives the assigned object');
+    $hooked->implicitWrite = new GtdTarget();
+    assert($hooked->lastSeen === 'gtd', 'a set hook with no parameter list still receives $value');
+
+    $promotedHook = new PromotedHookGtdDemo(new GtdTarget(), new GtdTarget());
+    assert($promotedHook->seen === 'gtd', 'promotion runs the promoted property\'s set hook');
+    assert($promotedHook->promoted instanceof GtdTarget, 'the promoted get hook reads through $this');
+    assert($promotedHook->formatted === 'gtd', 'parent::$formatted::get() calls the overridden hook');
+
     echo "All assertions passed.\n";
 }
 

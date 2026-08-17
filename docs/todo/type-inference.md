@@ -34,18 +34,12 @@ The mago parser (v1.8) already produces `Property::Hooked` and
 `.variables()` methods mean hooked properties are extracted for basic
 completion. However:
 
-- **Hook bodies are never walked.** Variables and anonymous classes
-  inside `get`/`set` bodies are invisible to resolution.
-- **`$value` parameter** inside `set` hooks is not offered for
-  variable completion.
 - **Asymmetric visibility** (`public private(set) string $name`) is
   not recognised — the `set` visibility is ignored, so filtering
   may incorrectly allow setting a property that should be
   write-restricted.
 
-**Fix:** In `extract_class_like_members`, match `Property::Hooked`
-explicitly, walk hook bodies for anonymous classes and variable
-scopes, and parse the set-visibility modifier into a new
+**Fix:** Parse the set-visibility modifier into a new
 `set_visibility` field on `PropertyInfo`.
 
 ### Asymmetric visibility (also PHP 8.4 / 8.5)

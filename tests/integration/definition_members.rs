@@ -5165,3 +5165,554 @@ async fn test_goto_definition_through_body_inferred_return_type() {
         other => panic!("Expected Scalar location, got: {:?}", other),
     }
 }
+
+// ─── Property Hook Bodies ──────────────────────────────────────────────────
+
+#[tokio::test]
+async fn definition_inside_property_hook_get_expression() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{
+            "autoload": {
+                "psr-4": {
+                    "App\\": "src/"
+                }
+            }
+        }"#,
+        &[(
+            "src/Product.php",
+            concat!(
+                "<?php\n",
+                "namespace App;\n",
+                "\n",
+                "final class Product {\n",
+                "    public function discountedMinor(): int {\n",
+                "        return 100;\n",
+                "    }\n",
+                "}\n",
+            ),
+        )],
+    );
+
+    let uri = Url::parse("file:///order.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "\n",
+        "final class OrderLine {\n",
+        "    public int $lineMinor {\n",
+        "        get => $this->product->discountedMinor() * $this->quantity;\n",
+        "    }\n",
+        "\n",
+        "    public function __construct(\n",
+        "        public readonly Product $product,\n",
+        "        public readonly int $quantity,\n",
+        "    ) {}\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "discountedMinor" in get => $this->product->discountedMinor()
+    // Line 5: "        get => $this->product->discountedMinor() * $this->quantity;"
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 5,
+                character: 38,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve discountedMinor() inside a property hook get expression"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            let path = location.uri.to_file_path().unwrap();
+            assert!(
+                path.ends_with("src/Product.php"),
+                "Should point to Product.php, got: {:?}",
+                path
+            );
+            assert_eq!(
+                location.range.start.line, 4,
+                "discountedMinor() is declared on line 4"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn definition_inside_property_hook_block_body() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Price {\n",
+        "    public function format(): string {\n",
+        "        return '$' . $this->amount;\n",
+        "    }\n",
+        "}\n",
+        "class Item {\n",
+        "    public string $label {\n",
+        "        get {\n",
+        "            return $this->price->format();\n",
+        "        }\n",
+        "        set(string $value) {\n",
+        "            $this->price = new Price();\n",
+        "        }\n",
+        "    }\n",
+        "    public Price $price;\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "format" in $this->price->format() on line 9
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 9,
+                character: 34,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = backend.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_some(),
+        "Should resolve format() inside a property hook block body"
+    );
+
+    match result.unwrap() {
+        GotoDefinitionResponse::Scalar(location) => {
+            assert_eq!(
+                location.range.start.line, 2,
+                "format() is declared on line 2"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn definition_of_local_assigned_inside_property_hook() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///hook_local.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Price {\n",
+        "    public function format(): string {\n",
+        "        return '0';\n",
+        "    }\n",
+        "}\n",
+        "class Item {\n",
+        "    public string $label {\n",
+        "        get {\n",
+        "            $p = $this->price;\n",
+        "            return $p->format();\n",
+        "        }\n",
+        "    }\n",
+        "    public Price $price;\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "format" in `$p->format()` on line 10, where `$p` is a
+    // local assigned earlier in the same hook body.
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 10,
+                character: 26,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    match backend.goto_definition(params).await.unwrap() {
+        Some(GotoDefinitionResponse::Scalar(location)) => {
+            assert_eq!(
+                location.range.start.line, 2,
+                "format() is declared on line 2"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn definition_through_declared_set_hook_value() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///hook_set_param.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Price {\n",
+        "    public function format(): string {\n",
+        "        return '0';\n",
+        "    }\n",
+        "}\n",
+        "class Item {\n",
+        "    public string $label {\n",
+        "        set(Price $value) => $this->stored = $value->format();\n",
+        "    }\n",
+        "    public string $stored;\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // Click on "format" in `$value->format()`, an expression-bodied hook
+    // whose parameter list sits outside the body.
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 8,
+                character: 55,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    match backend.goto_definition(params).await.unwrap() {
+        Some(GotoDefinitionResponse::Scalar(location)) => {
+            assert_eq!(
+                location.range.start.line, 2,
+                "format() is declared on line 2"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn definition_through_implicit_set_hook_value() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///hook_implicit_value.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Price {\n",
+        "    public function format(): string {\n",
+        "        return '0';\n",
+        "    }\n",
+        "}\n",
+        "class Item {\n",
+        "    public Price $label {\n",
+        "        set {\n",
+        "            $this->stored = $value->format();\n",
+        "        }\n",
+        "    }\n",
+        "    public string $stored;\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // `set` with no parameter list still receives `$value`, typed as the
+    // property.  Click on "format" in `$value->format()`.
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 9,
+                character: 39,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    match backend.goto_definition(params).await.unwrap() {
+        Some(GotoDefinitionResponse::Scalar(location)) => {
+            assert_eq!(
+                location.range.start.line, 2,
+                "format() is declared on line 2"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn definition_inside_promoted_property_hook() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///promoted_hook.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Price {\n",
+        "    public function format(): string {\n",
+        "        return '0';\n",
+        "    }\n",
+        "}\n",
+        "class Item {\n",
+        "    public string $stored = '';\n",
+        "    public function __construct(\n",
+        "        public Price $price,\n",
+        "        public Price $latest {\n",
+        "            get => $this->price;\n",
+        "            set {\n",
+        "                $this->stored = $value->format();\n",
+        "            }\n",
+        "        },\n",
+        "    ) {}\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // A constructor-promoted property carries its hooks in the parameter
+    // list rather than as a class member.  Click "format" on line 13.
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 13,
+                character: 42,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    match backend.goto_definition(params).await.unwrap() {
+        Some(GotoDefinitionResponse::Scalar(location)) => {
+            assert_eq!(
+                location.range.start.line, 2,
+                "format() is declared on line 2"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn definition_of_property_named_by_a_parent_hook_call() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///parent_hook_call.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Base {\n",
+        "    public string $label {\n",
+        "        get => 'base';\n",
+        "    }\n",
+        "}\n",
+        "class Child extends Base {\n",
+        "    public string $label {\n",
+        "        get => parent::$label::get() . '!';\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // `parent::$label::get()` names the parent's property, so the `$label`
+    // token navigates to its declaration on line 2.
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 8,
+                character: 26,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    match backend.goto_definition(params).await.unwrap() {
+        Some(GotoDefinitionResponse::Scalar(location)) => {
+            assert_eq!(
+                location.range.start.line, 2,
+                "Base::$label is declared on line 2"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn definition_through_implicit_value_of_an_arrow_bodied_set_hook() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///arrow_set_hook.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Price {\n",
+        "    public function format(): string {\n",
+        "        return '0';\n",
+        "    }\n",
+        "}\n",
+        "class Item {\n",
+        "    public string $stored = '';\n",
+        "    public Price $latest {\n",
+        "        get => new Price();\n",
+        "        set => $this->stored = $value->format();\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // An arrow-bodied `set` hook receives `$value` too, with no parameter
+    // list to hang it on.  Click "format" on line 10.
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 10,
+                character: 40,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    match backend.goto_definition(params).await.unwrap() {
+        Some(GotoDefinitionResponse::Scalar(location)) => {
+            assert_eq!(
+                location.range.start.line, 2,
+                "format() is declared on line 2"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn definition_of_a_plain_parent_property_named_by_a_hook_call() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///parent_plain_prop.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Point {\n",
+        "    public int $x;\n",
+        "    public int $y;\n",
+        "}\n",
+        "class Guarded extends Point {\n",
+        "    public int $x {\n",
+        "        set {\n",
+        "            parent::$x::set($value);\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let open_params = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "php".to_string(),
+            version: 1,
+            text: text.to_string(),
+        },
+    };
+    backend.did_open(open_params).await;
+
+    // The parent property a hook call names need not be hooked itself.
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 8,
+                character: 21,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    match backend.goto_definition(params).await.unwrap() {
+        Some(GotoDefinitionResponse::Scalar(location)) => {
+            assert_eq!(
+                location.range.start.line, 2,
+                "Point::$x is declared on line 2"
+            );
+        }
+        other => panic!("Expected Scalar location, got: {:?}", other),
+    }
+}

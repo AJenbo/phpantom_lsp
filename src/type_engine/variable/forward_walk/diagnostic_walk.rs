@@ -1021,20 +1021,77 @@ pub(crate) fn walk_class_member_body<'b>(
     use mago_syntax::cst::class_like::member::ClassLikeMember;
     use mago_syntax::cst::class_like::method::MethodBody;
 
-    if let ClassLikeMember::Method(method) = member
-        && let MethodBody::Concrete(block) = &method.body
-    {
-        let method_name = bytes_to_str(method.name.value).to_string();
-        let is_static = method.modifiers.contains_static();
-        analyze_function_body(
-            method.parameter_list.parameters.iter(),
-            block.statements.iter(),
-            method.span().start.offset,
-            enclosing_class,
-            Some(&method_name),
-            is_static,
-            diag_ctx,
-        );
+    match member {
+        ClassLikeMember::Method(method) => {
+            // A constructor-promoted property carries its hooks in the
+            // parameter list, so they need walking whether or not the
+            // constructor itself has a body.
+            for param in method.parameter_list.parameters.iter() {
+                if let Some(hooks) = &param.hooks {
+                    walk_property_hook_bodies(
+                        param.hint.as_ref(),
+                        hooks,
+                        enclosing_class,
+                        diag_ctx,
+                    );
+                }
+            }
+
+            let MethodBody::Concrete(block) = &method.body else {
+                return;
+            };
+            let method_name = bytes_to_str(method.name.value).to_string();
+            let is_static = method.modifiers.contains_static();
+            analyze_function_body(
+                method.parameter_list.parameters.iter(),
+                block.statements.iter(),
+                method.span().start.offset,
+                enclosing_class,
+                Some(&method_name),
+                is_static,
+                diag_ctx,
+            );
+        }
+        ClassLikeMember::Property(Property::Hooked(hooked)) => {
+            walk_property_hook_bodies(
+                hooked.hint.as_ref(),
+                &hooked.hook_list,
+                enclosing_class,
+                diag_ctx,
+            );
+        }
+        _ => {}
+    }
+}
+
+/// Walk the `get`/`set` bodies of a hooked property.
+///
+/// Each hook gets its own seeded scope, exactly as a method body does.
+/// Without one the snapshot in force inside the hook is whatever the
+/// previously walked body left behind, so `$this` resolves to that body's
+/// class and every `$this->member` in the hook is flagged as unknown.
+fn walk_property_hook_bodies(
+    property_hint: Option<&Hint<'_>>,
+    hook_list: &PropertyHookList<'_>,
+    enclosing_class: &ClassInfo,
+    diag_ctx: &DiagnosticWalkCtx<'_>,
+) {
+    let ctx = diag_ctx.forward_walk_ctx(enclosing_class);
+
+    for hook in hook_list.hooks.iter() {
+        let PropertyHookBody::Concrete(body) = &hook.body else {
+            continue;
+        };
+
+        let mut scope = seed_property_hook_scope(property_hint, hook, &ctx);
+        record_scope_snapshot(hook.span().start.offset, &scope);
+
+        // A one-line hook holds a single expression with nothing to
+        // assign into the scope, so the snapshot above already describes
+        // every point in it.  A block body still needs the walk.
+        if let PropertyHookConcreteBody::Block(block) = body {
+            walk_body_for_diagnostics(block.statements.iter(), &mut scope, &ctx);
+        }
     }
 }
 
@@ -1047,6 +1104,26 @@ pub(crate) struct DiagnosticWalkCtx<'a> {
     backend: Option<&'a crate::Backend>,
     loaders: Loaders<'a>,
     resolved_class_cache: Option<&'a crate::virtual_members::ResolvedClassCache>,
+}
+
+impl<'a> DiagnosticWalkCtx<'a> {
+    /// Build the forward-walk context for a body belonging to
+    /// `current_class`.  The diagnostic pass walks the whole file, so the
+    /// cursor is past the end of every body it visits.
+    fn forward_walk_ctx<'c>(&'c self, current_class: &'c ClassInfo) -> ForwardWalkCtx<'c> {
+        ForwardWalkCtx {
+            current_class,
+            all_classes: self.local_classes,
+            content: self.content,
+            cursor_offset: u32::MAX,
+            class_loader: self.class_loader,
+            backend: self.backend,
+            loaders: self.loaders,
+            resolved_class_cache: self.resolved_class_cache,
+            enclosing_return_type: None,
+            top_level_scope: None,
+        }
+    }
 }
 
 /// Run the forward walker on a single function/method body and record
@@ -1065,18 +1142,7 @@ pub(crate) fn analyze_function_body<'b>(
     is_static: bool,
     diag_ctx: &DiagnosticWalkCtx<'_>,
 ) {
-    let ctx = ForwardWalkCtx {
-        current_class,
-        all_classes: diag_ctx.local_classes,
-        content: diag_ctx.content,
-        cursor_offset: u32::MAX,
-        class_loader: diag_ctx.class_loader,
-        backend: diag_ctx.backend,
-        loaders: diag_ctx.loaders,
-        resolved_class_cache: diag_ctx.resolved_class_cache,
-        enclosing_return_type: None,
-        top_level_scope: None,
-    };
+    let ctx = diag_ctx.forward_walk_ctx(current_class);
 
     seed_and_walk_function_body(
         parameters,

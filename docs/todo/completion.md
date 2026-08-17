@@ -321,3 +321,35 @@ The right combination of these signals (and their relative weights)
 needs experimentation. A next step could be adding declaration origin
 on top of the existing kind tiering, which requires no new data and is
 straightforward to implement.
+
+## C12. The implicit `$value` of a `set` hook is not offered by variable completion
+
+**Impact: Low · Complexity: Medium**
+
+A `set` hook that declares no parameter list still receives the assigned
+value as `$value`:
+
+```php
+class Item {
+    public Price $label {
+        set {
+            $this->stored = $value->format();  // `$value` resolves
+        }
+    }
+}
+```
+
+The type engine seeds `$value` from the property's declared type, so
+hover, go-to-definition, and diagnostics all read it correctly. Typing
+`$va` inside the hook body does not offer it, though, because variable
+completion is driven by `SymbolMap::var_defs` and there is no `$value`
+token in the source to anchor a `VarDefSite` to. A hook that spells the
+parameter out (`set(Price $value)`) is offered as usual.
+
+Anchoring a synthetic def site on the `set` keyword is not enough on its
+own: `var_defs` offsets are also read as real source ranges by find
+references, rename, document highlight, and semantic tokens, so a def
+site pointing at a keyword would produce a bogus highlight and a rename
+edit that corrupts the hook. The fix needs a def kind those consumers
+skip (say `VarDefKind::ImplicitHookValue`) while variable completion
+includes it.

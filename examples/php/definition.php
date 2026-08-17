@@ -59,6 +59,80 @@ class GtdTarget extends GtdParent
 function gtdHelper(): GtdTarget { return new GtdTarget(); }
 
 
+// ── Property Hook Bodies (PHP 8.4) ──────────────────────────────────────────
+// A `get`/`set` hook body reads like any other body: Ctrl+Click reaches
+// what is written inside one, `$this` is the class that declares the hook,
+// a local keeps its type from one statement to the next, and the value a
+// `set` hook receives carries the property's type whether it is spelled
+// out or left implicit.
+
+class HookedGtdDemo
+{
+    public GtdTarget $source;
+    public string $lastSeen = '';
+
+    // Expression-bodied hook
+    public string $formatted {
+        get => $this->source->format();       // Ctrl+Click → GtdTarget::format()
+    }
+
+    // Block-bodied hook — $target is a local of the hook body
+    public string $labelled {
+        get {
+            $target = $this->source;
+            return $target->label();          // Ctrl+Click → GtdTarget::label()
+        }
+    }
+
+    // A declared `set` value
+    public GtdTarget $declaredWrite {
+        get => $this->source;
+        set(GtdTarget $value) {
+            $this->lastSeen = $value->format();  // Ctrl+Click → GtdTarget::format()
+        }
+    }
+
+    // An implicit `$value`, typed as the property
+    public GtdTarget $implicitWrite {
+        get => $this->source;
+        set {
+            $this->lastSeen = $value->label();   // Ctrl+Click → GtdTarget::label()
+        }
+    }
+
+    public function __construct()
+    {
+        $this->source = new GtdTarget();
+    }
+}
+
+// A hook on a constructor-promoted property, and a hook that calls the one
+// it overrides through PHP 8.4's `parent::$prop::get()` spelling.
+//
+// A promoted hooked property needs a `set` hook: promotion assigns the
+// argument, and a get-only virtual property is read-only.
+class PromotedHookGtdDemo extends HookedGtdDemo
+{
+    public string $seen = '';
+
+    public function __construct(
+        public GtdTarget $origin,
+        public GtdTarget $promoted {
+            get => $this->origin;
+            set {
+                $this->seen = $value->label();  // Ctrl+Click → GtdTarget::label()
+            }
+        },
+    ) {
+        parent::__construct();
+    }
+
+    public string $formatted {
+        get => parent::$formatted::get();       // Ctrl+Click $formatted → HookedGtdDemo::$formatted
+    }
+}
+
+
 // ── Type Hint Go-to-Definition ──────────────────────────────────────────────
 // Ctrl+Click on class names in type hints, return types, catch blocks,
 // and docblock annotations to jump to their definitions.
