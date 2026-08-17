@@ -499,10 +499,11 @@ impl Backend {
         value
     }
 
-    /// Every named route in the project, with the URI it was registered with.
+    /// Every named route in the project, with the URI it was registered with,
+    /// plus group prefixes whose full set of children is unknowable.
     pub(crate) fn cached_routes(
         &self,
-    ) -> std::sync::Arc<Vec<crate::virtual_members::laravel::RouteEntry>> {
+    ) -> std::sync::Arc<crate::virtual_members::laravel::RouteDiscovery> {
         self.cached_laravel_enumeration(
             &self.laravel_string_key_build_locks.routes,
             |cache| cache.routes.clone(),
@@ -513,6 +514,7 @@ impl Backend {
 
     pub(crate) fn cached_route_names(&self) -> Vec<String> {
         self.cached_routes()
+            .routes
             .iter()
             .map(|route| route.name.clone())
             .collect()

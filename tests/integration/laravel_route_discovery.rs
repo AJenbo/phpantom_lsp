@@ -213,3 +213,73 @@ async fn goto_definition_reaches_a_route_outside_the_routes_directory() {
         "should jump to the kiosk route file, got: {target}"
     );
 }
+
+// ─── Dynamic group name prefixes ────────────────────────────────────────────
+
+/// A project's own route file that includes a group whose `->name()` argument
+/// is a variable, as Filament does with `Route::name($panelId . '.')`.  Routes
+/// registered inside such a group cannot be enumerated statically, so any
+/// route call whose name falls under the known static prefix must not be
+/// flagged.
+const DYNAMIC_ROUTES: &str = "\
+<?php
+use Illuminate\\Support\\Facades\\Route;
+
+Route::get('/', fn() => 'welcome')->name('home');
+
+Route::name('filament.')
+    ->group(function () {
+        Route::name($panelId . '.')->group(function () {
+            Route::get('/dashboard', fn() => 'hi')->name('pages.dashboard');
+        });
+    });
+";
+
+const CONSUMER_DYNAMIC: &str = "\
+<?php
+namespace App;
+class Nav {
+    public function links(): void {
+        route('filament.admin.resources.vps.index');
+        route('home');
+        route('totally.bogus');
+    }
+}
+";
+
+#[tokio::test]
+async fn routes_under_a_dynamic_group_prefix_are_not_flagged() {
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER_JSON,
+        &[
+            ("routes/web.php", DYNAMIC_ROUTES),
+            ("src/Nav.php", CONSUMER_DYNAMIC),
+        ],
+    );
+    backend.initialized(InitializedParams {}).await;
+
+    let uri = Url::from_file_path(dir.path().join("src/Nav.php")).unwrap();
+    open(&backend, &uri, CONSUMER_DYNAMIC).await;
+
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri.as_str(), CONSUMER_DYNAMIC, &mut diags);
+
+    let messages: Vec<&String> = diags
+        .iter()
+        .filter(
+            |d| matches!(&d.code, Some(NumberOrString::String(s)) if s == "invalid_laravel_route"),
+        )
+        .map(|d| &d.message)
+        .collect();
+
+    assert_eq!(
+        messages.len(),
+        1,
+        "only the genuinely missing route should be flagged, got: {messages:?}"
+    );
+    assert!(
+        messages[0].contains("totally.bogus"),
+        "the flagged route should be the missing one, got: {}",
+        messages[0]
+    );
+}

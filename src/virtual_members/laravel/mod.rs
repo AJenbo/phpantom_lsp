@@ -176,7 +176,7 @@ pub(crate) use provider_resources::{
     extract_provider_resources,
 };
 pub(crate) use request_fields::{request_fields_at_position, resolve_request_field_definition};
-pub(crate) use route_names::{RouteEntry, enumerate_all_routes, route_uri_parameters};
+pub(crate) use route_names::{RouteDiscovery, enumerate_all_routes, route_uri_parameters};
 pub(crate) use storage::{
     FILESYSTEM_MANAGER_FQN, LaravelStorageDriverIndex, StorageDriverRegistration,
     extract_storage_driver_registrations, patch_storage_disk_type,

@@ -709,12 +709,19 @@ impl Backend {
         // enumerations.  Safe to call now that the `symbol_maps` read
         // lock has been released.
         let mut project_registers_routes = false;
-        let route_keys: HashSet<String> = if has_route {
-            let routes = self.cached_routes();
-            project_registers_routes = routes.iter().any(|route| !route.from_vendor);
-            routes.iter().map(|route| route.name.clone()).collect()
+        let (route_keys, route_open_prefixes): (HashSet<String>, Vec<String>) = if has_route {
+            let discovery = self.cached_routes();
+            project_registers_routes = discovery.routes.iter().any(|route| !route.from_vendor);
+            (
+                discovery
+                    .routes
+                    .iter()
+                    .map(|route| route.name.clone())
+                    .collect(),
+                discovery.open_prefixes.clone(),
+            )
         } else {
-            HashSet::new()
+            (HashSet::new(), Vec::new())
         };
         let config_keys: HashSet<String> = if has_config {
             self.cached_config_keys().into_iter().collect()
@@ -825,6 +832,16 @@ impl Backend {
                     // is whether *this project* contributed any, not whether
                     // the set is empty.
                     if !project_registers_routes {
+                        continue;
+                    }
+                    // A group whose `->name()` argument was not a string
+                    // literal (e.g. Filament's `Route::name($panelId . '.')`
+                    // has children we cannot enumerate statically.  Any
+                    // route that falls under such a prefix is unjudgeable.
+                    if route_open_prefixes
+                        .iter()
+                        .any(|prefix| key.starts_with(prefix))
+                    {
                         continue;
                     }
                     (route_keys.contains(key), "route", "invalid_laravel_route")

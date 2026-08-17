@@ -1442,12 +1442,16 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
         {
             laravel_keys += vs(v);
         }
-        if let Some(routes) = &c.routes {
-            laravel_keys
-                .add(routes.capacity() * size_of::<crate::virtual_members::laravel::RouteEntry>());
-            for route in routes.iter() {
+        if let Some(discovery) = &c.routes {
+            if let Some(first) = discovery.routes.first() {
+                laravel_keys.add(discovery.routes.capacity() * size_of_val(first));
+            }
+            for route in &discovery.routes {
                 laravel_keys.add(route.name.capacity());
                 laravel_keys.add(route.uri.capacity());
+            }
+            for prefix in &discovery.open_prefixes {
+                laravel_keys.add(prefix.capacity());
             }
         }
         if let Some(trees) = &c.config_trees {

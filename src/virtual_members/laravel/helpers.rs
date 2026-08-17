@@ -872,6 +872,34 @@ pub(crate) fn chain_name_prefix<'a>(expr: &Expression<'a>, content: &str) -> Str
     })
 }
 
+/// Whether the call chain includes a `->name(…)` whose argument is not a
+/// string literal.  When this fires, the accumulated name prefix is
+/// incomplete: the group may contain routes whose names we cannot enumerate
+/// statically.
+pub(crate) fn chain_has_dynamic_name(expr: &Expression<'_>, content: &str) -> bool {
+    match expr {
+        Expression::Call(Call::Method(mc)) => {
+            let ClassLikeMemberSelector::Identifier(ident) = &mc.method else {
+                return chain_has_dynamic_name(mc.object, content);
+            };
+            if ident.value.eq_ignore_ascii_case(b"name")
+                && first_string_arg(&mc.argument_list, content).is_none()
+            {
+                return true;
+            }
+            chain_has_dynamic_name(mc.object, content)
+        }
+        Expression::Call(Call::StaticMethod(sc)) => {
+            let ClassLikeMemberSelector::Identifier(ident) = &sc.method else {
+                return false;
+            };
+            ident.value.eq_ignore_ascii_case(b"name")
+                && first_string_arg(&sc.argument_list, content).is_none()
+        }
+        _ => false,
+    }
+}
+
 /// Collect all `->prefix('...')` URI segments from the call chain that
 /// precedes `->group()`, joined into a single prefix.
 pub(crate) fn chain_uri_prefix<'a>(expr: &Expression<'a>, content: &str) -> String {

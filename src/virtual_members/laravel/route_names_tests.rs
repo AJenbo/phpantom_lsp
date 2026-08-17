@@ -3,9 +3,21 @@ use super::*;
 /// Collect the routes of a single route file, as `enumerate_all_routes` does
 /// per file (without the workspace walk).
 fn routes_of(content: &str) -> Vec<RouteEntry> {
+    routes_and_prefixes(content).0
+}
+
+fn routes_and_prefixes(content: &str) -> (Vec<RouteEntry>, Vec<String>) {
     let mut out = Vec::new();
-    collect_all_names_from_file(content, None, None, &MacroScope::default(), &mut out);
-    out
+    let mut open_prefixes = Vec::new();
+    collect_all_names_from_file(
+        content,
+        None,
+        None,
+        &MacroScope::default(),
+        &mut out,
+        &mut open_prefixes,
+    );
+    (out, open_prefixes)
 }
 
 /// Collect the routes of a route file that can call the router macros
@@ -36,7 +48,8 @@ fn routes_with_macros(content: &str, macro_source: &str, names: &[&str]) -> Vec<
     };
 
     let mut out = Vec::new();
-    collect_all_names_from_file(content, None, None, &scope, &mut out);
+    let mut open_prefixes = Vec::new();
+    collect_all_names_from_file(content, None, None, &scope, &mut out, &mut open_prefixes);
     out
 }
 
@@ -706,12 +719,14 @@ fn registrations_inside_a_provider_method_are_collected() {
 fn routes_of_file(path: &Path, workspace_root: &Path) -> Vec<RouteEntry> {
     let content = std::fs::read_to_string(path).unwrap();
     let mut out = Vec::new();
+    let mut open_prefixes = Vec::new();
     collect_all_names_from_file(
         &content,
         Some(path),
         Some(workspace_root),
         &MacroScope::default(),
         &mut out,
+        &mut open_prefixes,
     );
     out
 }
@@ -906,4 +921,45 @@ fn an_unknown_chain_link_is_still_walked_through() {
         .map(|r| r.name)
         .collect();
     assert_eq!(names, vec!["dashboard".to_string()]);
+}
+
+// ─── Open prefixes (dynamic group names) ────────────────────────────────────
+
+#[test]
+fn dynamic_name_in_group_chain_records_an_open_prefix() {
+    let content = "\
+<?php
+Route::name('filament.')
+    ->group(function () {
+        Route::name($panelId . '.')->group(function () {
+            Route::get('/dashboard', fn() => 'hi')->name('pages.dashboard');
+        });
+    });
+";
+    let (routes, prefixes) = routes_and_prefixes(content);
+    assert!(
+        prefixes.contains(&"filament.".to_string()),
+        "the known static prefix should be recorded as open, got: {prefixes:?}"
+    );
+    // The statically resolvable route inside the dynamic group is still found.
+    let names: Vec<&str> = routes.iter().map(|r| r.name.as_str()).collect();
+    assert!(
+        names.contains(&"filament.pages.dashboard"),
+        "statically resolvable routes inside the group should still be collected, got: {names:?}"
+    );
+}
+
+#[test]
+fn fully_static_group_does_not_record_an_open_prefix() {
+    let content = "\
+<?php
+Route::name('admin.')->group(function () {
+    Route::get('/dashboard', fn() => 'hi')->name('dashboard');
+});
+";
+    let (_, prefixes) = routes_and_prefixes(content);
+    assert!(
+        prefixes.is_empty(),
+        "a fully static group should not record an open prefix, got: {prefixes:?}"
+    );
 }
