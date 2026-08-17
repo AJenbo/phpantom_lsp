@@ -1542,6 +1542,41 @@ enum Status: string {
     }
 }
 
+/// A global function's own name, a top-level constant's own name, and a
+/// constructor-promoted parameter's own name all declare something whose
+/// full signature/value is already on screen — same rule as
+/// [`hover_member_declaration_sites_return_none`], applied to the three
+/// declaration sites that used to slip through it.
+#[test]
+fn hover_global_declaration_sites_return_none() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+/** Adds a shipping surcharge. */
+function helper(): int {
+    return 1;
+}
+
+const LIMIT = 5;
+
+class Product {
+    public function __construct(public string $sku) {}
+}
+"#;
+
+    for (what, line, character) in [
+        ("function", 2u32, 10u32),
+        ("top-level const", 6, 7),
+        ("promoted property parameter", 9, 48),
+    ] {
+        let hover = hover_at(&backend, uri, content, line, character);
+        assert!(
+            hover.is_none(),
+            "should not show hover on the {what} declaration site, got: {hover:?}"
+        );
+    }
+}
+
 /// A request can arrive before the file has ever been parsed: an editor
 /// fires hover the instant it opens a file, and a raw LSP client can ask
 /// about a file it never opened at all, ahead of background indexing.

@@ -147,7 +147,7 @@ impl Backend {
                 // bindings, hover is useful to show the resolved type and
                 // any docblock descriptions.
                 if let Some(def_kind) = self.lookup_var_def_kind_at(uri, name, cursor_offset)
-                    && !matches!(
+                    && (!matches!(
                         def_kind,
                         VarDefKind::Assignment
                             | VarDefKind::CompoundAssignment
@@ -156,8 +156,13 @@ impl Backend {
                             | VarDefKind::Catch
                             | VarDefKind::ArrayDestructuring
                             | VarDefKind::ListDestructuring
-                    )
+                    ) || (def_kind == VarDefKind::Parameter
+                        && self.is_promoted_property_param(uri, symbol.start)))
                 {
+                    // A constructor-promoted parameter declares a property,
+                    // not a local variable, so it follows the same
+                    // "already visible on screen" rule as any other
+                    // property declaration.
                     return None;
                 }
                 self.hover_variable(name, uri, content, cursor_offset, current_class, &ctx)
@@ -403,9 +408,17 @@ impl Backend {
 
             SymbolKind::FunctionCall {
                 name,
+                is_definition,
                 is_docblock_reference,
-                ..
             } => {
+                // The user is already at the function's own declaration —
+                // showing hover here would just repeat the signature and
+                // docblock that are already on screen, same as a class or
+                // member declaration.
+                if *is_definition {
+                    return None;
+                }
+
                 // An unqualified `@see name()` describes the documented
                 // class's own member first, as phpDocumentor reads it.
                 if *is_docblock_reference
@@ -483,7 +496,18 @@ impl Backend {
                 }
             }
 
-            SymbolKind::ConstantReference { name, .. } => {
+            SymbolKind::ConstantReference {
+                name,
+                is_definition,
+            } => {
+                // The user is already at the `const NAME = ...;` declaration
+                // — the value is on the same line, so showing hover here
+                // would just repeat it, same as a class or member
+                // declaration.
+                if *is_definition {
+                    return None;
+                }
+
                 // The name is resolved against the file the same way the
                 // type engine resolves it, so a namespaced constant is
                 // found through whichever spelling the reference used.
