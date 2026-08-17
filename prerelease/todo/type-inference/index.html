@@ -1766,18 +1766,12 @@ within the same impact tier.</p>
 <code>.variables()</code> methods mean hooked properties are extracted for basic
 completion. However:</p>
 <ul>
-<li><strong>Hook bodies are never walked.</strong> Variables and anonymous classes
-  inside <code>get</code>/<code>set</code> bodies are invisible to resolution.</li>
-<li><strong><code>$value</code> parameter</strong> inside <code>set</code> hooks is not offered for
-  variable completion.</li>
 <li><strong>Asymmetric visibility</strong> (<code>public private(set) string $name</code>) is
   not recognised — the <code>set</code> visibility is ignored, so filtering
   may incorrectly allow setting a property that should be
   write-restricted.</li>
 </ul>
-<p><strong>Fix:</strong> In <code>extract_class_like_members</code>, match <code>Property::Hooked</code>
-explicitly, walk hook bodies for anonymous classes and variable
-scopes, and parse the set-visibility modifier into a new
+<p><strong>Fix:</strong> Parse the set-visibility modifier into a new
 <code>set_visibility</code> field on <code>PropertyInfo</code>.</p>
 <h3 id="asymmetric-visibility-also-php-84-85">Asymmetric visibility (also PHP 8.4 / 8.5)<a class="headerlink" href="#asymmetric-visibility-also-php-84-85" title="Permanent link">&para;</a></h3>
 <p>Separate from hooks, PHP 8.4 allows asymmetric visibility on plain

@@ -953,6 +953,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#c12-the-implicit-value-of-a-set-hook-is-not-offered-by-variable-completion" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        C12. The implicit <code>$value</code> of a <code>set</code> hook is not offered by variable completion
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1492,6 +1503,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#c12-the-implicit-value-of-a-set-hook-is-not-offered-by-variable-completion" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        C12. The implicit <code>$value</code> of a <code>set</code> hook is not offered by variable completion
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1977,6 +1999,31 @@ tiering already in place:</p>
 needs experimentation. A next step could be adding declaration origin
 on top of the existing kind tiering, which requires no new data and is
 straightforward to implement.</p>
+<h2 id="c12-the-implicit-value-of-a-set-hook-is-not-offered-by-variable-completion">C12. The implicit <code>$value</code> of a <code>set</code> hook is not offered by variable completion<a class="headerlink" href="#c12-the-implicit-value-of-a-set-hook-is-not-offered-by-variable-completion" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<p>A <code>set</code> hook that declares no parameter list still receives the assigned
+value as <code>$value</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">class Item {</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    public Price $label {</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">        set {</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">            $this-&gt;stored = $value-&gt;format();  // `$value` resolves</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">        }</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">    }</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">}</span>
+</code></pre></div>
+<p>The type engine seeds <code>$value</code> from the property's declared type, so
+hover, go-to-definition, and diagnostics all read it correctly. Typing
+<code>$va</code> inside the hook body does not offer it, though, because variable
+completion is driven by <code>SymbolMap::var_defs</code> and there is no <code>$value</code>
+token in the source to anchor a <code>VarDefSite</code> to. A hook that spells the
+parameter out (<code>set(Price $value)</code>) is offered as usual.</p>
+<p>Anchoring a synthetic def site on the <code>set</code> keyword is not enough on its
+own: <code>var_defs</code> offsets are also read as real source ranges by find
+references, rename, document highlight, and semantic tokens, so a def
+site pointing at a keyword would produce a bogus highlight and a rename
+edit that corrupts the hook. The fix needs a def kind those consumers
+skip (say <code>VarDefKind::ImplicitHookValue</code>) while variable completion
+includes it.</p>
 
 
 
