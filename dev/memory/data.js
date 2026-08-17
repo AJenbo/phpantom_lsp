@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786995527792,
+  "lastUpdate": 1786995714832,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -23323,6 +23323,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 81.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": false,
+          "id": "77878bb055c3d298ea7c7c35e35a473c269c9f15",
+          "message": "A route under a dynamic group prefix is no longer flagged as unknown",
+          "timestamp": "2026-08-17T21:23:49+02:00",
+          "tree_id": "fa1a2f982db460331a9ae768059863a7d91332f8",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/77878bb055c3d298ea7c7c35e35a473c269c9f15"
+        },
+        "date": 1786995710112,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 73,
             "unit": "MiB"
           }
         ]
