@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786921651918,
+  "lastUpdate": 1786929191432,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -23085,6 +23085,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 77.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": false,
+          "id": "2d3f049d6c768c7b89293e969c8532cb5c514337",
+          "message": "A raw Blade echo is read from its own opening brace",
+          "timestamp": "2026-08-17T02:53:00+02:00",
+          "tree_id": "0466f4de06764b1ce3216f315cc1c3ff29f7efc3",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/2d3f049d6c768c7b89293e969c8532cb5c514337"
+        },
+        "date": 1786929185049,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 73.8,
             "unit": "MiB"
           }
         ]
