@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786931767939,
+  "lastUpdate": 1786936954203,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -23187,6 +23187,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 83.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": false,
+          "id": "a00e13ab4e1056b8025e24a5d4af3c08fd02d8f1",
+          "message": "Go-to-definition works inside property hook bodies",
+          "timestamp": "2026-08-17T05:03:31+02:00",
+          "tree_id": "c62307ead97892023a3f66573f63081be6c13fee",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/a00e13ab4e1056b8025e24a5d4af3c08fd02d8f1"
+        },
+        "date": 1786936947151,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 81.4,
             "unit": "MiB"
           }
         ]
