@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786931765639,
+  "lastUpdate": 1786931767939,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -23153,6 +23153,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 71.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "ea941a807a828dd7a286a7ff1ff641a4bb323ef7",
+          "message": "Hover stands down at every declaration site, not just most of them",
+          "timestamp": "2026-08-17T03:40:20+02:00",
+          "tree_id": "a36558e3e5df5fb30ca42e9cbc1609aae115a691",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/ea941a807a828dd7a286a7ff1ff641a4bb323ef7"
+        },
+        "date": 1786931762103,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 83.9,
             "unit": "MiB"
           }
         ]
