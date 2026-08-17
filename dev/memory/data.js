@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786929191432,
+  "lastUpdate": 1786931765639,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -23119,6 +23119,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 73.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "shuvro.nsu.cse@gmail.com",
+            "name": "Shuvro Roy",
+            "username": "shuvroroy"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "ec47f8015ad50ecf5b98f8a9e37280a7cbdaa0b6",
+          "message": "fix: normalize filesystem aliases during discovery",
+          "timestamp": "2026-08-17T03:39:25+02:00",
+          "tree_id": "029f12344fb549f9c30073230a038b45a4c41921",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/ec47f8015ad50ecf5b98f8a9e37280a7cbdaa0b6"
+        },
+        "date": 1786931759788,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 36,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 71.3,
             "unit": "MiB"
           }
         ]
