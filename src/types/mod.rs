@@ -1370,6 +1370,17 @@ pub struct TypeAssertion {
     /// Whether the assertion is negated (`!Type`), meaning the parameter
     /// is guaranteed to *not* be this type.
     pub negated: bool,
+    /// Whether the assertion was written with the `=` modifier (`=Type`,
+    /// `!=Type`), asserting value equality rather than a subtype
+    /// relationship.
+    ///
+    /// Within its own branch an equality assertion narrows exactly as the
+    /// subtype form does, so this only matters in the opposite branch: an
+    /// `-if-true` / `-if-false` tag is a one-way implication for the
+    /// equality form, so it may not be inverted the way the subtype form
+    /// can.  `filled()` promises `!=null|''` when it returns true, which
+    /// says nothing about a value it returns false for.
+    pub is_equality: bool,
 }
 
 /// When a `@phpstan-assert` annotation takes effect.

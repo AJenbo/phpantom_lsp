@@ -2374,6 +2374,20 @@ function isNotRock(mixed $value): bool
     return !$value instanceof Rock;
 }
 
+/**
+ * The shape Laravel's `filled()` helper is annotated with: the asserted
+ * type is a union, and it is written in the equality form (`!=`), which
+ * only speaks for the branch its tag names.
+ *
+ * @phpstan-assert-if-true !=null|'' $value
+ *
+ * @phpstan-assert-if-false !=numeric|bool $value
+ */
+function demoFilled(mixed $value): bool
+{
+    return $value !== null && $value !== '';
+}
+
 class StaticAssert
 {
     /** @phpstan-assert Rock $value */

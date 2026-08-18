@@ -1415,6 +1415,17 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
                     AssertionKind::IfFalse => !function_returned_true,
                     AssertionKind::Always => continue,
                 };
+                // The branch this tag does not name is reached by negating
+                // what it promises, which only holds for the subtype form:
+                // `-if-true Foo` failing means the value was not a `Foo`.
+                // The equality form promises a comparison instead, and a
+                // failed comparison rules nothing out, so it stays a one-way
+                // implication.  Laravel's `filled()` carries
+                // `@phpstan-assert-if-false !=numeric|bool`, and inverting
+                // that made every filled value look like `numeric|bool`.
+                if !applies_positively && assertion.is_equality {
+                    continue;
+                }
                 if let Some(arg_var) = narrowing::find_assertion_arg_variable(
                     &func_call.argument_list,
                     &assertion.param_name,
@@ -1478,6 +1489,9 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
                     AssertionKind::IfFalse => !function_returned_true,
                     AssertionKind::Always => continue,
                 };
+                if !applies_positively && assertion.is_equality {
+                    continue;
+                }
                 if let Some(arg_var) = narrowing::find_assertion_arg_variable(
                     &static_call.argument_list,
                     &assertion.param_name,
@@ -1545,6 +1559,9 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
                         AssertionKind::IfFalse => !function_returned_true,
                         AssertionKind::Always => continue,
                     };
+                    if !applies_positively && assertion.is_equality {
+                        continue;
+                    }
                     let should_exclude = assertion.negated ^ !applies_positively;
                     // Resolve `self`/`static`/`$this` in the asserted type
                     // against the *declaring* class (e.g. `Decimal`), not the
@@ -1627,6 +1644,25 @@ fn apply_assertion_to_key(
             narrowing::apply_type_guard_exclusion(kind, &mut results, Some(ctx.class_loader));
         } else {
             narrowing::apply_type_guard_inclusion(kind, &mut results, Some(ctx.class_loader));
+        }
+    } else if should_exclude && matches!(asserted_type.kind(), TypeKind::Union(_)) {
+        // Ruling out a union rules out every member, so each one narrows on
+        // its own.  That is what lets `!=null|''` (Laravel's `filled()`)
+        // strip the null: the whole union names no class, so handing it to
+        // the class machinery below resolved nothing and narrowed nothing.
+        //
+        // Only exclusion decomposes this way.  Narrowing *to* each member in
+        // turn would leave the subject as the last member alone rather than
+        // the union, so an included union stays whole.
+        let var_ctx = build_var_ctx(target, ctx, scope_resolver);
+        for member in asserted_type.union_members() {
+            if let Some(kind) = narrowing::scalar_assert_guard_kind(member) {
+                narrowing::apply_type_guard_exclusion(kind, &mut results, Some(ctx.class_loader));
+            } else {
+                ResolvedType::apply_narrowing(&mut results, |classes| {
+                    narrowing::apply_instanceof_exclusion(member, &var_ctx, classes)
+                });
+            }
         }
     } else {
         let var_ctx = build_var_ctx(target, ctx, scope_resolver);

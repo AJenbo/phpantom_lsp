@@ -1422,6 +1422,16 @@ function runDemoAssertions(): void
     Scaffolding\ScaffoldingAssert::assertInstanceOf(Scaffolding\Pen::class, $assertObj);
     assert($assertObj instanceof Scaffolding\Pen, 'Scaffolding\ScaffoldingAssert::assertInstanceOf(Scaffolding\Pen::class, $obj) must narrow to Scaffolding\Pen');
 
+    // The union asserted type: `!=null|''` on the true branch means a
+    // filled value is neither, so a `?string` really is a `string` there.
+    assert(Scaffolding\demoFilled('needle'), 'demoFilled() must accept a non-empty string');
+    assert(!Scaffolding\demoFilled(null), 'demoFilled() must reject null');
+    assert(!Scaffolding\demoFilled(''), 'demoFilled() must reject the empty string');
+    $filledSearch = 'needle';
+    if (Scaffolding\demoFilled($filledSearch)) {
+        assert(is_string($filledSearch), 'a filled ?string is a string');
+    }
+
     // A variable class argument still guarantees the subject is an object.
     $assertCls = Scaffolding\Pen::class;
     $assertNode = new Scaffolding\Pen();

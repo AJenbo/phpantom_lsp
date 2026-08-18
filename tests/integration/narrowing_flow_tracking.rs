@@ -895,6 +895,178 @@ function f(Reader $reader, ?Row $row): void
     );
 }
 
+/// Laravel's `filled()` and `blank()`, copied tag for tag from the
+/// framework.  Between them they cover both halves of the pair: the tag
+/// naming the branch under test narrows it, and the tag naming the other
+/// branch must stay out of it.
+const LARAVEL_VALUE_HELPERS: &str = r#"<?php
+namespace Repro;
+
+/**
+ * @phpstan-assert-if-true !=null|'' $value
+ *
+ * @phpstan-assert-if-false !=numeric|bool $value
+ *
+ * @param  mixed  $value
+ */
+function filled($value): bool { return $value !== null && $value !== ''; }
+
+/**
+ * @phpstan-assert-if-false !=null|'' $value
+ *
+ * @phpstan-assert-if-true !=numeric|bool $value
+ *
+ * @param  mixed  $value
+ */
+function blank($value): bool { return $value === null || $value === ''; }
+
+function takesString(string $value): void {}
+"#;
+
+/// When the asserted type is a union (e.g. `!=null|''` from Laravel's
+/// `filled()`), each member must be excluded independently so that at
+/// least the `null` guard fires and strips the null from the subject.
+#[test]
+fn an_assert_if_true_with_union_asserted_type_strips_null() {
+    assert_no_type_errors(&format!(
+        r#"{LARAVEL_VALUE_HELPERS}
+function f(?string $search): void
+{{
+    if (filled($search)) {{
+        takesString($search);
+    }}
+}}
+"#
+    ));
+}
+
+/// The same promise read from the other side: an early return on the
+/// negated call leaves the rest of the body with the narrowed type.
+#[test]
+fn an_early_return_on_a_negated_assert_call_narrows_the_rest_of_the_body() {
+    assert_no_type_errors(&format!(
+        r#"{LARAVEL_VALUE_HELPERS}
+function f(?string $search): void
+{{
+    if (! filled($search)) {{
+        return;
+    }}
+    takesString($search);
+}}
+"#
+    ));
+}
+
+/// `blank()` carries the same pair with the branches swapped, so the
+/// `-if-false` tag is the one that has to narrow here.
+#[test]
+fn an_assert_if_false_with_union_asserted_type_narrows_the_else_branch() {
+    assert_no_type_errors(&format!(
+        r#"{LARAVEL_VALUE_HELPERS}
+function f(?string $search): void
+{{
+    if (blank($search)) {{
+        return;
+    }}
+    takesString($search);
+}}
+"#
+    ));
+}
+
+/// An `-if-true` / `-if-false` tag written in the equality form (`!=Type`)
+/// is a one-way implication: a failed comparison rules nothing out, so the
+/// tag must contribute nothing to the branch it does not name.  Laravel's
+/// `filled()` promises `!=numeric|bool` only when it returns *false*, and
+/// inverting that into the truthy branch typed every filled value as
+/// `numeric|bool` — reporting `takesString($search)` as `got bool`.
+#[test]
+fn an_equality_assertion_does_not_invert_into_the_branch_it_does_not_name() {
+    assert_no_type_errors(&format!(
+        r#"{LARAVEL_VALUE_HELPERS}
+function f(?string $search): void
+{{
+    if (filled($search)) {{
+        takesString($search);
+    }}
+
+    if (! blank($search)) {{
+        takesString($search);
+    }}
+}}
+"#
+    ));
+}
+
+/// The subtype form stays invertible, which is what makes the equality
+/// carve-out above a carve-out rather than a blanket rule: `!null` promised
+/// on true means the value *is* null when the call returns false.
+#[test]
+fn a_subtype_assertion_still_inverts_into_the_opposite_branch() {
+    let messages = type_diagnostics(
+        r#"<?php
+namespace Repro;
+
+/**
+ * @phpstan-assert-if-true !null $value
+ */
+function isReady(?string $value): bool { return $value !== null; }
+
+function takesString(string $value): void {}
+
+function f(?string $search): void
+{
+    if (isReady($search)) {
+        takesString($search);
+    } else {
+        takesString($search);
+    }
+}
+"#,
+    );
+    assert_eq!(
+        messages.len(),
+        1,
+        "the else branch should still know the value is null, got: {messages:?}"
+    );
+}
+
+/// A union that is asserted *into* the branch stays a union.  Only the
+/// negated form splits into its members, since ruling out `A|B` rules out
+/// both; narrowing to `A|B` one member at a time would leave the subject
+/// as `B` alone, and every `Cat` in the branch would look like a `Dog`.
+#[test]
+fn an_asserted_union_narrows_to_every_member_not_just_the_last() {
+    let messages = type_diagnostics(
+        r#"<?php
+namespace Repro;
+
+interface Pet {}
+class Cat implements Pet {}
+class Dog implements Pet {}
+
+/**
+ * @phpstan-assert-if-true Cat|Dog $value
+ */
+function isKnownPet(Pet $value): bool { return true; }
+
+function takesCat(Cat $value): void {}
+
+function f(Pet $pet): void
+{
+    if (isKnownPet($pet)) {
+        takesCat($pet);
+    }
+}
+"#,
+    );
+    assert_eq!(messages.len(), 1, "got: {messages:?}");
+    assert!(
+        messages[0].contains("Repro\\Cat|Repro\\Dog"),
+        "both members should survive the assertion, got: {messages:?}"
+    );
+}
+
 // ─── A ternary that repeats its own subject ─────────────────────────────────
 
 const SELF_TERNARY_SCAFFOLD: &str = r#"<?php

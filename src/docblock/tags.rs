@@ -438,7 +438,7 @@ pub fn extract_type_assertions_from_info(info: &DocblockInfo) -> Vec<TypeAsserti
     let mut results = Vec::new();
 
     for tag in info.tags_by_kinds(ASSERT_KINDS) {
-        let Some((negated, type_str, subject)) = assert_parts(tag) else {
+        let Some((negated, is_equality, type_str, subject)) = assert_parts(tag) else {
             continue;
         };
 
@@ -447,25 +447,28 @@ pub fn extract_type_assertions_from_info(info: &DocblockInfo) -> Vec<TypeAsserti
             param_name: subject.into_owned(),
             asserted_type: PhpType::parse(&type_str),
             negated,
+            is_equality,
         });
     }
 
     results
 }
 
-/// Split an assertion tag into `(negated, asserted_type, subject)`.
+/// Split an assertion tag into `(negated, is_equality, asserted_type, subject)`.
 ///
-/// The grammar reports the negation flag, the pattern and the subject
-/// separately.  When it could not parse the tag (as with the modifier
-/// stacking in `@phpstan-assert =!Foo $x`, which it declines to model), the
-/// modifiers are peeled off by hand instead: `!` negates and `=` marks an
-/// exact-type assertion, which narrows the same way the default subtype
-/// form does and is therefore dropped.
-fn assert_parts(tag: &TagInfo) -> Option<(bool, Cow<'_, str>, Cow<'_, str>)> {
+/// The grammar reports the negation flag, the equality flag, the pattern and
+/// the subject separately.  When it could not parse the tag (as with the
+/// modifier stacking in `@phpstan-assert =!Foo $x`, which it declines to
+/// model), the modifiers are peeled off by hand instead: `!` negates and `=`
+/// marks an equality assertion.  The `=` form narrows the branch it belongs to
+/// exactly as the subtype form does, but it may not be inverted into the
+/// opposite branch, so the flag is carried rather than dropped.
+fn assert_parts(tag: &TagInfo) -> Option<(bool, bool, Cow<'_, str>, Cow<'_, str>)> {
     if let TagValueInfo::Assert(value) = &tag.value {
         let type_text = value.type_text.as_deref()?;
         return Some((
             value.negated,
+            value.is_equality,
             Cow::Borrowed(type_text),
             Cow::Borrowed(value.subject.as_str()),
         ));
@@ -473,11 +476,13 @@ fn assert_parts(tag: &TagInfo) -> Option<(bool, Cow<'_, str>, Cow<'_, str>)> {
 
     let mut rest = tag.description.trim();
     let mut negated = false;
+    let mut is_equality = false;
     loop {
         if let Some(r) = rest.strip_prefix('!') {
             negated = !negated;
             rest = r.trim_start();
         } else if let Some(r) = rest.strip_prefix('=') {
+            is_equality = true;
             rest = r.trim_start();
         } else {
             break;
@@ -494,7 +499,12 @@ fn assert_parts(tag: &TagInfo) -> Option<(bool, Cow<'_, str>, Cow<'_, str>)> {
         .next()
         .filter(|token| token.starts_with('$'))?;
 
-    Some((negated, Cow::Borrowed(type_str), Cow::Borrowed(subject)))
+    Some((
+        negated,
+        is_equality,
+        Cow::Borrowed(type_str),
+        Cow::Borrowed(subject),
+    ))
 }
 
 /// Extract the type from a `@var` PHPDoc tag.
@@ -2286,6 +2296,7 @@ mod tests {
         assert_eq!(result[0].asserted_type.to_string(), "ExpectedType");
         assert_eq!(result[0].param_name, "$actual");
         assert!(!result[0].negated);
+        assert!(result[0].is_equality);
     }
 
     #[test]
@@ -2300,7 +2311,34 @@ mod tests {
             assert_eq!(result.len(), 1, "doc: {doc}");
             assert_eq!(result[0].asserted_type.to_string(), "Foobar", "doc: {doc}");
             assert!(result[0].negated, "doc: {doc}");
+            assert!(result[0].is_equality, "doc: {doc}");
         }
+    }
+
+    #[test]
+    fn assert_without_equals_is_not_an_equality_assertion() {
+        // The subtype form is the one that stays invertible into the
+        // branch the tag does not name, so the two must not be conflated.
+        for doc in [
+            "/** @phpstan-assert Foobar $actual */",
+            "/** @phpstan-assert !Foobar $actual */",
+        ] {
+            let result = extract_type_assertions(doc);
+            assert_eq!(result.len(), 1, "doc: {doc}");
+            assert!(!result[0].is_equality, "doc: {doc}");
+        }
+    }
+
+    #[test]
+    fn assert_equality_survives_a_union_asserted_type() {
+        // Laravel's `filled()` / `blank()` pair, which is where the
+        // equality form shows up in real code.
+        let doc = "/** @phpstan-assert-if-true !=null|'' $value */";
+        let result = extract_type_assertions(doc);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].kind, AssertionKind::IfTrue);
+        assert!(result[0].negated);
+        assert!(result[0].is_equality);
     }
 
     // ── strip_html_tags ──────────────────────────────────────────────

@@ -635,6 +635,14 @@ pub(in crate::type_engine) fn apply_guard_clause_narrowing(
                 AssertionKind::IfFalse => !function_returned_true,
                 AssertionKind::Always => continue,
             };
+            // The equality form (`!=Type`) promises a comparison, and a
+            // comparison that fails rules nothing out, so it only speaks for
+            // the branch it names.  Inverting it the way the subtype form
+            // inverts would put Laravel's `filled()`/`blank()` promises in
+            // the wrong branch.
+            if !applies_positively && assertion.is_equality {
+                continue;
+            }
 
             if let Some(arg_var) = find_assertion_arg_variable(
                 info.argument_list,

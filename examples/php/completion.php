@@ -1050,6 +1050,17 @@ class AssertNarrowingDemo
             $maybe->crush();
         }
     }
+
+    // An asserted type written as a union rules out every member, so the
+    // shape Laravel's `filled()` carries (`!=null|''`) strips the null.
+    public function unionAssert(?string $search): string
+    {
+        if (Scaffolding\demoFilled($search)) {
+            return $search;                                   // string, not ?string
+        }
+
+        return '';
+    }
 }
 
 

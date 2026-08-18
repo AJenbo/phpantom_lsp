@@ -905,6 +905,24 @@ class Demo
         strtoupper($flour);               // → string
     }
 
+    // ── filled() and blank() rule out the empty values ──────────────────
+
+    public function valueHelpers(?string $search): void
+    {
+        // `filled()` promises the value is neither null nor empty, so the
+        // null is gone inside the branch and `strtoupper()` is happy with
+        // it. `blank()` is the same promise read from the other side.
+        if (filled($search)) {
+            strtoupper($search);          // → string, no longer ?string
+        }
+
+        if (blank($search)) {
+            return;
+        }
+
+        strtoupper($search);              // → string
+    }
+
 
     // ── Request input keys from validation rules ────────────────────────
 

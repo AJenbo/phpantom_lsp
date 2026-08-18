@@ -739,6 +739,7 @@ pub fn apply_third_party_class_patches(class: &mut ClassInfo) {
             param_name: (*subject).to_string(),
             asserted_type: PhpType::null(),
             negated: true,
+            is_equality: false,
         });
         class.methods.make_mut()[idx] = std::sync::Arc::new(method);
     }
