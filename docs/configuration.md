@@ -104,7 +104,8 @@ highlighting remains in charge of ordinary PHP syntax.
 
 ### `[mago]`
 
-Mago is only activated when `mago.toml` exists at the workspace root.
+Mago is only activated when `mago.toml` exists at the workspace root. The
+diagnostic proxy requires Mago 1.25 or newer.
 
 | Key               | Type    | Default | Description |
 | ----------------- | ------- | ------- | ----------- |

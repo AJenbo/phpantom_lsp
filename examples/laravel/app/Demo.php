@@ -152,6 +152,11 @@ class Demo
         BlogAuthor::where('active', 1)->when(true, fn($q) => $q)->get();
         BlogAuthor::where('active', 1)->unless(false, fn($q) => $q)->first();
 
+        // A fetched Eloquent collection is traversable and keeps its model type.
+        foreach (BlogAuthor::query()->get() as $author) {
+            $author->profile->getBio();       // → BlogAuthor
+        }
+
         // Paginators carry the model element type through foreach
         foreach (BlogAuthor::where('active', 1)->paginate() as $author) {
             $author->profile->getBio();       // → BlogAuthor

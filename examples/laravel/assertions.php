@@ -183,6 +183,20 @@ check(
     is_subclass_of(\App\Models\Administrator::class, \Illuminate\Contracts\Auth\Authenticatable::class)
 );
 
+// ─── Eloquent collection iteration ──────────────────────────────────────────
+
+check(
+    'Eloquent Collection is iterable (IteratorAggregate)',
+    is_subclass_of(\Illuminate\Database\Eloquent\Collection::class, \IteratorAggregate::class)
+);
+$authors = new \Illuminate\Database\Eloquent\Collection([new \App\Models\BlogAuthor()]);
+foreach ($authors as $author) {
+    check(
+        'iterating an Eloquent Collection yields its model entries',
+        $author instanceof \App\Models\BlogAuthor
+    );
+}
+
 // ─── Paginator element types ─────────────────────────────────────────────────
 
 // paginate()/simplePaginate()/cursorPaginate() exist on the Eloquent Builder

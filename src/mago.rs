@@ -44,12 +44,19 @@
 //! to LSP `Diagnostic` values using the buffer content to compute
 //! line/column positions.
 //!
-//! Requires Mago 1.15+ for `--stdin-input` support.
+//! For Laravel projects, analyze runs extend the project's Mago
+//! configuration with the two collection declarations needed to follow
+//! Eloquent's transitive `IteratorAggregate` hierarchy.  The files remain
+//! context-only Mago includes; PHPantom does not filter analyzer output.
+//!
+//! Requires Mago 1.25+ for `--stdin-input` and `extends` support.
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
+use tempfile::NamedTempFile;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range};
 
 use crate::config::MagoConfig;
@@ -93,6 +100,72 @@ pub(crate) fn resolve_mago(
         None => crate::process::auto_detect_binary(workspace_root, bin_dir, "mago")
             .map(|path| ResolvedMago { path }),
     }
+}
+
+/// Add Laravel's collection declarations to Mago's analyzer context.
+///
+/// Laravel maps `Illuminate\\Database\\Eloquent` and
+/// `Illuminate\\Support` through different Composer paths.  A Mago config
+/// that includes the database path can therefore load Eloquent Collection
+/// while missing the Support Collection and Enumerable declarations that
+/// prove it implements `IteratorAggregate`.  Extend the user's config with
+/// those two files, preserving every existing setting and keeping the
+/// additional files context-only.
+fn add_laravel_collection_context(
+    cmd: &mut Command,
+    workspace_root: &Path,
+) -> Result<Option<NamedTempFile>, String> {
+    let Some(sources) = laravel_collection_sources(workspace_root) else {
+        return Ok(None);
+    };
+
+    let config_path = workspace_root.join("mago.toml");
+    let config_path = config_path.canonicalize().unwrap_or(config_path);
+    let overlay = serde_json::json!({
+        "extends": config_path.to_string_lossy(),
+        "source": {
+            "includes": sources.iter().map(|path| path.to_string_lossy()).collect::<Vec<_>>(),
+        },
+    });
+
+    let mut temp = tempfile::Builder::new()
+        .prefix("phpantom-mago-")
+        .suffix(".json")
+        .tempfile()
+        .map_err(|error| format!("Failed to create Mago context config: {error}"))?;
+    serde_json::to_writer(&mut temp, &overlay)
+        .map_err(|error| format!("Failed to write Mago context config: {error}"))?;
+    temp.flush()
+        .map_err(|error| format!("Failed to flush Mago context config: {error}"))?;
+
+    cmd.arg("--config").arg(temp.path());
+    Ok(Some(temp))
+}
+
+/// Locate Laravel's Support Collection and Enumerable declarations for both
+/// full-framework and split-component Composer installations.
+fn laravel_collection_sources(workspace_root: &Path) -> Option<[PathBuf; 2]> {
+    let vendor_dir = crate::composer::read_composer_package(workspace_root)
+        .map(|package| crate::composer::get_vendor_dir(&package))
+        .unwrap_or_else(|| "vendor".to_string());
+    let vendor_root = workspace_root.join(vendor_dir);
+
+    let candidates = [
+        vendor_root.join("laravel/framework/src/Illuminate/Collections"),
+        vendor_root.join("illuminate/collections"),
+    ];
+    for directory in candidates {
+        let collection = directory.join("Collection.php");
+        let enumerable = directory.join("Enumerable.php");
+        if collection.is_file() && enumerable.is_file() {
+            return Some([
+                collection.canonicalize().unwrap_or(collection),
+                enumerable.canonicalize().unwrap_or(enumerable),
+            ]);
+        }
+    }
+
+    None
 }
 
 // ── Mago execution ─────────────────────────────────────────────────
@@ -182,6 +255,7 @@ pub(crate) fn run_mago_analyze(
     let timeout = Duration::from_millis(timeout_ms);
 
     let mut cmd = Command::new(&resolved.path);
+    let laravel_context = add_laravel_collection_context(&mut cmd, workspace_root)?;
     cmd.arg("analyze")
         .arg("--reporting-format")
         .arg("json")
@@ -198,7 +272,7 @@ pub(crate) fn run_mago_analyze(
         "Mago analyze",
         Some(content),
     )?;
-
+    drop(laravel_context);
     match result.code {
         0 => {
             if result.stdout.trim().is_empty() {
@@ -276,6 +350,11 @@ fn run_mago_workspace(
     let timeout = Duration::from_millis(base_timeout_ms.saturating_mul(WORKSPACE_TIMEOUT_FACTOR));
 
     let mut cmd = Command::new(&resolved.path);
+    let laravel_context = if subcommand == "analyze" {
+        add_laravel_collection_context(&mut cmd, workspace_root)?
+    } else {
+        None
+    };
     cmd.arg(subcommand)
         .arg("--reporting-format")
         .arg("json")
@@ -284,7 +363,7 @@ fn run_mago_workspace(
     let tool_name = format!("Mago {} (workspace)", subcommand);
     let result =
         crate::process::run_command_with_timeout(&mut cmd, timeout, cancelled, &tool_name, None)?;
-
+    drop(laravel_context);
     match result.code {
         0 => {
             if result.stdout.trim().is_empty() {
@@ -905,6 +984,160 @@ mod tests {
     fn has_mago_config_false() {
         let dir = tempfile::tempdir().unwrap();
         assert!(!has_mago_config(dir.path()));
+    }
+
+    // ── Laravel analyzer context ───────────────────────────────────
+
+    #[test]
+    fn laravel_context_extends_mago_config_with_framework_collection_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let collections = dir
+            .path()
+            .join("vendor/laravel/framework/src/Illuminate/Collections");
+        std::fs::create_dir_all(&collections).unwrap();
+        std::fs::write(dir.path().join("mago.toml"), "version = \"1\"\n").unwrap();
+        std::fs::write(collections.join("Collection.php"), "<?php").unwrap();
+        std::fs::write(collections.join("Enumerable.php"), "<?php").unwrap();
+
+        let mut cmd = Command::new("mago");
+        let context = add_laravel_collection_context(&mut cmd, dir.path())
+            .unwrap()
+            .expect("Laravel context config");
+        let args: Vec<_> = cmd.get_args().collect();
+        assert_eq!(args.len(), 2);
+        assert_eq!(args[0], std::ffi::OsStr::new("--config"));
+        assert_eq!(args[1], context.path().as_os_str());
+
+        let overlay: serde_json::Value =
+            serde_json::from_reader(context.reopen().unwrap()).unwrap();
+        assert_eq!(
+            overlay["extends"],
+            dir.path()
+                .join("mago.toml")
+                .canonicalize()
+                .unwrap()
+                .to_string_lossy()
+                .as_ref()
+        );
+        assert_eq!(
+            overlay["source"]["includes"],
+            serde_json::json!([
+                collections
+                    .join("Collection.php")
+                    .canonicalize()
+                    .unwrap()
+                    .to_string_lossy(),
+                collections
+                    .join("Enumerable.php")
+                    .canonicalize()
+                    .unwrap()
+                    .to_string_lossy(),
+            ])
+        );
+    }
+
+    #[test]
+    fn laravel_context_supports_split_package_and_custom_vendor_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let collections = dir.path().join("dependencies/illuminate/collections");
+        std::fs::create_dir_all(&collections).unwrap();
+        std::fs::write(
+            dir.path().join("composer.json"),
+            r#"{"config":{"vendor-dir":"dependencies"}}"#,
+        )
+        .unwrap();
+        std::fs::write(collections.join("Collection.php"), "<?php").unwrap();
+        std::fs::write(collections.join("Enumerable.php"), "<?php").unwrap();
+
+        let sources = laravel_collection_sources(dir.path()).expect("split package sources");
+        assert_eq!(
+            sources,
+            [
+                collections.join("Collection.php").canonicalize().unwrap(),
+                collections.join("Enumerable.php").canonicalize().unwrap(),
+            ]
+        );
+    }
+
+    #[test]
+    fn laravel_context_is_absent_without_both_collection_declarations() {
+        let dir = tempfile::tempdir().unwrap();
+        let collections = dir
+            .path()
+            .join("vendor/laravel/framework/src/Illuminate/Collections");
+        std::fs::create_dir_all(&collections).unwrap();
+        std::fs::write(collections.join("Collection.php"), "<?php").unwrap();
+
+        let mut cmd = Command::new("mago");
+        assert!(
+            add_laravel_collection_context(&mut cmd, dir.path())
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(cmd.get_args().count(), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn laravel_context_is_used_by_file_and_workspace_analyze_only() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::sync::atomic::AtomicBool;
+
+        let dir = tempfile::tempdir().unwrap();
+        let collections = dir
+            .path()
+            .join("vendor/laravel/framework/src/Illuminate/Collections");
+        std::fs::create_dir_all(&collections).unwrap();
+        std::fs::write(dir.path().join("mago.toml"), "version = \"1\"\n").unwrap();
+        std::fs::write(collections.join("Collection.php"), "<?php").unwrap();
+        std::fs::write(collections.join("Enumerable.php"), "<?php").unwrap();
+        let source = dir.path().join("Server.php");
+        std::fs::write(&source, "<?php\n").unwrap();
+
+        let executable = dir.path().join("mago");
+        std::fs::write(
+            &executable,
+            r#"#!/bin/sh
+if [ "$1" = "--config" ]; then
+    grep -q 'Collection.php' "$2" || exit 9
+    grep -q 'Enumerable.php' "$2" || exit 10
+    [ "$3" = "analyze" ] || exit 11
+elif [ "$1" = "lint" ]; then
+    [ "$2" = "--reporting-format" ] || exit 12
+else
+    exit 13
+fi
+printf '{"issues":[]}\n'
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let resolved = ResolvedMago { path: executable };
+        let config = MagoConfig::default();
+        let cancelled = AtomicBool::new(false);
+        assert!(
+            run_mago_analyze(
+                &resolved,
+                "<?php\n",
+                &source,
+                dir.path(),
+                &config,
+                &cancelled,
+            )
+            .unwrap()
+            .is_empty()
+        );
+        assert!(
+            run_mago_analyze_workspace(&resolved, dir.path(), &config, &cancelled)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            run_mago_lint_workspace(&resolved, dir.path(), &config, &cancelled)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     // ── resolve_mago ────────────────────────────────────────────────

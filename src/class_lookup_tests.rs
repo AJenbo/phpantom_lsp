@@ -349,6 +349,46 @@ fn subtype_of_typed_accepts_traversable_class_as_iterable() {
     ));
 }
 
+#[test]
+fn subtype_of_typed_accepts_laravel_collection_as_iterable() {
+    use crate::php_type::PhpType;
+
+    let traversable = make_class("Traversable", None, None, &[]);
+    let iterator_aggregate = make_class("IteratorAggregate", None, None, &["Traversable"]);
+    let enumerable = make_class(
+        "Enumerable",
+        Some("Illuminate\\Support"),
+        None,
+        &["IteratorAggregate"],
+    );
+    let support_collection = make_class(
+        "Collection",
+        Some("Illuminate\\Support"),
+        None,
+        &["Illuminate\\Support\\Enumerable"],
+    );
+    let eloquent_collection = make_class(
+        "Collection",
+        Some("Illuminate\\Database\\Eloquent"),
+        Some("Illuminate\\Support\\Collection"),
+        &[],
+    );
+    let classes = [
+        traversable,
+        iterator_aggregate,
+        enumerable,
+        support_collection,
+        eloquent_collection,
+    ];
+    let loader = loader_from(&classes);
+
+    assert!(is_subtype_of_typed(
+        &PhpType::parse("Illuminate\\Database\\Eloquent\\Collection<int, App\\Models\\Server>"),
+        &PhpType::parse("iterable"),
+        &loader,
+    ));
+}
+
 // ── is_subtype_of_typed: array-like cross-form rules ────────
 
 #[test]

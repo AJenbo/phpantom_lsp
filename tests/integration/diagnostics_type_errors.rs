@@ -1130,6 +1130,143 @@ function test(Bag $bag): void {
 }
 
 #[test]
+fn no_diagnostic_for_eloquent_collection_to_iterable() {
+    use crate::common::create_psr4_workspace_with_stubs;
+
+    const ITERATOR_STUBS: &str = r#"<?php
+interface Traversable {}
+
+/**
+ * @template TKey
+ * @template-covariant TValue
+ */
+interface IteratorAggregate extends Traversable {}
+"#;
+    let files = [
+        (
+            "vendor/illuminate/collections/Enumerable.php",
+            r#"<?php
+namespace Illuminate\Support;
+
+use IteratorAggregate;
+
+/**
+ * @template TKey
+ * @template-covariant TValue
+ * @extends \IteratorAggregate<TKey, TValue>
+ */
+interface Enumerable extends IteratorAggregate {}
+"#,
+        ),
+        (
+            "vendor/illuminate/collections/Collection.php",
+            r#"<?php
+namespace Illuminate\Support;
+
+/**
+ * @template TKey
+ * @template-covariant TValue
+ * @implements \Illuminate\Support\Enumerable<TKey, TValue>
+ */
+class Collection implements Enumerable {}
+"#,
+        ),
+        (
+            "vendor/illuminate/database/Collection.php",
+            r#"<?php
+namespace Illuminate\Database\Eloquent;
+
+use Illuminate\Support\Collection as BaseCollection;
+
+/**
+ * @template TKey
+ * @template TModel of Model
+ * @extends \Illuminate\Support\Collection<TKey, TModel>
+ */
+class Collection extends BaseCollection {}
+"#,
+        ),
+        (
+            "vendor/illuminate/database/Builder.php",
+            r#"<?php
+namespace Illuminate\Database\Eloquent;
+
+/** @template TModel of Model */
+class Builder {
+    /** @return Collection<int, TModel> */
+    public function get(): Collection {}
+}
+"#,
+        ),
+        (
+            "vendor/illuminate/database/Model.php",
+            r#"<?php
+namespace Illuminate\Database\Eloquent;
+
+abstract class Model {
+    /** @return Builder<static> */
+    public static function query(): Builder {}
+}
+"#,
+        ),
+        (
+            "app/Models/Server.php",
+            r#"<?php
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+
+final class Server extends Model {}
+"#,
+        ),
+    ];
+    let composer = r#"{
+        "autoload": {
+            "psr-4": {
+                "App\\": "app/",
+                "Illuminate\\Support\\": "vendor/illuminate/collections/",
+                "Illuminate\\Database\\Eloquent\\": "vendor/illuminate/database/"
+            }
+        }
+    }"#;
+    let (backend, dir) = create_psr4_workspace_with_stubs(
+        composer,
+        &files,
+        &[
+            ("Traversable", ITERATOR_STUBS),
+            ("IteratorAggregate", ITERATOR_STUBS),
+        ],
+    );
+    let uri = format!("file://{}/app/InspectServers.php", dir.path().display());
+    let php = r#"<?php
+namespace App;
+
+use App\Models\Server;
+
+function acceptsIterable(iterable $servers): void {}
+function acceptsServer(Server $server): void {}
+
+function inspectServers(): void {
+    $servers = Server::query()->get();
+    acceptsIterable($servers);
+
+    foreach ($servers as $server) {
+        acceptsServer($server);
+    }
+}
+"#;
+    backend.update_ast(&uri, php);
+    let mut diags = Vec::new();
+    backend.collect_argument_type_diagnostics(&uri, php, &mut diags);
+
+    assert!(
+        !has_type_error(&diags),
+        "An Eloquent Collection and its Server elements should be iterable, got: {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+#[test]
 fn flags_non_traversable_class_to_iterable() {
     let php = r#"<?php
 interface Traversable {}
