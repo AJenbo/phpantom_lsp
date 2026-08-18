@@ -462,6 +462,39 @@ pub(crate) fn template_values_with_defaults<'a>(
     Cow::Owned(merged)
 }
 
+/// Drop a method's own `@template` parameters from a call's template values.
+///
+/// A conditional keyed on a class-level parameter (`TAsync is false`) is
+/// decided by the value that parameter holds, but one keyed on the method's
+/// own (`T is int`) is decided by the argument that binds `T` — comparing it
+/// against the substituted value instead reads a resolved type as though it
+/// were a literal and picks the wrong branch. Stripping the method's names
+/// leaves those conditionals to the argument-binding path.
+pub(crate) fn class_scoped_template_values<'a>(
+    values: &'a HashMap<String, PhpType>,
+    method_template_params: &[Atom],
+) -> Cow<'a, HashMap<String, PhpType>> {
+    if method_template_params.is_empty()
+        || !method_template_params
+            .iter()
+            .any(|name| values.contains_key(name.as_str()))
+    {
+        return Cow::Borrowed(values);
+    }
+
+    Cow::Owned(
+        values
+            .iter()
+            .filter(|(name, _)| {
+                !method_template_params
+                    .iter()
+                    .any(|param| param.as_str() == name.as_str())
+            })
+            .map(|(name, value)| (name.clone(), value.clone()))
+            .collect(),
+    )
+}
+
 #[inline]
 fn default_type_arg(class: &ClassInfo, param: &Atom) -> PhpType {
     class

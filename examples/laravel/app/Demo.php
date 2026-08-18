@@ -25,6 +25,8 @@ use Database\Factories\AnnotatedPostFactory;
 use Database\Factories\BlogAuthorFactory;
 use Database\Factories\EditorialFactory;
 use Illuminate\Database\Eloquent\Relations\Relation;
+use Illuminate\Http\Client\Factory as HttpFactory;
+use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Request;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
@@ -34,6 +36,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Lang;
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Facades\Response;
@@ -1289,5 +1292,24 @@ class Demo
 
         // Supplying a path returns the generated URL string.
         return url($path);                // → string
+    }
+
+    // ── HTTP client sync/async template default ────────────────────────────
+
+    public function httpClient(PendingRequest $pending, HttpFactory $factory): void
+    {
+        // PendingRequest is `@template TAsync of bool = false`, so a request
+        // that never selects async mode carries the default and its methods
+        // return the response itself rather than a promise.
+        Http::get('https://example.com')->json();          // → Response
+        Http::post('https://example.com')->status();       // → Response
+        $pending->get('https://example.com')->body();      // → Response
+        $factory->get('https://example.com')->ok();        // → Response
+
+        // async() binds TAsync to true, so the same call returns a promise
+        // whether it starts on the facade, the factory, or the request.
+        Http::async()->get('https://example.com');         // → PromiseInterface
+        $factory->async()->get('https://example.com');     // → PromiseInterface
+        $pending->async()->get('https://example.com');     // → PromiseInterface
     }
 }

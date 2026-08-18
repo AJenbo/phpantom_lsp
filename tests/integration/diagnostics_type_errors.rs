@@ -7539,6 +7539,113 @@ function testFacade(): void
     );
 }
 
+#[test]
+fn selecting_a_non_default_template_argument_overrides_the_default() {
+    let php = r#"<?php
+/**
+ * @template TAsync of bool = false
+ */
+class PendingRequest
+{
+    /**
+     * @template T of bool = true
+     * @param T $async
+     * @return self<T>
+     */
+    public function async(bool $async = true) {}
+
+    /**
+     * @return Response|PromiseInterface
+     * @phpstan-return (TAsync is false ? Response : PromiseInterface)
+     */
+    public function get(string $url) {}
+}
+
+class Response {}
+interface PromiseInterface {}
+
+function takesPromise(PromiseInterface $promise): void {}
+
+function testDirect(PendingRequest $request): void
+{
+    takesPromise($request->async()->get('/users'));
+}
+
+/** @mixin PendingRequest */
+class HttpFactory {}
+
+/**
+ * @method static PendingRequest async(bool $async = true)
+ * @method static Response|PromiseInterface get(string $url)
+ */
+class HttpFacade
+{
+    protected static function getFacadeAccessor()
+    {
+        return HttpFactory::class;
+    }
+}
+
+function testFactory(HttpFactory $factory): void
+{
+    takesPromise($factory->async()->get('/users'));
+}
+
+function testFacade(): void
+{
+    takesPromise(HttpFacade::async()->get('/users'));
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "An explicitly selected template argument must beat the declared default, through a mixin and a facade as well as directly: {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+#[test]
+fn a_conditional_keyed_on_a_method_template_is_decided_by_its_argument() {
+    let php = r#"<?php
+class Alpha {}
+class Beta {}
+
+class Picker
+{
+    /**
+     * @template T
+     * @param T $value
+     * @return (T is int ? Alpha : Beta)
+     */
+    public function pick($value) {}
+
+    /**
+     * @template T of string
+     * @param T $value
+     * @return (T is 'a' ? Alpha : Beta)
+     */
+    public function pickLiteral(string $value) {}
+}
+
+function takesAlpha(Alpha $a): void {}
+function takesBeta(Beta $b): void {}
+
+function test(Picker $picker): void
+{
+    takesAlpha($picker->pick(1));
+    takesBeta($picker->pick('x'));
+    takesAlpha($picker->pickLiteral('a'));
+    takesBeta($picker->pickLiteral('b'));
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "A conditional keyed on the method's own @template must be decided by the argument that binds it: {:?}",
+        type_error_messages(&diags)
+    );
+}
+
 // ─── class-string<T>|T union binds T to the class, not the class-string ─────
 
 #[test]

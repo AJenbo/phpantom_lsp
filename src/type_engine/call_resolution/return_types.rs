@@ -1503,8 +1503,12 @@ impl Backend {
         let resolve_method = |method: &MethodInfo| -> Vec<Arc<ClassInfo>> {
             // Try conditional return type first (PHPStan syntax)
             if let Some(ref cond) = method.conditional_return {
+                let class_values = crate::inheritance::class_scoped_template_values(
+                    template_subs,
+                    &method.template_params,
+                );
                 let tpl = TemplateContext {
-                    defaults: Some(template_subs),
+                    defaults: Some(class_values.as_ref()),
                     params: &method.template_params,
                     bindings: &method.template_bindings,
                     arg_type_resolver: None,
