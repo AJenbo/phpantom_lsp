@@ -90,7 +90,7 @@ highlighting remains in charge of ordinary PHP syntax.
 
 | Key            | Type    | Default  | Description |
 | -------------- | ------- | -------- | ----------- |
-| `command`      | string  | unset    | Command or path for PHPStan. Unset: auto-detect via `vendor/bin/phpstan` then `$PATH`. `""`: disable. |
+| `command`      | string  | unset    | Command or path for PHPStan. Unset: auto-detect via `vendor/bin/phpstan` (only when `composer.json` requires `phpstan/phpstan` directly) then `$PATH`. `""`: disable. |
 | `memory-limit` | string  | `"1G"`   | Memory limit passed to PHPStan via `--memory-limit`. |
 | `timeout`      | integer | `60000`  | Max runtime in milliseconds before PHPStan is killed. |
 

@@ -1121,6 +1121,14 @@ pub(crate) fn has_require_dev(package: &ComposerPackage, dep: &str) -> bool {
     package.require_dev.contains_key(dep)
 }
 
+/// Check whether a package name appears in `composer.json`'s `require` or
+/// `require-dev`.
+///
+/// Matches the package name exactly (e.g. `"phpstan/phpstan"`).
+pub(crate) fn has_dependency(package: &ComposerPackage, dep: &str) -> bool {
+    package.require.contains_key(dep) || package.require_dev.contains_key(dep)
+}
+
 /// Detect whether the project depends on Laravel or a standalone
 /// Illuminate component.
 ///

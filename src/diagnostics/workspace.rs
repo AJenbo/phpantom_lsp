@@ -606,14 +606,18 @@ impl Backend {
             return;
         };
         let config = self.config();
-        let bin_dir: Option<String> = crate::composer::read_composer_package(&root)
-            .map(|pkg| crate::composer::get_bin_dir(&pkg));
+        let composer_pkg = crate::composer::read_composer_package(&root);
+        let bin_dir: Option<String> = composer_pkg.as_ref().map(crate::composer::get_bin_dir);
 
         // ── PHPStan ─────────────────────────────────────────────────
         if !config.phpstan.is_disabled()
             && crate::phpstan::has_project_config(&root)
-            && let Some(resolved) =
-                crate::phpstan::resolve_phpstan(Some(&root), &config.phpstan, bin_dir.as_deref())
+            && let Some(resolved) = crate::phpstan::resolve_phpstan(
+                Some(&root),
+                &config.phpstan,
+                bin_dir.as_deref(),
+                composer_pkg.as_ref(),
+            )
         {
             progress.set_percentage(80, "Running PHPStan (project-wide)");
             let phpstan_config = config.phpstan.clone();

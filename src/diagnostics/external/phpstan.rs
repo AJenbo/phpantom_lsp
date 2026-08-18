@@ -95,13 +95,14 @@ impl Backend {
                 None => continue,
             };
 
-            let bin_dir: Option<String> = crate::composer::read_composer_package(&workspace_root)
-                .map(|pkg| crate::composer::get_bin_dir(&pkg));
+            let composer_pkg = crate::composer::read_composer_package(&workspace_root);
+            let bin_dir: Option<String> = composer_pkg.as_ref().map(crate::composer::get_bin_dir);
 
             let resolved = match phpstan::resolve_phpstan(
                 Some(&workspace_root),
                 &config.phpstan,
                 bin_dir.as_deref(),
+                composer_pkg.as_ref(),
             ) {
                 Some(r) => r,
                 None => continue,

@@ -16,8 +16,9 @@
 //!
 //! ```toml
 //! [phpstan]
-//! # Command/path for phpstan. When unset, auto-detected via
-//! # Composer's bin-dir (default vendor/bin), then $PATH.
+//! # Command/path for phpstan. When unset, auto-detected: Composer's
+//! # bin-dir (default vendor/bin) if composer.json depends on
+//! # phpstan/phpstan directly, then $PATH regardless of composer.json.
 //! # Set to "" to disable.
 //! # command = "vendor/bin/phpstan"
 //!
@@ -64,13 +65,24 @@ pub(crate) struct ResolvedPhpStan {
 ///
 /// Resolution rules:
 /// - Config value `Some("")` (empty string) → disabled (`None`).
-/// - Config value `Some(cmd)` → use `cmd` as-is (user override).
-/// - Config value `None` → auto-detect: try `<bin_dir>/phpstan` under
-///   the workspace root, then search `$PATH`.
+/// - Config value `Some(cmd)` → use `cmd` as-is (user override, bypasses
+///   the `composer.json` check below entirely — this is how a manually
+///   installed PHPStan, e.g. a `.phar` outside the Composer bin dir, is
+///   wired up).
+/// - Config value `None` → auto-detect:
+///   - `<bin_dir>/phpstan` under the workspace root, but only when the
+///     project depends on `phpstan/phpstan` directly (`require` or
+///     `require-dev`). This avoids proxying to a stale `vendor/bin/phpstan`
+///     left behind by a project that no longer depends on it.
+///   - otherwise `$PATH`, unconditionally — a `phpstan` the user installed
+///     globally was a deliberate choice, not leftover state, so the
+///     `composer.json` check does not apply to it.
+///   - otherwise `None`.
 pub(crate) fn resolve_phpstan(
     workspace_root: Option<&Path>,
     config: &PhpStanConfig,
     bin_dir: Option<&str>,
+    composer_json: Option<&crate::composer::ComposerPackage>,
 ) -> Option<ResolvedPhpStan> {
     match config.command.as_deref() {
         // Explicitly disabled.
@@ -79,10 +91,23 @@ pub(crate) fn resolve_phpstan(
         Some(cmd) => Some(ResolvedPhpStan {
             path: PathBuf::from(cmd),
         }),
-        // Auto-detect: `<bin_dir>/phpstan` under the workspace root,
-        // then `$PATH`.
-        None => crate::process::auto_detect_binary(workspace_root, bin_dir, "phpstan")
-            .map(|path| ResolvedPhpStan { path }),
+        // Auto-detect.
+        None => {
+            let depends_on_phpstan = composer_json
+                .is_some_and(|pkg| crate::composer::has_dependency(pkg, "phpstan/phpstan"));
+
+            if depends_on_phpstan && let Some(root) = workspace_root {
+                let bin = bin_dir.unwrap_or("vendor/bin");
+                let candidate = root.join(bin).join("phpstan");
+                if candidate.is_file() {
+                    return Some(ResolvedPhpStan { path: candidate });
+                }
+            }
+
+            crate::process::which("phpstan")
+                .ok()
+                .map(|path| ResolvedPhpStan { path })
+        }
     }
 }
 
@@ -837,6 +862,12 @@ mod tests {
 
     // ── resolve_phpstan ─────────────────────────────────────────────
 
+    /// Helper: parse a JSON string into a [`crate::composer::ComposerPackage`]
+    /// declaring a `require-dev` dependency on `phpstan/phpstan`.
+    fn pkg_with_phpstan() -> crate::composer::ComposerPackage {
+        r#"{"require-dev": {"phpstan/phpstan": "^2.1"}}"#.parse().unwrap()
+    }
+
     #[test]
     fn resolve_disabled_when_empty_string() {
         let config = PhpStanConfig {
@@ -844,7 +875,7 @@ mod tests {
             memory_limit: None,
             timeout: None,
         };
-        let result = resolve_phpstan(None, &config, None);
+        let result = resolve_phpstan(None, &config, None, None);
         assert!(result.is_none());
     }
 
@@ -855,7 +886,8 @@ mod tests {
             memory_limit: None,
             timeout: None,
         };
-        let result = resolve_phpstan(None, &config, None);
+        // Explicit command bypasses the composer.json dependency check.
+        let result = resolve_phpstan(None, &config, None, None);
         assert!(result.is_some());
         assert_eq!(result.unwrap().path, PathBuf::from("/usr/bin/phpstan"));
     }
@@ -875,7 +907,8 @@ mod tests {
         }
 
         let config = PhpStanConfig::default();
-        let result = resolve_phpstan(Some(dir.path()), &config, None);
+        let package = pkg_with_phpstan();
+        let result = resolve_phpstan(Some(dir.path()), &config, None, Some(&package));
         assert!(result.is_some());
         assert_eq!(result.unwrap().path, phpstan);
     }
@@ -895,7 +928,8 @@ mod tests {
         }
 
         let config = PhpStanConfig::default();
-        let result = resolve_phpstan(Some(dir.path()), &config, Some("tools"));
+        let package = pkg_with_phpstan();
+        let result = resolve_phpstan(Some(dir.path()), &config, Some("tools"), Some(&package));
         assert!(result.is_some());
         assert_eq!(result.unwrap().path, phpstan);
     }
@@ -904,10 +938,40 @@ mod tests {
     fn resolve_no_binary_found() {
         let dir = tempfile::tempdir().unwrap();
         let config = PhpStanConfig::default();
+        let package = pkg_with_phpstan();
         // No vendor/bin/phpstan, and PATH is unlikely to have it in test env.
         // This test may still find phpstan on PATH in some environments,
         // so we just verify it doesn't panic.
-        let _ = resolve_phpstan(Some(dir.path()), &config, None);
+        let _ = resolve_phpstan(Some(dir.path()), &config, None, Some(&package));
+    }
+
+    #[test]
+    fn resolve_auto_detect_skipped_without_composer_dependency() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin_path = dir.path().join("vendor").join("bin");
+        std::fs::create_dir_all(&bin_path).unwrap();
+        let phpstan = bin_path.join("phpstan");
+        std::fs::write(&phpstan, "#!/bin/sh\n").unwrap();
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&phpstan, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let config = PhpStanConfig::default();
+        // A binary sits at vendor/bin/phpstan, but composer.json does not
+        // depend on phpstan/phpstan (e.g. a stale binary, or one installed
+        // for another project) — auto-detect must not pick it up from
+        // vendor/bin. It may still find an unrelated `phpstan` on $PATH in
+        // some environments, so only assert the vendor/bin one is excluded.
+        let package: crate::composer::ComposerPackage = r#"{"require": {}}"#.parse().unwrap();
+        let result = resolve_phpstan(Some(dir.path()), &config, None, Some(&package));
+        assert_ne!(result.map(|r| r.path), Some(phpstan.clone()));
+
+        // No composer.json at all behaves the same way.
+        let result = resolve_phpstan(Some(dir.path()), &config, None, None);
+        assert_ne!(result.map(|r| r.path), Some(phpstan));
     }
 
     // ── write_temp_file ─────────────────────────────────────────────
