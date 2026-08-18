@@ -1776,8 +1776,10 @@ pub(super) fn resolve_conditional_return_for_call(
         calling: Some(calling_class_name),
         declaring: Some(declaring_class_name),
     };
+    let class_values =
+        crate::inheritance::class_scoped_template_values(template_subs, &method.template_params);
     let tpl = crate::type_engine::conditional_resolution::TemplateContext {
-        defaults: None,
+        defaults: Some(class_values.as_ref()),
         params: method.template_params.as_slice(),
         bindings: method.template_bindings.as_slice(),
         arg_type_resolver,
@@ -1805,7 +1807,7 @@ pub(super) fn resolve_conditional_return_for_call(
     // Collapse any conditionals nested inside the winning branch.
     let collapsed = if substituted.contains_conditional() {
         let tpl2 = crate::type_engine::conditional_resolution::TemplateContext {
-            defaults: Some(template_subs),
+            defaults: Some(class_values.as_ref()),
             params: method.template_params.as_slice(),
             bindings: method.template_bindings.as_slice(),
             arg_type_resolver,

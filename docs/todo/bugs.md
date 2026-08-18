@@ -45,4 +45,37 @@ No outstanding items.
 
 ## Miscellaneous
 
-No outstanding items.
+### B180. A deprecation is reported against a same-named variable from another method
+
+**Impact: Low-Medium · Complexity: Medium**
+
+The `deprecated_usage` diagnostic types its subject from a scope that is
+not the one the call sits in, so a parameter name reused across two
+methods of the same class picks up whichever type was bound first:
+
+```php
+class Probe
+{
+    public function fromHttpRequest(\Illuminate\Http\Request $request): void
+    {
+        $request->input('name');
+    }
+
+    public function fromHttpClient(\Illuminate\Http\Client\PendingRequest $request): void
+    {
+        // Reported as `Illuminate\Http\Request::get is deprecated`, though
+        // `$request` here is a PendingRequest and its `get()` is not
+        // deprecated at all.
+        $request->get('https://example.com');
+    }
+}
+```
+
+Putting the `PendingRequest` method first makes the report disappear,
+and so does renaming either parameter, which is what identifies the leak
+as name-keyed and order-dependent rather than a mis-resolution of
+`PendingRequest`. Every other diagnostic on the same line resolves
+`$request` correctly, so the shared forward walker is right and the
+deprecation check is reading a stale or class-wide variable map instead
+of the per-method scope. The fix is to resolve the subject through the
+same scope the surrounding diagnostics use.

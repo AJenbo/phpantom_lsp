@@ -1425,7 +1425,8 @@ impl Backend {
                     }
                 }
 
-                // Fallback: resolve unbound template params to bounds.
+                // Fallback: resolve omitted template params to their defaults
+                // and otherwise erase them to their bounds.
                 let type_args = crate::inheritance::default_type_args(&cls_arc);
                 let substituted = crate::virtual_members::resolve_class_fully_with_type_args(
                     &cls_arc,
@@ -1493,21 +1494,21 @@ impl Backend {
     ) -> Vec<Arc<ClassInfo>> {
         let all_classes = mr_ctx.all_classes;
         let class_loader = mr_ctx.class_loader;
-        let template_subs = mr_ctx.template_subs;
+        let template_values =
+            crate::inheritance::template_values_with_defaults(class_info, mr_ctx.template_subs);
+        let template_subs = template_values.as_ref();
         let var_resolver = mr_ctx.var_resolver;
         // Helper: try to resolve a method's conditional return type, falling
         // back to template-substituted return type, then plain return type.
         let resolve_method = |method: &MethodInfo| -> Vec<Arc<ClassInfo>> {
             // Try conditional return type first (PHPStan syntax)
             if let Some(ref cond) = method.conditional_return {
+                let class_values = crate::inheritance::class_scoped_template_values(
+                    template_subs,
+                    &method.template_params,
+                );
                 let tpl = TemplateContext {
-                    defaults: Some(
-                        &class_info
-                            .template_param_defaults
-                            .iter()
-                            .map(|(k, v)| (k.to_string(), v.clone()))
-                            .collect::<HashMap<String, PhpType>>(),
-                    ),
+                    defaults: Some(class_values.as_ref()),
                     params: &method.template_params,
                     bindings: &method.template_bindings,
                     arg_type_resolver: None,
