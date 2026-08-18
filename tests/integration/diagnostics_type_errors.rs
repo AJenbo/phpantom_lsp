@@ -7481,6 +7481,64 @@ function test(Fac $f): void
     );
 }
 
+#[test]
+fn conditional_return_on_generic_class_uses_template_default() {
+    let php = r#"<?php
+/**
+ * @template TAsync of bool = false
+ */
+class PendingRequest
+{
+    /**
+     * @return Response|PromiseInterface
+     * @phpstan-return (TAsync is false ? Response : PromiseInterface)
+     */
+    public function get(string $url) {}
+}
+
+class Response {}
+interface PromiseInterface {}
+
+function takesResponse(Response $response): void {}
+function takesPromise(PromiseInterface $promise): void {}
+
+function test(PendingRequest $request): void
+{
+    $response = $request->get('/users');
+    takesResponse($response);
+}
+
+/** @param PendingRequest<true> $request */
+function testAsync(PendingRequest $request): void
+{
+    takesPromise($request->get('/users'));
+}
+
+/** @mixin PendingRequest */
+class HttpFactory {}
+
+/** @method static Response|PromiseInterface get(string $url) */
+class HttpFacade
+{
+    protected static function getFacadeAccessor()
+    {
+        return HttpFactory::class;
+    }
+}
+
+function testFacade(): void
+{
+    takesResponse(HttpFacade::get('/users'));
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "A generic class's default template argument must decide its method's conditional return: {:?}",
+        type_error_messages(&diags)
+    );
+}
+
 // ─── class-string<T>|T union binds T to the class, not the class-string ─────
 
 #[test]

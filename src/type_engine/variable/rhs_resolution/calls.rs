@@ -1777,7 +1777,7 @@ pub(super) fn resolve_conditional_return_for_call(
         declaring: Some(declaring_class_name),
     };
     let tpl = crate::type_engine::conditional_resolution::TemplateContext {
-        defaults: None,
+        defaults: Some(template_subs),
         params: method.template_params.as_slice(),
         bindings: method.template_bindings.as_slice(),
         arg_type_resolver,

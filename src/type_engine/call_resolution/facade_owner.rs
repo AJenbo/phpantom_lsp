@@ -80,9 +80,28 @@ fn method_has_conditional_return(
     }
     let merged =
         crate::virtual_members::resolve_class_fully_maybe_cached(class_info, class_loader, cache);
-    merged
+    if merged
         .get_method_ci(method_name)
         .is_some_and(|m| m.conditional_return.is_some())
+    {
+        return true;
+    }
+
+    // A generic mixin's conditional may already have been collapsed from
+    // its declared template default while being merged. Inspect the source
+    // mixin as well so a facade's generated broad `@method` union does not
+    // hide that more precise concrete-owner return type.
+    class_info
+        .mixins
+        .iter()
+        .chain(merged.mixins.iter())
+        .any(|mixin| {
+            class_loader(mixin.as_str()).is_some_and(|mixin_class| {
+                mixin_class
+                    .get_method_ci(method_name)
+                    .is_some_and(|method| method.conditional_return.is_some())
+            })
+        })
 }
 
 fn facade_accessor_concrete_owner(

@@ -235,13 +235,12 @@ pub(super) fn resolve_rhs_instantiation(
                 }
             }
 
-            // ── Fallback: resolve unbound template params to bounds ─
+            // ── Fallback: resolve omitted template params ─────────
             // When no constructor argument bound any template param
             // (e.g. `new Collection()` with no args, or the
             // constructor has no template bindings), substitute all
-            // template params with their declared upper bound or
-            // `mixed`.  This follows PHPStan's `resolveToBounds()`
-            // semantics and prevents raw template names from leaking
+            // template params with their declared default, upper bound,
+            // or `mixed`. This prevents raw template names from leaking
             // into method parameter/return types.
             let type_args = crate::inheritance::default_type_args(cls);
             let substituted = crate::virtual_members::resolve_class_fully_with_type_args(

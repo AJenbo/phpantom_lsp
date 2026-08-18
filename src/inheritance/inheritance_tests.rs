@@ -488,6 +488,66 @@ fn test_apply_generic_args_right_aligns_single_arg_for_collection() {
 }
 
 #[test]
+fn default_type_args_prefer_declared_defaults_over_bounds() {
+    let class = ClassInfo {
+        name: atom("PendingRequest"),
+        template_params: vec![atom("TAsync")],
+        template_param_bounds: [(atom("TAsync"), PhpType::parse("bool"))]
+            .into_iter()
+            .collect::<AtomMap<_>>(),
+        template_param_defaults: [(atom("TAsync"), PhpType::parse("false"))]
+            .into_iter()
+            .collect::<AtomMap<_>>(),
+        ..ClassInfo::default()
+    };
+
+    assert_eq!(default_type_args(&class), vec![PhpType::parse("false")]);
+}
+
+#[test]
+fn generic_substitutions_use_defaults_for_omitted_trailing_parameters() {
+    let class = ClassInfo {
+        name: atom("RequestResult"),
+        template_params: vec![atom("TPayload"), atom("TAsync")],
+        template_param_bounds: [(atom("TAsync"), PhpType::parse("bool"))]
+            .into_iter()
+            .collect::<AtomMap<_>>(),
+        template_param_defaults: [(atom("TAsync"), PhpType::parse("false"))]
+            .into_iter()
+            .collect::<AtomMap<_>>(),
+        ..ClassInfo::default()
+    };
+
+    let substitutions = build_generic_subs(&class, &[PhpType::parse("Response")]);
+
+    assert_eq!(
+        substitutions.get("TPayload"),
+        Some(&PhpType::parse("Response"))
+    );
+    assert_eq!(substitutions.get("TAsync"), Some(&PhpType::parse("false")));
+}
+
+#[test]
+fn template_values_merge_defaults_without_overwriting_explicit_values() {
+    let class = ClassInfo {
+        name: atom("RequestResult"),
+        template_param_defaults: [
+            (atom("TPayload"), PhpType::parse("mixed")),
+            (atom("TAsync"), PhpType::parse("false")),
+        ]
+        .into_iter()
+        .collect::<AtomMap<_>>(),
+        ..ClassInfo::default()
+    };
+    let explicit = make_subs(&[("TPayload", "Response")]);
+
+    let values = template_values_with_defaults(&class, &explicit);
+
+    assert_eq!(values.get("TPayload"), Some(&PhpType::parse("Response")));
+    assert_eq!(values.get("TAsync"), Some(&PhpType::parse("false")));
+}
+
+#[test]
 fn test_apply_generic_args_no_right_align_when_all_args_provided() {
     // When both args are provided, positional mapping is used as-is.
     let collection = ClassInfo {

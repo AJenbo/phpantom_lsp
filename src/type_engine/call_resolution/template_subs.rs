@@ -1041,22 +1041,31 @@ pub(crate) fn build_call_template_subs(
     ctx: &ResolutionCtx<'_>,
 ) -> HashMap<String, PhpType> {
     let class_level_subs: HashMap<String, PhpType> = receiver_type
-        .and_then(|ty| match ty.kind() {
-            TypeKind::Generic(g)
-                if !g.args.is_empty()
-                    && !owner.template_params.is_empty()
-                    && !g.args.iter().any(|a| a.is_self_like()) =>
+        .map(|ty| {
+            if ty.is_self_like()
+                || matches!(ty.kind(), TypeKind::Generic(g) if g.args.iter().any(|a| a.is_self_like()))
             {
-                Some(
+                return HashMap::new();
+            }
+
+            let mut values: HashMap<String, PhpType> = owner
+                .template_param_defaults
+                .iter()
+                .map(|(name, default)| (name.to_string(), default.clone()))
+                .collect();
+            if let TypeKind::Generic(g) = ty.kind()
+                && !g.args.is_empty()
+                && !owner.template_params.is_empty()
+            {
+                values.extend(
                     owner
                         .template_params
                         .iter()
                         .zip(g.args.iter())
-                        .map(|(name, ty)| (name.to_string(), ty.clone()))
-                        .collect(),
-                )
+                        .map(|(name, ty)| (name.to_string(), ty.clone())),
+                );
             }
-            _ => None,
+            values
         })
         .unwrap_or_default();
 
@@ -1610,4 +1619,58 @@ fn unify_template(param_hint: &PhpType, arg_type: &PhpType, tpl_name: &str) -> O
 fn names_template_directly(hint: &PhpType, tpl_name: &str) -> bool {
     matches!(hint.kind(), TypeKind::Generic(g)
         if g.args.iter().any(|a| matches!(a.kind(), TypeKind::Named(n) if &**n == tpl_name)))
+}
+
+#[cfg(test)]
+mod class_template_sub_tests {
+    use std::sync::Arc;
+
+    use super::build_call_template_subs;
+    use crate::atom::atom;
+    use crate::php_type::PhpType;
+    use crate::type_engine::resolver::ResolutionCtx;
+    use crate::types::ClassInfo;
+
+    #[test]
+    fn unresolved_self_like_receivers_do_not_apply_class_defaults() {
+        let owner = ClassInfo {
+            name: atom("PendingRequest"),
+            template_params: vec![atom("TAsync")],
+            template_param_defaults: [(atom("TAsync"), PhpType::parse("false"))]
+                .into_iter()
+                .collect(),
+            ..ClassInfo::default()
+        };
+        let classes = Vec::new();
+        let class_loader = |_: &str| -> Option<Arc<ClassInfo>> { None };
+        let ctx = ResolutionCtx {
+            current_class: None,
+            all_classes: &classes,
+            content: "",
+            cursor_offset: 0,
+            class_loader: &class_loader,
+            backend: None,
+            laravel_macro_this_resolver: None,
+            resolved_class_cache: None,
+            function_loader: None,
+            scope_var_resolver: None,
+            is_in_static_method: false,
+            preserve_static: false,
+        };
+
+        assert!(
+            build_call_template_subs(&owner, "send", &[], Some(&PhpType::parse("static")), &ctx,)
+                .is_empty()
+        );
+        assert!(
+            build_call_template_subs(
+                &owner,
+                "send",
+                &[],
+                Some(&PhpType::parse("PendingRequest<static>")),
+                &ctx,
+            )
+            .is_empty()
+        );
+    }
 }

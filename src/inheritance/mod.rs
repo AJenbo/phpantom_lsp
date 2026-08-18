@@ -41,7 +41,7 @@ pub(crate) use generics::{
     apply_generic_args, apply_substitution_to_conditional, apply_substitution_to_method,
     apply_substitution_to_property, bind_inherited_class_keywords, build_generic_subs,
     build_substitution_map, default_type_args, method_has_inherited_class_keyword,
-    method_references_params, property_references_params,
+    method_references_params, property_references_params, template_values_with_defaults,
 };
 
 /// A borrow-or-owned handle to a `ClassInfo`, used to walk the parent
