@@ -78,6 +78,54 @@ to be widened to a `@template TName of string`, which is what PHPStan
 does for literal string types and would want measuring against the whole
 corpus first.
 
+### B226. A function-`static` variable's type is not tracked across its own reads
+
+**Impact: Low-Medium · Complexity: Medium-High**
+
+`type_engine/variable/forward_walk/` has no handling at all for a
+`static $var;` declaration (there is no `StaticVariable` case anywhere
+under it); the walker treats the name as an ordinary, unassigned local
+until it sees an assignment to it in the same top-to-bottom pass. That
+loses the one thing a `static` local actually means: its value can carry
+over from an *earlier call* that assigned it in a branch the current
+call never reaches.
+
+```php
+function info(?Configuration $config = null) {
+    static $lastConfig;
+    if ($config !== null) {
+        $lastConfig = $config;
+        return null;
+    }
+    $config = $lastConfig ?: new Configuration();
+    // $shell::VERSION below needs $config resolved to Configuration for
+    // Sudo::fetchProperty($config, 'shell') to type as ?Shell (the
+    // pass-through accessor inference already handles that part).
+    $shell = Sudo::fetchProperty($config, 'shell');
+    if ($shell) {
+        $shellInfo = ['PsySH version' => $shell::VERSION];
+    }
+}
+```
+
+On the call that falls through to the second half, `$lastConfig` is read
+without ever having been assigned within *this* walk, so `$config`
+resolves too conservatively for the accessor pass-through (see the
+`ReflectionProperty`/`Sudo::fetchProperty` inference above) to carry
+`Configuration::$shell`'s declared type through to `$shell`, and
+`$shell::VERSION` cannot be resolved. Found via
+`php-typing-conformance`'s LSP navigation probe against psysh
+(`Psy\Shell::VERSION`, `src/functions.php:383`): find-references reports
+20 of 21 known references, missing exactly this one; Intelephense and
+Phpactor miss the same reference, but DEVSENSE resolves it, which is
+worth chasing. The same gap also degrades hover and inferred types
+wherever code narrows on a `static` local this way, not just
+find-references. A correct fix needs to seed a
+`static $var`'s type from the union of every assignment reachable
+anywhere in the enclosing function body (not only the ones preceding the
+read in this pass), since the assignment that matters can sit in a
+branch this call never takes.
+
 ### B183. A Laravel Folio route is reported as unknown
 
 **Impact: High · Complexity: Medium**
@@ -115,26 +163,6 @@ would need.
 Reproduced against a Folio-based Laravel application; `route('home')`
 from `routes/web.php` in the same file resolves correctly, so the gap is
 specific to filesystem-derived routes.
-
-### B225. A route group whose name spells out nothing still flags its routes
-
-**Impact: Low · Complexity: Medium**
-
-A group whose name is entirely a variable and which sits under no
-enclosing literal group (`Route::name($panelId)->group(...)` at the top
-of a routes file) records no open prefix, so every `route()` call naming
-one of its routes is still reported as unknown.
-
-The obvious fix is the wrong one: an open prefix of `""` is a prefix of
-every route name there is, so the diagnostic
-(`route_open_prefixes.iter().any(|prefix| key.starts_with(prefix))` in
-`diagnostics/mod.rs`) would stand down for the whole project rather than
-for the one group. What is needed instead is for the collector
-(`virtual_members/laravel/route_names.rs`) to record which *names* fall
-under an unknowable group rather than which prefixes, so an unnamed
-group opens only the suffixes it registers (`pages.dashboard` under an
-unknown prefix means any name *ending* in it is unjudgeable) and every
-other name in the project stays checked.
 
 ## Array types
 

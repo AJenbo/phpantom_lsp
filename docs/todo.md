@@ -104,7 +104,7 @@ unlikely to move the needle for most users.
 |     | **[Bugs](todo/bugs.md)**                                                                                                                                                    |             |             |
 | B183 | [A Laravel Folio route is reported as unknown](todo/bugs.md#b183-a-laravel-folio-route-is-reported-as-unknown)                                                              | High        | Medium      |
 | B218 | [`new ReflectionProperty(Foo::class, 'bar')` forgets what it reflects](todo/bugs.md#b218-new-reflectionpropertyfooclass-bar-forgets-what-it-reflects)                        | Low         | Medium      |
-| B225 | [A route group whose name spells out nothing still flags its routes](todo/bugs.md#b225-a-route-group-whose-name-spells-out-nothing-still-flags-its-routes)                   | Low         | Medium      |
+| B226 | [A function-`static` variable's type is not tracked across its own reads](todo/bugs.md#b226-a-function-static-variables-type-is-not-tracked-across-its-own-reads)            | Low-Medium  | Medium-High |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |

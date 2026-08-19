@@ -881,8 +881,17 @@ fn scan_expr(
         let group = GroupPrefix {
             name: prefix,
             uri: "",
+            unknowable: false,
         };
-        push_resource_routes(&registration, group, &mut routes);
+        push_resource_routes(
+            &registration,
+            group,
+            &mut RouteSink {
+                out: &mut routes,
+                open_prefixes: &mut Vec::new(),
+                open_suffixes: &mut Vec::new(),
+            },
+        );
         if routes
             .iter()
             .any(|route| route_name_matches(target, &route.name))
@@ -1163,6 +1172,14 @@ pub(crate) struct RouteDiscovery {
     /// starting with one of these prefixes cannot be judged: the full set of
     /// names under the prefix is unknowable through static analysis.
     pub open_prefixes: Vec<String>,
+    /// Route names registered under a group whose name could not be
+    /// statically recovered, recorded whole rather than as a prefix (e.g. a
+    /// bare `Route::name($panelId)->group(…)` with no enclosing literal group
+    /// spells out no known leading text at all, so no prefix can be
+    /// recorded).  A `route()` call that *ends* with one of these cannot be
+    /// judged: the unknown run of characters the group's name contributes
+    /// could be anything, so only the part written out after it is known.
+    pub open_suffixes: Vec<String>,
 }
 
 /// The name and URI prefixes a route inherits from the groups enclosing it.
@@ -1172,6 +1189,22 @@ struct GroupPrefix<'a> {
     name: &'a str,
     /// Accumulated URI prefix (`->prefix('admin')`, `['prefix' => …]`).
     uri: &'a str,
+    /// Whether this group or an enclosing one has a name that could not be
+    /// statically recovered.  Once set, every route name registered beneath
+    /// it is also recorded in [`RouteDiscovery::open_suffixes`], since the
+    /// literal name alone (missing whatever the unknown group name
+    /// contributes ahead of it) is not a route that necessarily exists.
+    unknowable: bool,
+}
+
+/// Where a route-file scan accumulates what it finds: the routes themselves,
+/// plus the prefixes and suffixes of route names an unknowable group leaves
+/// unjudgeable.  Bundled into one struct so the `collect_names_from_*` family
+/// threads a single mutable borrow rather than three.
+struct RouteSink<'a> {
+    out: &'a mut Vec<RouteEntry>,
+    open_prefixes: &'a mut Vec<String>,
+    open_suffixes: &'a mut Vec<String>,
 }
 
 /// Registration methods whose first argument is the route URI.
@@ -1277,6 +1310,7 @@ pub(crate) fn route_uri_parameters(uri: &str) -> Vec<&str> {
 pub(crate) fn enumerate_all_routes(backend: &Backend) -> RouteDiscovery {
     let mut routes = Vec::new();
     let mut open_prefixes = Vec::new();
+    let mut open_suffixes = Vec::new();
     let mut scanned: HashSet<PathBuf> = HashSet::new();
     let snapshot = backend.user_file_symbol_maps();
     let workspace_root = backend.workspace.workspace_root.read().clone();
@@ -1311,8 +1345,11 @@ pub(crate) fn enumerate_all_routes(backend: &Backend) -> RouteDiscovery {
             path.as_deref(),
             workspace_root.as_deref(),
             &macros,
-            &mut routes,
-            &mut open_prefixes,
+            &mut RouteSink {
+                out: &mut routes,
+                open_prefixes: &mut open_prefixes,
+                open_suffixes: &mut open_suffixes,
+            },
         );
         if file_uri.contains("/vendor/") {
             mark_from_vendor(&mut routes[before..]);
@@ -1333,8 +1370,11 @@ pub(crate) fn enumerate_all_routes(backend: &Backend) -> RouteDiscovery {
                 Some(route_path),
                 workspace_root.as_deref(),
                 &macros,
-                &mut routes,
-                &mut open_prefixes,
+                &mut RouteSink {
+                    out: &mut routes,
+                    open_prefixes: &mut open_prefixes,
+                    open_suffixes: &mut open_suffixes,
+                },
             );
             if route_path
                 .components()
@@ -1359,9 +1399,12 @@ pub(crate) fn enumerate_all_routes(backend: &Backend) -> RouteDiscovery {
     routes.dedup_by(|a, b| a.name == b.name);
     open_prefixes.sort();
     open_prefixes.dedup();
+    open_suffixes.sort();
+    open_suffixes.dedup();
     RouteDiscovery {
         routes,
         open_prefixes,
+        open_suffixes,
     }
 }
 
@@ -1378,8 +1421,7 @@ fn collect_all_names_from_file(
     file_path: Option<&Path>,
     workspace_root: Option<&Path>,
     macros: &MacroScope,
-    out: &mut Vec<RouteEntry>,
-    open_prefixes: &mut Vec<String>,
+    sink: &mut RouteSink<'_>,
 ) {
     let open = RefCell::new(HashSet::new());
     if let Some(path) = file_path {
@@ -1405,8 +1447,7 @@ fn collect_all_names_from_file(
             GroupPrefix::default(),
             paths,
             &mut scope,
-            out,
-            open_prefixes,
+            sink,
         );
     }
 }
@@ -1417,24 +1458,15 @@ fn collect_names_from_stmt(
     group: GroupPrefix<'_>,
     paths: ScanPaths<'_>,
     scope: &mut Scope,
-    out: &mut Vec<RouteEntry>,
-    open_prefixes: &mut Vec<String>,
+    sink: &mut RouteSink<'_>,
 ) {
     match stmt {
         Statement::Expression(e) => {
-            collect_names_from_expr(
-                e.expression,
-                content,
-                group,
-                paths,
-                scope,
-                out,
-                open_prefixes,
-            );
+            collect_names_from_expr(e.expression, content, group, paths, scope, sink);
         }
         Statement::Return(r) => {
             if let Some(v) = r.value {
-                collect_names_from_expr(v, content, group, paths, scope, out, open_prefixes);
+                collect_names_from_expr(v, content, group, paths, scope, sink);
             }
         }
         // A loop over a literal array registers one route per element, so the
@@ -1442,15 +1474,7 @@ fn collect_names_from_stmt(
         Statement::Foreach(fe) => {
             for_each_iteration(fe, content, scope, &mut |scope| {
                 for nested in fe.body.statements() {
-                    collect_names_from_stmt(
-                        nested,
-                        content,
-                        group,
-                        paths,
-                        scope,
-                        out,
-                        open_prefixes,
-                    );
+                    collect_names_from_stmt(nested, content, group, paths, scope, sink);
                 }
             });
             return;
@@ -1458,7 +1482,7 @@ fn collect_names_from_stmt(
         _ => {}
     }
     for_each_nested_statement(stmt, &mut |nested| {
-        collect_names_from_stmt(nested, content, group, paths, scope, out, open_prefixes);
+        collect_names_from_stmt(nested, content, group, paths, scope, sink);
     });
 }
 
@@ -1468,17 +1492,16 @@ fn collect_names_from_expr(
     group: GroupPrefix<'_>,
     paths: ScanPaths<'_>,
     scope: &mut Scope,
-    out: &mut Vec<RouteEntry>,
-    open_prefixes: &mut Vec<String>,
+    sink: &mut RouteSink<'_>,
 ) {
     // A chain that registers a resource generates its whole route set here;
     // none of the per-route handling below applies to it.
     if let Some(registration) = resource_registration(expr, content) {
-        push_resource_routes(&registration, group, out);
+        push_resource_routes(&registration, group, sink);
         // A `->group()` sharing the chain registers routes of its own, which
         // the resource shortcut must not swallow.
         if let Some(preceding) = registration.preceding {
-            collect_names_from_expr(preceding, content, group, paths, scope, out, open_prefixes);
+            collect_names_from_expr(preceding, content, group, paths, scope, sink);
         }
         return;
     }
@@ -1486,15 +1509,7 @@ fn collect_names_from_expr(
     match expr {
         Expression::Call(Call::Method(mc)) => {
             let ClassLikeMemberSelector::Identifier(ident) = &mc.method else {
-                collect_names_from_expr(
-                    mc.object,
-                    content,
-                    group,
-                    paths,
-                    scope,
-                    out,
-                    open_prefixes,
-                );
+                collect_names_from_expr(mc.object, content, group, paths, scope, sink);
                 return;
             };
             let method = ident.value.to_ascii_lowercase();
@@ -1502,9 +1517,13 @@ fn collect_names_from_expr(
             if method == b"group" {
                 // When the chain includes a `->name()` whose argument is not
                 // a string literal, the accumulated prefix is incomplete and
-                // routes under it cannot be judged.
-                if let Some(head) = chain_dynamic_name_prefix(mc.object, content, scope) {
-                    record_open_prefix(group.name, &head, open_prefixes);
+                // routes under it cannot be judged.  Whatever known text was
+                // written out is still recorded as an open prefix, and every
+                // route name registered inside the group from here on is
+                // also unknowable, regardless of whether that text is empty.
+                let dynamic_head = chain_dynamic_name_prefix(mc.object, content, scope);
+                if let Some(head) = &dynamic_head {
+                    record_open_prefix(group.name, head, sink.open_prefixes);
                 }
                 let name_prefix =
                     format!("{}{}", group.name, chain_name_prefix(mc.object, content));
@@ -1513,17 +1532,10 @@ fn collect_names_from_expr(
                 let inner = GroupPrefix {
                     name: &name_prefix,
                     uri: &uri_prefix,
+                    unknowable: group.unknowable || dynamic_head.is_some(),
                 };
                 for arg in mc.argument_list.arguments.iter() {
-                    collect_names_from_group_body(
-                        arg.value(),
-                        content,
-                        inner,
-                        paths,
-                        scope,
-                        out,
-                        open_prefixes,
-                    );
+                    collect_names_from_group_body(arg.value(), content, inner, paths, scope, sink);
                 }
             } else if method == b"name" {
                 if let Some(first_arg) = mc.argument_list.arguments.iter().next()
@@ -1532,12 +1544,20 @@ fn collect_names_from_expr(
                     let full = format!("{}{name_val}", group.name);
                     // Only collect leaf names (non-prefix names that don't end with '.').
                     if !full.is_empty() && !full.ends_with('.') {
+                        // A group ancestor left its own name unknowable, so
+                        // this route's real name has an unrecoverable run of
+                        // characters ahead of `full` — record it as an open
+                        // suffix rather than trusting `full` as the whole
+                        // name.
+                        if group.unknowable {
+                            sink.open_suffixes.push(full.clone());
+                        }
                         // A `->prefix()` on the route's own chain
                         // (`Route::prefix('admin')->get(…)`) prefixes the URI
                         // just as an enclosing group's does.
                         let uri_prefix =
                             join_uri_segments(group.uri, &chain_uri_prefix(mc.object, content));
-                        out.push(RouteEntry {
+                        sink.out.push(RouteEntry {
                             name: full,
                             uri: route_uri(
                                 &uri_prefix,
@@ -1547,33 +1567,16 @@ fn collect_names_from_expr(
                         });
                     }
                 }
-                collect_names_from_expr(
-                    mc.object,
-                    content,
-                    group,
-                    paths,
-                    scope,
-                    out,
-                    open_prefixes,
-                );
+                collect_names_from_expr(mc.object, content, group, paths, scope, sink);
             } else if !collect_names_from_macro(
                 ident.value,
                 Some(mc.object),
                 content,
                 group,
                 paths,
-                out,
-                open_prefixes,
+                sink,
             ) {
-                collect_names_from_expr(
-                    mc.object,
-                    content,
-                    group,
-                    paths,
-                    scope,
-                    out,
-                    open_prefixes,
-                );
+                collect_names_from_expr(mc.object, content, group, paths, scope, sink);
             }
         }
         Expression::Call(Call::StaticMethod(sc)) => {
@@ -1587,8 +1590,9 @@ fn collect_names_from_expr(
                 // `['as' => $dynamic]` is the legacy spelling of the fluent
                 // `->name($dynamic)` group above and leaves the same names
                 // unknowable.
-                if let Some(head) = dynamic_as_prefix_from_args(args(), content, scope) {
-                    record_open_prefix(group.name, &head, open_prefixes);
+                let dynamic_head = dynamic_as_prefix_from_args(args(), content, scope);
+                if let Some(head) = &dynamic_head {
+                    record_open_prefix(group.name, head, sink.open_prefixes);
                 }
                 let name_prefix = format!(
                     "{}{}",
@@ -1600,17 +1604,10 @@ fn collect_names_from_expr(
                 let inner = GroupPrefix {
                     name: &name_prefix,
                     uri: &uri_prefix,
+                    unknowable: group.unknowable || dynamic_head.is_some(),
                 };
                 for arg in sc.argument_list.arguments.iter() {
-                    collect_names_from_group_body(
-                        arg.value(),
-                        content,
-                        inner,
-                        paths,
-                        scope,
-                        out,
-                        open_prefixes,
-                    );
+                    collect_names_from_group_body(arg.value(), content, inner, paths, scope, sink);
                 }
             } else {
                 // `Auth::routes()` registers nothing itself: the facade
@@ -1622,44 +1619,20 @@ fn collect_names_from_expr(
                     } else {
                         ident.value
                     };
-                collect_names_from_macro(
-                    macro_name,
-                    None,
-                    content,
-                    group,
-                    paths,
-                    out,
-                    open_prefixes,
-                );
+                collect_names_from_macro(macro_name, None, content, group, paths, sink);
             }
         }
         // The data a route file loops over is usually built in a variable
         // first, and a registration is occasionally assigned to one too.
         Expression::Assignment(assignment) => {
             bind_assignment(assignment, content, scope);
-            collect_names_from_expr(
-                assignment.rhs,
-                content,
-                group,
-                paths,
-                scope,
-                out,
-                open_prefixes,
-            );
+            collect_names_from_expr(assignment.rhs, content, group, paths, scope, sink);
         }
         // A route file pulled in by `require`/`include` registers its routes
         // under whichever group encloses the include.
         Expression::Construct(construct) => {
             if let Some(file) = include_target(construct) {
-                collect_names_from_included_file(
-                    file,
-                    content,
-                    group,
-                    paths,
-                    scope,
-                    out,
-                    open_prefixes,
-                );
+                collect_names_from_included_file(file, content, group, paths, scope, sink);
             }
         }
         _ => {}
@@ -1708,8 +1681,7 @@ fn collect_names_from_macro(
     content: &str,
     group: GroupPrefix<'_>,
     paths: ScanPaths<'_>,
-    out: &mut Vec<RouteEntry>,
-    open_prefixes: &mut Vec<String>,
+    sink: &mut RouteSink<'_>,
 ) -> bool {
     let Some(open) = open_route_macro(paths.macros, method) else {
         return false;
@@ -1725,6 +1697,7 @@ fn collect_names_from_macro(
     let inner = GroupPrefix {
         name: &name_prefix,
         uri: &uri_prefix,
+        unknowable: group.unknowable,
     };
     let arena = LocalArena::new();
     let file_id = FileId::new(b"macro.php");
@@ -1741,15 +1714,7 @@ fn collect_names_from_macro(
     match macro_body_at(Node::Program(program), open.offset) {
         Some(MacroBody::Closure(closure)) => {
             for stmt in closure.body.statements.iter() {
-                collect_names_from_stmt(
-                    stmt,
-                    &open.content,
-                    inner,
-                    sub_paths,
-                    &mut scope,
-                    out,
-                    open_prefixes,
-                );
+                collect_names_from_stmt(stmt, &open.content, inner, sub_paths, &mut scope, sink);
             }
         }
         Some(MacroBody::Arrow(arrow)) => {
@@ -1759,8 +1724,7 @@ fn collect_names_from_macro(
                 inner,
                 sub_paths,
                 &mut scope,
-                out,
-                open_prefixes,
+                sink,
             );
         }
         None => {}
@@ -1774,7 +1738,7 @@ fn collect_names_from_macro(
 fn push_resource_routes(
     registration: &ResourceRegistration<'_>,
     group: GroupPrefix<'_>,
-    out: &mut Vec<RouteEntry>,
+    sink: &mut RouteSink<'_>,
 ) {
     let (path_prefix, resource) = split_resource_prefix(registration.name);
     let segments: Vec<&str> = resource.split('.').filter(|s| !s.is_empty()).collect();
@@ -1817,8 +1781,15 @@ fn push_resource_routes(
             // index and store.
             _ => (collection_name.as_str(), collection_uri.clone()),
         };
-        out.push(RouteEntry {
-            name: resource_route_name(registration, name_base, suffix, group.name),
+        let name = resource_route_name(registration, name_base, suffix, group.name);
+        // As with a plain `->name()` leaf, an ancestor group whose own name
+        // is unknowable means `name` is missing whatever unrecoverable text
+        // that group contributes ahead of it.
+        if group.unknowable {
+            sink.open_suffixes.push(name.clone());
+        }
+        sink.out.push(RouteEntry {
+            name,
             uri,
             from_vendor: false,
         });
@@ -1862,31 +1833,20 @@ fn collect_names_from_group_body(
     group: GroupPrefix<'_>,
     paths: ScanPaths<'_>,
     scope: &mut Scope,
-    out: &mut Vec<RouteEntry>,
-    open_prefixes: &mut Vec<String>,
+    sink: &mut RouteSink<'_>,
 ) {
     match expr {
         Expression::Closure(closure) => {
             for stmt in closure.body.statements.iter() {
-                collect_names_from_stmt(stmt, content, group, paths, scope, out, open_prefixes);
+                collect_names_from_stmt(stmt, content, group, paths, scope, sink);
             }
         }
         Expression::ArrowFunction(af) => {
-            collect_names_from_expr(
-                af.expression,
-                content,
-                group,
-                paths,
-                scope,
-                out,
-                open_prefixes,
-            );
+            collect_names_from_expr(af.expression, content, group, paths, scope, sink);
         }
         // `Route::group([], __DIR__ . '/sub.php')` names a file rather than a
         // callback.
-        _ => {
-            collect_names_from_included_file(expr, content, group, paths, scope, out, open_prefixes)
-        }
+        _ => collect_names_from_included_file(expr, content, group, paths, scope, sink),
     }
 }
 
@@ -1901,8 +1861,7 @@ fn collect_names_from_included_file(
     group: GroupPrefix<'_>,
     paths: ScanPaths<'_>,
     scope: &mut Scope,
-    out: &mut Vec<RouteEntry>,
-    open_prefixes: &mut Vec<String>,
+    sink: &mut RouteSink<'_>,
 ) {
     let Some(included) = open_included_file(file, content, paths) else {
         return;
@@ -1918,15 +1877,7 @@ fn collect_names_from_included_file(
     };
 
     for stmt in program.statements.iter() {
-        collect_names_from_stmt(
-            stmt,
-            &included.content,
-            group,
-            sub_paths,
-            scope,
-            out,
-            open_prefixes,
-        );
+        collect_names_from_stmt(stmt, &included.content, group, sub_paths, scope, sink);
     }
 }
 

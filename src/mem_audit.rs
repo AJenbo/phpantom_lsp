@@ -1453,6 +1453,9 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
             for prefix in &discovery.open_prefixes {
                 laravel_keys.add(prefix.capacity());
             }
+            for suffix in &discovery.open_suffixes {
+                laravel_keys.add(suffix.capacity());
+            }
         }
         if let Some(trees) = &c.config_trees {
             // ConfigNode is recursive; count the spine only.

@@ -714,7 +714,11 @@ impl Backend {
         // enumerations.  Safe to call now that the `symbol_maps` read
         // lock has been released.
         let mut project_registers_routes = false;
-        let (route_keys, route_open_prefixes): (HashSet<String>, Vec<String>) = if has_route {
+        let (route_keys, route_open_prefixes, route_open_suffixes): (
+            HashSet<String>,
+            Vec<String>,
+            Vec<String>,
+        ) = if has_route {
             let discovery = self.cached_routes();
             project_registers_routes = discovery.routes.iter().any(|route| !route.from_vendor);
             (
@@ -724,9 +728,10 @@ impl Backend {
                     .map(|route| route.name.clone())
                     .collect(),
                 discovery.open_prefixes.clone(),
+                discovery.open_suffixes.clone(),
             )
         } else {
-            (HashSet::new(), Vec::new())
+            (HashSet::new(), Vec::new(), Vec::new())
         };
         let config_keys: HashSet<String> = if has_config {
             self.cached_config_keys().into_iter().collect()
@@ -841,11 +846,18 @@ impl Backend {
                     }
                     // A group whose `->name()` argument was not a string
                     // literal (e.g. Filament's `Route::name($panelId . '.')`
-                    // has children we cannot enumerate statically.  Any
-                    // route that falls under such a prefix is unjudgeable.
+                    // has children we cannot enumerate statically.  Any route
+                    // that falls under such a prefix is unjudgeable, and so
+                    // is any route ending in one of the names such a group
+                    // registers, even when it recorded no known prefix at all
+                    // (e.g. a group with no enclosing literal group whose own
+                    // name is entirely a variable).
                     if route_open_prefixes
                         .iter()
                         .any(|prefix| key.starts_with(prefix))
+                        || route_open_suffixes
+                            .iter()
+                            .any(|suffix| key.ends_with(suffix))
                     {
                         continue;
                     }
