@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787178219438,
+  "lastUpdate": 1787179220617,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -24071,6 +24071,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 69.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "1057f6dd48e0a4b1013390937b4f7311f8152ade",
+          "message": "Unsetting an array element is now understood as narrowing the array, not\njust the variable",
+          "timestamp": "2026-08-20T00:23:05+02:00",
+          "tree_id": "cafc797605a8807b8dfeeacc12c49a06f6efb86f",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/1057f6dd48e0a4b1013390937b4f7311f8152ade"
+        },
+        "date": 1787179214119,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 66.6,
             "unit": "MiB"
           }
         ]
