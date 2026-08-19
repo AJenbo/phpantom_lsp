@@ -4700,6 +4700,108 @@ echo Holder::BAR;
 }
 
 #[tokio::test]
+async fn rename_namespaced_constant_leaves_a_sibling_namespace_constant_alone() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test/const_namespace_collision.php").unwrap();
+    let text = "<?php
+namespace A;
+
+const VERSION = '1';
+
+echo VERSION;
+
+namespace B;
+
+const VERSION = '2';
+
+echo VERSION;
+";
+
+    open_file(&backend, &uri, text).await;
+
+    let (line, character) = line_char_of(text, "const VERSION = '1';");
+    let edit = rename(&backend, &uri, line, character + 6, "RELEASE")
+        .await
+        .expect("a namespaced constant declaration should rename");
+    let result = apply_edits(text, &edits_for_uri(&edit, &uri));
+
+    assert!(
+        result.contains("namespace A;\n\nconst RELEASE = '1';"),
+        "the declaration in A takes the new name, got: {result}"
+    );
+    assert!(
+        result.contains("namespace B;\n\nconst VERSION = '2';"),
+        "the unrelated declaration in B must not rename, got: {result}"
+    );
+    assert!(
+        result.contains("echo VERSION;\n"),
+        "B's own unqualified use of its own VERSION must not rename, got: {result}"
+    );
+}
+
+#[tokio::test]
+async fn rename_namespaced_function_leaves_a_sibling_namespace_function_alone() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test/function_namespace_collision.php").unwrap();
+    let text = "<?php
+namespace A;
+
+function version(): string { return '1'; }
+
+namespace B;
+
+function version(): string { return '2'; }
+";
+
+    open_file(&backend, &uri, text).await;
+
+    let (line, character) = line_char_of(text, "function version(): string { return '1'; }");
+    let edit = rename(&backend, &uri, line, character + 9, "release")
+        .await
+        .expect("a namespaced function declaration should rename");
+    let result = apply_edits(text, &edits_for_uri(&edit, &uri));
+
+    assert!(
+        result.contains("namespace A;\n\nfunction release(): string { return '1'; }"),
+        "the declaration in A takes the new name, got: {result}"
+    );
+    assert!(
+        result.contains("namespace B;\n\nfunction version(): string { return '2'; }"),
+        "the unrelated declaration in B must not rename, got: {result}"
+    );
+}
+
+#[tokio::test]
+async fn rename_global_constant_reaches_an_unqualified_use_inside_a_namespace() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test/const_global_fallback.php").unwrap();
+    let text = "<?php
+const VERSION = '1';
+
+namespace App;
+
+echo VERSION;
+";
+
+    open_file(&backend, &uri, text).await;
+
+    let (line, character) = line_char_of(text, "const VERSION = '1';");
+    let edit = rename(&backend, &uri, line, character + 6, "RELEASE")
+        .await
+        .expect("a global constant declaration should rename");
+    let result = apply_edits(text, &edits_for_uri(&edit, &uri));
+
+    assert!(
+        result.contains("const RELEASE = '1';"),
+        "the global declaration takes the new name, got: {result}"
+    );
+    assert!(
+        result.contains("echo RELEASE;"),
+        "the unqualified use inside App falls back to the global constant, got: {result}"
+    );
+}
+
+#[tokio::test]
 async fn rename_constant_leaves_an_explicit_alias_alone() {
     let backend = Backend::new_test();
     let uri = Url::parse("file:///test/const_alias.php").unwrap();

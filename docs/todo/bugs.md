@@ -115,33 +115,6 @@ No outstanding items.
 
 ## Symbol resolution
 
-### B188. Renaming a namespaced constant or function renames unrelated symbols of the same short name
-
-**Impact: High · Complexity: Medium**
-
-`constant_matches` in `references/functions.rs` accepts a span as a
-match whenever its *resolved* FQN merely shares the target's short name
-(`crate::util::short_name(resolved) == target_short`), not only when it
-is the exact same declaration. The identical disjunct exists for
-functions:
-
-```php
-namespace A;
-const VERSION = '1';
-
-namespace B;
-const VERSION = '2'; // renaming A\VERSION silently renames this too
-```
-
-The short-name fallback exists to catch PHP's runtime namespace-fallback
-resolution for genuinely unqualified references, but it fires even when
-the sibling-namespace constant/function is a real, unambiguous
-declaration of its own. This is the same bug class fixed for class
-constants vs. global constants in a recent commit; it is still open
-across namespaces for constants and functions. Rename silently rewriting
-declarations and uses in an unrelated namespace is a correctness
-regression risk on any release with namespaced code.
-
 ### B189. Renaming a `define()`-declared constant leaves the `define()` call unrenamed
 
 **Impact: High · Complexity: Medium-High**

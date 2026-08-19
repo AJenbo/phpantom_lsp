@@ -35,7 +35,6 @@ contributor even though it's short.
 | #    | Item                                                                                                                                                      | Impact      | Complexity  |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 | B189 | [Renaming a `define()`-declared constant leaves the `define()` call unrenamed](todo/bugs.md#b189-renaming-a-define-declared-constant-leaves-the-define-call-unrenamed) | High        | Medium-High |
-| B188 | [Renaming a namespaced constant or function renames unrelated symbols of the same short name](todo/bugs.md#b188-renaming-a-namespaced-constant-or-function-renames-unrelated-symbols-of-the-same-short-name) | High        | Medium      |
 | B216 | [A project-wide external tool run can overwrite a fresher per-file result for a file that stays open](todo/bugs.md#b216-a-project-wide-external-tool-run-can-overwrite-a-fresher-per-file-result-for-a-file-that-stays-open) | Low-Medium  | Medium-High |
 |      | **Release 0.10.0**                                                                                                                                        |             |             |
 
