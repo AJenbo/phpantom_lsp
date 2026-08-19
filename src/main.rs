@@ -132,8 +132,18 @@ enum Command {
         format: Option<FormatArg>,
     },
 
-    /// Create a default .phpantom.toml configuration file in the current directory.
-    Init,
+    /// Create a default .phpantom.toml configuration file.
+    ///
+    /// Writes to the current directory, or with --global to the
+    /// platform config directory that every project inherits from.
+    Init {
+        /// Create the user-wide config instead, in the platform config
+        /// directory (~/.config/phpantom_lsp on Linux).  Every project
+        /// inherits its settings, and each project's own
+        /// .phpantom.toml overrides them key by key.
+        #[arg(long)]
+        global: bool,
+    },
 
     /// Check for updates or upgrade to the latest version.
     ///
@@ -238,22 +248,24 @@ async fn async_main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Some(Command::Init) => {
-            let cwd = std::env::current_dir().unwrap_or_else(|e| {
-                eprintln!("Error: cannot determine current directory: {}", e);
-                std::process::exit(1);
-            });
+        Some(Command::Init { global }) => {
+            let result = if global {
+                config::create_global_config()
+            } else {
+                let cwd = std::env::current_dir().unwrap_or_else(|e| {
+                    eprintln!("Error: cannot determine current directory: {}", e);
+                    std::process::exit(1);
+                });
+                config::create_default_config(&cwd)
+                    .map(|created| (created, cwd.join(config::CONFIG_FILE_NAME)))
+            };
 
-            match config::create_default_config(&cwd) {
-                Ok(true) => {
-                    println!("Created {} in {}", config::CONFIG_FILE_NAME, cwd.display());
+            match result {
+                Ok((true, path)) => {
+                    println!("Created {}", path.display());
                 }
-                Ok(false) => {
-                    println!(
-                        "{} already exists in {}",
-                        config::CONFIG_FILE_NAME,
-                        cwd.display()
-                    );
+                Ok((false, path)) => {
+                    println!("{} already exists", path.display());
                 }
                 Err(e) => {
                     eprintln!("Error: {}", e);

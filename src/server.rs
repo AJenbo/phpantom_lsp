@@ -483,6 +483,17 @@ impl LanguageServer for Backend {
             mago_analyze_backend.mago_analyze_worker().await;
         });
 
+        // Spawn the global config watcher. Unlike the project's own
+        // `.phpantom.toml` (covered by the file watcher registered below),
+        // the global config lives outside the workspace and has to be
+        // polled directly; see `global_config_watcher` for why.
+        if let Some(root) = self.workspace.workspace_root.read().clone() {
+            let config_watcher_backend = self.clone_for_diagnostic_worker();
+            tokio::spawn(async move {
+                config_watcher_backend.global_config_watcher(root).await;
+            });
+        }
+
         // ── Dynamic capability registration ─────────────────────────
         // lsp-types 0.94 does not expose a `type_hierarchy_provider`
         // field on `ServerCapabilities`, so we register the capability
@@ -1841,7 +1852,12 @@ impl Backend {
             // Pull clients receive these results only through
             // `workspace/diagnostic` responses, so defer the pass until
             // the client sends its first workspace pull — a client that
-            // never pulls never pays for the scan.
+            // never pulls never pays for the scan.  Check the toggle
+            // before that wait, which otherwise parks this task until
+            // shutdown on a pull client that has the pass switched off.
+            if !progress_backend.config().diagnostics.workspace_enabled() {
+                return;
+            }
             if progress_backend
                 .supports_pull_diagnostics
                 .load(Ordering::Acquire)
@@ -3252,10 +3268,6 @@ impl Backend {
     pub(crate) fn reload_laravel_schema_index(&self, root: &std::path::Path) {
         if !self.resolved_class_cache.read().is_laravel() {
             return;
-        }
-
-        if let Ok(cfg) = crate::config::load_config(root) {
-            *self.workspace.config.lock() = cfg;
         }
 
         let laravel_config = self.config().laravel;

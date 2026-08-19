@@ -35,7 +35,14 @@ pub(crate) struct WorkspaceEnv {
     /// The target PHP version used for version-aware stub filtering.
     pub(crate) php_version: Mutex<PhpVersion>,
     /// Per-project configuration loaded from `.phpantom.toml`.
-    pub(crate) config: Mutex<config::Config>,
+    ///
+    /// Shared by `Arc` (unlike `php_version` and the other plain `Mutex`
+    /// fields above) because, unlike those, it is written again after
+    /// startup: a config-file watcher reloads it on a cloned `Backend`
+    /// (the blocking-task and background-worker clones), and that reload
+    /// must be visible to every other clone, including the long-lived one
+    /// that answers LSP requests.
+    pub(crate) config: Arc<Mutex<config::Config>>,
 }
 
 impl WorkspaceEnv {
@@ -47,7 +54,7 @@ impl WorkspaceEnv {
             vendor_dir_paths: Mutex::new(Vec::new()),
             vendor_package_origin_roots: Arc::new(RwLock::new(Vec::new())),
             php_version: Mutex::new(PhpVersion::default()),
-            config: Mutex::new(config::Config::default()),
+            config: Arc::new(Mutex::new(config::Config::default())),
         }
     }
 }
@@ -61,7 +68,7 @@ impl Clone for WorkspaceEnv {
             vendor_dir_paths: Mutex::new(self.vendor_dir_paths.lock().clone()),
             vendor_package_origin_roots: Arc::clone(&self.vendor_package_origin_roots),
             php_version: Mutex::new(*self.php_version.lock()),
-            config: Mutex::new(self.config.lock().clone()),
+            config: Arc::clone(&self.config),
         }
     }
 }

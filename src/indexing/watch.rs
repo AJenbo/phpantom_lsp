@@ -1,20 +1,32 @@
 //! Watched-file change application.
 //!
 //! Applies a `workspace/didChangeWatchedFiles` batch to the symbol
-//! indexes on a blocking thread.
+//! indexes on a blocking thread. Also owns [`Backend::reload_config`] and
+//! the background poller that watches the global config file, since the
+//! client's file watcher only ever reports paths inside the workspace
+//! (see [`Backend::global_config_watcher`]).
 
 use std::path::PathBuf;
+use std::sync::atomic::Ordering;
+use std::time::Duration;
 
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 
+/// How often [`Backend::global_config_watcher`] stats the global config
+/// file. A single `stat` call is cheap enough that sub-second polling
+/// would still be negligible, but there is no reason to notice an edit
+/// faster than a human can plausibly switch back to their editor.
+const GLOBAL_CONFIG_POLL_INTERVAL: Duration = Duration::from_secs(2);
+
 impl Backend {
     /// Apply a `workspace/didChangeWatchedFiles` batch to the indexes.
     ///
-    /// Returns `true` if any PHP file or composer change was acted on (so the
-    /// caller can ask the editor to re-pull diagnostics).  Runs entirely on a
-    /// blocking thread; it parses no files on the async runtime.
+    /// Returns `true` if any PHP file, composer file, or the project's own
+    /// `.phpantom.toml` was acted on (so the caller can ask the editor to
+    /// re-pull diagnostics).  Runs entirely on a blocking thread; it parses
+    /// no files on the async runtime.
     ///
     /// Editors cannot watch the filesystem while the window is unfocused, so
     /// on refocus they resynchronise by reporting the *entire* workspace as
@@ -36,12 +48,14 @@ impl Backend {
         root: &std::path::Path,
     ) -> bool {
         let mut composer_changed = false;
+        let mut config_changed = false;
         let mut schema_full_rebuild = false;
         let mut migration_changes: Vec<(PathBuf, FileChangeType)> = Vec::new();
         let mut php_changes: Vec<(String, PathBuf, FileChangeType)> = Vec::new();
         let mut migration_discovery =
             crate::virtual_members::laravel::database_schema::MigrationDiscovery::default();
         let is_laravel = self.resolved_class_cache.read().is_laravel();
+        let config_path = root.join(crate::config::CONFIG_FILE_NAME);
         {
             let open = self.open_files.read();
             let parsed = self.parsed_uris.read();
@@ -50,6 +64,10 @@ impl Backend {
                 let path_str = change.uri.path();
                 if path_str.ends_with("/composer.json") || path_str.ends_with("/composer.lock") {
                     composer_changed = true;
+                    continue;
+                }
+                if change.uri.to_file_path().is_ok_and(|p| p == config_path) {
+                    config_changed = true;
                     continue;
                 }
                 if is_laravel
@@ -116,10 +134,23 @@ impl Backend {
 
         if php_changes.is_empty()
             && !composer_changed
+            && !config_changed
             && !schema_full_rebuild
             && migration_changes.is_empty()
         {
             return false;
+        }
+
+        if config_changed {
+            tracing::info!("PHPantom: .phpantom.toml changed, reloading configuration");
+            self.reload_config(root);
+            // Schema/migration settings live in the same file, and the
+            // cheapest correct response to "something in here changed" is
+            // the same full rebuild a config/database.php or schema file
+            // change already triggers below.
+            if is_laravel {
+                schema_full_rebuild = true;
+            }
         }
 
         if !php_changes.is_empty() {
@@ -156,6 +187,73 @@ impl Backend {
         }
 
         true
+    }
+
+    /// Reload the merged project + global configuration from disk.
+    ///
+    /// Used both for a project's own `.phpantom.toml` (via
+    /// [`apply_watched_file_changes`](Self::apply_watched_file_changes))
+    /// and for the global config file (polled by the background watcher
+    /// spawned in `initialized`), so either one takes effect immediately
+    /// instead of requiring a restart. Always goes through
+    /// [`load_config`](crate::config::load_config) so the project layer
+    /// keeps overriding the global one no matter which file changed.
+    ///
+    /// `config` lives behind an `Arc` precisely so that a write made here
+    /// on a cloned `Backend` (a blocking-task or background-worker clone)
+    /// is visible to every other clone, including the long-lived one that
+    /// answers LSP requests.
+    pub(crate) fn reload_config(&self, root: &std::path::Path) {
+        match crate::config::load_config(root) {
+            Ok(cfg) => *self.workspace.config.lock() = cfg,
+            Err(e) => {
+                tracing::warn!("Failed to reload .phpantom.toml: {}", e);
+                return;
+            }
+        }
+
+        // Resolved classes and completions may depend on config-driven
+        // behaviour (e.g. `report-magic-properties`), so both must be
+        // recomputed against the new settings rather than served stale.
+        self.resolved_class_cache.write().clear();
+        self.member_completion_cache.lock().clear();
+    }
+
+    /// Poll the global config file for changes and reload on edit.
+    ///
+    /// The global config lives outside every workspace, so it can never
+    /// match a client-side `**/…` file watcher glob (workspace-relative by
+    /// definition) and dynamic registration with an absolute
+    /// [`RelativePattern`](tower_lsp::lsp_types::RelativePattern) base is
+    /// unevenly supported across editors. Polling one file's mtime is a
+    /// single `stat` call, cheap enough to just always do ourselves rather
+    /// than depend on client capabilities.
+    ///
+    /// Runs for the lifetime of the session; exits once
+    /// [`shutdown_flag`](Self) is set, same as the other background
+    /// workers spawned in `initialized`.
+    pub(crate) async fn global_config_watcher(&self, root: PathBuf) {
+        let Some(path) = crate::config::global_config_path() else {
+            return;
+        };
+
+        let mtime = |p: &std::path::Path| std::fs::metadata(p).ok().and_then(|m| m.modified().ok());
+        let mut last_modified = mtime(&path);
+
+        loop {
+            if self.shutdown_flag.load(Ordering::Acquire) {
+                return;
+            }
+            tokio::time::sleep(GLOBAL_CONFIG_POLL_INTERVAL).await;
+
+            let modified = mtime(&path);
+            if modified == last_modified {
+                continue;
+            }
+            last_modified = modified;
+            tracing::info!("PHPantom: global config changed, reloading configuration");
+            self.reload_config(&root);
+        }
     }
 }
 
@@ -293,6 +391,56 @@ mod tests {
                 .get("Vendor\\Variant")
                 .is_none(),
             "the class index must not outlive the last declaration"
+        );
+    }
+
+    /// A non-Laravel project used to never reload its own `.phpantom.toml`
+    /// on change: the reload was piggybacked on the Laravel schema watcher,
+    /// which only fires for Laravel projects.
+    #[test]
+    fn non_laravel_project_reloads_its_own_config_on_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join(crate::config::CONFIG_FILE_NAME);
+        std::fs::write(&config_path, "[diagnostics]\nextra-arguments = true\n").unwrap();
+
+        let backend = Backend::new_test();
+        backend.resolved_class_cache.write().set_laravel(false);
+        assert!(!backend.config().diagnostics.extra_arguments_enabled());
+
+        let params = DidChangeWatchedFilesParams {
+            changes: vec![FileEvent {
+                uri: Url::from_file_path(&config_path).unwrap(),
+                typ: FileChangeType::CHANGED,
+            }],
+        };
+        assert!(backend.apply_watched_file_changes(&params, dir.path()));
+        assert!(backend.config().diagnostics.extra_arguments_enabled());
+    }
+
+    /// `reload_config` writes through the `Arc<Mutex<Config>>` shared by
+    /// every `Backend` clone (the blocking-task and background-worker
+    /// clones created via `clone_for_diagnostic_worker`), not just the
+    /// clone it was called on. Before `config` moved behind an `Arc`, a
+    /// reload performed on one of those clones (as every reload always is)
+    /// was invisible to the original `Backend` answering LSP requests.
+    #[test]
+    fn reload_config_is_visible_on_every_clone() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(crate::config::CONFIG_FILE_NAME),
+            "[diagnostics]\nextra-arguments = true\n",
+        )
+        .unwrap();
+
+        let backend = Backend::new_test();
+        let clone = backend.clone_for_diagnostic_worker();
+        assert!(!backend.config().diagnostics.extra_arguments_enabled());
+
+        clone.reload_config(dir.path());
+
+        assert!(
+            backend.config().diagnostics.extra_arguments_enabled(),
+            "a reload on a clone must be visible on the original Backend"
         );
     }
 }

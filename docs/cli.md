@@ -275,7 +275,15 @@ not overwrite).
 
 ```sh
 phpantom_lsp init
+phpantom_lsp init --global   # user-wide defaults, inherited by every project
 ```
+
+`--global` writes to the platform config directory
+(`~/.config/phpantom_lsp/.phpantom.toml` on Linux) instead, creating it
+if needed. Every project reads that file first and merges its own
+`.phpantom.toml` over it key by key, so put the settings you want
+everywhere in the global file and keep project configs to the
+differences.
 
 See the [Configuration Reference](configuration.md) for details on
 available settings.

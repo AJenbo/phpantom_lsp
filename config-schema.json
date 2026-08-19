@@ -37,12 +37,12 @@
         },
         "workspace": {
           "type": "boolean",
-          "description": "Compute diagnostics for the whole workspace in the background after startup and the full index finish, so project-wide problems appear for files that are not open in the editor. Requires the default \"full\" indexing strategy.",
-          "default": true
+          "description": "Compute diagnostics for the whole workspace in the background after startup and the full index finish, so project-wide problems appear for files that are not open in the editor. Off by default: it costs a project-wide sweep every session. Requires the default \"full\" indexing strategy.",
+          "default": false
         },
         "workspace-external": {
           "type": "boolean",
-          "description": "Run configured external tools (PHPStan, PHPCS, Mago) once over the whole project after workspace diagnostics finish. Each tool only runs when it is enabled and has its own project-level configuration file (phpstan.neon, phpcs.xml, mago.toml).",
+          "description": "Run configured external tools (PHPStan, PHPCS, Mago) once over the whole project after workspace diagnostics finish. Only takes effect when \"workspace\" is enabled. Each tool only runs when it is enabled and has its own project-level configuration file (phpstan.neon, phpcs.xml, mago.toml).",
           "default": true
         },
         "ignore": {

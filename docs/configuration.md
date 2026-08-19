@@ -4,12 +4,8 @@ PHPantom works best with Composer projects. It reads `composer.json` to discover
 
 ## `.phpantom.toml`
 
-PHPantom supports an optional per-project configuration file. A global
-config can also be placed at `$XDG_CONFIG_HOME/phpantom_lsp/.phpantom.toml`
-(typically `~/.config/phpantom_lsp/.phpantom.toml` on Linux). Project
-settings override global settings.
-
-To generate a starter config file:
+PHPantom supports an optional per-project configuration file. To
+generate a starter config file:
 
 ```bash
 phpantom_lsp init
@@ -20,6 +16,31 @@ Editors with TOML schema support (Zed, VS Code + Even Better TOML,
 Neovim) provide autocomplete and hover documentation for every option
 via the schema. Only add settings you want to override -- when absent,
 all settings use their defaults.
+
+### Global config
+
+Settings you want in every project belong in the global config rather
+than in a `.phpantom.toml` per repository:
+
+```bash
+phpantom_lsp init --global
+```
+
+It lives at `$XDG_CONFIG_HOME/phpantom_lsp/.phpantom.toml` (typically
+`~/.config/phpantom_lsp/.phpantom.toml` on Linux,
+`~/Library/Application Support/phpantom_lsp/.phpantom.toml` on macOS,
+`%APPDATA%\phpantom_lsp\.phpantom.toml` on Windows), takes exactly the
+same keys as a project config, and is read first. A project config is
+then merged over it key by key, not wholesale, so a project only has to
+spell out the settings where it differs from your defaults: with
+`workspace = true` and `extra-arguments = true` set globally, a project
+that sets only `workspace = false` still gets `extra-arguments`.
+
+Both the global config and a project's own `.phpantom.toml` are
+watched, and most settings take effect within a couple of seconds of
+saving either file. The exceptions are settings that shape the initial
+workspace scan, such as the PHP version and indexing strategy below --
+those still need a restart to fully apply.
 
 The full schema is at [`config-schema.json`](https://github.com/PHPantom-dev/phpantom_lsp/blob/main/config-schema.json).
 
@@ -36,8 +57,8 @@ The full schema is at [`config-schema.json`](https://github.com/PHPantom-dev/php
 | `unresolved-member-access` | bool   | `false` | Report `->`, `?->`, `::` on subjects whose type could not be resolved. Useful for type coverage, noisy on untyped codebases. |
 | `extra-arguments`          | bool   | `false` | Report calls that pass more arguments than the function accepts. |
 | `report-magic-properties`  | bool   | `false` | Report unknown property access on classes with `__get` when virtual properties are defined. Matches PHPStan's `reportMagicProperties`. |
-| `workspace`                | bool   | `true`  | Compute diagnostics for the whole workspace in the background after startup. Requires the default `full` indexing strategy. |
-| `workspace-external`       | bool   | `true`  | Run configured external tools (PHPStan, PHPCS, Mago) once over the whole project after workspace diagnostics finish. |
+| `workspace`                | bool   | `false` | Compute diagnostics for the whole workspace in the background after startup, so problems appear for files you have not opened. Costs a project-wide sweep every session. Requires the default `full` indexing strategy. |
+| `workspace-external`       | bool   | `true`  | Run configured external tools (PHPStan, PHPCS, Mago) once over the whole project after workspace diagnostics finish. Only takes effect when `workspace` is enabled. |
 
 #### `[[diagnostics.ignore]]`
 
