@@ -2005,7 +2005,19 @@ highlighting remains in charge of ordinary PHP syntax.</p>
 <td><code>command</code></td>
 <td>string</td>
 <td>unset</td>
-<td>Command or path for Mago. Unset: auto-detect via <code>vendor/bin/mago</code> then <code>$PATH</code>. <code>""</code>: disable.</td>
+<td>Command or path for Mago. Unset: auto-detect via <code>vendor/bin/mago</code> (only when <code>composer.json</code> requires <code>carthage-software/mago</code> directly) then <code>$PATH</code>. <code>""</code>: disable.</td>
+</tr>
+<tr>
+<td><code>lint</code></td>
+<td>bool</td>
+<td>unset</td>
+<td>Proxy <code>mago lint</code> diagnostics. Unset: only when <code>mago.toml</code> has a <code>[linter]</code> table.</td>
+</tr>
+<tr>
+<td><code>analyze</code></td>
+<td>bool</td>
+<td>unset</td>
+<td>Proxy <code>mago analyze</code> diagnostics. Unset: only when <code>mago.toml</code> has an <code>[analyzer]</code> table, and on Laravel only when it also wires up an extension.</td>
 </tr>
 <tr>
 <td><code>lint-timeout</code></td>
@@ -2021,6 +2033,9 @@ highlighting remains in charge of ordinary PHP syntax.</p>
 </tr>
 </tbody>
 </table>
+<p>Which of Mago's two diagnostic commands run follows the workspace <code>mago.toml</code>, since a project that uses Mago for one thing rarely wants the others. A <code>mago.toml</code> holding a <code>[formatter]</code> table and nothing else belongs to a project that formats with Mago and checks its code with something else, so neither <code>mago lint</code> nor <code>mago analyze</code> is proxied for it.</p>
+<p>On a Laravel project, <code>mago analyze</code> additionally needs the <code>mago.toml</code> to wire up an extension, either an enabled <code>[extension-hosts.*]</code> entry or a namespaced plugin such as <code>plugins = ["acme/laravel"]</code>. Mago's analyser has no built-in Laravel support, so without one it cannot see through Eloquent or the facades and reports correct code in bulk. Mago's own plugins (<code>stdlib</code>, <code>psl</code>, <code>flow-php</code>, <code>psr-container</code>) do not count, since none of them supplies that knowledge. <code>mago lint</code> is unaffected, as its linter does have a Laravel integration.</p>
+<p>Set <code>lint</code> or <code>analyze</code> explicitly to override all of this in either direction.</p>
 <h3 id="laravel"><code>[laravel]</code><a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h3>
 <h4 id="laravelschema"><code>[laravel.schema]</code><a class="headerlink" href="#laravelschema" title="Permanent link">&para;</a></h4>
 <table>
