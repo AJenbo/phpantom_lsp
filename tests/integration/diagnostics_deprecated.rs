@@ -3319,3 +3319,42 @@ makeHelper()->deprecatedMethod();
         deprecated
     );
 }
+
+#[test]
+fn nullsafe_chain_does_not_share_a_cache_entry_across_a_reassignment() {
+    let backend = create_test_backend();
+    let uri = "file:///nullsafe_reassign.php";
+    let diags = deprecated_diagnostics(
+        &backend,
+        uri,
+        r#"<?php
+class Fresh {
+    public function run(): void {}
+}
+
+class Legacy {
+    /** @deprecated Use Fresh::run() instead */
+    public function run(): void {}
+}
+
+function demo(): void {
+    $svc = new Fresh();
+    $svc?->run();
+    $svc = new Legacy();
+    $svc?->run();
+}
+"#,
+    );
+
+    assert_eq!(
+        diags.len(),
+        1,
+        "The call after the reassignment should be flagged. Got: {:?}",
+        diags,
+    );
+    assert_eq!(
+        diags[0].range.start.line, 14,
+        "The deprecation should land on the second call. Got: {:?}",
+        diags,
+    );
+}

@@ -375,6 +375,13 @@ pub fn resolve_class_fully_with_generics(
     // Resolve the base class (cached at (FQN, [])).
     let base = resolve_class_fully_inner(class, class_loader, cache);
 
+    // Set when the rebind below had to stop at base inheritance because
+    // this specialisation was already being resolved on this thread.  The
+    // result is missing its virtual members, `@mixin` methods, and
+    // framework patches, so it is fit to return to the re-entrant caller
+    // but must not be cached as if it were the finished article.
+    let mut post_merge_skipped = false;
+
     let mut result = if !base.template_params.is_empty() {
         Arc::new(crate::inheritance::apply_generic_args(&base, generic_args))
     } else if let Some((overridden, mut rebound)) =
@@ -404,6 +411,8 @@ pub fn resolve_class_fully_with_generics(
                 fqn,
             };
             apply_post_merge_stages(&mut rebound, &overridden, class_loader, stage_cache);
+        } else {
+            post_merge_skipped = true;
         }
         rebound.rebuild_method_index();
         Arc::new(rebound)
@@ -425,7 +434,9 @@ pub fn resolve_class_fully_with_generics(
         result = Arc::new(proxy);
     }
 
-    if let Some(c) = cache {
+    if let Some(c) = cache
+        && !post_merge_skipped
+    {
         c.write().insert(cache_key, Arc::clone(&result));
     }
 

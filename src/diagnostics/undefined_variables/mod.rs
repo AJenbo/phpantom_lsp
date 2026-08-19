@@ -57,8 +57,9 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::parser::with_parsed_program;
 use crate::scope_collector::{
-    AccessKind, ByRefCallKind, ByRefResolver, FrameKind, ScopeMap,
+    AccessKind, ByRefCallKind, ByRefResolver, FrameKind, ScopeBody, ScopeMap,
     collect_function_scope_with_kind_and_resolver, collect_function_scope_with_resolver,
+    collect_hook_scope_with_resolver, hook_body_span,
 };
 
 use super::helpers::make_diagnostic;
@@ -259,7 +260,7 @@ fn collect_from_statement(
             );
             check_scope(
                 &scope,
-                func.body.statements.as_slice(),
+                ScopeBody::Statements(func.body.statements.as_slice()),
                 ctx,
                 false, // not a method
             );
@@ -293,7 +294,7 @@ fn collect_from_statement(
     }
 }
 
-/// Walk class-like members to find method bodies.
+/// Walk class-like members to find method and property hook bodies.
 fn collect_from_class_members(
     members: &[ClassLikeMember<'_>],
     ctx: &mut DiagnosticCtx<'_>,
@@ -301,29 +302,75 @@ fn collect_from_class_members(
     class_name: Option<&str>,
 ) {
     for member in members.iter() {
-        if let ClassLikeMember::Method(method) = member
-            && let MethodBody::Concrete(block) = &method.body
-        {
-            let body_start = block.left_brace.start.offset;
-            let body_end = block.right_brace.end.offset;
+        match member {
+            ClassLikeMember::Method(method) => {
+                // A constructor-promoted property carries its hooks in
+                // the parameter list, so they need checking whether or
+                // not the constructor itself has a body.
+                for param in method.parameter_list.parameters.iter() {
+                    if let Some(hooks) = &param.hooks {
+                        check_property_hooks(hooks, ctx, resolver, class_name);
+                    }
+                }
 
-            let is_static = method
-                .modifiers
-                .iter()
-                .any(|m| matches!(m, Modifier::Static(_)));
+                let MethodBody::Concrete(block) = &method.body else {
+                    continue;
+                };
+                let body_start = block.left_brace.start.offset;
+                let body_end = block.right_brace.end.offset;
 
-            let scope = collect_function_scope_with_kind_and_resolver(
-                &method.parameter_list,
-                block.statements.as_slice(),
-                body_start,
-                body_end,
-                FrameKind::Method,
-                resolver,
-                class_name.map(|s| s.to_string()),
-            );
+                let is_static = method
+                    .modifiers
+                    .iter()
+                    .any(|m| matches!(m, Modifier::Static(_)));
 
-            check_scope(&scope, block.statements.as_slice(), ctx, !is_static);
+                let body = ScopeBody::Statements(block.statements.as_slice());
+                let scope = collect_function_scope_with_kind_and_resolver(
+                    &method.parameter_list,
+                    body,
+                    body_start,
+                    body_end,
+                    FrameKind::Method,
+                    resolver,
+                    class_name.map(|s| s.to_string()),
+                );
+
+                check_scope(&scope, body, ctx, !is_static);
+            }
+            ClassLikeMember::Property(Property::Hooked(hooked)) => {
+                check_property_hooks(&hooked.hook_list, ctx, resolver, class_name);
+            }
+            _ => {}
         }
+    }
+}
+
+/// Check each `get`/`set` body of a hooked property.
+///
+/// A hook body is a variable scope of its own, with `$this` always
+/// defined (a hook is never static) and, for a `set` hook, the assigned
+/// value as a parameter.
+fn check_property_hooks(
+    hooks: &PropertyHookList<'_>,
+    ctx: &mut DiagnosticCtx<'_>,
+    resolver: Option<ByRefResolver<'_>>,
+    class_name: Option<&str>,
+) {
+    for hook in hooks.hooks.iter() {
+        let Some((body_start, body_end, body)) = hook_body_span(hook) else {
+            continue;
+        };
+
+        let scope = collect_hook_scope_with_resolver(
+            hook,
+            body,
+            body_start,
+            body_end,
+            resolver,
+            class_name.map(|s| s.to_string()),
+        );
+
+        check_scope(&scope, body, ctx, true);
     }
 }
 
@@ -340,20 +387,20 @@ fn collect_from_class_members(
 /// positives from branch-dependent definitions.
 fn check_scope(
     scope: &ScopeMap,
-    statements: &[Statement<'_>],
+    body: ScopeBody<'_, '_>,
     ctx: &mut DiagnosticCtx<'_>,
     this_is_defined: bool,
 ) {
     // Bail out early if the function uses features that make static
     // analysis unsound.
-    if has_dynamic_variables(statements) || has_extract_call(statements) {
+    if has_dynamic_variables(body) || has_extract_call(body) {
         return;
     }
 
     // Collect variable names referenced by compact() calls — these
     // variables are used by string name and should be treated as
     // defined.
-    let compact_vars = collect_compact_vars(statements);
+    let compact_vars = collect_compact_vars(body);
 
     // Collect variable names annotated with `/** @var Type $var */`
     // inline docblocks, each with the byte offset of its `$` sigil so it
@@ -363,13 +410,13 @@ fn check_scope(
 
     // Collect byte offsets suppressed by the `@` error control
     // operator (e.g. `@$var`).
-    let error_suppressed_offsets = collect_error_suppressed_offsets(statements);
+    let error_suppressed_offsets = collect_error_suppressed_offsets(body);
 
     // Collect byte offsets of variables inside `isset()` and `empty()`,
     // plus reads guarded by an `isset()`/`!isset()` earlier in the same
     // short-circuiting `&&`/`||` chain.
-    let mut guarded_offsets = collect_guarded_offsets(statements);
-    guarded_offsets.extend(collect_short_circuit_guarded_offsets(statements));
+    let mut guarded_offsets = collect_guarded_offsets(body);
+    guarded_offsets.extend(collect_short_circuit_guarded_offsets(body));
 
     if scope.frames.is_empty() {
         return;

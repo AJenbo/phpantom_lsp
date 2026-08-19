@@ -20,6 +20,7 @@ use mago_syntax::cst::*;
 use mago_syntax::walker::Walker;
 
 use crate::atom::bytes_to_str;
+use crate::scope_collector::ScopeBody;
 
 /// Emit [`Walker`] overrides that stop traversal at nested variable
 /// scopes (closures, arrow functions, named function declarations) while
@@ -95,15 +96,12 @@ pub(super) fn collect_var_annotations(content: &str) -> Vec<(String, u32)> {
 
 /// Collect byte offsets of variable reads that appear under the `@` error
 /// suppression operator (e.g. `@$var`, `@foo($var)`).
-pub(super) fn collect_error_suppressed_offsets(statements: &[Statement<'_>]) -> HashSet<u32> {
-    let walker = SuppressedWalker;
+pub(super) fn collect_error_suppressed_offsets(body: ScopeBody<'_, '_>) -> HashSet<u32> {
     let mut ctx = SuppressedCtx {
         offsets: HashSet::new(),
         error_depth: 0,
     };
-    for stmt in statements {
-        walker.walk_statement(stmt, &mut ctx);
-    }
+    body.walk_with(&SuppressedWalker, &mut ctx);
     ctx.offsets
 }
 
@@ -142,12 +140,9 @@ impl<'ast, 'arena> Walker<'ast, 'arena, SuppressedCtx> for SuppressedWalker {
 
 /// Collect byte offsets of variable reads that appear inside `isset()` or
 /// `empty()` calls.  These variables are being guarded, not used.
-pub(super) fn collect_guarded_offsets(statements: &[Statement<'_>]) -> HashSet<u32> {
-    let walker = GuardedWalker;
+pub(super) fn collect_guarded_offsets(body: ScopeBody<'_, '_>) -> HashSet<u32> {
     let mut offsets = HashSet::new();
-    for stmt in statements {
-        walker.walk_statement(stmt, &mut offsets);
-    }
+    body.walk_with(&GuardedWalker, &mut offsets);
     offsets
 }
 
@@ -213,12 +208,9 @@ fn collect_guard_targets(expr: &Expression<'_>, offsets: &mut HashSet<u32>) {
 /// This only covers the operands of the boolean expression itself, not
 /// the surrounding `if`/`while` body — a plain `isset($x)` check does
 /// not otherwise define `$x` (see `flags_undefined_variable_after_isset_guard`).
-pub(super) fn collect_short_circuit_guarded_offsets(statements: &[Statement<'_>]) -> HashSet<u32> {
-    let walker = ShortCircuitWalker;
+pub(super) fn collect_short_circuit_guarded_offsets(body: ScopeBody<'_, '_>) -> HashSet<u32> {
     let mut offsets = HashSet::new();
-    for stmt in statements {
-        walker.walk_statement(stmt, &mut offsets);
-    }
+    body.walk_with(&ShortCircuitWalker, &mut offsets);
     offsets
 }
 

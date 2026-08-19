@@ -13283,3 +13283,51 @@ class Counter
     );
     assert_eq!(diags[0].range.start.line, 8);
 }
+
+/// A closure embedded in an arrow-bodied hook is its own scope.  The hook
+/// walk used to treat the arrow form as "a single expression with nothing
+/// to assign" and stop there, so the closure's parameters never got a
+/// snapshot and every member access on them was skipped fail-open.
+#[test]
+fn closure_inside_an_arrow_bodied_hook_is_checked() {
+    let backend = create_test_backend();
+    let uri = "file:///arrow_hook_closure.php";
+    let text = r#"<?php
+class Part
+{
+    public function format(): string
+    {
+        return '';
+    }
+}
+
+class Bag
+{
+    /** @var Part[] */
+    private array $parts = [];
+
+    public array $formatted {
+        get => array_map(fn (Part $p) => $p->nope(), $this->parts);
+    }
+
+    public array $listed {
+        get => array_map(function (Part $p) {
+            return $p->format();
+        }, $this->parts);
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    let messages: Vec<&String> = diags.iter().map(|d| &d.message).collect();
+    assert_eq!(
+        diags.len(),
+        1,
+        "only the bogus `nope()` call should be flagged, got: {:?}",
+        messages
+    );
+    assert!(
+        messages[0].contains("nope"),
+        "the diagnostic should name `nope`, got: {:?}",
+        messages
+    );
+}

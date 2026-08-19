@@ -21,6 +21,8 @@ use std::collections::HashSet;
 use mago_syntax::cst::*;
 use mago_syntax::walker::Walker;
 
+use crate::scope_collector::ScopeBody;
+
 /// Emit [`Walker`] overrides that stop traversal at nested variable
 /// scopes (closures, arrow functions, named function declarations) while
 /// still walking an anonymous class's constructor arguments, which belong
@@ -40,14 +42,11 @@ macro_rules! stop_at_inner_scopes {
 
 // ─── Dynamic variable / extract detection ───────────────────────────────────
 
-/// Returns `true` if the statements contain variable variables (`$$x` or
-/// `${expr}`) anywhere in the function body (excluding nested scopes).
-pub(super) fn has_dynamic_variables(statements: &[Statement<'_>]) -> bool {
-    let walker = DynamicVariableWalker;
+/// Returns `true` if the body contains variable variables (`$$x` or
+/// `${expr}`) anywhere in it (excluding nested scopes).
+pub(super) fn has_dynamic_variables(body: ScopeBody<'_, '_>) -> bool {
     let mut found = false;
-    for stmt in statements {
-        walker.walk_statement(stmt, &mut found);
-    }
+    body.walk_with(&DynamicVariableWalker, &mut found);
     found
 }
 
@@ -93,13 +92,10 @@ impl<'ast, 'arena> Walker<'ast, 'arena, bool> for DynamicVariableWalker {
     stop_at_inner_scopes!(bool);
 }
 
-/// Returns `true` if the statements contain a call to `extract()`.
-pub(super) fn has_extract_call(statements: &[Statement<'_>]) -> bool {
-    let walker = ExtractCallWalker;
+/// Returns `true` if the body contains a call to `extract()`.
+pub(super) fn has_extract_call(body: ScopeBody<'_, '_>) -> bool {
     let mut found = false;
-    for stmt in statements {
-        walker.walk_statement(stmt, &mut found);
-    }
+    body.walk_with(&ExtractCallWalker, &mut found);
     found
 }
 
@@ -120,12 +116,9 @@ impl<'ast, 'arena> Walker<'ast, 'arena, bool> for ExtractCallWalker {
 /// Collect variable names referenced by `compact('var1', 'var2', …)`
 /// calls.  These variables are used by string name and should be
 /// considered defined.
-pub(crate) fn collect_compact_vars(statements: &[Statement<'_>]) -> HashSet<String> {
-    let walker = CompactWalker;
+pub(crate) fn collect_compact_vars(body: ScopeBody<'_, '_>) -> HashSet<String> {
     let mut vars = HashSet::new();
-    for stmt in statements {
-        walker.walk_statement(stmt, &mut vars);
-    }
+    body.walk_with(&CompactWalker, &mut vars);
     vars
 }
 
@@ -204,16 +197,13 @@ fn collect_compact_name_from_elem(elem: &ArrayElement<'_>, vars: &mut HashSet<St
 
 // ─── get_defined_vars() detection ───────────────────────────────────────────
 
-/// Returns true if the statements contain a call to `get_defined_vars()`.
+/// Returns true if the body contains a call to `get_defined_vars()`.
 /// When present in a scope, all variables defined in that scope are
 /// considered used (e.g. for debug dumps), so unused-variable diagnostics
 /// should be suppressed for them.
-pub(crate) fn has_get_defined_vars(statements: &[Statement<'_>]) -> bool {
-    let walker = GetDefinedVarsWalker;
+pub(crate) fn has_get_defined_vars(body: ScopeBody<'_, '_>) -> bool {
     let mut found = false;
-    for stmt in statements {
-        walker.walk_statement(stmt, &mut found);
-    }
+    body.walk_with(&GetDefinedVarsWalker, &mut found);
     found
 }
 

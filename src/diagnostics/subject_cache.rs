@@ -98,7 +98,9 @@ impl SubjectCacheKey {
             && !subject_text.starts_with("$this->")
         {
             // Extract the bare variable name (e.g. "$file" from "$file"
-            // or from a chain like "$file->foo()").
+            // or from a chain like "$file->foo()").  A null-safe hop is
+            // already normalised to `->` by the subject-text lowering,
+            // so there is no `?` to strip here.
             let var_name = subject_text
                 .find("->")
                 .map(|i| &subject_text[..i])

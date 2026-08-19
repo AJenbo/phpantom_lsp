@@ -249,21 +249,6 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B203. A custom Eloquent builder rebind can cache a degraded result on cache re-entry
-
-**Impact: Medium · Complexity: Medium-High**
-
-When `mark_in_flight(fqn)` reports same-thread re-entry on a custom
-builder's FQN, `apply_post_merge_stages` (`virtual_members/resolve.rs`)
-is skipped, but the base-inheritance-only rebound class is still
-inserted into the persistent resolved-class cache under
-`(fqn, generic_args)`. Nothing overwrites it afterwards unless the exact
-same specialization is re-requested outside an in-flight guard, so a
-later hover/completion/diagnostic on that builder specialization gets a
-result missing its virtual members, `@mixin` methods, and Laravel
-patches, until the entry is evicted by a file edit. Fix by skipping the
-cache insert whenever `apply_post_merge_stages` was skipped.
-
 ### B204. A custom Eloquent builder two levels below `Builder` fails to rebind its model
 
 **Impact: Low-Medium · Complexity: Medium**
@@ -306,30 +291,6 @@ no enclosing literal group (`Route::name('filament.' . $panelId . '.')
 returns `""` for a non-literal name and records nothing open). Both leave
 `route('filament.admin.pages.dashboard')`-style calls flagged unknown.
 
-### B209. A nullsafe first hop breaks the deprecated-diagnostic subject cache key
-
-**Impact: Low · Complexity: Low-Medium**
-
-`SubjectCacheKey::build` (`diagnostics/subject_cache.rs`) extracts a
-chain's variable name with `find("->")`, so a nullsafe first hop such as
-`$a?->b->deprecated()` yields the variable name `"$a?"` instead of `"$a"`.
-The def-offset lookup for that malformed name fails, so accesses before
-and after a reassignment of `$a` can share one cache entry, risking a
-stale type for the deprecation check.
-
-### B210. Undefined-variable diagnostics never check property hook bodies
-
-**Impact: Low-Medium · Complexity: Low-Medium**
-
-The undefined-variable walker (`diagnostics/undefined_variables/mod.rs`)
-and `scope_collector/build.rs` both only enumerate `ClassLikeMember::Method`
-bodies. Property hook bodies were taught to the symbol map, the forward
-walker, and unknown-member diagnostics, but this separate walker still
-skips them, so a typo such as `return $vlaue;` inside a `set` hook is
-never flagged. No false positives result — the bodies are simply
-unchecked — but the coverage gap is now user-visible since hooks are a
-supported, documented feature.
-
 ### B223. Switching workspace diagnostics off mid-session leaves its results in place
 
 **Impact: Low · Complexity: Medium**
@@ -347,25 +308,6 @@ means stopping a running pass, clearing `WorkspaceDiagnostics`, and
 telling the editor to drop what it was shown, and re-enabling afterwards
 has to be able to start a fresh pass (`workspace_diag_pass_started` is
 one-way today).
-
-### B214. A closure inside an arrow-bodied property hook gets no variable snapshot
-
-**Impact: Low · Complexity: Medium**
-
-`walk_property_hook_bodies` (`type_engine/variable/forward_walk/diagnostic_walk.rs`)
-assumes an arrow-form hook body is "a single expression with nothing to
-assign," but a closure embedded in that expression has its own
-parameters that never get a snapshot:
-
-```php
-public array $items {
-    get => array_map(fn ($p) => $p->format(), $this->items);
-}
-```
-
-Lookups on `$p` inside the closure return empty, so member diagnostics
-inside closures embedded in arrow-bodied hooks are silently skipped
-(fail-open) rather than checked.
 
 ### B215. A file closed mid-computation can have stale diagnostics reinserted after the close purge
 

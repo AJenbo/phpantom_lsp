@@ -21,7 +21,7 @@ use crate::atom::bytes_to_str;
 use crate::diagnostics::undefined_variables::{collect_compact_vars, has_get_defined_vars};
 use crate::parser::with_parsed_program;
 use crate::scope_collector::{
-    AccessKind, FrameKind, ScopeMap, collect_function_scope_with_kind,
+    AccessKind, FrameKind, ScopeBody, ScopeMap, collect_function_scope_with_kind,
     collect_function_scope_with_resolver,
 };
 use crate::types::PhpVersion;
@@ -106,8 +106,9 @@ impl<'ast, 'arena, 'a> mago_syntax::walker::Walker<'ast, 'arena, DiagnosticCtx<'
     fn walk_in_function(&self, func: &'ast Function<'arena>, ctx: &mut DiagnosticCtx<'a>) {
         let body_start = func.body.left_brace.start.offset;
         let body_end = func.body.right_brace.end.offset;
-        let compact_vars = collect_compact_vars(func.body.statements.as_slice());
-        let has_get_defined = has_get_defined_vars(func.body.statements.as_slice());
+        let body = ScopeBody::Statements(func.body.statements.as_slice());
+        let compact_vars = collect_compact_vars(body);
+        let has_get_defined = has_get_defined_vars(body);
         let scope = collect_function_scope_with_resolver(
             &func.parameter_list,
             func.body.statements.as_slice(),
@@ -128,8 +129,9 @@ impl<'ast, 'arena, 'a> mago_syntax::walker::Walker<'ast, 'arena, DiagnosticCtx<'
         // Collect promoted parameter names so we can exclude them.
         let promoted_params = collect_promoted_params(&method.parameter_list);
 
-        let compact_vars = collect_compact_vars(block.statements.as_slice());
-        let has_get_defined = has_get_defined_vars(block.statements.as_slice());
+        let body = ScopeBody::Statements(block.statements.as_slice());
+        let compact_vars = collect_compact_vars(body);
+        let has_get_defined = has_get_defined_vars(body);
         let scope = collect_function_scope_with_kind(
             &method.parameter_list,
             block.statements.as_slice(),

@@ -1086,11 +1086,18 @@ fn walk_property_hook_bodies(
         let mut scope = seed_property_hook_scope(property_hint, hook, &ctx);
         record_scope_snapshot(hook.span().start.offset, &scope);
 
-        // A one-line hook holds a single expression with nothing to
-        // assign into the scope, so the snapshot above already describes
-        // every point in it.  A block body still needs the walk.
-        if let PropertyHookConcreteBody::Block(block) = body {
-            walk_body_for_diagnostics(block.statements.iter(), &mut scope, &ctx);
+        match body {
+            PropertyHookConcreteBody::Block(block) => {
+                walk_body_for_diagnostics(block.statements.iter(), &mut scope, &ctx);
+            }
+            // A one-line hook holds a single expression with nothing to
+            // assign into the scope, so the snapshot above already
+            // describes every point in it — except inside a closure
+            // embedded in that expression, whose parameters need their
+            // own snapshot.
+            PropertyHookConcreteBody::Expression(expr_body) => {
+                walk_closures_in_expr(expr_body.expression, &scope, &ctx, None);
+            }
         }
     }
 }

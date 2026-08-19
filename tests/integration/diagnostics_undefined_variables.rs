@@ -1961,3 +1961,165 @@ function test(): void {
         "Diagnostic should be for $undefined",
     );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Property hooks
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn flags_undefined_variable_in_block_property_hook() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+class Person {
+    private string $first = '';
+    public string $name {
+        get {
+            return $frist;
+        }
+    }
+}
+"#,
+    );
+    assert_eq!(
+        diags.len(),
+        1,
+        "A typo inside a block-bodied hook should be flagged. Got: {:?}",
+        diags,
+    );
+    assert!(diags[0].message.contains("$frist"));
+}
+
+#[test]
+fn flags_undefined_variable_in_arrow_property_hook() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+class Person {
+    private string $first = '';
+    public string $name {
+        get => $frist;
+    }
+}
+"#,
+    );
+    assert_eq!(
+        diags.len(),
+        1,
+        "A typo inside an arrow-bodied hook should be flagged. Got: {:?}",
+        diags,
+    );
+    assert!(diags[0].message.contains("$frist"));
+}
+
+#[test]
+fn flags_undefined_variable_in_promoted_property_hook() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+class Person {
+    public function __construct(
+        public string $name {
+            get => $frist;
+        },
+    ) {}
+}
+"#,
+    );
+    assert_eq!(
+        diags.len(),
+        1,
+        "A typo inside a promoted property's hook should be flagged. Got: {:?}",
+        diags,
+    );
+    assert!(diags[0].message.contains("$frist"));
+}
+
+#[test]
+fn no_diagnostic_for_implicit_set_hook_value() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+class Person {
+    private string $stored = '';
+    public string $name {
+        get => $this->stored;
+        set {
+            $this->stored = trim($value);
+        }
+    }
+    public string $nick {
+        set => $this->stored = strtolower($value);
+    }
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "A set hook's implicit $value is always defined. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn no_diagnostic_for_declared_set_hook_parameter() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+class Person {
+    private string $stored = '';
+    public string $name {
+        set (string $incoming) {
+            $this->stored = $incoming;
+        }
+    }
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "A set hook's declared parameter is defined. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn no_diagnostic_for_isset_guarded_read_in_arrow_hook() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+class Person {
+    public bool $known {
+        get => isset($maybe) && $maybe !== '';
+    }
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "An isset() guard inside an arrow-bodied hook suppresses the read. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn hook_body_does_not_leak_variables_into_a_sibling_hook() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+class Person {
+    public string $name {
+        get {
+            $local = 'x';
+            return $local;
+        }
+    }
+    public string $other {
+        get {
+            return $local;
+        }
+    }
+}
+"#,
+    );
+    assert_eq!(
+        diags.len(),
+        1,
+        "Each hook is its own scope. Got: {:?}",
+        diags,
+    );
+    assert!(diags[0].message.contains("$local"));
+}
