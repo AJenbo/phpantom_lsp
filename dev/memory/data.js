@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787111441020,
+  "lastUpdate": 1787112112638,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -23629,6 +23629,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 82,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "bc6c58bccf544e458c11ac7e32a59a9eaaa3e374",
+          "message": "PHPStan: Check for /larastan to allow for forks, and also allow if a\nphpstan.neon exists",
+          "timestamp": "2026-08-19T05:40:32+02:00",
+          "tree_id": "32a9be44f68fb3cfbb2d0c691ff7a1512790c1a9",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/bc6c58bccf544e458c11ac7e32a59a9eaaa3e374"
+        },
+        "date": 1787112105858,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 34.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 70.3,
             "unit": "MiB"
           }
         ]
