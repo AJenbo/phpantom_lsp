@@ -1161,17 +1161,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b216-a-project-wide-external-tool-run-can-overwrite-a-fresher-per-file-result-for-a-file-that-stays-open" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B216. A project-wide external tool run can overwrite a fresher per-file result for a file that stays open
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b199-a-workspace-diagnostics-scan-never-replaces-a-worker-retired-by-the-give-up-timeout" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2164,17 +2153,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b216-a-project-wide-external-tool-run-can-overwrite-a-fresher-per-file-result-for-a-file-that-stays-open" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B216. A project-wide external tool run can overwrite a fresher per-file result for a file that stays open
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b199-a-workspace-diagnostics-scan-never-replaces-a-worker-retired-by-the-give-up-timeout" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2795,24 +2773,6 @@ override it.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b216-a-project-wide-external-tool-run-can-overwrite-a-fresher-per-file-result-for-a-file-that-stays-open">B216. A project-wide external tool run can overwrite a fresher per-file result for a file that stays open<a class="headerlink" href="#b216-a-project-wide-external-tool-run-can-overwrite-a-fresher-per-file-result-for-a-file-that-stays-open" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
-<p><code>store_workspace_external_results</code> (<code>diagnostics/workspace.rs</code>) writes a
-project-wide external tool's scan-time results straight into the
-per-file <code>last_diags</code> caches (<code>phpstan_tool</code>, <code>phpcs_tool</code>,
-<code>mago_lint_tool</code>, <code>mago_analyze_tool</code>) for any file that is open when it
-writes. If a concurrent per-file run of the same tool (triggered by an
-edit to that same open file) finishes and writes a fresher result to the
-same cache entry while the project-wide scan is still awaiting
-<code>flush_workspace_diag_updates</code> (up to the 10s <code>REFRESH_TIMEOUT</code>), the
-scan's unconditional <code>cache.lock().insert(...)</code> at the end can overwrite
-that fresher, already-corrected result with its own stale one — a
-last-write-wins race, since neither writer knows about the other. Fixing
-this needs some notion of freshness (e.g. a per-uri generation counter
-bumped by the per-file workers, with the project-wide writer skipping
-its own write when the generation has moved since the scan captured that
-file) rather than a simple open/closed re-check, which is why it is
-tracked separately from the closed-file race this was split off from.</p>
 <h3 id="b199-a-workspace-diagnostics-scan-never-replaces-a-worker-retired-by-the-give-up-timeout">B199. A workspace diagnostics scan never replaces a worker retired by the give-up timeout<a class="headerlink" href="#b199-a-workspace-diagnostics-scan-never-replaces-a-worker-retired-by-the-give-up-timeout" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium-High · Complexity: Medium</strong></p>
 <p>The native diagnostics scan spawns a fixed worker pool once per pass
