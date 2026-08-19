@@ -962,17 +962,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b217-renaming-a-constant-leaves-defined-and-constant-calls-unrenamed" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B217. Renaming a constant leaves <code>defined()</code> and <code>constant()</code> calls unrenamed
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b190-reference-count-hints-read-zero-for-a-global-function-called-from-namespaced-code" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1976,17 +1965,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b217-renaming-a-constant-leaves-defined-and-constant-calls-unrenamed" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B217. Renaming a constant leaves <code>defined()</code> and <code>constant()</code> calls unrenamed
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b190-reference-count-hints-read-zero-for-a-global-function-called-from-namespaced-code" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2492,27 +2470,6 @@ executed, when the array it iterates was actually emptied first).</p>
 <h2 id="arithmetic">Arithmetic<a class="headerlink" href="#arithmetic" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
-<h3 id="b217-renaming-a-constant-leaves-defined-and-constant-calls-unrenamed">B217. Renaming a constant leaves <code>defined()</code> and <code>constant()</code> calls unrenamed<a class="headerlink" href="#b217-renaming-a-constant-leaves-defined-and-constant-calls-unrenamed" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium-High · Complexity: Medium</strong></p>
-<p><code>defined('FOO')</code> and <code>constant('FOO')</code> name a constant through a string
-literal, and the symbol map emits no <code>ConstantReference</code> span for either.
-Renaming <code>FOO</code> therefore rewrites the declaration and every ordinary use
-but leaves those calls asking about the old name, so a <code>defined()</code> guard
-silently stops guarding and <code>constant()</code> fails at runtime. Find
-References under-reports them for the same reason, and neither hovers or
-navigates.</p>
-<p><code>try_emit_define_name_span</code>
-(<code>symbol_map/extraction/expressions/calls.rs</code>) already does this for
-<code>define()</code> and is the shape to follow, with two differences: the span is
-a use rather than a declaration (<code>is_definition: false</code>), and a string
-naming a class constant (<code>constant('Foo::BAR')</code>) must be excluded or
-routed to <code>MemberAccess</code> instead, since it names a member and not a
-global constant.</p>
-<p>The same helper also declines a name the source does not spell
-literally, so <code>define('App\\FOO', 1)</code> (an escaped backslash inside a
-single-quoted string, which reads as <code>App\FOO</code>) still produces no span
-and stays unrenamed. Covering it means spanning a sub-range of the
-literal that agrees with the escaped spelling.</p>
 <h3 id="b190-reference-count-hints-read-zero-for-a-global-function-called-from-namespaced-code">B190. Reference-count hints read zero for a global function called from namespaced code<a class="headerlink" href="#b190-reference-count-hints-read-zero-for-a-global-function-called-from-namespaced-code" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <p><code>symbol_name_keys</code> (<code>reference_index.rs</code>) credits a call's reference
