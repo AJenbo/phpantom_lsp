@@ -328,9 +328,15 @@ fn push_changed_member_keys(
 
 /// Push the members whose type comes from a method body, and which a
 /// signature comparison therefore cannot rule out as unchanged.
+///
+/// A `mixed` return (native or docblock) is treated the same as no
+/// declared type: both fall through to body inference, so a body-only
+/// edit to either can change the type callers see.
 fn push_body_inferred_member_keys(keys: &mut HashSet<ReferenceIndexKey>, class: &ClassInfo) {
     for method in class.methods.iter() {
-        if method.return_type.is_none() && !method.name.eq_ignore_ascii_case("__construct") {
+        if method.return_type.as_ref().is_none_or(|t| t.is_mixed())
+            && !method.name.eq_ignore_ascii_case("__construct")
+        {
             push_member_keys(keys, &method.name);
         }
     }

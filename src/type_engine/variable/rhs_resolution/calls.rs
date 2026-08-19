@@ -2123,17 +2123,52 @@ pub(super) fn resolve_owner_method_call(
     let results =
         Backend::resolve_method_return_types_with_args(owner, method_name, &text_args, &mr_ctx);
     if !results.is_empty() {
-        return match ret_type_string {
+        // A `mixed` hint carries no information. `results` being non-empty
+        // despite it means `resolve_method_return_types_with_args` reached
+        // its own body-inference fallback and resolved real classes —
+        // attaching the stale `mixed` hint on top would make the resolved
+        // type display as `mixed` instead of the inferred class.
+        let hint = ret_type_string.filter(|t| !t.is_mixed());
+        return match hint {
             Some(hint) => ResolvedType::from_classes_with_hint(results, hint),
             None => ResolvedType::from_classes(results),
         };
     }
 
+    // Body return type inference fallback: when the method has no declared
+    // return type, or its only declared type is `mixed` (native or
+    // docblock — carries no information, so reading the body can only
+    // narrow it, never contradict it), try to infer the return type from
+    // the method body.  This handles non-class types (list<Foo>, int,
+    // array shapes) that resolve_method_return_types_with_args cannot
+    // represent.  Tried before the type-string-only fallback below so
+    // that a `mixed` hint doesn't win by default when inference has
+    // something better to offer.
+    if method_ref.is_some_and(|m| {
+        m.return_type.as_ref().is_none_or(|t| t.is_mixed()) && m.name_offset != 0 && !m.is_virtual
+    }) && let Some(backend) = ctx.backend
+        && let Some(inferred) = crate::type_engine::call_resolution::try_infer_body_return_type(
+            backend,
+            &owner.fqn(),
+            method_ref.unwrap(),
+        )
+        && !inferred.is_void()
+        && !inferred.is_mixed()
+    {
+        return vec![resolved_type_with_lookup(
+            inferred,
+            current_class_name,
+            ctx.all_classes,
+            ctx.class_loader,
+        )];
+    }
+
     // The method has a return type string but `type_hint_to_classes_typed`
     // found no matching class (e.g. `list<Widget>`, `int`, `array{name:
-    // string}`).  Return a type-string-only entry so that consumers reading
-    // `.type_string` (hover, foreach resolution, null-coalesce stripping)
-    // still get the information.
+    // string}`), or inference above produced nothing useful.  Return a
+    // type-string-only entry so that consumers reading `.type_string`
+    // (hover, foreach resolution, null-coalesce stripping) still get the
+    // information.
     //
     // Return the type string even for non-informative types like `array` or
     // `mixed` — a correct-but-vague type is better than keeping the
@@ -2150,29 +2185,6 @@ pub(super) fn resolve_owner_method_call(
         let parsed_effective = expanded.unwrap_or(hint);
         return vec![resolved_type_with_lookup(
             parsed_effective,
-            current_class_name,
-            ctx.all_classes,
-            ctx.class_loader,
-        )];
-    }
-
-    // Body return type inference fallback: when the method has no declared
-    // return type and no @return docblock, try to infer the return type
-    // from the method body.  This handles non-class types (list<Foo>, int,
-    // array shapes) that resolve_method_return_types_with_args cannot
-    // represent.
-    if method_ref.is_some_and(|m| m.return_type.is_none() && m.name_offset != 0 && !m.is_virtual)
-        && let Some(backend) = ctx.backend
-        && let Some(inferred) = crate::type_engine::call_resolution::try_infer_body_return_type(
-            backend,
-            &owner.fqn(),
-            method_ref.unwrap(),
-        )
-        && !inferred.is_void()
-        && !inferred.is_mixed()
-    {
-        return vec![resolved_type_with_lookup(
-            inferred,
             current_class_name,
             ctx.all_classes,
             ctx.class_loader,

@@ -368,6 +368,11 @@ class ScaffoldingUntypedFactory
 {
     public function createPen() { return new Pen(); }
 
+    public static function createPenStatic() { return new Pen(); }
+
+    /** @return mixed */
+    public function createPenMixed() { return new Pen(); }
+
     public function createTool(bool $flag)
     {
         if ($flag) {

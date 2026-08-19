@@ -472,7 +472,47 @@ var unconditionally.
 
 ## Array types
 
-No outstanding items.
+### B188. A concrete `ArrayAccess::offsetGet()` override is ignored on subscript read
+
+**Impact: Low-Medium · Complexity: Medium**
+
+```php
+class Pen {
+    public function write(): void {}
+}
+
+class PlainArrayAccess implements \ArrayAccess {
+    /** @var Pen[] */
+    private array $items = [];
+    public function offsetExists(mixed $offset): bool { return isset($this->items[$offset]); }
+    public function offsetGet(mixed $offset): Pen { return $this->items[$offset] ?? new Pen(); }
+    public function offsetSet(mixed $offset, mixed $value): void { $this->items[$offset] = $value; }
+    public function offsetUnset(mixed $offset): void { unset($this->items[$offset]); }
+}
+
+function test(): void {
+    $pens = new PlainArrayAccess();
+    $pens[0]->write();  // reported: subject type 'TValue' could not be resolved
+}
+```
+
+`PlainArrayAccess` declares no generics at all and its own `offsetGet()`
+returns a concrete `Pen`, but `$pens[0]` resolves through the stub
+interface's own `ArrayAccess<TKey, TValue>::offsetGet(): TValue`
+signature instead of the subclass's override, leaking the interface's
+unbound template parameter name as a literal, unresolvable type. This
+reproduces standalone with a single class and a single subscript
+read — no second `ArrayAccess` implementer or generic binding is needed
+to trigger it, though a file with more than one `ArrayAccess`
+implementer changes which specific subscript expression the diagnostic
+lands on, suggesting the wrong-signature lookup is cached or keyed by
+something coarser than the receiver class.
+
+Whatever resolves an `offsetGet()` call for `$obj[$key]` needs to prefer
+the receiver's own (or nearest-ancestor's) concrete method the same way
+ordinary method-call resolution already does, falling back to the
+interface's own signature only when the receiver truly does not
+override it.
 
 ## Docblock handling
 

@@ -213,17 +213,17 @@ fn infer_body_return_type(
     // to that declaring file, so reading the receiver's own file at
     // that offset would land on the wrong location.  Resolve the class
     // that actually declares the method and read *its* file.
-    let file_uri = backend
-        .find_or_load_class(class_fqn)
-        .map(|receiver| {
-            let loader = |name: &str| backend.find_or_load_class(name);
-            crate::hover::find_declaring_class(
-                &receiver,
-                &method.name,
-                &crate::hover::MemberKindForOrigin::Method,
-                &loader,
-            )
-        })
+    let declaring_class = backend.find_or_load_class(class_fqn).map(|receiver| {
+        let loader = |name: &str| backend.find_or_load_class(name);
+        crate::hover::find_declaring_class(
+            &receiver,
+            &method.name,
+            &crate::hover::MemberKindForOrigin::Method,
+            &loader,
+        )
+    });
+    let file_uri = declaring_class
+        .as_ref()
         .and_then(|decl| {
             backend
                 .symbols
@@ -275,7 +275,29 @@ fn infer_body_return_type(
 
     // Prefer the effective type (richer, e.g. `list<string>`)
     // over the native type (e.g. `array`).
-    Some(result.effective.unwrap_or(result.native))
+    let inferred = result.effective.unwrap_or(result.native);
+
+    // A method whose declaring trait/class has `@template` parameters can
+    // have its body infer a bare, unsubstituted parameter name (e.g.
+    // `@param T $t` / `return $t;` infers literal `T`) when the caller's
+    // merge-time substitution — which resolves `T` to a concrete type or
+    // erases it to `mixed` for the *using* class — never touches the
+    // trait's own source file that this re-reads.  A raw template name is
+    // no more informative than `mixed` and would otherwise leak to the
+    // user as if it were a real type, so reject it the same way.
+    if let Some(decl) = declaring_class.as_ref() {
+        let mut template_params: Vec<String> = method
+            .template_params
+            .iter()
+            .map(|p| p.to_string())
+            .collect();
+        template_params.extend(decl.template_params.iter().map(|p| p.to_string()));
+        if inferred.references_any_template_param(&template_params) {
+            return None;
+        }
+    }
+
+    Some(inferred)
 }
 
 // ── Bundled request-scope activation ────────────────────────────────────────

@@ -1,0 +1,23 @@
+// test: a declared `@return mixed` does not block body-return inference
+// feature: completion
+// `mixed` carries no information, so it is treated the same as an absent
+// return type: the body is still read for a more useful inferred type.
+// expect: barMethod(
+---
+<?php
+
+class MixedReturnFactory {
+    /** @return mixed */
+    public function make() {
+        return new MixedReturnItem();
+    }
+}
+
+class MixedReturnItem {
+    public function barMethod(): void {}
+}
+
+function testMixedReturn(MixedReturnFactory $factory): void {
+    $item = $factory->make();
+    $item-><>
+}

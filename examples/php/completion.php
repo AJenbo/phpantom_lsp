@@ -4661,6 +4661,16 @@ class BodyReturnTypeDemo
         $pen = $factory->createPen();
         $pen->write();
 
+        // A static call with no declared return type reads the body the
+        // same way an instance call does.
+        $staticPen = Scaffolding\ScaffoldingUntypedFactory::createPenStatic();
+        $staticPen->write();
+
+        // A declared `@return mixed` carries no information — every type
+        // satisfies it — so the body is still read for a real answer.
+        $mixedPen = $factory->createPenMixed();
+        $mixedPen->write();
+
         // Multiple returns: union of `new Scaffolding\Pen()` and `new Scaffolding\Pencil()`
         $tool = $factory->createTool(true);
         $tool->write();                           // shared by Scaffolding\Pen (also Scaffolding\Pencil via sketch)

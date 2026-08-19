@@ -37,6 +37,10 @@ function runDemoAssertions(): void
     $factory = new Scaffolding\ScaffoldingUntypedFactory();
     $pen = $factory->createPen();
     assert($pen instanceof Scaffolding\Pen, 'createPen() must return Scaffolding\Pen (inferred from body)');
+    $staticPen = Scaffolding\ScaffoldingUntypedFactory::createPenStatic();
+    assert($staticPen instanceof Scaffolding\Pen, 'createPenStatic() must return Scaffolding\Pen (inferred from body of a static call)');
+    $mixedPen = $factory->createPenMixed();
+    assert($mixedPen instanceof Scaffolding\Pen, 'createPenMixed() must return Scaffolding\Pen (inferred from body despite the declared @return mixed)');
     $tool = $factory->createTool(true);
     assert($tool instanceof Scaffolding\Pen || $tool instanceof Scaffolding\Pencil, 'createTool() must return Scaffolding\Pen|Scaffolding\Pencil');
 

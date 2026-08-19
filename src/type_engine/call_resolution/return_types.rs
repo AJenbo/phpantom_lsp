@@ -1601,8 +1601,13 @@ impl Backend {
                 }
             }
 
-            // Fall back to plain return type
-            if let Some(ref ret) = method.return_type {
+            // Fall back to plain return type.  A `mixed` return (native or
+            // docblock) carries no information, so it is treated the same
+            // as no declared type at all: skip straight to body inference
+            // below rather than resolving it to zero classes here.
+            if let Some(ref ret) = method.return_type
+                && !ret.is_mixed()
+            {
                 // When the return type is `parent`, resolve to the actual
                 // parent class rather than returning the owning class.
                 if ret.is_parent_ref() {
@@ -1642,7 +1647,8 @@ impl Backend {
             }
             // Try body return type inference as a last resort.
             // Only for real (non-virtual, non-stub) methods that genuinely
-            // lack a return type declaration and docblock @return tag.
+            // lack a return type declaration and docblock @return tag, or
+            // whose only declared type is `mixed`.
             if method.name_offset != 0
                 && !method.is_virtual
                 && let Some(backend) = mr_ctx.backend
