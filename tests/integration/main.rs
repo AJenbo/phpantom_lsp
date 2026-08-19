@@ -190,6 +190,7 @@ mod php_version;
 mod preg_match_shapes;
 mod references;
 mod references_laravel_trans;
+mod reflection_property_types;
 mod reparse_symbol_eviction;
 mod return_type_resolution;
 mod self_out;

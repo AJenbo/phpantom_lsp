@@ -2819,6 +2819,61 @@ async fn test_member_references_through_property_receivers() {
     }
 }
 
+/// A member reached through a value read out of the Reflection API is a
+/// reference like any other, once the reflected read types.
+///
+/// The receiver is `$value`, so the deleted name-vs-class-name fallback
+/// could not have matched `Shell` on spelling; the hit proves the type
+/// travelled from `Configuration::$shell` through `getProperty('shell')`
+/// and `getValue()`.
+#[tokio::test]
+async fn test_const_reference_through_a_reflected_property_read() {
+    let backend = Backend::new_test_with_full_stubs();
+    let uri_shell = Url::parse("file:///Shell.php").unwrap();
+    let uri_config = Url::parse("file:///Configuration.php").unwrap();
+    let uri_use = Url::parse("file:///probe.php").unwrap();
+
+    let text_shell = concat!(
+        "<?php\n",                     // L0
+        "namespace Psy;\n",            // L1
+        "class Shell {\n",             // L2
+        "    const VERSION = 'v1';\n", // L3
+        "}\n",                         // L4
+    );
+    let text_config = concat!(
+        "<?php\n",                             // L0
+        "namespace Psy;\n",                    // L1
+        "class Configuration {\n",             // L2
+        "    private ?Shell $shell = null;\n", // L3
+        "}\n",                                 // L4
+    );
+    let text_use = concat!(
+        "<?php\n",                                         // L0
+        "namespace Psy;\n",                                // L1
+        "function probe(Configuration $config): void {\n", // L2
+        "    $refl = new \\ReflectionObject($config);\n",  // L3
+        "    $reflected = $refl->getProperty('shell');\n", // L4
+        "    $value = $reflected->getValue($config);\n",   // L5
+        "    echo $value::VERSION;\n",                     // L6
+        "}\n",                                             // L7
+    );
+
+    open_file(&backend, &uri_shell, text_shell).await;
+    open_file(&backend, &uri_config, text_config).await;
+    open_file(&backend, &uri_use, text_use).await;
+
+    let locs = find_references(&backend, &uri_shell, 3, 11, false).await;
+    let lines: Vec<u32> = locs
+        .iter()
+        .filter(|l| l.uri == uri_use)
+        .map(|l| l.range.start.line)
+        .collect();
+    assert!(
+        lines.contains(&6),
+        "expected the VERSION read on probe.php line 6 to be a reference, got {lines:?}"
+    );
+}
+
 // ─── Laravel string-key gating (non-Laravel projects) ──────────────────────
 
 /// A non-Laravel project can define its own `config()` function (common in

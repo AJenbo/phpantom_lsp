@@ -697,6 +697,12 @@ function runDemoAssertions(): void
     $widget = (new ReflectionInstantiationDemo())->build(Scaffolding\ReflectedWidget::class);
     assert($widget instanceof Scaffolding\ReflectedWidget, 'ReflectionClass::newInstance() must be Scaffolding\ReflectedWidget');
 
+    // ── Reflected property read ─────────────────────────────────────────
+    $holder = new Scaffolding\ReflectedHolder($widget);
+    $reflectedWidget = (new ReflectionInstantiationDemo())->reflectedWidget($holder);
+    assert($reflectedWidget instanceof Scaffolding\ReflectedWidget, 'ReflectionProperty::getValue() must be Scaffolding\ReflectedWidget');
+    assert((new ReflectionInstantiationDemo())->reflectedWidget(new Scaffolding\ReflectedHolder()) === null, 'A null private property must read back as null');
+
     // ── Inline new chaining ─────────────────────────────────────────────
     $fromNew = (new Scaffolding\Canvas())->getBrush();
     assert($fromNew instanceof Scaffolding\Brush, '(new Scaffolding\Canvas())->getBrush() must be Scaffolding\Brush');

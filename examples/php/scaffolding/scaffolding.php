@@ -40,6 +40,17 @@ class ReflectedWidget
     public function label(): string { return 'widget'; }
 }
 
+/** Holds the widget privately, so only reflection can read it back. */
+class ReflectedHolder
+{
+    private ?ReflectedWidget $widget;
+
+    public function __construct(?ReflectedWidget $widget = null)
+    {
+        $this->widget = $widget;
+    }
+}
+
 // ── Promote Constructor Parameter scaffolding ───────────────────────────────
 // Targets both a property and a parameter, because PHP applies an attribute
 // written on a promoted parameter to both of them.

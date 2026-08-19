@@ -53,14 +53,18 @@
 //!   their raw `PhpType`.
 //! - [`facade_owner`]: picking the concrete container class that types a
 //!   static call made through a Laravel facade.
+//! - [`reflection`]: typing a property read through the Reflection API,
+//!   whose result depends on the property name passed at the call site.
 mod arg_type_resolution;
 mod callable_target;
 mod facade_owner;
+mod reflection;
 mod return_types;
 mod target_cache;
 mod template_subs;
 
 pub(crate) use facade_owner::facade_concrete_owner;
+pub(crate) use reflection::{is_reflected_property_call, resolve_reflected_property_at_call};
 pub(crate) use return_types::{
     MethodReturnCtx, folded_class_constant_type, folded_global_constant_type,
     resolve_static_access_type,

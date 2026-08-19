@@ -87,6 +87,7 @@ unlikely to move the needle for most users.
 | C4  | Non-array functions with dynamic return types                                                                                                                               | Low         | High        |
 |     | **[Type Inference](todo/type-inference.md)**                                                                                                                                |             |             |
 | T20 | [Type narrowing reconciliation engine](todo/type-inference.md#t20-type-narrowing-reconciliation-engine) (CNF clause algebra, sure/sureNot tracking)                         | Medium-High | Very High   |
+| T42 | [Body-return inference is instance-call-only and stops at `@return mixed`](todo/type-inference.md#t42-body-return-inference-is-instance-call-only-and-stops-at-return-mixed) | Medium      | Medium      |
 | T41 | [`@param-out` is parsed but never read](todo/type-inference.md#t41-param-out-is-parsed-but-never-read)                                                                      | Medium      | Medium      |
 | T28 | [Template inference depth priority (shallowest bound wins)](todo/type-inference.md#t28-template-inference-depth-priority-shallowest-bound-wins)                             | Medium      | Medium-High |
 | T3  | [Property hooks (PHP 8.4)](todo/type-inference.md#t3-property-hooks-php-84)                                                                                                 | Medium      | Medium-High |
@@ -104,6 +105,12 @@ unlikely to move the needle for most users.
 | T10 | [Ternary expression as RHS of list destructuring](todo/type-inference.md#t10-ternary-expression-as-rhs-of-list-destructuring)                                               | Low         | Medium      |
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Medium      |
 |     | **[Bugs](todo/bugs.md)**                                                                                                                                                    |             |             |
+| B183 | [A Laravel Folio route is reported as unknown](todo/bugs.md#b183-a-laravel-folio-route-is-reported-as-unknown)                                                              | High        | Medium      |
+| B219 | [The `env()` helper offers no key completion](todo/bugs.md#b219-the-env-helper-offers-no-key-completion)                                                                     | Medium      | Low         |
+| B217 | [A `mixed`-returning accessor loses the type its arguments decide](todo/bugs.md#b217-a-mixed-returning-accessor-loses-the-type-its-arguments-decide)                         | Low-Medium  | High        |
+| B220 | [Translation hover does not show the translated string](todo/bugs.md#b220-translation-hover-does-not-show-the-translated-string)                                             | Low-Medium  | Low         |
+| B221 | [Env hover withholds the value for no real reason](todo/bugs.md#b221-env-hover-withholds-the-value-for-no-real-reason)                                                       | Medium      | Low         |
+| B218 | [`new ReflectionProperty(Foo::class, 'bar')` forgets what it reflects](todo/bugs.md#b218-new-reflectionpropertyfooclass-bar-forgets-what-it-reflects)                        | Low         | Medium      |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |

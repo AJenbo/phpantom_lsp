@@ -1458,6 +1458,32 @@ pub(super) fn resolve_method_call_on_receiver<'b>(
     let (owner_classes, receiver_resolved) =
         expand_union_generic_owners(owner_classes, receiver_resolved, ctx);
 
+    // A property read through the Reflection API: the name handed to
+    // `getProperty()` decides the type, so the stub's `ReflectionProperty`
+    // / `mixed` return types are as specific as an annotation can be.
+    // Keyed on the receiver's own type arguments rather than on an owner
+    // class, since it is the reflected class the result depends on.
+    if crate::type_engine::call_resolution::is_reflected_property_call(&method_name)
+        && let Some(ty) = crate::type_engine::call_resolution::resolve_reflected_property_at_call(
+            &method_name,
+            &arg_refs,
+            &receiver_resolved,
+            &rctx,
+        )
+    {
+        let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+            &ty,
+            "",
+            ctx.all_classes,
+            ctx.class_loader,
+        );
+        return if classes.is_empty() {
+            vec![ResolvedType::from_type_string(ty)]
+        } else {
+            ResolvedType::from_classes_with_hint(classes, ty)
+        };
+    }
+
     // Laravel validated input: the rules that guard this request describe the
     // array it hands back, so `$data = $request->validated()` gets a shape
     // rather than plain `array`.  Classifying the call does not depend on the

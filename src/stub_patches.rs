@@ -143,9 +143,15 @@
 //!    it. The method throws instead of returning null, so we drop the
 //!    branch and the two stay in sync.
 //!
-//! 9. **Benevolent methods** -- the class-level half of function patch 10,
-//!    covering `Redis`, `SplFileInfo`, the DOM classes, `PDO::prepare`,
-//!    `DateTime::modify` and `Closure::bind`.
+//! 9. **`ReflectionObject`** -- the instance-only specialisation of
+//!    `ReflectionClass`, but without its `@template T of object` or an
+//!    `@extends ReflectionClass<T>`, so it forgets the class it reflects.
+//!    PHPStan's stubs declare both, plus the constructor binding
+//!    `T → $object`.
+//!
+//! 10. **Benevolent methods** -- the class-level half of function patch 10,
+//!     covering `Redis`, `SplFileInfo`, the DOM classes, `PDO::prepare`,
+//!     `DateTime::modify` and `Closure::bind`.
 //!
 //! ## Removing patches
 //!
@@ -686,6 +692,7 @@ pub fn apply_class_stub_patches(class: &mut ClassInfo) {
         "ArrayIterator" => patch_array_iterator(class),
         "SimpleXMLElement" => patch_simple_xml_element(class),
         "ReflectionClass" => patch_reflection_class(class),
+        "ReflectionObject" => patch_reflection_object(class),
         _ => {}
     }
     mark_benevolent_methods(class);
@@ -1023,6 +1030,50 @@ fn patch_reflection_class(class: &mut ClassInfo) {
         method.native_return_type = non_null_native;
     }
     class.methods.make_mut()[idx] = std::sync::Arc::new(method);
+}
+
+/// Carry `ReflectionObject`'s reflected class the way `ReflectionClass`
+/// already carries it.
+///
+/// phpstorm-stubs annotate `ReflectionClass` with `@template T of object`
+/// and bind `T` from the constructor's `class-string<T>|T` parameter, but
+/// `ReflectionObject` -- the same class narrowed to an instance -- declares
+/// neither the template nor the `@extends`, so `new ReflectionObject($x)`
+/// forgets what it reflects and `newInstance()` widens back to `object`.
+/// PHPStan's stubs carry `@template-extends ReflectionClass<T>` here.
+fn patch_reflection_object(class: &mut ClassInfo) {
+    if !class.template_params.is_empty() {
+        return;
+    }
+    add_templates(class, &[("T", Some("object"))]);
+    let parent = atom("ReflectionClass");
+    if !class.extends_generics.iter().any(|(n, _)| *n == parent) {
+        class
+            .extends_generics
+            .push((parent, vec![PhpType::named(atom("T"))]));
+    }
+
+    let Some(ctor_idx) = class
+        .methods
+        .iter()
+        .position(|m| m.name.as_str() == "__construct")
+    else {
+        return;
+    };
+    let mut ctor = (*class.methods[ctor_idx]).clone();
+    let binding = (atom("T"), atom("$object"));
+    if !ctor.template_bindings.iter().any(|(t, _)| t == &binding.0) {
+        ctor.template_bindings.push(binding);
+    }
+    if let Some(param) = ctor
+        .parameters
+        .make_mut()
+        .iter_mut()
+        .find(|p| p.name == "$object")
+    {
+        param.type_hint = Some(PhpType::named(atom("T")));
+    }
+    class.methods.make_mut()[ctor_idx] = std::sync::Arc::new(ctor);
 }
 
 /// Give a method a conditional return type, provided the stub declares the

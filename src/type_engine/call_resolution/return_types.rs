@@ -443,6 +443,30 @@ impl Backend {
                     )
                 });
 
+                // A property read through the Reflection API: the name
+                // handed to `getProperty()` decides the type, so the
+                // stub's `ReflectionProperty` / `mixed` return types are
+                // as specific as an annotation can be.
+                if super::is_reflected_property_call(method_name)
+                    && let Some(ty) = super::resolve_reflected_property_at_call(
+                        method_name,
+                        &split_text_args(text_args).to_vec(),
+                        &lhs_resolved,
+                        ctx,
+                    )
+                {
+                    let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                        &ty,
+                        "",
+                        ctx.all_classes,
+                        ctx.class_loader,
+                    );
+                    if let Some(ref mut hint_out) = return_type_hint_out {
+                        **hint_out = Some(ty);
+                    }
+                    return classes;
+                }
+
                 // Guard-aware auth user model: a `user()` call on a
                 // `Guard`/`Request` subtype resolves to the model
                 // configured for the guard named at the call site

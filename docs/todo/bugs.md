@@ -248,6 +248,228 @@ poisoned by the first file's cached entry:
 Pen::make()->write();           Pen::make()->write();  // may resolve against A\Pen
 ```
 
+### B217. A `mixed`-returning accessor loses the type its arguments decide
+
+**Impact: Low-Medium · Complexity: High**
+
+Find References resolves a member access's receiver to a type and keeps
+the access only when that type is in the target's hierarchy. A receiver
+whose type cannot be resolved is skipped, which is the right call over
+matching by spelling, but it means a genuine reference through an
+untyped value is silently dropped. Rename runs the same search, so such
+a site is also left un-rewritten.
+
+What remains is the case where the receiver's type is decided by the
+*arguments* of a call to a user function that declares no return type of
+its own:
+
+```php
+class Sudo {
+    /** @return mixed Value of $object->property */
+    public static function fetchProperty($object, string $property)
+    {
+        $prop = self::getProperty(new \ReflectionObject($object), $property);
+
+        return $prop->getValue($object);
+    }
+
+    private static function getProperty(\ReflectionClass $refl, string $property): \ReflectionProperty
+    {
+        return $refl->getProperty($property);
+    }
+}
+
+function probe(Configuration $config): void {
+    $shell = Sudo::fetchProperty($config, 'shell');
+    echo $shell::VERSION;  // not counted as a reference to Shell::VERSION
+}
+```
+
+Measured on the conformance suite's navigation corpus, this is the one
+missing reference in `Psy\Shell::VERSION` (20 of 21,
+`src/functions.php:383`), and the code above is `Psy\Sudo` verbatim.
+
+The reflected read itself types: `getProperty('shell')` on a
+`ReflectionClass`/`ReflectionObject` with a known class yields the
+declared type of that property, so the same access written in one frame
+is found. Specialising the shape above one step at a time says exactly
+where the type is lost:
+
+| The callee, specialised | Inside its body | At the call site |
+| ----------------------- | --------------- | ---------------- |
+| `static`, no declared return, `Configuration $object`, literal name | `$prop` is `ReflectionProperty<Configuration, 'shell'>` | nothing |
+| the same with `@return mixed` | `$prop` resolves | `mixed` |
+| `$object` untyped, `string $property` (as psysh writes it) | `$prop` is a bare `ReflectionProperty` | nothing |
+
+So the type already exists inside the body — it just never leaves the
+function. Four things are in the way, and the first two are
+[T42](type-inference.md#t42-body-return-inference-is-instance-call-only-and-stops-at-return-mixed),
+which is worth doing on its own:
+
+- **Body-return inference never runs for a static call.** The fallback
+  lives at the tail of `resolve_owner_method_call`;
+  `resolve_rhs_static_call` has none. Every link in the chain above is
+  `static`.
+- **A declared `@return mixed` short-circuits it.** The hint is returned
+  before the inference fallback is reached. `mixed` says nothing and
+  every type is a subtype of it, so refining it can only narrow.
+- **Parameters are seeded from the declaration, not the call site.**
+  This is the third row of the table, and it is the real work:
+  `seed_params` reads the signature, and the resolution context that
+  invokes inference carries neither the resolved argument types nor the
+  `content`/`cursor_offset` needed to resolve them. The body-inference
+  memo is keyed `(class FQN, method)` and would have to grow the
+  argument types too, or one call site's answer gets served to another.
+- **The helper's declared `: \ReflectionProperty` erases the binding.**
+  Accepting an inferred refinement needs a rule — same base class, adds
+  generic arguments, inferred wins — which is sound because the
+  refinement is a strict subtype, but it means inference has to run
+  where a return type is already declared. That is the performance
+  cliff; the tightest gate found so far is to allow it only while
+  already inside an inference frame.
+
+Note that 0.9.0 scored 21 of 21 here. The hit came from the name
+matching removed in f10aedba, which compared the receiver's variable
+name against the short class names in the target hierarchy and paired
+`$shell` with `Shell` on spelling alone. That heuristic was the source
+of false references and wrong rename edits, so the drop is a loss of a
+coincidence, not of a working feature. **Do not restore it.** The fix
+is to type the receiver.
+
+Intelephense and Phpactor miss the same line; the DEVSENSE server finds
+it.
+
+### B218. `new ReflectionProperty(Foo::class, 'bar')` forgets what it reflects
+
+**Impact: Low · Complexity: Medium**
+
+A reflection value built by `ReflectionClass::getProperty('bar')` carries
+the class and the property name, so reading it types as the property
+declares. Constructing the same value directly does not:
+
+```php
+$viaClass = (new \ReflectionClass(Configuration::class))->getProperty('shell');
+$viaClass->getValue($config);   // ?Shell
+
+$direct = new \ReflectionProperty(Configuration::class, 'shell');
+$direct->getValue($config);     // mixed
+```
+
+The two spellings are interchangeable in real code, so the second should
+resolve like the first. The binding cannot come from the constructor's
+docblock: `class-string<T>|T $class` would bind the class through the
+existing machinery, but the `$property` name is a string literal, and a
+literal only binds to a `@template` whose bound is a type operator
+(`key-of<…>` and friends). Either the two `new`-expression resolution
+paths need the same rule the two call paths got, or literal binding has
+to be widened to a `@template TName of string`, which is what PHPStan
+does for literal string types and would want measuring against the whole
+corpus first.
+
+### B183. A Laravel Folio route is reported as unknown
+
+**Impact: High · Complexity: Medium**
+
+Folio registers routes from the filesystem: a page file under a mounted
+directory becomes a route, and `Laravel\Folio\name()` inside the page
+names it. The route index only reads registrations it can see in
+`routes/`, service providers, and resource declarations, so a Folio
+route does not exist as far as any consumer is concerned. The worst
+symptom is a false positive:
+
+```php
+// resources/views/folio/explore/index.blade.php
+use function Laravel\Folio\name;
+name('explore');
+
+// anywhere else
+route('explore');  // Unknown route: 'explore'
+```
+
+Three more follow from the same cause: go-to-definition on the name
+answers nothing, completion inside `route('')` omits every Folio route,
+and hover falls back to the bare `Route name` label instead of naming
+the file that declares it.
+
+The mount points come from `Folio::path(...)` / `Folio::route(...)` calls
+in a service provider (`FolioServiceProvider` by convention), and the
+name comes from a `name()` call in the page file, imported as
+`use function Laravel\Folio\name;`. Both need reading before the route
+index can answer for these names. The URI a page maps to is derived from
+its path relative to the mount, with `[param]` and `[...param]` segments
+becoming route parameters, which is also what route-parameter completion
+would need.
+
+Reproduced against a Folio-based Laravel application; `route('home')`
+from `routes/web.php` in the same file resolves correctly, so the gap is
+specific to filesystem-derived routes.
+
+### B219. The `env()` helper offers no key completion
+
+**Impact: Medium · Complexity: Low**
+
+Completion inside `env('')` returns nothing, while `Env::get('')` in the
+same file completes every key in the project's `.env`. The call-site
+table in `completion/laravel_string_keys.rs` maps the facade form
+(`("env", "get" | "getorfail")`) but the plain-function arm alongside
+`route`, `config`, `view`, `__`, `trans`, and `auth` has no `env` entry,
+so the bare helper never reaches `enumerate_env_keys()`. The helper is
+by far the more common spelling of the two.
+
+Hover and go-to-definition both work on the same position, so only
+completion is affected.
+
+### B220. Translation hover does not show the translated string
+
+**Impact: Low-Medium · Complexity: Low**
+
+Hovering a translation key names the key and the file it came from but
+not the string it resolves to, which is the one thing the reader cannot
+already see:
+
+```php
+__('boards.explore');  // shows: Trans `boards.explore`, Defined in `lang/en/boards.php`
+                       // omits:  Explore
+```
+
+The value is already loaded to answer the key's existence, so showing it
+is a formatting change in the `Trans` arm of
+`describe_laravel_string_key()` in `hover/mod.rs`. A key carrying
+`:placeholder` substitutions should show the raw string as written
+rather than attempt substitution.
+
+Note that the sibling `Env` arm also withholds its value; see B221,
+which argues that reasoning does not hold up either.
+
+### B221. Env hover withholds the value for no real reason
+
+**Impact: Medium · Complexity: Low**
+
+The `Env` arm of `describe_laravel_string_key()` in `hover/mod.rs`
+deliberately shows only "Declared in `.env`" and never the value, with a
+comment reasoning that a `.env` holds credentials and hover is the one
+place they would surface unasked. That reasoning does not hold up:
+
+- `config`, `route`, `view`, and `trans` hovers all show the resolved
+  value or destination. `env` is the one outlier, for no benefit that
+  offsets the inconsistency.
+- The value is one keystroke away regardless: `dump(env('KEY'))`,
+  logging it, or just opening `.env` in the next tab all show it with
+  no protection at all. Hiding it from hover blocks nothing a developer
+  who wants the value can't already do.
+- The suppression is blanket — `APP_NAME` gets the same treatment as
+  `STRIPE_SECRET` — so it is not even targeted at keys that look
+  sensitive.
+- Laravel LSP, a purpose-built Laravel language server, shows the value.
+
+The one real scenario this protects against is an accidental exposure
+during screen-sharing or a recorded session, where hovering is much
+lower-friction than deliberately opening `.env`. That is worth weighing
+against showing the value like every sibling hover does; a middle
+ground worth considering is masking only keys whose name looks like a
+secret (`SECRET`, `KEY`, `TOKEN`, `PASSWORD`), rather than every env
+var unconditionally.
+
 ## Array types
 
 No outstanding items.

@@ -4789,7 +4789,8 @@ trait MocksServiceDemo
 // `new ReflectionClass($classString)` binds the reflected type from a
 // `class-string<T>`.  `newInstance()` returns `T` and `newInstanceArgs()`
 // returns `T|null`, even though the constructor's native hint is the broad
-// `object|string`.
+// `object|string`.  `new ReflectionObject($instance)` binds the same way from
+// the instance it is handed.
 
 class ReflectionInstantiationDemo
 {
@@ -4804,6 +4805,23 @@ class ReflectionInstantiationDemo
 
         // newInstance() → Scaffolding\ReflectedWidget (not class-string<Scaffolding\ReflectedWidget>)
         return $reflection->newInstance();
+    }
+
+    /**
+     * Reading a property back through reflection.
+     *
+     * `getProperty()` is declared to return a bare `ReflectionProperty` and
+     * `getValue()` a bare `mixed`, but the reflected class and the property
+     * name are both known here, so the read types as the declaration does.
+     */
+    public function reflectedWidget(Scaffolding\ReflectedHolder $holder): ?Scaffolding\ReflectedWidget
+    {
+        $reflection = new \ReflectionObject($holder); // ReflectionObject<Scaffolding\ReflectedHolder>
+        $property = $reflection->getProperty('widget');
+
+        // Try: `$property->getValue($holder)->` — Scaffolding\ReflectedWidget
+        // members (label()), because the read is not `mixed`
+        return $property->getValue($holder);          // ?Scaffolding\ReflectedWidget
     }
 }
 
