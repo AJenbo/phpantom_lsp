@@ -42,8 +42,14 @@ pub(crate) struct DiagnosticState {
     pub(crate) suppressed: Arc<Mutex<Vec<Diagnostic>>>,
     /// Diagnostics for files not open in the editor (background pass).
     pub(crate) workspace_diags: Arc<Mutex<WorkspaceDiagnostics>>,
-    /// Prevents duplicate background workspace diagnostics passes.
+    /// Whether the background workspace diagnostics pass is currently
+    /// active (started and not since switched off by a config reload).
+    /// Also prevents duplicate concurrent passes.
     pub(crate) workspace_diag_pass_started: Arc<AtomicBool>,
+    /// Set to stop a running native pass and its workers when a live
+    /// config reload switches `[diagnostics] workspace` off mid-pass.
+    /// Cleared again before a later pass starts.
+    pub(crate) workspace_diag_cancel: Arc<AtomicBool>,
     /// Whether the client has sent at least one `workspace/diagnostic`
     /// pull.  In pull mode the background workspace pass waits for this:
     /// its results are only deliverable through workspace pull responses,
@@ -81,6 +87,7 @@ impl DiagnosticState {
             suppressed: Arc::new(Mutex::new(Vec::new())),
             workspace_diags: Arc::new(Mutex::new(WorkspaceDiagnostics::default())),
             workspace_diag_pass_started: Arc::new(AtomicBool::new(false)),
+            workspace_diag_cancel: Arc::new(AtomicBool::new(false)),
             workspace_pull_seen: Arc::new(AtomicBool::new(false)),
             workspace_pull_notify: Arc::new(Notify::new()),
             decl_baselines: Arc::new(Mutex::new(HashMap::new())),

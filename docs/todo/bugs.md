@@ -218,20 +218,4 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B223. Switching workspace diagnostics off mid-session leaves its results in place
-
-**Impact: Low · Complexity: Medium**
-
-`[diagnostics] workspace` is now read again on a live config reload, but
-only in the enabling direction. Turning it off while the native pass is
-running does not stop it: `drive_native_pass` only checks the shutdown
-flag, so the pass runs to completion and publishes results for files the
-user has just said they do not want diagnosed. Turning it off after the
-pass finished leaves the stored results reported for the rest of the
-session too, and `recompute_workspace_diags_for_closed_file` keeps
-updating them on every close (it is gated on
-`workspace_diag_pass_started`, not on the setting). Doing this properly
-means stopping a running pass, clearing `WorkspaceDiagnostics`, and
-telling the editor to drop what it was shown, and re-enabling afterwards
-has to be able to start a fresh pass (`workspace_diag_pass_started` is
-one-way today).
+No outstanding items.

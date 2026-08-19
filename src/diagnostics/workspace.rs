@@ -277,6 +277,10 @@ struct NativePass<F> {
     /// The queue every worker drains.
     queue: Arc<NativeQueue>,
     shutdown: Arc<AtomicBool>,
+    /// Cancels this pass specifically, separately from `shutdown` (the
+    /// whole session ending). Set when a live config reload switches
+    /// `[diagnostics] workspace` off mid-pass.
+    cancel: Arc<AtomicBool>,
     /// When the pass began; claim times are measured against it.
     started: Instant,
     /// The per-file analysis, shared by every worker.
@@ -293,11 +297,17 @@ impl<F> NativePass<F>
 where
     F: Fn(&str) -> Option<Vec<Diagnostic>> + Send + Sync + 'static,
 {
-    fn new(uris: Vec<String>, shutdown: Arc<AtomicBool>, work: Arc<F>) -> Self {
+    fn new(
+        uris: Vec<String>,
+        shutdown: Arc<AtomicBool>,
+        cancel: Arc<AtomicBool>,
+        work: Arc<F>,
+    ) -> Self {
         Self {
             uris: Arc::new(uris),
             queue: Arc::new(NativeQueue::new()),
             shutdown,
+            cancel,
             started: Instant::now(),
             work,
             slots: Vec::new(),
@@ -337,13 +347,17 @@ where
         let uris = Arc::clone(&self.uris);
         let queue = Arc::clone(&self.queue);
         let shutdown = Arc::clone(&self.shutdown);
+        let cancel = Arc::clone(&self.cancel);
         let work = Arc::clone(&self.work);
         let started = self.started;
         let spawned = std::thread::Builder::new()
             .name(format!("ws-diag-worker-{id}"))
             .stack_size(crate::PARSE_WORKER_STACK_SIZE)
             .spawn(move || {
-                while !worker.is_retired() && !shutdown.load(Ordering::Acquire) {
+                while !worker.is_retired()
+                    && !shutdown.load(Ordering::Acquire)
+                    && !cancel.load(Ordering::Acquire)
+                {
                     let file = queue.next.fetch_add(1, Ordering::Relaxed);
                     if file >= uris.len() {
                         break;
@@ -507,6 +521,27 @@ impl WorkspaceDiagnostics {
         self.result_ids.keys().cloned().collect()
     }
 
+    /// Clear every stored native and external result, e.g. when
+    /// `[diagnostics] workspace` is switched off mid-session.
+    ///
+    /// Keeps the result-id bookkeeping (so `tracked_uris` still lists
+    /// these URIs and a pull client that asks again is told they are
+    /// now empty) rather than dropping the struct back to its default.
+    /// Returns the URIs whose stored diagnostics were non-empty and so
+    /// need republishing to the editor.
+    pub(crate) fn clear_all(&mut self) -> Vec<String> {
+        let mut changed: HashSet<String> = self.native.keys().cloned().collect();
+        for map in self.external.values() {
+            changed.extend(map.keys().cloned());
+        }
+        self.native.clear();
+        self.external.clear();
+        for uri in &changed {
+            self.bump(uri);
+        }
+        changed.into_iter().collect()
+    }
+
     /// Decide whether to answer `Unchanged` or resend full diagnostics
     /// for a tracked `uri`, given the id (if any) the client echoed back
     /// as its previous result for this URI. Returns the current result
@@ -603,6 +638,49 @@ impl Backend {
         });
     }
 
+    /// Stop the pass and drop its results when a live config reload has
+    /// just switched `[diagnostics] workspace` off.
+    ///
+    /// Cancels a pass still running (both `drive_native_pass` and its
+    /// workers check `workspace_diag_cancel`), marks the pass as no
+    /// longer active so [`Self::start_workspace_diagnostics_on_reload`]
+    /// can start a fresh one if the setting is switched back on later,
+    /// and clears the stored results so the editor drops what it was
+    /// shown instead of carrying it for the rest of the session.
+    pub(crate) fn stop_workspace_diagnostics_on_reload(&self) {
+        if self.config().diagnostics.workspace_enabled() {
+            return;
+        }
+        if !self
+            .diag
+            .workspace_diag_pass_started
+            .swap(false, Ordering::AcqRel)
+        {
+            // Wasn't active, so there is nothing running to cancel and
+            // nothing stored to clear.
+            return;
+        }
+        self.diag
+            .workspace_diag_cancel
+            .store(true, Ordering::Release);
+
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        let backend = self.clone_for_diagnostic_worker();
+        runtime.spawn(async move {
+            backend.clear_workspace_diagnostics().await;
+        });
+    }
+
+    /// Clear every stored workspace diagnostic and tell the editor to
+    /// drop what it was shown.  Used when the setting is switched off
+    /// mid-session; see [`Self::stop_workspace_diagnostics_on_reload`].
+    async fn clear_workspace_diagnostics(&self) {
+        let changed = self.diag.workspace_diags.lock().clear_all();
+        self.flush_workspace_diag_updates(changed).await;
+    }
+
     /// Whether a config reload has left the workspace pass owed a run.
     ///
     /// Split out from [`Self::start_workspace_diagnostics_on_reload`] so
@@ -622,6 +700,14 @@ impl Backend {
             // pass itself.
             && self.workspace_indexed.load(Ordering::Acquire)
             && !self.full_index_in_progress.load(Ordering::Acquire)
+    }
+
+    /// Whether the running workspace pass has been told to stop, either
+    /// because the whole session is shutting down or because a live
+    /// config reload just switched `[diagnostics] workspace` off.
+    fn workspace_pass_stopping(&self) -> bool {
+        self.shutdown_flag.load(Ordering::Acquire)
+            || self.diag.workspace_diag_cancel.load(Ordering::Acquire)
     }
 
     /// Run the background workspace diagnostics pass.
@@ -646,6 +732,11 @@ impl Backend {
         {
             return;
         }
+        // A previous run may have been cancelled by the setting being
+        // switched off mid-pass; clear that before this fresh one starts.
+        self.diag
+            .workspace_diag_cancel
+            .store(false, Ordering::Release);
 
         // Wait for `initialized` to finish (it clears resolution caches
         // after the startup scan; starting before that would waste the
@@ -674,9 +765,9 @@ impl Backend {
         // the files it gave up on were logged as they happened, but the
         // ones behind them in the queue were never looked at, and a
         // silently short scan is what makes this look like a scan that
-        // simply stopped.  A shutdown cuts the pass off by design, so it
-        // is not reported.
-        if outcome.unchecked() > 0 && !self.shutdown_flag.load(Ordering::Acquire) {
+        // simply stopped.  A shutdown or the setting being switched off
+        // cuts the pass off by design, so it is not reported either way.
+        if outcome.unchecked() > 0 && !self.workspace_pass_stopping() {
             self.log(
                 MessageType::WARNING,
                 format!(
@@ -690,8 +781,7 @@ impl Backend {
             .await;
         }
 
-        if self.config().diagnostics.workspace_external_enabled()
-            && !self.shutdown_flag.load(Ordering::Acquire)
+        if self.config().diagnostics.workspace_external_enabled() && !self.workspace_pass_stopping()
         {
             self.run_workspace_external_tools(&progress).await;
         }
@@ -744,7 +834,12 @@ impl Backend {
             .unwrap_or(2)
             .min(uris.len());
 
-        let mut pass = NativePass::new(uris, Arc::clone(&self.shutdown_flag), work);
+        let mut pass = NativePass::new(
+            uris,
+            Arc::clone(&self.shutdown_flag),
+            Arc::clone(&self.diag.workspace_diag_cancel),
+            work,
+        );
         pass.spawn_workers(workers);
 
         self.drive_native_pass(&mut pass, FileWatchdog::default(), progress)
@@ -874,7 +969,7 @@ impl Backend {
                 last_message = message;
             }
 
-            let stopping = all_stopped || self.shutdown_flag.load(Ordering::Acquire);
+            let stopping = all_stopped || self.workspace_pass_stopping();
             if !pending_updates.is_empty()
                 && (stopping || last_delivery.elapsed() >= DELIVERY_INTERVAL)
             {
@@ -1122,7 +1217,7 @@ impl Backend {
             }
         }
 
-        if self.shutdown_flag.load(Ordering::Acquire) {
+        if self.workspace_pass_stopping() {
             return;
         }
 
@@ -1147,7 +1242,7 @@ impl Backend {
             }
         }
 
-        if self.shutdown_flag.load(Ordering::Acquire) {
+        if self.workspace_pass_stopping() {
             return;
         }
 
@@ -1185,7 +1280,7 @@ impl Backend {
                         .await;
                 }
 
-                if self.shutdown_flag.load(Ordering::Acquire) {
+                if self.workspace_pass_stopping() {
                     return;
                 }
             }
@@ -1653,7 +1748,12 @@ mod tests {
             Some(vec![diag("unknown_class", 1)])
         });
 
-        let mut pass = NativePass::new(uris, Arc::clone(&backend.shutdown_flag), work);
+        let mut pass = NativePass::new(
+            uris,
+            Arc::clone(&backend.shutdown_flag),
+            Arc::clone(&backend.diag.workspace_diag_cancel),
+            work,
+        );
         pass.spawn_workers(2);
 
         let watchdog = FileWatchdog {
@@ -1735,6 +1835,73 @@ mod tests {
         assert!(!backend.workspace_diagnostics_due_after_reload());
     }
 
+    /// A config reload that switches `[diagnostics] workspace` off while
+    /// the pass is active must cancel it and mark it inactive, so a
+    /// running pass stops instead of finishing and publishing results
+    /// for files the user just said not to diagnose, and a later
+    /// re-enable can start a fresh pass rather than being blocked
+    /// forever by the one-shot guard.
+    #[test]
+    fn a_reload_that_disables_workspace_diagnostics_cancels_and_deactivates_the_pass() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let config = dir.path().join(crate::config::CONFIG_FILE_NAME);
+        let backend = Backend::new_test_with_workspace(dir.path().to_path_buf(), Vec::new());
+        backend
+            .diag
+            .workspace_diag_pass_started
+            .store(true, Ordering::Release);
+
+        std::fs::write(&config, "[diagnostics]\nworkspace = false\n").expect("write config");
+        backend.reload_config(dir.path());
+
+        assert!(
+            !backend
+                .diag
+                .workspace_diag_pass_started
+                .load(Ordering::Acquire),
+            "the pass must be marked inactive so a later re-enable can start a fresh one"
+        );
+        assert!(
+            backend.diag.workspace_diag_cancel.load(Ordering::Acquire),
+            "a config reload that disables the setting must cancel a running pass"
+        );
+
+        // A pass that was never active (or already stopped) has nothing
+        // to cancel, so a reload while still off must be a no-op.
+        backend
+            .diag
+            .workspace_diag_cancel
+            .store(false, Ordering::Release);
+        backend.reload_config(dir.path());
+        assert!(!backend.diag.workspace_diag_cancel.load(Ordering::Acquire));
+    }
+
+    /// Clearing must drop every stored result so the editor is not left
+    /// carrying stale diagnostics, but keep the URI tracked so a pull
+    /// client that asks again is told it is now empty rather than
+    /// hearing nothing about it at all.
+    #[tokio::test]
+    async fn clear_workspace_diagnostics_drops_results_but_keeps_tracking_the_uri() {
+        let backend = Backend::new_test();
+        backend
+            .diag
+            .workspace_diags
+            .lock()
+            .set_native("file:///w.php", vec![diag("unknown_class", 1)]);
+
+        backend.clear_workspace_diagnostics().await;
+
+        let ws = backend.diag.workspace_diags.lock();
+        assert!(
+            ws.merged("file:///w.php").is_empty(),
+            "stored diagnostics must be cleared"
+        );
+        assert!(
+            ws.tracked_uris().contains(&"file:///w.php".to_string()),
+            "the uri must stay tracked so a pull client is told it is now empty"
+        );
+    }
+
     /// The replacement budget is finite: a project that wedges every
     /// worker it is handed stops accumulating threads.
     #[test]
@@ -1742,6 +1909,7 @@ mod tests {
         let mut pass = NativePass::new(
             Vec::new(),
             Arc::new(AtomicBool::new(true)),
+            Arc::new(AtomicBool::new(false)),
             Arc::new(|_: &str| None),
         );
         for _ in 0..MAX_WORKER_REPLACEMENTS {
@@ -1799,7 +1967,12 @@ mod tests {
             Some(vec![diag("unknown_class", 1)])
         });
 
-        let mut pass = NativePass::new(uris, Arc::clone(&backend.shutdown_flag), work);
+        let mut pass = NativePass::new(
+            uris,
+            Arc::clone(&backend.shutdown_flag),
+            Arc::clone(&backend.diag.workspace_diag_cancel),
+            work,
+        );
         pass.spawn_workers(2);
 
         let watchdog = FileWatchdog {
@@ -1856,6 +2029,7 @@ mod tests {
         let mut pass = NativePass::new(
             uris,
             Arc::clone(&backend.shutdown_flag),
+            Arc::clone(&backend.diag.workspace_diag_cancel),
             Arc::new(|_: &str| Some(Vec::new())),
         );
         pass.spawn_workers(2);
