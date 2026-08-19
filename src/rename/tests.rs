@@ -5008,3 +5008,69 @@ if (defined('FOO')) {
         "the constant() read takes the new name, got: {result}"
     );
 }
+
+#[tokio::test]
+async fn rename_function_rewrites_a_call_spelled_in_another_case() {
+    let backend = Backend::new_test();
+    let uri_a = Url::parse("file:///helpers.php").unwrap();
+    let uri_b = Url::parse("file:///main.php").unwrap();
+    let text_a = concat!(
+        "<?php\n",                      // L0
+        "function helper(): void {}\n", // L1
+    );
+    let text_b = concat!(
+        "<?php\n",                   // L0
+        "namespace App;\n",          // L1
+        "function demo(): void {\n", // L2
+        "    HELPER();\n",           // L3
+        "    helper();\n",           // L4
+        "}\n",                       // L5
+    );
+
+    open_file(&backend, &uri_a, text_a).await;
+    open_file(&backend, &uri_b, text_b).await;
+
+    let edit = rename(&backend, &uri_a, 1, 10, "utility")
+        .await
+        .expect("expected a workspace edit for the function rename");
+
+    // Leaving HELPER() behind would leave the file calling a function
+    // that no longer exists.
+    let updated = apply_edits(text_b, &edits_for_uri(&edit, &uri_b));
+    assert!(
+        !updated.contains("HELPER()") && updated.matches("utility()").count() == 2,
+        "both spellings should be rewritten:\n{updated}"
+    );
+}
+
+#[tokio::test]
+async fn rename_function_can_start_from_a_fully_qualified_call() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                     // L0
+        "namespace Support;\n",        // L1
+        "function shout(): void {}\n", // L2
+        "namespace App;\n",            // L3
+        "function demo(): void {\n",   // L4
+        "    \\Support\\shout();\n",   // L5
+        "}\n",                         // L6
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    let prepared = prepare_rename(&backend, &uri, 5, 15).await;
+    assert!(
+        prepared.is_some(),
+        "prepare-rename should accept a fully-qualified call site"
+    );
+
+    let edit = rename(&backend, &uri, 5, 15, "yell")
+        .await
+        .expect("expected a workspace edit from the fully-qualified call site");
+    let updated = apply_edits(text, &edits_for_uri(&edit, &uri));
+    assert!(
+        updated.contains("function yell(): void {}") && updated.contains("\\Support\\yell();"),
+        "the declaration and the qualified call should both move:\n{updated}"
+    );
+}

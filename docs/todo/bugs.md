@@ -115,22 +115,6 @@ No outstanding items.
 
 ## Symbol resolution
 
-### B190. Reference-count hints read zero for a global function called from namespaced code
-
-**Impact: Medium · Complexity: Medium**
-
-`symbol_name_keys` (`reference_index.rs`) credits a call's reference
-count to its *resolved* FQN only. Because `mago-names` unconditionally
-qualifies an unqualified call with the current namespace (PHP's runtime
-fallback semantics), a call to a global `function helper() {}` written
-as `helper()` inside `namespace App;` is credited to `Function("App\helper")`,
-a function that doesn't exist, while the declaration's own key is
-`Function("helper")`. The reference-count inlay hint above the
-declaration therefore reads "0 references" in any PSR-4-style project
-that calls the global function from inside a namespace, even though Find
-References (which separately falls back to short-name matching) lists
-every call correctly.
-
 ### B191. The property hook call rewrite matches any class, not just `parent`
 
 **Impact: Medium · Complexity: Low**
@@ -152,58 +136,6 @@ argument-count checks are skipped), and `$instance` is emitted as
 `is_static: false`, so hover shows a static property as an instance one.
 Restrict the match to a `parent` class reference.
 
-### B192. Rename started from a `use function` or aliased call site misses fallback call sites
-
-**Impact: Low-Medium · Complexity: Low**
-
-`references/dispatch.rs`'s `FunctionCall` arm passes the raw import span
-text (e.g. `Foo\bar`) as the short-name fallback target instead of
-shortening it with `short_name()` first, the way the constant arm right
-below it does. Starting Find References/rename from a `use function
-Foo\bar;` import, or from an aliased call site, therefore only matches
-the fully-qualified key and never reaches unqualified call sites in
-other namespaces that resolve to the same function — sites that *are*
-found when the search starts from the declaration instead.
-
-### B193. Function reference matching is case-sensitive
-
-**Impact: Low · Complexity: Low-Medium**
-
-PHP resolves function names case-insensitively, but the string-keyed
-reference index and `find_function_references`
-(`references/functions.rs`) match case-sensitively. A call spelled
-`HELPER()` resolves to `App\HELPER`, whose key never intersects the
-`helper` candidate keys, so the file containing that call is filtered
-out before scanning and a rename of `helper` leaves `HELPER()` calling
-the old (now renamed-away) name. `import_aware_edit_text` already passes
-`case_insensitive: true` for functions, but only for edit text of
-locations already found by the case-sensitive search; constants are
-correctly case-sensitive throughout and are not affected.
-
-### B194. Rename cannot be started from a fully-qualified call site
-
-**Impact: Low · Complexity: Low**
-
-`span_spells_its_name` (`rename/validate.rs`) compares the recorded name
-(without its leading `\`) against the span text (with it) for a
-fully-qualified reference such as `\Foo\bar()`, so the comparison fails
-and prepare-rename returns nothing when started from that site. Rename
-started from any other, non-fully-qualified site still edits
-fully-qualified sites correctly, so this only blocks initiating the
-rename from an FQN spelling.
-
-### B195. A constant's own declaration is not recognized as a declaration by the reference index
-
-**Impact: Low · Complexity: Low**
-
-The `is_declaration` match in `reference_index.rs` covers
-`ClassDeclaration`, `FunctionCall { is_definition: true }`, and
-`MemberDeclaration`, but not `ConstantReference { is_definition: true }`
-— the flag was added for constants without updating this match. No
-consumer currently displays constant reference counts, so this is
-latent, but a future count/hint feature for constants would count the
-declaration itself as one of its own references.
-
 ### B196. The chain resolution cache key omits file identity
 
 **Impact: Low-Medium · Complexity: Medium**
@@ -221,6 +153,30 @@ poisoned by the first file's cached entry:
 // file A: use A\Pen;           file B: use B\Pen;
 Pen::make()->write();           Pen::make()->write();  // may resolve against A\Pen
 ```
+
+### B222. Class reference matching is case-sensitive
+
+**Impact: Medium · Complexity: Medium**
+
+PHP resolves class names case-insensitively, but `class_names_match`
+(`references/mod.rs`), the `ReferenceIndexKey::Class` keys, and
+`build_class_rename_edit` all compare them case-sensitively:
+
+```php
+class Widget {}
+$a = new WIDGET();  // renaming Widget to Gadget leaves this calling WIDGET
+$b = new Widget();
+```
+
+Find References omits the `WIDGET` site and rename leaves it behind,
+which breaks the file it was supposed to fix. This is the same defect
+fixed for functions in the reference index and `find_function_references`
+(where the key is now folded to ASCII lowercase and the comparisons use
+`eq_ignore_ascii_case`); classes need the same treatment, but they reach
+their edits through the separate class-rename handler, which understands
+`use` imports, aliases, and collisions, so the alias and import spellings
+have to be folded consistently too. Constants are correctly
+case-sensitive in PHP and must stay as they are.
 
 ### B217. A `mixed`-returning accessor loses the type its arguments decide
 

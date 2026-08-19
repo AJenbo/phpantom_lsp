@@ -55,8 +55,10 @@ impl Backend {
                         });
                         Self::resolve_to_fqn(name, use_map, &file_namespace)
                     };
+                // Function names are case-insensitive in PHP, so `HELPER()`
+                // is a call to `helper` and has to compare equal to it.
                 let resolved_normalized = strip_fqn_prefix(&resolved);
-                if resolved_normalized == target {
+                if resolved_normalized.eq_ignore_ascii_case(target) {
                     return true;
                 }
                 // PHP falls back from an unqualified call to the global
@@ -68,7 +70,8 @@ impl Backend {
                 // is never treated as a match.
                 !name.contains('\\')
                     && !target.contains('\\')
-                    && crate::util::short_name(resolved_normalized) == target_short
+                    && crate::util::short_name(resolved_normalized)
+                        .eq_ignore_ascii_case(target_short)
                     && !self
                         .symbols
                         .global_functions

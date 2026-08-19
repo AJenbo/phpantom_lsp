@@ -157,7 +157,7 @@ fn affected_reference_keys(
     // Global functions and constants: names only, so any file that
     // declares them contributes them on every save.
     for name in baseline.functions.iter().chain(current.functions.iter()) {
-        push_name_keys(&mut keys, name, ReferenceIndexKey::Function);
+        push_name_keys(&mut keys, name, ReferenceIndexKey::function_owned);
     }
     for name in baseline.constants.iter().chain(current.constants.iter()) {
         push_name_keys(&mut keys, name, ReferenceIndexKey::Constant);

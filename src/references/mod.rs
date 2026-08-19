@@ -244,7 +244,7 @@ pub(super) fn class_candidate_keys(target: &str, target_short: &str) -> Vec<Refe
 pub(super) fn function_candidate_keys(target: &str, target_short: &str) -> Vec<ReferenceIndexKey> {
     symbol_candidate_names(target, target_short)
         .into_iter()
-        .map(ReferenceIndexKey::Function)
+        .map(ReferenceIndexKey::function_owned)
         .collect()
 }
 

@@ -1112,6 +1112,40 @@ mod tests {
     }
 
     #[test]
+    fn function_count_includes_unqualified_calls_from_a_namespaced_file() {
+        let backend = Backend::new_test();
+        backend.update_ast(
+            "file:///app/Service.php",
+            "<?php\nnamespace App;\nfunction run(): void {\n    helper();\n    helper();\n}\n",
+        );
+
+        let hints = declaration_hints(
+            &backend,
+            "file:///helpers.php",
+            "<?php\nfunction helper(): void {}\n",
+        );
+
+        assert_eq!(hint_on_line(&hints, 1).as_deref(), Some(" 2 references"));
+    }
+
+    #[test]
+    fn function_count_ignores_the_case_a_call_is_spelled_with() {
+        let backend = Backend::new_test();
+        backend.update_ast(
+            "file:///app/Service.php",
+            "<?php\nnamespace App;\nfunction run(): void {\n    HELPER();\n}\n",
+        );
+
+        let hints = declaration_hints(
+            &backend,
+            "file:///helpers.php",
+            "<?php\nfunction helper(): void {}\n",
+        );
+
+        assert_eq!(hint_on_line(&hints, 1).as_deref(), Some(" 1 reference"));
+    }
+
+    #[test]
     fn declaration_count_hints_skip_magic_methods() {
         let backend = Backend::new_test();
         let uri = "file:///test.php";
