@@ -2985,6 +2985,82 @@ fn namespaced_standalone_constant_produces_constant_reference() {
 }
 
 #[test]
+fn define_call_names_the_constant_it_declares() {
+    let php = "<?php\ndefine('FOO', 1);\n";
+    let map = parse_and_extract(php);
+
+    let name_offset = php.find("FOO").unwrap() as u32;
+    let hit = map.lookup(name_offset).expect("define() names a constant");
+    assert!(
+        matches!(
+            hit.kind,
+            SymbolKind::ConstantReference {
+                ref name,
+                is_definition: true,
+            } if name == "FOO"
+        ),
+        "Expected the declaration of FOO, got {:?}",
+        hit.kind
+    );
+    assert_eq!(
+        (hit.start, hit.end),
+        (name_offset, name_offset + 3),
+        "the span covers the name alone so a rename edit leaves the quotes"
+    );
+}
+
+#[test]
+fn define_call_with_a_namespaced_name_keeps_the_namespace() {
+    let php = "<?php\ndefine('App\\FOO', 1);\n";
+    let map = parse_and_extract(php);
+
+    let name_offset = php.find("App").unwrap() as u32;
+    let hit = map
+        .lookup(name_offset)
+        .expect("a namespaced define() names a constant");
+    assert!(
+        matches!(
+            hit.kind,
+            SymbolKind::ConstantReference { ref name, .. } if name == "App\\FOO"
+        ),
+        "Expected the declaration of App\\FOO, got {:?}",
+        hit.kind
+    );
+}
+
+#[test]
+fn define_call_whose_name_needs_unescaping_declares_nothing() {
+    // The span is what a rename rewrites, so it may only cover a name the
+    // source spells literally.  `"FO\x4F"` reaches PHP as `FOO` but reads
+    // as something else, and rewriting it would corrupt the call.
+    let php = "<?php\ndefine(\"FO\\x4F\", 1);\n";
+    let map = parse_and_extract(php);
+
+    let name_offset = php.find("FO\\x4F").unwrap() as u32;
+    assert!(
+        map.lookup(name_offset).is_none(),
+        "An escaped name should declare nothing, got {:?}",
+        map.lookup(name_offset).map(|hit| &hit.kind)
+    );
+}
+
+#[test]
+fn define_call_with_a_non_literal_name_declares_nothing() {
+    // `define($name, 1)` names no constant the extractor can see, and a
+    // span over `$name` would make rename rewrite a variable.
+    let php = "<?php\nfunction t(string $name) { define($name, 1); }\n";
+    let map = parse_and_extract(php);
+
+    let name_offset = php.rfind("$name").unwrap() as u32;
+    let hit = map.lookup(name_offset).expect("the variable is navigable");
+    assert!(
+        matches!(hit.kind, SymbolKind::Variable { .. }),
+        "Expected a variable, got {:?}",
+        hit.kind
+    );
+}
+
+#[test]
 fn unquoted_offset_in_string_interpolation_is_not_a_class_reference() {
     // `"$data[code]"` reads `code` as the string key `'code'`, so the
     // offset is neither a constant nor a class name.

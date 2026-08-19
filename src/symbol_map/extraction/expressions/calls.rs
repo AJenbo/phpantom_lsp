@@ -137,6 +137,58 @@ fn extract_property_hook_call<'a>(
     true
 }
 
+/// Emit the declaration span for the constant `define('NAME', …)` creates.
+///
+/// The name is a string literal rather than an identifier, so nothing else
+/// in the extractor sees it.  Without this span the defining call is not a
+/// reference to its own constant: renaming from a use site rewrites every
+/// use and leaves `define()` naming the old constant, so the code no longer
+/// defines what it reads.
+fn try_emit_define_name_span(
+    argument_list: &ArgumentList<'_>,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    let Some(first) = argument_list.arguments.first() else {
+        return;
+    };
+    let Expression::Literal(Literal::String(literal)) = first.value() else {
+        return;
+    };
+
+    // `Literal::String` is only ever single- or double-quoted, so the name
+    // starts one byte past the opening quote.
+    let inner_start = literal.span.start.offset + 1;
+    let inner_end = literal.span.end.offset - 1;
+    if inner_start >= inner_end || inner_end as usize > content.len() {
+        return;
+    }
+    let Some(raw) = content.get(inner_start as usize..inner_end as usize) else {
+        return;
+    };
+
+    // Rename rewrites whatever the span covers, so a name that only reaches
+    // PHP through an escape (`define("FO\x4F", 1)`) must not claim to spell
+    // itself in the source.
+    if literal.value.and_then(literal_bytes_to_str) != Some(raw) {
+        return;
+    }
+
+    // `define('\FOO', 1)` names the same constant `FOO` does, and the span
+    // has to cover the name alone for the rename edit to leave the prefix.
+    let name = strip_fqn_prefix(raw);
+    let start = inner_start + (raw.len() - name.len()) as u32;
+
+    spans.push(SymbolSpan {
+        start,
+        end: inner_end,
+        kind: SymbolKind::ConstantReference {
+            name: crate::atom::atom(name),
+            is_definition: true,
+        },
+    });
+}
+
 // ─── Function / method / static calls ───────────────────────────────────────
 
 pub(super) fn extract_call_expr<'a>(
@@ -175,6 +227,13 @@ fn extract_call<'a>(
                     let name_clean = strip_fqn_prefix(raw);
                     if name_clean.eq_ignore_ascii_case("compact") {
                         try_emit_compact_string_spans(
+                            &func_call.argument_list,
+                            ctx.content,
+                            &mut ctx.spans,
+                        );
+                    }
+                    if name_clean.eq_ignore_ascii_case("define") {
+                        try_emit_define_name_span(
                             &func_call.argument_list,
                             ctx.content,
                             &mut ctx.spans,

@@ -2723,10 +2723,11 @@ async fn test_goto_definition_interface_declaration_returns_own_location() {
     );
 }
 
-/// Ctrl+Click on a constant name inside its own `define()` call should
-/// return `None` rather than jumping to itself.
+/// Ctrl+Click on a constant name inside its own `define()` call returns
+/// that declaration's own location, the way every other declaration site
+/// does, so the editor can offer Find References from there.
 #[tokio::test]
-async fn test_goto_definition_define_constant_at_definition_returns_none() {
+async fn test_goto_definition_define_constant_at_definition_returns_own_location() {
     let backend = create_test_backend();
 
     let uri = Url::parse("file:///self_ref_define.php").unwrap();
@@ -2762,10 +2763,24 @@ async fn test_goto_definition_define_constant_at_definition_returns_none() {
     };
 
     let result = backend.goto_definition(params).await.unwrap();
-    assert!(
-        result.is_none(),
-        "GTD on a constant name inside its own define() call should return None, got: {:?}",
-        result
+    let locations = match result {
+        Some(GotoDefinitionResponse::Array(locs)) => locs,
+        Some(GotoDefinitionResponse::Scalar(loc)) => vec![loc],
+        other => panic!("Expected the declaration's own location, got: {other:?}"),
+    };
+    assert_eq!(
+        locations.len(),
+        1,
+        "should return exactly one location, got: {locations:?}"
+    );
+    assert_eq!(
+        locations[0].range.start,
+        Position {
+            line: 1,
+            character: 8,
+        },
+        "the declaration is the name inside the quotes, not the `define` call, got: {:?}",
+        locations[0].range
     );
 
     // Verify that clicking on the *usage* of APP_VERSION still works.

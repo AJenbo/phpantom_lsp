@@ -4875,3 +4875,102 @@ echo BAR;
         "either starting point must reach the declaration"
     );
 }
+
+#[tokio::test]
+async fn rename_from_a_use_rewrites_the_define_that_declares_the_constant() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test/define_use.php").unwrap();
+    let text = "<?php
+define('FOO', 1);
+
+echo FOO;
+";
+
+    open_file(&backend, &uri, text).await;
+
+    let (line, character) = line_char_of(text, "echo FOO;");
+    let edit = rename(&backend, &uri, line, character + 5, "BAR")
+        .await
+        .expect("a use of a define()-declared constant should rename");
+    let result = apply_edits(text, &edits_for_uri(&edit, &uri));
+
+    assert!(
+        result.contains("define('BAR', 1);"),
+        "the define() call must take the new name or the constant is left undefined, got: {result}"
+    );
+    assert!(
+        result.contains("echo BAR;"),
+        "the use takes the new name, got: {result}"
+    );
+}
+
+#[tokio::test]
+async fn rename_from_a_define_call_rewrites_the_constants_uses() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test/define_decl.php").unwrap();
+    let text = "<?php
+define('FOO', 1);
+
+echo FOO;
+echo 'FOO';
+";
+
+    open_file(&backend, &uri, text).await;
+
+    let (line, character) = line_char_of(text, "define('FOO', 1);");
+    let edit = rename(&backend, &uri, line, character + 8, "BAR")
+        .await
+        .expect("the name in a define() call should rename");
+    let result = apply_edits(text, &edits_for_uri(&edit, &uri));
+
+    assert!(
+        result.contains("define('BAR', 1);"),
+        "the declaration takes the new name, got: {result}"
+    );
+    assert!(
+        result.contains("echo BAR;"),
+        "a use of the constant takes the new name, got: {result}"
+    );
+    assert!(
+        result.contains("echo 'FOO';"),
+        "an unrelated string of the same text must not rename, got: {result}"
+    );
+}
+
+#[tokio::test]
+async fn rename_of_a_define_leaves_a_same_named_class_constant_alone() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test/define_collision.php").unwrap();
+    let text = "<?php
+define('FOO', 1);
+
+class Holder
+{
+    public const FOO = 2;
+}
+
+echo FOO;
+echo Holder::FOO;
+";
+
+    open_file(&backend, &uri, text).await;
+
+    let (line, character) = line_char_of(text, "define('FOO', 1);");
+    let edit = rename(&backend, &uri, line, character + 8, "BAR")
+        .await
+        .expect("the name in a define() call should rename");
+    let result = apply_edits(text, &edits_for_uri(&edit, &uri));
+
+    assert!(
+        result.contains("define('BAR', 1);"),
+        "the declaration takes the new name, got: {result}"
+    );
+    assert!(
+        result.contains("echo BAR;"),
+        "the global constant's use takes the new name, got: {result}"
+    );
+    assert!(
+        result.contains("public const FOO = 2;"),
+        "an unrelated class constant of the same short name must not rename, got: {result}"
+    );
+}

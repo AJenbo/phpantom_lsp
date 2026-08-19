@@ -115,29 +115,31 @@ No outstanding items.
 
 ## Symbol resolution
 
-### B189. Renaming a `define()`-declared constant leaves the `define()` call unrenamed
+### B217. Renaming a constant leaves `defined()` and `constant()` calls unrenamed
 
-**Impact: High · Complexity: Medium-High**
+**Impact: Medium-High · Complexity: Medium**
 
-`ConstantReference` spans are only emitted for top-level `const`
-declarations, `use const` imports, and `ConstantAccess` sites
-(`symbol_map/extraction/statements.rs` and related). A constant
-registered via `define('FOO', ...)` produces no span for the string
-argument, even though `constant('FOO')`, `FOO`, and `function_exists`
-style lookups resolve it via the parser's symbol table. Renaming started
-from any use site of a `define()`-declared constant therefore rewrites
-every use but leaves the `define()` call itself untouched, producing
-code that no longer defines the constant it now reads:
+`defined('FOO')` and `constant('FOO')` name a constant through a string
+literal, and the symbol map emits no `ConstantReference` span for either.
+Renaming `FOO` therefore rewrites the declaration and every ordinary use
+but leaves those calls asking about the old name, so a `defined()` guard
+silently stops guarding and `constant()` fails at runtime. Find
+References under-reports them for the same reason, and neither hovers or
+navigates.
 
-```php
-define('FOO', 1);
-echo FOO; // rename FOO -> BAR rewrites this to BAR...
-// ...but define('FOO', 1) above is left as-is: BAR is now undefined at runtime
-```
+`try_emit_define_name_span`
+(`symbol_map/extraction/expressions/calls.rs`) already does this for
+`define()` and is the shape to follow, with two differences: the span is
+a use rather than a declaration (`is_definition: false`), and a string
+naming a class constant (`constant('Foo::BAR')`) must be excluded or
+routed to `MemberAccess` instead, since it names a member and not a
+global constant.
 
-The docblock on `SymbolKind::ConstantReference` already claims `define()`
-names are covered; they are not. Fix belongs in symbol-map extraction of
-`define()` call arguments.
+The same helper also declines a name the source does not spell
+literally, so `define('App\\FOO', 1)` (an escaped backslash inside a
+single-quoted string, which reads as `App\FOO`) still produces no span
+and stays unrenamed. Covering it means spanning a sub-range of the
+literal that agrees with the escaped spelling.
 
 ### B190. Reference-count hints read zero for a global function called from namespaced code
 
