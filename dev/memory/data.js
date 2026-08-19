@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787106522607,
+  "lastUpdate": 1787107221556,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -23493,6 +23493,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 82.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "36e8f3519ddf5cbc3b7be88db15d97ab219b6989",
+          "message": "A Laravel project that requires Larastan gets PHPStan diagnostics too",
+          "timestamp": "2026-08-19T04:21:53+02:00",
+          "tree_id": "b75e953733571d524c9a062667b30aecc894004b",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/36e8f3519ddf5cbc3b7be88db15d97ab219b6989"
+        },
+        "date": 1787107214538,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 71.1,
             "unit": "MiB"
           }
         ]
