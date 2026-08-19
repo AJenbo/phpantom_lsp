@@ -1385,6 +1385,23 @@
   
 </li>
         
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-analyze-and-fix-cli-subcommands-no-longer-build-the-cross-file-reference-index-that-index-only-serves-find-references-rename-and-reference-count-inlay-hints-none-of-which-the-cli-subcommands-query-so-skipping-it-removes-wasted-work-from-whole-project-runs-the-editors-lsp-session-is-unaffected" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <strong>The <code>analyze</code> and <code>fix</code> CLI subcommands no longer build the cross-file reference index.</strong> That index only serves Find References, Rename, and reference-count inlay hints, none of which the CLI subcommands query, so skipping it removes wasted work from whole-project runs. The editor's LSP session is unaffected.
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The analyze and fix CLI subcommands no longer build the cross-file reference index. That index only serves Find References, Rename, and reference-count inlay hints, none of which the CLI subcommands query, so skipping it removes wasted work from whole-project runs. The editor&#x27;s LSP session is unaffected.">
+      <ul class="md-nav__list">
+        
           <li class="md-nav__item">
   <a href="#removed" class="md-nav__link">
     <span class="md-ellipsis">
@@ -2000,6 +2017,23 @@
   
 </li>
         
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-analyze-and-fix-cli-subcommands-no-longer-build-the-cross-file-reference-index-that-index-only-serves-find-references-rename-and-reference-count-inlay-hints-none-of-which-the-cli-subcommands-query-so-skipping-it-removes-wasted-work-from-whole-project-runs-the-editors-lsp-session-is-unaffected" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <strong>The <code>analyze</code> and <code>fix</code> CLI subcommands no longer build the cross-file reference index.</strong> That index only serves Find References, Rename, and reference-count inlay hints, none of which the CLI subcommands query, so skipping it removes wasted work from whole-project runs. The editor's LSP session is unaffected.
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The analyze and fix CLI subcommands no longer build the cross-file reference index. That index only serves Find References, Rename, and reference-count inlay hints, none of which the CLI subcommands query, so skipping it removes wasted work from whole-project runs. The editor&#x27;s LSP session is unaffected.">
+      <ul class="md-nav__list">
+        
           <li class="md-nav__item">
   <a href="#removed" class="md-nav__link">
     <span class="md-ellipsis">
@@ -2454,7 +2488,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <h4 id="whole-project-analysis">Whole-project analysis<a class="headerlink" href="#whole-project-analysis" title="Permanent link">&para;</a></h4>
 <ul>
 <li><strong>Full workspace indexing.</strong> PHPantom now parses every PHP file in your project in the background after startup by default, building complete symbol data and a cross-file reference index. Find References, Rename, Go to Implementation, and Type Hierarchy resolve against the whole project instead of only the files you have opened, and scan only the files known to reference the symbol. Lighter modes remain available for projects that prefer a smaller footprint. Contributed by @sidux in https://github.com/PHPantom-dev/phpantom_lsp/pull/186.</li>
-<li><strong>Workspace-wide diagnostics.</strong> Problems are now surfaced across the whole project rather than only in open files. After startup and the background index finish, diagnostics run over every file and stream into the editor's problems panel as they are found, so issues in files you have not opened are already visible when you navigate to them. Configured external tools (PHPStan, PHPCS, Mago) also run once over the whole project afterwards. Both passes are deferred until after startup so they never slow down the time it takes the editor to become usable, and both can be disabled in <code>.phpantom.toml</code>.</li>
+<li><strong>Workspace-wide diagnostics.</strong> Problems can now be surfaced across the whole project rather than only in open files. Set <code>workspace = true</code> under <code>[diagnostics]</code> in <code>.phpantom.toml</code> and, once startup and the background index finish, diagnostics run over every file and stream into the editor's problems panel as they are found, so issues in files you have not opened are already visible when you navigate to them. Configured external tools (PHPStan, PHPCS, Mago) also run once over the whole project afterwards. Both passes are deferred until after startup so they never slow down the time it takes the editor to become usable. It is off by default: a project-wide sweep is real work on every session, and it is worth asking for rather than paying for unasked.</li>
 </ul>
 <h4 id="blade-templates">Blade templates<a class="headerlink" href="#blade-templates" title="Permanent link">&para;</a></h4>
 <ul>
@@ -2507,6 +2541,8 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h4 id="tooling-and-platform">Tooling and platform<a class="headerlink" href="#tooling-and-platform" title="Permanent link">&para;</a></h4>
 <ul>
+<li><strong>Settings you want in every project can be set once.</strong> <code>phpantom_lsp init --global</code> creates a config in your platform's config directory (<code>~/.config/phpantom_lsp/.phpantom.toml</code> on Linux) that every project inherits, so a preference like turning workspace diagnostics on, or pinning a PHP version, no longer has to be repeated in a <code>.phpantom.toml</code> per repository. It takes the same keys as a project config and is read first; a project's own config is merged over it key by key rather than replacing it, so a project only has to spell out the settings where it differs from your defaults. A mistake in the global file is now reported against that file instead of against the project config it was merged into.</li>
+<li><strong>Config changes apply without a restart.</strong> Editing either the global config or a project's own <code>.phpantom.toml</code> now reloads settings within a couple of seconds, for both new and existing editor windows. Previously a project's own config only reloaded for Laravel projects, and the global config never reloaded at all.</li>
 <li><strong>Analyze verbosity flags.</strong> <code>phpantom_lsp analyze</code> now supports PHPStan-style <code>--debug</code> and <code>-v</code>/<code>-vv</code>/<code>-vvv</code>. <code>--debug</code> prints each file as it is analyzed and disables the progress bar, so a hang is immediately attributable to a specific file; <code>-v</code> adds per-file durations and a phase summary, <code>-vv</code> adds worker ids and parse tracing, and <code>-vvv</code> adds memory usage.</li>
 <li><strong>PHPantom can run in the browser.</strong> The whole type engine compiles to WebAssembly, so a web editor can have PHPantom's completion, hover, go-to-definition, symbol highlighting, and rename without a server to talk to and without a round-trip per keystroke. The module speaks ordinary LSP JSON-RPC and needs no filesystem: the standard library stubs are compiled in and open documents live in memory. Every release ships a prebuilt module, so a host can pin a version rather than build its own. See <a href="../wasm/">wasm.md</a> for the host interface. Contributed by @ondrejmirtes.</li>
 </ul>
@@ -2540,8 +2576,9 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <li><strong><code>@method</code> and <code>@property</code> tags are parsed once per class instead of on every resolution.</strong> The magic members a class declares in its docblock are now parsed when the file is read and reused from then on, instead of being re-parsed from the raw comment text every time the class (or anything that inherits or mixes it in) is resolved. Whole-project analysis of a large Laravel codebase runs a few percent faster and uses slightly less memory, with identical results.</li>
 <li><strong>Faster Eloquent scope-method resolution.</strong> Injecting a model's scope methods onto its Builder used to re-walk the model's full inheritance chain from scratch on every <code>Builder&lt;Model&gt;</code> instantiation. That base resolution is now cached, so a file with many instantiations of the same model's Builder resolves its scopes once.</li>
 <li><strong>Faster workspace symbol search.</strong> Matching a symbol against the "Go to Symbol in Workspace" query no longer allocates a lowercased copy of every class, method, property, constant, and function name in the project on each keystroke; matching is now done byte-wise in place for the common case of ASCII identifiers.</li>
-<li><strong>The <code>analyze</code> and <code>fix</code> CLI subcommands no longer build the cross-file reference index.</strong> That index only serves Find References, Rename, and reference-count inlay hints, none of which the CLI subcommands query, so skipping it removes wasted work from whole-project runs. The editor's LSP session is unaffected.</li>
-<li></li>
+<li>
+<h2 id="the-analyze-and-fix-cli-subcommands-no-longer-build-the-cross-file-reference-index-that-index-only-serves-find-references-rename-and-reference-count-inlay-hints-none-of-which-the-cli-subcommands-query-so-skipping-it-removes-wasted-work-from-whole-project-runs-the-editors-lsp-session-is-unaffected"><strong>The <code>analyze</code> and <code>fix</code> CLI subcommands no longer build the cross-file reference index.</strong> That index only serves Find References, Rename, and reference-count inlay hints, none of which the CLI subcommands query, so skipping it removes wasted work from whole-project runs. The editor's LSP session is unaffected.<a class="headerlink" href="#the-analyze-and-fix-cli-subcommands-no-longer-build-the-cross-file-reference-index-that-index-only-serves-find-references-rename-and-reference-count-inlay-hints-none-of-which-the-cli-subcommands-query-so-skipping-it-removes-wasted-work-from-whole-project-runs-the-editors-lsp-session-is-unaffected" title="Permanent link">&para;</a></h2>
+</li>
 </ul>
 <h3 id="removed">Removed<a class="headerlink" href="#removed" title="Permanent link">&para;</a></h3>
 <ul>

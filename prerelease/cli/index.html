@@ -2259,7 +2259,14 @@ Neovim) provide autocomplete and hover documentation for all available
 options via the schema. Safe to run if the file already exists (it will
 not overwrite).</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>phpantom_lsp<span class="w"> </span>init
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>phpantom_lsp<span class="w"> </span>init<span class="w"> </span>--global<span class="w">   </span><span class="c1"># user-wide defaults, inherited by every project</span>
 </code></pre></div>
+<p><code>--global</code> writes to the platform config directory
+(<code>~/.config/phpantom_lsp/.phpantom.toml</code> on Linux) instead, creating it
+if needed. Every project reads that file first and merges its own
+<code>.phpantom.toml</code> over it key by key, so put the settings you want
+everywhere in the global file and keep project configs to the
+differences.</p>
 <p>See the <a href="../configuration/">Configuration Reference</a> for details on
 available settings.</p>
 <hr />

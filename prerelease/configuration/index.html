@@ -525,6 +525,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#global-config" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Global config
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#php" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1516,6 +1527,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#global-config" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Global config
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#php" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1740,11 +1762,8 @@
 <h1 id="configuration-reference">Configuration Reference<a class="headerlink" href="#configuration-reference" title="Permanent link">&para;</a></h1>
 <p>PHPantom works best with Composer projects. It reads <code>composer.json</code> to discover autoload directories and vendor packages, so completions and go-to-definition only surface classes that your autoloader can actually load. Projects without <code>composer.json</code> fall back to scanning every PHP file in the workspace.</p>
 <h2 id="phpantomtoml"><code>.phpantom.toml</code><a class="headerlink" href="#phpantomtoml" title="Permanent link">&para;</a></h2>
-<p>PHPantom supports an optional per-project configuration file. A global
-config can also be placed at <code>$XDG_CONFIG_HOME/phpantom_lsp/.phpantom.toml</code>
-(typically <code>~/.config/phpantom_lsp/.phpantom.toml</code> on Linux). Project
-settings override global settings.</p>
-<p>To generate a starter config file:</p>
+<p>PHPantom supports an optional per-project configuration file. To
+generate a starter config file:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>phpantom_lsp<span class="w"> </span>init
 </code></pre></div>
 <p>This creates a minimal <code>.phpantom.toml</code> with a JSON schema directive.
@@ -1752,6 +1771,25 @@ Editors with TOML schema support (Zed, VS Code + Even Better TOML,
 Neovim) provide autocomplete and hover documentation for every option
 via the schema. Only add settings you want to override -- when absent,
 all settings use their defaults.</p>
+<h3 id="global-config">Global config<a class="headerlink" href="#global-config" title="Permanent link">&para;</a></h3>
+<p>Settings you want in every project belong in the global config rather
+than in a <code>.phpantom.toml</code> per repository:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>phpantom_lsp<span class="w"> </span>init<span class="w"> </span>--global
+</code></pre></div>
+<p>It lives at <code>$XDG_CONFIG_HOME/phpantom_lsp/.phpantom.toml</code> (typically
+<code>~/.config/phpantom_lsp/.phpantom.toml</code> on Linux,
+<code>~/Library/Application Support/phpantom_lsp/.phpantom.toml</code> on macOS,
+<code>%APPDATA%\phpantom_lsp\.phpantom.toml</code> on Windows), takes exactly the
+same keys as a project config, and is read first. A project config is
+then merged over it key by key, not wholesale, so a project only has to
+spell out the settings where it differs from your defaults: with
+<code>workspace = true</code> and <code>extra-arguments = true</code> set globally, a project
+that sets only <code>workspace = false</code> still gets <code>extra-arguments</code>.</p>
+<p>Both the global config and a project's own <code>.phpantom.toml</code> are
+watched, and most settings take effect within a couple of seconds of
+saving either file. The exceptions are settings that shape the initial
+workspace scan, such as the PHP version and indexing strategy below --
+those still need a restart to fully apply.</p>
 <p>The full schema is at <a href="https://github.com/PHPantom-dev/phpantom_lsp/blob/main/config-schema.json"><code>config-schema.json</code></a>.</p>
 <h3 id="php"><code>[php]</code><a class="headerlink" href="#php" title="Permanent link">&para;</a></h3>
 <table>
@@ -1804,14 +1842,14 @@ all settings use their defaults.</p>
 <tr>
 <td><code>workspace</code></td>
 <td>bool</td>
-<td><code>true</code></td>
-<td>Compute diagnostics for the whole workspace in the background after startup. Requires the default <code>full</code> indexing strategy.</td>
+<td><code>false</code></td>
+<td>Compute diagnostics for the whole workspace in the background after startup, so problems appear for files you have not opened. Costs a project-wide sweep every session. Requires the default <code>full</code> indexing strategy.</td>
 </tr>
 <tr>
 <td><code>workspace-external</code></td>
 <td>bool</td>
 <td><code>true</code></td>
-<td>Run configured external tools (PHPStan, PHPCS, Mago) once over the whole project after workspace diagnostics finish.</td>
+<td>Run configured external tools (PHPStan, PHPCS, Mago) once over the whole project after workspace diagnostics finish. Only takes effect when <code>workspace</code> is enabled.</td>
 </tr>
 </tbody>
 </table>
@@ -1821,12 +1859,12 @@ all settings use their defaults.</p>
 (glob relative to workspace root), and/or <code>identifier</code> (diagnostic
 code). A diagnostic is suppressed when it matches every constraint
 present on a rule; omitted constraints match anything.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">[[diagnostics.ignore]]</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">path</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;tests/**&quot;</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="k">[[diagnostics.ignore]]</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="n">identifier</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;deprecated_usage&quot;</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="n">message</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;^Call to deprecated function some_legacy_helper</span><span class="se">\\</span><span class="s2">(</span><span class="se">\\</span><span class="s2">)&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">[[diagnostics.ignore]]</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">path</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;tests/**&quot;</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="k">[[diagnostics.ignore]]</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="n">identifier</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;deprecated_usage&quot;</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="n">message</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;^Call to deprecated function some_legacy_helper</span><span class="se">\\</span><span class="s2">(</span><span class="se">\\</span><span class="s2">)&quot;</span>
 </code></pre></div>
 <h3 id="indexing"><code>[indexing]</code><a class="headerlink" href="#indexing" title="Permanent link">&para;</a></h3>
 <table>
@@ -2096,11 +2134,11 @@ highlighting remains in charge of ordinary PHP syntax.</p>
 <li><strong>Otherwise, the built-in formatter is used.</strong></li>
 </ol>
 <p>The built-in formatter defaults to the PER-CS 2.0 style. If a <code>mago.toml</code> is present at the workspace root, its <code>[formatter]</code> table is honoured instead, so PHPantom formats with the same preset and settings your project already uses with the Mago CLI:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># mago.toml</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="k">[formatter]</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">preset</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;psr-12&quot;</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="n">print-width</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">100</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="n">use-tabs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">false</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># mago.toml</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="k">[formatter]</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="n">preset</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;psr-12&quot;</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="n">print-width</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">100</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="n">use-tabs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">false</span>
 </code></pre></div>
 <p>For the full list of <code>[formatter]</code> options (presets, brace placement, blank-line handling, casing, and the rest), refer to the upstream Mago documentation: <a href="https://mago.carthage.software/latest/en/tools/formatter/configuration-reference">Formatter configuration reference</a>.</p>
 <h2 id="indexing-strategy">Indexing Strategy<a class="headerlink" href="#indexing-strategy" title="Permanent link">&para;</a></h2>
