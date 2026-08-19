@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787179220617,
+  "lastUpdate": 1787180142843,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -24105,6 +24105,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 66.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "af8b2a30c6951c7392fc78b73a3be00f75f6553d",
+          "message": "Switching workspace diagnostics off now takes effect immediately too",
+          "timestamp": "2026-08-20T00:40:16+02:00",
+          "tree_id": "f6516a98c1a71b7ce90df921ad07949a75d27540",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/af8b2a30c6951c7392fc78b73a3be00f75f6553d"
+        },
+        "date": 1787180138094,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 68.9,
             "unit": "MiB"
           }
         ]
