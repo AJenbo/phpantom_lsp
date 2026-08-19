@@ -255,6 +255,8 @@ function runDemoAssertions(): void
     assert($named === ['ink' => 'ink'], 'array_filter() with a value callback keeps only the entries it approves of, so no null survives');
     $writers = array_values(array_filter((new Scaffolding\ScaffoldingArrayFunc())->mixedWriters(), fn($writer) => $writer instanceof Scaffolding\Pen));
     assert(count($writers) === 2 && $writers[0] instanceof Scaffolding\Pen, 'array_filter() with an instanceof callback keeps only that class');
+    $sparse = array_filter([3, 4, 5], fn($v) => $v > 3);
+    assert(array_keys($sparse) === [1, 2], 'array_filter() keeps the key of every entry it keeps, so filtering a list leaves gaps rather than another list');
 
     // ── array<T>|false keeps its element type after a false check ────────
     $pens = Scaffolding\loadPensOrFail();

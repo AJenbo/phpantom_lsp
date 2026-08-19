@@ -108,6 +108,7 @@ pub(in crate::type_engine) fn array_func_raw_type(
             // callback the kept members are whatever it approves of, which
             // says nothing about their type.
             if func_name.eq_ignore_ascii_case("array_filter") {
+                let raw = filtered_container(&raw);
                 if !args.has_arg(1) {
                     return Some(filter_element_type(&raw).unwrap_or(raw));
                 }
@@ -382,6 +383,36 @@ fn is_list_type(ty: &PhpType) -> bool {
         TypeKind::ListShape(_) => true,
         TypeKind::Union(members) => members.iter().all(is_list_type),
         _ => false,
+    }
+}
+
+/// The container `array_filter` hands back for an input of type `raw`.
+///
+/// The filter keeps the key of every entry it keeps, so the numbering of
+/// a filtered `list` comes back with gaps: `array_filter([3, 4, 5], fn
+/// ($v) => $v > 3)` starts at key 1, and reading `[0]` off it finds
+/// nothing. The result is `array<int, T>`, which is what `array_values()`
+/// exists to renumber. A filter may also drop every entry, so a
+/// `non-empty-` refinement does not survive the call either.
+///
+/// Everything else is returned unchanged: an `array<string, T>` really
+/// does keep its `string` keys.
+fn filtered_container(raw: &PhpType) -> PhpType {
+    match raw.kind() {
+        TypeKind::Generic(g) if crate::php_type::is_list_name(g.name.as_str()) => {
+            match g.args.first() {
+                Some(value) => PhpType::generic_array(PhpType::int(), value.clone()),
+                None => PhpType::array(),
+            }
+        }
+        TypeKind::Generic(g) if crate::php_type::is_non_empty_array_name(g.name.as_str()) => {
+            PhpType::generic("array", g.args.clone())
+        }
+        TypeKind::Union(members) => {
+            PhpType::union(members.iter().map(filtered_container).collect())
+        }
+        TypeKind::Nullable(inner) => PhpType::nullable(filtered_container(inner)),
+        _ => raw.clone(),
     }
 }
 

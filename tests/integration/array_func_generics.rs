@@ -188,6 +188,8 @@ function probe(array $names, array $users): void {
 /// `array_filter` with no callback keeps exactly the truthy members, so the
 /// element type drops `null`. A callback the analysis cannot read leaves the
 /// element type alone, since anything it approves of could be in there.
+/// Either way the surviving entries keep their original keys, so a filtered
+/// `list` comes back renumbered as `array<int, T>`.
 #[test]
 fn array_filter_without_a_callback_drops_falsy_members() {
     let content = r#"<?php
@@ -208,9 +210,48 @@ function probe(array $maybe, array $users, array $plain, callable $cb): void {
         content,
         &[
             ("$kept", "array<string, string>"),
-            ("$present", "list<User>"),
+            ("$present", "array<int, User>"),
             ("$chosen", "array<string, string|null>"),
-            ("$unchanged", "list<string>"),
+            ("$unchanged", "array<int, string>"),
+        ],
+    );
+}
+
+/// `array_filter` keeps the key of every entry it keeps, so filtering a `list`
+/// leaves gaps in the numbering and the result is no longer a `list`. The
+/// renumbering functions around it are the ones that rebuild the promise, and
+/// a filter may drop every entry, so a `non-empty-` refinement goes too.
+#[test]
+fn array_filter_drops_the_list_promise_its_input_carried() {
+    let content = r#"<?php
+/**
+ * @param list<int> $values
+ * @param non-empty-list<int> $some
+ * @param non-empty-array<string, int> $rows
+ * @param array<string, int> $keyed
+ */
+function probe(array $values, array $some, array $rows, array $keyed, callable $cb): void {
+    $filtered = array_filter($values, $cb);
+    $truthy = array_filter($values);
+    $from_non_empty = array_filter($some, $cb);
+    $mapped = array_filter($rows, $cb);
+    $unchanged = array_filter($keyed, $cb);
+    $shape = array_filter([1, 2, 3], $cb);
+    $renumbered = array_values(array_filter($values, $cb));
+    $preserved = array_unique($values);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$filtered", "array<int, int>"),
+            ("$truthy", "array<int, int>"),
+            ("$from_non_empty", "array<int, int>"),
+            ("$mapped", "array<string, int>"),
+            ("$unchanged", "array<string, int>"),
+            ("$shape", "array<int, 1|2|3>"),
+            ("$renumbered", "list<int>"),
+            ("$preserved", "list<int>"),
         ],
     );
 }
@@ -368,7 +409,7 @@ function probe(array $maybe, array $users, array $mixed): void {
             ("$guarded", "array<string, string>"),
             ("$named", "array<int>"),
             ("$closure", "array<string>"),
-            ("$instances", "list<Admin>"),
+            ("$instances", "array<int, Admin>"),
             ("$both", "array<string, string>"),
             ("$inline", "list<string>"),
         ],
@@ -433,8 +474,8 @@ function probe(array $data): void {
 /// `array<T>` and `T[]` name a value type and leave the key domain open, so
 /// the callback narrows every key PHP permits — the same result the spelled
 /// out `array<string|int, T>` gets. A `list<T>` does promise `int` keys, so
-/// a callback asking for string keys has nothing to keep and the declared
-/// type stands.
+/// a callback asking for string keys has nothing to keep and the element
+/// type stands, over the `array<int, T>` a filtered list always decays to.
 #[test]
 fn array_filter_narrows_the_open_key_domain_of_a_shorthand_array() {
     let content = r#"<?php
@@ -454,7 +495,7 @@ function probe(array $shorthand, array $slice, array $sequential): void {
         &[
             ("$from_shorthand", "array<string, string>"),
             ("$from_slice", "array<string, string>"),
-            ("$from_list", "list<string>"),
+            ("$from_list", "array<int, string>"),
         ],
     );
 }
@@ -581,7 +622,7 @@ function probe(array $counts, array $users): void {
         &[
             ("$total", "int"),
             ("$last", "User"),
-            ("$kept", "list<User>"),
+            ("$kept", "array<int, User>"),
         ],
     );
 }

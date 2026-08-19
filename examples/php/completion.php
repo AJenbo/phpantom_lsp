@@ -3308,8 +3308,13 @@ class ArrayFuncDemo
     {
         $src = new Scaffolding\ScaffoldingArrayFunc();
 
+        // array_filter keeps the key of every entry it keeps, so filtering a
+        // list leaves gaps in the numbering: the result is array<int, Pen>
+        // and its first entry need not be at key 0. The element type is what
+        // survives the call.
         $active = array_filter($src->members, fn(Scaffolding\Pen $pen) => $pen->color() === 'blue');
-        $active[0]->write();              // Scaffolding\Pen preserved through array_filter
+        $renumbered = array_values($active);
+        $renumbered[0]->write();          // Scaffolding\Pen preserved through array_filter
 
         $vals = array_values($src->members);
         $vals[0]->write();                // Scaffolding\Pen preserved through array_values
@@ -3331,7 +3336,7 @@ class ArrayFuncDemo
         $mapped[0]->write();              // Scaffolding\Pen from array_map fallback
 
         // The same rules apply without an intermediate variable.
-        array_filter($src->members)[0]->write();
+        array_values(array_filter($src->members))[0]->write();
         array_map(fn($pen): Scaffolding\Pen => $pen, $src->members)[0]->write();
 
         // Untyped callback parameter inferred from a method-call array
