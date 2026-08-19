@@ -962,17 +962,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b188-renaming-a-namespaced-constant-or-function-renames-unrelated-symbols-of-the-same-short-name" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B188. Renaming a namespaced constant or function renames unrelated symbols of the same short name
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b189-renaming-a-define-declared-constant-leaves-the-define-call-unrenamed" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1904,17 +1893,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b188-renaming-a-namespaced-constant-or-function-renames-unrelated-symbols-of-the-same-short-name" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B188. Renaming a namespaced constant or function renames unrelated symbols of the same short name
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b189-renaming-a-define-declared-constant-leaves-the-define-call-unrenamed" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2348,27 +2326,6 @@ executed, when the array it iterates was actually emptied first).</p>
 <h2 id="arithmetic">Arithmetic<a class="headerlink" href="#arithmetic" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
-<h3 id="b188-renaming-a-namespaced-constant-or-function-renames-unrelated-symbols-of-the-same-short-name">B188. Renaming a namespaced constant or function renames unrelated symbols of the same short name<a class="headerlink" href="#b188-renaming-a-namespaced-constant-or-function-renames-unrelated-symbols-of-the-same-short-name" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: High · Complexity: Medium</strong></p>
-<p><code>constant_matches</code> in <code>references/functions.rs</code> accepts a span as a
-match whenever its <em>resolved</em> FQN merely shares the target's short name
-(<code>crate::util::short_name(resolved) == target_short</code>), not only when it
-is the exact same declaration. The identical disjunct exists for
-functions:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">namespace A;</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">const VERSION = &#39;1&#39;;</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">namespace B;</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">const VERSION = &#39;2&#39;; // renaming A\VERSION silently renames this too</span>
-</code></pre></div>
-<p>The short-name fallback exists to catch PHP's runtime namespace-fallback
-resolution for genuinely unqualified references, but it fires even when
-the sibling-namespace constant/function is a real, unambiguous
-declaration of its own. This is the same bug class fixed for class
-constants vs. global constants in a recent commit; it is still open
-across namespaces for constants and functions. Rename silently rewriting
-declarations and uses in an unrelated namespace is a correctness
-regression risk on any release with namespaced code.</p>
 <h3 id="b189-renaming-a-define-declared-constant-leaves-the-define-call-unrenamed">B189. Renaming a <code>define()</code>-declared constant leaves the <code>define()</code> call unrenamed<a class="headerlink" href="#b189-renaming-a-define-declared-constant-leaves-the-define-call-unrenamed" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: High · Complexity: Medium-High</strong></p>
 <p><code>ConstantReference</code> spans are only emitted for top-level <code>const</code>
@@ -2380,9 +2337,9 @@ style lookups resolve it via the parser's symbol table. Renaming started
 from any use site of a <code>define()</code>-declared constant therefore rewrites
 every use but leaves the <code>define()</code> call itself untouched, producing
 code that no longer defines the constant it now reads:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">define(&#39;FOO&#39;, 1);</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">echo FOO; // rename FOO -&gt; BAR rewrites this to BAR...</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">// ...but define(&#39;FOO&#39;, 1) above is left as-is: BAR is now undefined at runtime</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">define(&#39;FOO&#39;, 1);</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">echo FOO; // rename FOO -&gt; BAR rewrites this to BAR...</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">// ...but define(&#39;FOO&#39;, 1) above is left as-is: BAR is now undefined at runtime</span>
 </code></pre></div>
 <p>The docblock on <code>SymbolKind::ConstantReference</code> already claims <code>define()</code>
 names are covered; they are not. Fix belongs in symbol-map extraction of
@@ -2408,7 +2365,7 @@ property-hook invocation, but PHP 8.4 only defines this syntax for
 <code>parent::</code>. The extraction never checks <code>property_access.class</code>, so
 legitimate code using the same token shape for an unrelated purpose is
 hijacked:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">Registry::$instance::get(&#39;service&#39;); // a real static property + static call</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">Registry::$instance::get(&#39;service&#39;); // a real static property + static call</span>
 </code></pre></div>
 <p>Here the <code>get</code> call's <code>MemberAccess</code> span is dropped entirely (hover and
 go-to-definition on <code>get</code> answer nothing, and its unknown-method/
@@ -2465,8 +2422,8 @@ guard used by find-references/rename while walking other files). Two
 files that each <code>use</code> a different class under the same alias and spell
 the same method-chain text can have the second file's resolution
 poisoned by the first file's cached entry:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">// file A: use A\Pen;           file B: use B\Pen;</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">Pen::make()-&gt;write();           Pen::make()-&gt;write();  // may resolve against A\Pen</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">// file A: use A\Pen;           file B: use B\Pen;</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">Pen::make()-&gt;write();           Pen::make()-&gt;write();  // may resolve against A\Pen</span>
 </code></pre></div>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
@@ -2655,9 +2612,9 @@ sites to <code>request_diagnostic_refresh()</code>.</p>
 assumes an arrow-form hook body is "a single expression with nothing to
 assign," but a closure embedded in that expression has its own
 parameters that never get a snapshot:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">public array $items {</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">    get =&gt; array_map(fn ($p) =&gt; $p-&gt;format(), $this-&gt;items);</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">public array $items {</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">    get =&gt; array_map(fn ($p) =&gt; $p-&gt;format(), $this-&gt;items);</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">}</span>
 </code></pre></div>
 <p>Lookups on <code>$p</code> inside the closure return empty, so member diagnostics
 inside closures embedded in arrow-bodied hooks are silently skipped
