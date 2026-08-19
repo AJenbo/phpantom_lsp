@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787102390199,
+  "lastUpdate": 1787106522607,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -23459,6 +23459,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 83.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "0de10f47edc3656a40522ad96ef5da2f893a8d08",
+          "message": "A project that uses Mago only for formatting no longer gets Mago's lint\nand analyze reports",
+          "timestamp": "2026-08-19T04:08:55+02:00",
+          "tree_id": "20676af32f369b555f4f13b5b9a3bed0c1a70b62",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/0de10f47edc3656a40522ad96ef5da2f893a8d08"
+        },
+        "date": 1787106516173,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 82.3,
             "unit": "MiB"
           }
         ]
