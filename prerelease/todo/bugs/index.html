@@ -1100,10 +1100,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b198-a-project-wide-external-tool-run-can-resurrect-diagnostics-on-a-closed-file" class="md-nav__link">
+  <a href="#b216-a-project-wide-external-tool-run-can-overwrite-a-fresher-per-file-result-for-a-file-that-stays-open" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B198. A project-wide external tool run can resurrect diagnostics on a closed file
+        B216. A project-wide external tool run can overwrite a fresher per-file result for a file that stays open
       </span>
     </span>
   </a>
@@ -2042,10 +2042,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b198-a-project-wide-external-tool-run-can-resurrect-diagnostics-on-a-closed-file" class="md-nav__link">
+  <a href="#b216-a-project-wide-external-tool-run-can-overwrite-a-fresher-per-file-result-for-a-file-that-stays-open" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B198. A project-wide external tool run can resurrect diagnostics on a closed file
+        B216. A project-wide external tool run can overwrite a fresher per-file result for a file that stays open
       </span>
     </span>
   </a>
@@ -2473,23 +2473,24 @@ poisoned by the first file's cached entry:</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b198-a-project-wide-external-tool-run-can-resurrect-diagnostics-on-a-closed-file">B198. A project-wide external tool run can resurrect diagnostics on a closed file<a class="headerlink" href="#b198-a-project-wide-external-tool-run-can-resurrect-diagnostics-on-a-closed-file" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium-High · Complexity: Low-Medium</strong></p>
-<p><code>store_workspace_external_results</code> (<code>diagnostics/workspace.rs</code>)
-partitions results by <code>open_files</code>, then awaits
-<code>flush_workspace_diag_updates</code> (which can block up to the 10s
-<code>REFRESH_TIMEOUT</code>), and only afterwards inserts into the per-file tool
-caches — with no re-check of <code>open_files</code> at insert time, unlike the
-per-file external-tool workers, which do re-check immediately before
-writing. If the file is closed during that await, <code>clear_diagnostics_for_file</code>
-has already purged its caches, and this loop re-inserts the scan-time
-diagnostics right back in — the exact bug a recent commit fixed for the
-regular close path. The same insert is also unconditional for files that
-stay open: it can overwrite a fresher (already-fixed) per-file result
-with a stale scan-time one, and it never clears an open file's cache
-entry when the tool no longer reports anything for it. Fix by re-checking
-<code>open_files</code> immediately before each insert, matching the per-file
-workers.</p>
+<h3 id="b216-a-project-wide-external-tool-run-can-overwrite-a-fresher-per-file-result-for-a-file-that-stays-open">B216. A project-wide external tool run can overwrite a fresher per-file result for a file that stays open<a class="headerlink" href="#b216-a-project-wide-external-tool-run-can-overwrite-a-fresher-per-file-result-for-a-file-that-stays-open" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
+<p><code>store_workspace_external_results</code> (<code>diagnostics/workspace.rs</code>) writes a
+project-wide external tool's scan-time results straight into the
+per-file <code>last_diags</code> caches (<code>phpstan_tool</code>, <code>phpcs_tool</code>,
+<code>mago_lint_tool</code>, <code>mago_analyze_tool</code>) for any file that is open when it
+writes. If a concurrent per-file run of the same tool (triggered by an
+edit to that same open file) finishes and writes a fresher result to the
+same cache entry while the project-wide scan is still awaiting
+<code>flush_workspace_diag_updates</code> (up to the 10s <code>REFRESH_TIMEOUT</code>), the
+scan's unconditional <code>cache.lock().insert(...)</code> at the end can overwrite
+that fresher, already-corrected result with its own stale one — a
+last-write-wins race, since neither writer knows about the other. Fixing
+this needs some notion of freshness (e.g. a per-uri generation counter
+bumped by the per-file workers, with the project-wide writer skipping
+its own write when the generation has moved since the scan captured that
+file) rather than a simple open/closed re-check, which is why it is
+tracked separately from the closed-file race this was split off from.</p>
 <h3 id="b199-a-workspace-diagnostics-scan-never-replaces-a-worker-retired-by-the-give-up-timeout">B199. A workspace diagnostics scan never replaces a worker retired by the give-up timeout<a class="headerlink" href="#b199-a-workspace-diagnostics-scan-never-replaces-a-worker-retired-by-the-give-up-timeout" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium-High · Complexity: Medium</strong></p>
 <p>The native diagnostics scan spawns a fixed worker pool once per pass
