@@ -2273,6 +2273,18 @@ function crushOneRock(Rock $rock): string
     return $rock->crush();
 }
 
+/**
+ * A union that names no class at all, the shape a framework lookup
+ * returns when it may hand back either an object or the raw key it was
+ * asked for (Laravel's `Route::parameter()` is annotated this way).
+ *
+ * @return object|string
+ */
+function lookUpSpecimen(bool $found)
+{
+    return $found ? new Rock() : 'rock';
+}
+
 function pickTag(): TextTag|NumberTag
 {
     return new TextTag();

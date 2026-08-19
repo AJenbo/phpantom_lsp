@@ -1411,3 +1411,64 @@ function acrossIterations(string $slug, string $marker): void {{
     let messages = type_error_messages(&backend, uri, &text);
     assert_eq!(messages.len(), 2, "got {messages:?}");
 }
+
+/// Scaffolding for an `instanceof` check on a subject whose declared type
+/// names no class: the shape a route parameter or a container lookup
+/// arrives as.
+const BROAD_SUBJECT_SCAFFOLD: &str = r#"<?php
+namespace BroadSubject;
+
+class Server {}
+
+class Auth {
+    public function canManageServer(Server $server): bool { return true; }
+}
+
+function auth_user(): Auth { return new Auth(); }
+function abort(int $code, string $message): void {}
+"#;
+
+/// `instanceof` on an `object|string` subject proves the subject *is* the
+/// class: the `object` alternative is subsumed by it and the `string` one
+/// is ruled out by the check succeeding, so neither may survive to be
+/// judged against a parameter type.
+#[test]
+fn an_instanceof_check_replaces_a_union_that_names_no_class() {
+    let backend = create_test_backend();
+    let uri = "file:///broad_subject.php";
+    let text = format!(
+        "{BROAD_SUBJECT_SCAFFOLD}
+class Controller {{
+    /** @param object|string $server */
+    public function orChain($server): void {{
+        if (! $server instanceof Server || ! auth_user()->canManageServer($server)) {{
+            abort(403, 'nope');
+        }}
+    }}
+
+    /** @param object|string $server */
+    public function andChain($server): bool {{
+        return $server instanceof Server && auth_user()->canManageServer($server);
+    }}
+
+    /** @param object|string $server */
+    public function truthyBranch($server): void {{
+        if ($server instanceof Server) {{
+            auth_user()->canManageServer($server);
+        }}
+    }}
+
+    /** @param object|string $server */
+    public function guardClause($server): void {{
+        if (! $server instanceof Server) {{
+            abort(403, 'nope');
+            return;
+        }}
+        auth_user()->canManageServer($server);
+    }}
+}}
+"
+    );
+    let messages = type_error_messages(&backend, uri, &text);
+    assert!(messages.is_empty(), "got {messages:?}");
+}

@@ -304,6 +304,15 @@ class TypeNarrowingDemo
             // guard clause body
         }
 
+        // The same holds when the subject's declared type names no class:
+        // `object` is subsumed by the checked class and `string` is ruled
+        // out by the check succeeding, so nothing but Scaffolding\Rock
+        // survives into the right operand.
+        $looked = Scaffolding\lookUpSpecimen(true);           // object|string
+        if (!$looked instanceof Scaffolding\Rock || !Scaffolding\crushOneRock($looked)) {
+            // guard clause body
+        }
+
         // A boolean holding the result of an instanceof check carries the
         // check with it: testing the boolean narrows the original subject.
         $stored = Scaffolding\pickRockOrBanana();

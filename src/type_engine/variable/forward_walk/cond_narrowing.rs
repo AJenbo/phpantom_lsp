@@ -671,26 +671,46 @@ fn commit_instanceof_narrowing(
         return;
     }
 
-    // When the existing type says no more than `mixed` or `object`,
-    // instanceof replaces it — there is no useful information to preserve
-    // or intersect.  `null` members count as broad too: a successful check
-    // rules them out, so `object|null` is as uninformative as bare
+    // A successful check rules out every alternative that cannot be an
+    // object, and an `object`/`mixed` alternative says nothing the checked
+    // class does not already say.  When that leaves no class alternative
+    // to filter down to, the check's conclusion is the whole answer:
+    // `object|string` (the shape a route parameter arrives as) becomes the
+    // checked class instead of growing it as one more alternative.  `null`
+    // counts as ruled out too, so `?object` is as uninformative as bare
     // `object`.
-    let is_broad_atom = |ty: &PhpType| {
-        ty.is_null()
-            || matches!(
-                ty.kind(),
-                TypeKind::Named(n) if n.eq_ignore_ascii_case("mixed") || n.eq_ignore_ascii_case("object")
-            )
+    //
+    // A subject with no object alternative at all is deliberately left to
+    // the passes that run after this one: `is_a($s, C::class, true)` on a
+    // `string` proves a `class-string<C>`, not a `C`.
+    let is_broad_object = |ty: &PhpType| {
+        matches!(
+            ty.kind(),
+            TypeKind::Named(n) if n.eq_ignore_ascii_case("mixed") || n.eq_ignore_ascii_case("object")
+        )
     };
-    let all_broad = existing.iter().all(|rt| {
-        rt.class_info.is_none()
-            && match rt.type_string.non_null_type() {
-                Some(non_null) => is_broad_atom(&non_null),
-                None => is_broad_atom(&rt.type_string),
+    let mut names_class = false;
+    let mut broad_object = false;
+    for rt in existing {
+        if rt.class_info.is_some() {
+            names_class = true;
+            break;
+        }
+        for member in rt.type_string.union_members() {
+            if !member.top_level_class_names().is_empty() {
+                names_class = true;
+                break;
             }
-    });
-    if all_broad {
+            let bare = member.non_null_type();
+            if is_broad_object(bare.as_ref().unwrap_or(member)) {
+                broad_object = true;
+            }
+        }
+        if names_class {
+            break;
+        }
+    }
+    if !names_class && broad_object {
         scope.set(var_name, narrowed);
         return;
     }

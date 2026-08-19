@@ -417,6 +417,12 @@ function runDemoAssertions(): void
     assert(is_array(Scaffolding\pickRockOrRocks(false)), 'the false branch really is the array alternative instanceof rules out');
     (new TypeNarrowingDemo())->guardClause();
 
+    // ── Type narrowing: instanceof over a union that names no class ─────
+    $looked = Scaffolding\lookUpSpecimen(true);
+    assert($looked instanceof Scaffolding\Rock, 'the found branch really hands back the object alternative');
+    assert(Scaffolding\crushOneRock($looked) === 'smash!', 'the narrowed value really is what Scaffolding\crushOneRock() accepts');
+    assert(is_string(Scaffolding\lookUpSpecimen(false)), 'the missing branch really is the string alternative instanceof rules out');
+
     // ── Type narrowing: inline && ───────────────────────────────────────
     $sample = Scaffolding\pickRockOrBanana();
     if ($sample instanceof Scaffolding\Rock && $sample->crush()) {
