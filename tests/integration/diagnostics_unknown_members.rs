@@ -1,6 +1,7 @@
 use crate::common::{
     create_psr4_workspace, create_psr4_workspace_with_stubs, create_test_backend,
-    create_test_backend_with_exception_stubs, create_test_backend_with_stubs,
+    create_test_backend_with_exception_stubs, create_test_backend_with_full_stubs,
+    create_test_backend_with_stubs,
 };
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
@@ -4351,6 +4352,48 @@ class ParserTest extends BaseAssert {
             .iter()
             .any(|d| d.message.contains("could not be resolved") && d.message.contains("getImage")),
         "assertInstanceOf must narrow via a variable holding a ::class literal, got: {diags:?}",
+    );
+}
+
+/// A concrete `ArrayAccess::offsetGet()` override must win over the
+/// interface stub's own `@return TValue` docblock when the implementer
+/// declares no generics at all (`implements \ArrayAccess` with no
+/// `@implements ArrayAccess<TKey, TValue>`). `ArrayAccess`'s `TValue` is
+/// never bound in that case, and it must fall back to its bound (`mixed`)
+/// rather than leaking through the interface-enrichment pass as if it
+/// were a real, unresolvable class named "TValue".
+#[test]
+fn array_access_concrete_offset_get_override_wins_over_interface_stub() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Pen {
+    public function write(): void {}
+}
+
+class PlainArrayAccess implements \ArrayAccess {
+    /** @var Pen[] */
+    private array $items = [];
+    public function offsetExists(mixed $offset): bool { return isset($this->items[$offset]); }
+    public function offsetGet(mixed $offset): Pen { return $this->items[$offset] ?? new Pen(); }
+    public function offsetSet(mixed $offset, mixed $value): void { $this->items[$offset] = $value; }
+    public function offsetUnset(mixed $offset): void { unset($this->items[$offset]); }
+}
+
+function test(): void {
+    $pens = new PlainArrayAccess();
+    $pens[0]->write();
+}
+"#;
+    backend.update_ast(uri, text);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.message.contains("could not be resolved")),
+        "PlainArrayAccess::offsetGet()'s own `Pen` return type must win over \
+         ArrayAccess's unbound `TValue` docblock, got: {diags:?}",
     );
 }
 

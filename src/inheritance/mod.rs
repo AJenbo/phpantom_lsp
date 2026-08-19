@@ -461,8 +461,31 @@ pub(crate) fn resolve_class_with_inheritance(
         };
 
         // Build substitution map from @implements/@template-implements generics.
-        let iface_subs =
+        //
+        // Any of the interface's own @template params this class doesn't
+        // bind explicitly (e.g. a plain `implements ArrayAccess` with no
+        // `@implements ArrayAccess<TKey, TValue>` at all) falls back to its
+        // declared bound (or `mixed`) here. Without this, a docblock return
+        // type like `ArrayAccess`'s own `@return TValue` would leak through
+        // `enrich_method_arc_from_ancestor` below as if "TValue" were a real,
+        // resolvable class, clobbering the class's own concrete override
+        // (e.g. `offsetGet(): Pen`). This fallback is local to interface
+        // enrichment; `build_substitution_map` itself must keep leaving an
+        // absent annotation unresolved, since other consumers (the `extends`
+        // chain walk, Laravel factory model detection) rely on that absence
+        // to fall through to their own convention-based resolution.
+        let mut iface_subs =
             build_substitution_map(&ClassRef::Borrowed(class), &iface, &HashMap::new());
+        for param_name in &iface.template_params {
+            if !iface_subs.contains_key(param_name.as_str()) {
+                let fallback = iface
+                    .template_param_bounds
+                    .get(param_name)
+                    .cloned()
+                    .unwrap_or_else(PhpType::mixed);
+                iface_subs.insert(param_name.to_string(), fallback);
+            }
+        }
         let iface_sub_keys: Vec<String> = iface_subs.keys().cloned().collect();
         let fp_iface = TransformFingerprint::new(Some(&iface_subs), None, 0);
 
