@@ -286,21 +286,3 @@ means stopping a running pass, clearing `WorkspaceDiagnostics`, and
 telling the editor to drop what it was shown, and re-enabling afterwards
 has to be able to start a fresh pass (`workspace_diag_pass_started` is
 one-way today).
-
-### B215. A file closed mid-computation can have stale diagnostics reinserted after the close purge
-
-**Impact: Low · Complexity: Medium**
-
-Several diagnostic write-back paths check `open_files` once before
-starting a multi-step computation and never re-check before the final
-write. `assemble_and_push`'s read-merge-write across the six per-source
-diagnostic caches is not atomic, so two concurrent completions (e.g. a
-fast-phase worker and an external tool) can interleave such that the
-stale merge's write lands last. Separately, the main diagnostic worker
-(`diagnostics/mod.rs`) checks `open_files` only before starting
-`publish_diagnostics_for_file`; a close landing mid-compute (the fast/slow
-phases can take seconds) lets the tail of that computation re-insert
-`last_fast`/`last_full`/`result_ids` after `clear_diagnostics_for_file`
-has purged them. Both self-heal on the file's next open/edit, but until
-then a closed file's cache holds diagnostics that should have been
-cleared.

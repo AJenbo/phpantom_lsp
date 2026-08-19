@@ -1740,6 +1740,7 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
         backend.diag.last_full.lock().clear();
         backend.diag.result_ids.lock().clear();
         backend.diag.suppressed.lock().clear();
+        backend.diag.assemble_locks.lock().clear();
         *backend.diag.workspace_diags.lock() = Default::default();
     });
 

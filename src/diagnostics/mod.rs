@@ -1087,6 +1087,14 @@ impl Backend {
             .unwrap_or_default()
         };
 
+        // The collector above can take a while; re-check that the file is
+        // still open immediately before writing so a close that landed
+        // mid-compute can't resurrect the caches `clear_diagnostics_for_file`
+        // already purged (same rationale as the external tool workers).
+        if !self.open_files.read().contains_key(uri_str) {
+            return;
+        }
+
         {
             let mut cache = self.diag.last_fast.lock();
             cache.insert(uri_str.to_string(), fast_diagnostics.clone());
@@ -1117,6 +1125,12 @@ impl Backend {
             .await
             .unwrap_or_default()
         };
+
+        // Re-check again: Phase 2 runs a full-file forward walk and can
+        // take seconds, plenty of time for a close to land mid-compute.
+        if !self.open_files.read().contains_key(uri_str) {
+            return;
+        }
 
         {
             let mut cache = self.diag.last_slow.lock();
@@ -1160,6 +1174,23 @@ impl Backend {
             Ok(u) => u,
             Err(_) => return false,
         };
+
+        // Serialize this URI's read-merge-write. Each per-source cache
+        // below is locked and released independently, so without this a
+        // second call that starts reading after this one can still finish
+        // writing first (or vice versa), landing a merge based on a
+        // stale snapshot after a fresher one. Dropped before the
+        // push-mode `.await` below since it guards only the synchronous
+        // merge and the pull-mode cache write.
+        let assemble_lock = {
+            let mut locks = self.diag.assemble_locks.lock();
+            Arc::clone(
+                locks
+                    .entry(uri_str.to_string())
+                    .or_insert_with(|| Arc::new(parking_lot::Mutex::new(()))),
+            )
+        };
+        let assemble_guard = assemble_lock.lock();
 
         // ── Read all per-source caches ──────────────────────────────
         let mut full = Vec::new();
@@ -1298,6 +1329,9 @@ impl Backend {
             let Some(client) = &self.client else {
                 return false;
             };
+            // Nothing left to serialize: push mode caches nothing, it
+            // only publishes the merged set inline.
+            drop(assemble_guard);
             client.publish_diagnostics(uri, full, None).await;
             false
         }
@@ -1635,6 +1669,10 @@ impl Backend {
         // Remove pull-diagnostic caches.
         self.diag.result_ids.lock().remove(uri_str);
         self.diag.last_full.lock().remove(uri_str);
+        // Drop the per-URI assemble lock so the map doesn't grow
+        // unboundedly across a long editing session; a fresh one is
+        // created on demand if the URI is reopened.
+        self.diag.assemble_locks.lock().remove(uri_str);
 
         let client = match &self.client {
             Some(c) => c,
@@ -2086,5 +2124,25 @@ mod tests {
             assert_ne!(result_id(), seen_before_close);
             assert_ne!(result_id(), last_seen_before_close);
         }
+    }
+
+    /// `publish_diagnostics_for_file` must not resurrect a closed file's
+    /// caches. Before the fix, both Phase 1 and Phase 2 wrote into
+    /// `last_fast`/`last_slow` (and cascaded into `last_full` via
+    /// `assemble_and_refresh`) unconditionally, so a close landing
+    /// mid-compute left the closed file's caches populated again right
+    /// after `clear_diagnostics_for_file` had purged them. A file that
+    /// was never in `open_files` exercises the same check.
+    #[tokio::test]
+    async fn publish_diagnostics_skips_write_when_file_not_open() {
+        let backend = Backend::new_test();
+        let uri = "file:///not_open.php";
+        let content = "<?php\nclass Foo {}\n";
+
+        backend.publish_diagnostics_for_file(uri, content).await;
+
+        assert!(backend.diag.last_fast.lock().get(uri).is_none());
+        assert!(backend.diag.last_slow.lock().get(uri).is_none());
+        assert!(backend.diag.last_full.lock().get(uri).is_none());
     }
 }
