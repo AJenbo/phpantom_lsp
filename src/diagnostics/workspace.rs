@@ -1068,11 +1068,19 @@ impl Backend {
         source: &'static str,
         results: HashMap<PathBuf, Vec<Diagnostic>>,
     ) {
+        let cache = match source {
+            "phpstan" => &self.phpstan_tool.last_diags,
+            "phpcs" => &self.phpcs_tool.last_diags,
+            "mago-lint" => &self.mago_lint_tool.last_diags,
+            "mago-analyze" => &self.mago_analyze_tool.last_diags,
+            _ => return,
+        };
+
         let rules = ignore_rules::compile_ignore_rules(&self.config().diagnostics.ignore);
         let root = self.workspace.workspace_root.read().clone();
 
         let mut workspace_results: HashMap<String, Vec<Diagnostic>> = HashMap::new();
-        let mut open_results: Vec<(String, Vec<Diagnostic>)> = Vec::new();
+        let mut open_results: HashMap<String, Vec<Diagnostic>> = HashMap::new();
         {
             let open = self.open_files.read();
             for (path, mut diags) in results {
@@ -1086,14 +1094,26 @@ impl Backend {
                         .replace('\\', "/");
                     ignore_rules::filter_ignored_by_config(&mut diags, &relative, &rules);
                 }
-                if diags.is_empty() {
-                    continue;
-                }
                 let uri = crate::util::path_to_uri(&path);
                 if open.contains_key(&uri) {
-                    open_results.push((uri, diags));
-                } else {
+                    // Insert even when empty so a file whose diagnostics
+                    // just cleared up still gets its per-file cache
+                    // cleared below, matching the per-file external-tool
+                    // workers, which always write their result.
+                    open_results.insert(uri, diags);
+                } else if !diags.is_empty() {
                     workspace_results.insert(uri, diags);
+                }
+            }
+
+            // An open file this source previously reported on but that
+            // didn't turn up in this scan at all (not merely filtered
+            // to empty) has had its issues fixed; clear its cache entry
+            // too, matching how `set_external` below clears a closed
+            // file that drops out of the workspace results.
+            for uri in cache.lock().keys() {
+                if open.contains_key(uri) && !open_results.contains_key(uri) {
+                    open_results.insert(uri.clone(), Vec::new());
                 }
             }
         }
@@ -1112,13 +1132,15 @@ impl Backend {
         }
         let mut changed = false;
         for (uri, diags) in open_results {
-            let cache = match source {
-                "phpstan" => &self.phpstan_tool.last_diags,
-                "phpcs" => &self.phpcs_tool.last_diags,
-                "mago-lint" => &self.mago_lint_tool.last_diags,
-                "mago-analyze" => &self.mago_analyze_tool.last_diags,
-                _ => continue,
-            };
+            // The file may have closed while awaiting
+            // `flush_workspace_diag_updates` above, in which case
+            // `clear_diagnostics_for_file` already purged its caches.
+            // Re-check immediately before writing, matching the
+            // per-file external-tool workers, so scan-time results
+            // don't resurrect diagnostics for a now-closed file.
+            if !self.open_files.read().contains_key(&uri) {
+                continue;
+            }
             cache.lock().insert(uri.clone(), diags);
             changed |= self.assemble_and_push(&uri).await;
         }
@@ -1581,6 +1603,65 @@ mod tests {
         assert!(
             backend.phpstan_tool.last_diags.lock().get(uri).is_none(),
             "the per-file cache entry should still be purged"
+        );
+    }
+
+    /// A project-wide scan that no longer reports diagnostics for an
+    /// open file (the file is absent from the results map entirely, not
+    /// merely reported with an empty list) must still clear that file's
+    /// stale per-file cache entry.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn store_workspace_external_results_clears_open_file_dropped_from_scan() {
+        let backend = Backend::new_test();
+        let uri = "file:///open.php";
+        backend
+            .open_files
+            .write()
+            .insert(uri.to_string(), Arc::new("<?php\n".to_string()));
+        backend
+            .phpstan_tool
+            .last_diags
+            .lock()
+            .insert(uri.to_string(), vec![diag("argument.type", 3)]);
+
+        backend
+            .store_workspace_external_results("phpstan", HashMap::new())
+            .await;
+
+        assert!(
+            backend
+                .phpstan_tool
+                .last_diags
+                .lock()
+                .get(uri)
+                .is_some_and(Vec::is_empty),
+            "the open file's stale phpstan entry must clear once the tool stops reporting it"
+        );
+    }
+
+    /// The write-time check for `open_files` must apply per file, not
+    /// just at partition time: a file that is still open when results
+    /// are written gets its cache updated.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn store_workspace_external_results_updates_open_file_cache() {
+        let backend = Backend::new_test();
+        let uri_str = "file:///open.php";
+        backend
+            .open_files
+            .write()
+            .insert(uri_str.to_string(), Arc::new("<?php\n".to_string()));
+
+        let mut results = HashMap::new();
+        results.insert(PathBuf::from("/open.php"), vec![diag("argument.type", 5)]);
+        backend
+            .store_workspace_external_results("phpstan", results)
+            .await;
+
+        let cached = backend.phpstan_tool.last_diags.lock().get(uri_str).cloned();
+        assert_eq!(
+            cached.map(|d| d.len()),
+            Some(1),
+            "an open file's results should feed the live per-file cache"
         );
     }
 }

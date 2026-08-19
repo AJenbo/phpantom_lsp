@@ -283,25 +283,26 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B198. A project-wide external tool run can resurrect diagnostics on a closed file
+### B216. A project-wide external tool run can overwrite a fresher per-file result for a file that stays open
 
-**Impact: Medium-High · Complexity: Low-Medium**
+**Impact: Low-Medium · Complexity: Medium-High**
 
-`store_workspace_external_results` (`diagnostics/workspace.rs`)
-partitions results by `open_files`, then awaits
-`flush_workspace_diag_updates` (which can block up to the 10s
-`REFRESH_TIMEOUT`), and only afterwards inserts into the per-file tool
-caches — with no re-check of `open_files` at insert time, unlike the
-per-file external-tool workers, which do re-check immediately before
-writing. If the file is closed during that await, `clear_diagnostics_for_file`
-has already purged its caches, and this loop re-inserts the scan-time
-diagnostics right back in — the exact bug a recent commit fixed for the
-regular close path. The same insert is also unconditional for files that
-stay open: it can overwrite a fresher (already-fixed) per-file result
-with a stale scan-time one, and it never clears an open file's cache
-entry when the tool no longer reports anything for it. Fix by re-checking
-`open_files` immediately before each insert, matching the per-file
-workers.
+`store_workspace_external_results` (`diagnostics/workspace.rs`) writes a
+project-wide external tool's scan-time results straight into the
+per-file `last_diags` caches (`phpstan_tool`, `phpcs_tool`,
+`mago_lint_tool`, `mago_analyze_tool`) for any file that is open when it
+writes. If a concurrent per-file run of the same tool (triggered by an
+edit to that same open file) finishes and writes a fresher result to the
+same cache entry while the project-wide scan is still awaiting
+`flush_workspace_diag_updates` (up to the 10s `REFRESH_TIMEOUT`), the
+scan's unconditional `cache.lock().insert(...)` at the end can overwrite
+that fresher, already-corrected result with its own stale one — a
+last-write-wins race, since neither writer knows about the other. Fixing
+this needs some notion of freshness (e.g. a per-uri generation counter
+bumped by the per-file workers, with the project-wide writer skipping
+its own write when the generation has moved since the scan captured that
+file) rather than a simple open/closed re-check, which is why it is
+tracked separately from the closed-file race this was split off from.
 
 ### B199. A workspace diagnostics scan never replaces a worker retired by the give-up timeout
 
