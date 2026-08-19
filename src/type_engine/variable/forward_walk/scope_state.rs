@@ -28,6 +28,9 @@ pub(crate) struct VarAssertion {
     /// Exact class identity (`get_class($raw) === …`) rather than a
     /// subtype check.
     pub exact: bool,
+    /// The check was `is_a($raw, Foo::class, true)` — a string
+    /// alternative on the subject must survive narrowing.
+    pub allow_string: bool,
 }
 
 /// The type-state of all variables at a single program point.

@@ -36,37 +36,6 @@ No outstanding items.
 
 ## Narrowing
 
-### B183. `is_a()` narrows away the string half of an `object|string` parameter
-
-**Impact: Medium-High · Complexity: Medium**
-
-`try_extract_instanceof_with_negation` folds `is_a($x, C::class, true)`
-into the same narrowing path as a real `instanceof`, without recording
-that the third argument (`$allow_string`) keeps the class-string
-alternative alive. `commit_instanceof_narrowing` then replaces the whole
-subject type with the checked class whenever no union member already
-names a class, so on `object|string` the true branch drops `string`
-entirely instead of narrowing to `Foo|class-string<Foo>`:
-
-```php
-function f(object|string $x): void {
-    if (is_a($x, Foo::class, true)) {
-        // $x is reported as Foo; it can still be a class-string<Foo>
-        if (is_string($x)) {
-            new $x();
-        }
-    }
-}
-```
-
-Before the commit that introduced this path the case was simply left
-un-narrowed; now it is actively wrong, producing false-positive type
-errors when the narrowed `$x` is later passed to a `string`/`class-string`
-parameter. Fix in `type_engine/variable/forward_walk/cond_narrowing.rs`
-and `type_engine/types/narrowing/instanceof.rs`, threading
-`allow_string` through so the true branch keeps the string alternative
-and `apply_class_string_guard_narrowing` still runs.
-
 ### B184. A negated `get_class()` check over-narrows and drops valid subclasses
 
 **Impact: Medium · Complexity: Low-Medium**

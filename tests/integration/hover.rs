@@ -10536,6 +10536,27 @@ function test(string $x): void {
 }
 
 #[test]
+fn hover_is_a_allow_string_keeps_string_alternative_on_object_or_string() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Extension {}
+function test(object|string $x): void {
+    if (is_a($x, Extension::class, true)) {
+        $x;
+    }
+}
+"#;
+    let hover = hover_at(&backend, uri, content, 4, 8).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Extension") && text.contains("class-string<Extension>"),
+        "is_a($x, Extension::class, true) on object|string should narrow to Extension|class-string<Extension>, got: {}",
+        text
+    );
+}
+
+#[test]
 fn hover_class_exists_narrows_string_to_class_string() {
     let backend = create_test_backend();
     let uri = "file:///test.php";

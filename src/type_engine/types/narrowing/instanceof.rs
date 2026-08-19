@@ -395,12 +395,17 @@ pub(in crate::type_engine) fn try_extract_instanceof<'b>(
 ///   `$x::class === Foo::class`) where subclasses should NOT be preserved.
 ///   `false` for `instanceof` / `is_a()` checks where a more-specific subtype
 ///   in the current results should be kept.
+/// - `allow_string`: `true` for `is_a($x, Foo::class, true)` — the third
+///   argument means the check also passes when `$x` is a `class-string<Foo>`,
+///   so a string alternative in the subject's current type must survive the
+///   narrowing rather than being replaced by the checked class.
 #[derive(Clone)]
 pub(in crate::type_engine) struct InstanceofExtraction {
     /// The narrowed type (e.g. `PhpType::named(atom("ClassName"))`).
     pub class_type: PhpType,
     pub negated: bool,
     pub exact: bool,
+    pub allow_string: bool,
 }
 
 pub(in crate::type_engine) fn try_extract_instanceof_with_negation<'b>(
@@ -426,13 +431,17 @@ pub(in crate::type_engine) fn try_extract_instanceof_with_negation<'b>(
                     class_type: cls_type,
                     negated: false,
                     exact: false,
+                    allow_string: false,
                 })
                 .or_else(|| {
                     // `is_a($var, ClassName::class)` — equivalent to instanceof
-                    try_extract_is_a(expr, var_name).map(|cls_type| InstanceofExtraction {
-                        class_type: cls_type,
-                        negated: false,
-                        exact: false,
+                    try_extract_is_a(expr, var_name).map(|(cls_type, allow_string)| {
+                        InstanceofExtraction {
+                            class_type: cls_type,
+                            negated: false,
+                            exact: false,
+                            allow_string,
+                        }
                     })
                 })
                 .or_else(|| {
@@ -443,6 +452,7 @@ pub(in crate::type_engine) fn try_extract_instanceof_with_negation<'b>(
                             class_type: cls_type,
                             negated: neg,
                             exact: true,
+                            allow_string: false,
                         }
                     })
                 })
@@ -453,8 +463,11 @@ pub(in crate::type_engine) fn try_extract_instanceof_with_negation<'b>(
 /// Detect `is_a($var, ClassName::class)` — semantically equivalent to
 /// `$var instanceof ClassName`.
 ///
-/// Returns the class name if the pattern matches.
-fn try_extract_is_a<'b>(expr: &'b Expression<'b>, var_name: &str) -> Option<PhpType> {
+/// Returns the class name and whether the third argument (`$allow_string`)
+/// is literally `true`: `is_a($x, Foo::class, true)` also passes when `$x`
+/// is a `class-string<Foo>`, so a string alternative on the subject must
+/// survive the narrowing rather than being replaced by `Foo` alone.
+fn try_extract_is_a<'b>(expr: &'b Expression<'b>, var_name: &str) -> Option<(PhpType, bool)> {
     let expr = match expr {
         Expression::Parenthesized(inner) => inner.expression,
         other => other,
@@ -488,7 +501,9 @@ fn try_extract_is_a<'b>(expr: &'b Expression<'b>, var_name: &str) -> Option<PhpT
             Argument::Positional(pos) => pos.value,
             Argument::Named(named) => named.value,
         };
-        extract_class_string_from_expr(second_expr).map(|n| PhpType::named(atom(n.as_ref())))
+        let allow_string = args.get(2).is_some_and(|arg| argument_value(arg).is_true());
+        extract_class_string_from_expr(second_expr)
+            .map(|n| (PhpType::named(atom(n.as_ref())), allow_string))
     } else {
         None
     }

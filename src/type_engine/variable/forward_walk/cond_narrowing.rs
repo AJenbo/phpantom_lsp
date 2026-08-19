@@ -268,6 +268,7 @@ pub(crate) fn record_assertion_variable<'b>(
                     class_type: extraction.class_type,
                     negated: extraction.negated,
                     exact: extraction.exact,
+                    allow_string: extraction.allow_string,
                 });
                 break;
             }
@@ -328,6 +329,7 @@ pub(in crate::type_engine) fn assertion_alias_extractions(
                     class_type: c.class_type.clone(),
                     negated: c.negated != negated,
                     exact: c.exact,
+                    allow_string: c.allow_string,
                 },
             )
         })
@@ -383,6 +385,9 @@ struct Conjuncts {
     /// A `||` chain contributed, so at least one contribution is a set of
     /// alternatives rather than a class the value definitely is.
     saw_alternatives: bool,
+    /// At least one contributing operand was `is_a($x, C::class, true)` —
+    /// a string alternative on the subject must survive the narrowing.
+    allow_string: bool,
 }
 
 impl Conjuncts {
@@ -530,7 +535,9 @@ pub(crate) fn apply_condition_narrowing<'b>(
                     if !single.is_empty() {
                         let entry = instanceof_results.entry(var_name.clone()).or_default();
                         ResolvedType::extend_unique(entry, single);
-                        conjuncts.entry(var_name.clone()).or_default().operands += 1;
+                        let c = conjuncts.entry(var_name.clone()).or_default();
+                        c.operands += 1;
+                        c.allow_string |= extraction.allow_string;
                     } else {
                         // Target class is unresolvable — mark variable
                         // as empty so diagnostics suppress false positives.
@@ -549,10 +556,12 @@ pub(crate) fn apply_condition_narrowing<'b>(
         let intersected = conjuncts
             .get(&var_name)
             .is_some_and(Conjuncts::is_intersection);
+        let allow_string = conjuncts.get(&var_name).is_some_and(|c| c.allow_string);
         commit_instanceof_narrowing(
             &var_name,
             narrowed,
             intersected,
+            allow_string,
             scope,
             ctx,
             &scope_resolver,
@@ -651,6 +660,7 @@ fn commit_instanceof_narrowing(
     var_name: &str,
     mut narrowed: Vec<ResolvedType>,
     intersected: bool,
+    allow_string: bool,
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
     scope_resolver: &dyn Fn(&str) -> Vec<ResolvedType>,
@@ -670,6 +680,46 @@ fn commit_instanceof_narrowing(
         scope.set(var_name, narrowed);
         return;
     }
+
+    // `is_a($x, C::class, true)` also passes when `$x` is a
+    // `class-string<C>`, so a string alternative already in the subject's
+    // type must survive every path below that would otherwise replace the
+    // whole union with just the checked class. The string half can be a
+    // whole entry (`string`) or one member of a broader union carried by a
+    // single entry (`object|string`), so pull it out at the union-member
+    // level rather than requiring the whole entry to be string-only.
+    // `apply_class_string_guard_narrowing` (run right after this pass)
+    // turns the preserved string alternative into `class-string<C>`.
+    let string_alt: Vec<ResolvedType> = if allow_string {
+        existing
+            .iter()
+            .filter(|rt| rt.class_info.is_none())
+            .filter_map(|rt| {
+                let stringy: Vec<PhpType> = rt
+                    .type_string
+                    .union_members()
+                    .into_iter()
+                    .filter(|m| m.is_subtype_of(&PhpType::string()))
+                    .cloned()
+                    .collect();
+                match stringy.len() {
+                    0 => None,
+                    1 => Some(ResolvedType::from_type_string(
+                        stringy.into_iter().next().unwrap(),
+                    )),
+                    _ => Some(ResolvedType::from_type_string(PhpType::union(stringy))),
+                }
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let with_string_alt = |mut result: Vec<ResolvedType>| -> Vec<ResolvedType> {
+        if !string_alt.is_empty() {
+            ResolvedType::extend_unique(&mut result, string_alt.clone());
+        }
+        result
+    };
 
     // A successful check rules out every alternative that cannot be an
     // object, and an `object`/`mixed` alternative says nothing the checked
@@ -711,7 +761,7 @@ fn commit_instanceof_narrowing(
         }
     }
     if !names_class && broad_object {
-        scope.set(var_name, narrowed);
+        scope.set(var_name, with_string_alt(narrowed));
         return;
     }
 
@@ -772,9 +822,9 @@ fn commit_instanceof_narrowing(
             ResolvedType::tag_as_intersection(&mut filtered);
         }
         if filtered.is_empty() {
-            scope.set(var_name, narrowed);
+            scope.set(var_name, with_string_alt(narrowed));
         } else {
-            scope.set(var_name, filtered);
+            scope.set(var_name, with_string_alt(filtered));
         }
         return;
     }
@@ -807,10 +857,10 @@ fn commit_instanceof_narrowing(
     // separate entries, which describe one value that is both at once.
     ResolvedType::tag_as_intersection(&mut results);
     if !results.is_empty() {
-        scope.set(var_name, results);
+        scope.set(var_name, with_string_alt(results));
     } else {
         // Fallback: use the narrowed types directly.
-        scope.set(var_name, narrowed);
+        scope.set(var_name, with_string_alt(narrowed));
     }
 }
 
@@ -902,7 +952,15 @@ pub(crate) fn apply_condition_narrowing_inverse_single<'b>(
                         classes,
                     )
                 });
-                commit_instanceof_narrowing(var_name, narrowed, false, scope, ctx, &scope_resolver);
+                commit_instanceof_narrowing(
+                    var_name,
+                    narrowed,
+                    false,
+                    extraction.allow_string,
+                    scope,
+                    ctx,
+                    &scope_resolver,
+                );
             } else {
                 // Inverse of positive instanceof → exclusion.
                 // Exclusion does NOT strip null (`!instanceof` is

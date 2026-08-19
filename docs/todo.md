@@ -37,7 +37,6 @@ contributor even though it's short.
 | B189 | [Renaming a `define()`-declared constant leaves the `define()` call unrenamed](todo/bugs.md#b189-renaming-a-define-declared-constant-leaves-the-define-call-unrenamed) | High        | Medium-High |
 | B188 | [Renaming a namespaced constant or function renames unrelated symbols of the same short name](todo/bugs.md#b188-renaming-a-namespaced-constant-or-function-renames-unrelated-symbols-of-the-same-short-name) | High        | Medium      |
 | B198 | [A project-wide external tool run can resurrect diagnostics on a closed file](todo/bugs.md#b198-a-project-wide-external-tool-run-can-resurrect-diagnostics-on-a-closed-file) | Medium-High | Low-Medium  |
-| B183 | [`is_a()` narrows away the string half of an `object\|string` parameter](todo/bugs.md#b183-is_a-narrows-away-the-string-half-of-an-objectstring-parameter) | Medium-High | Medium      |
 |      | **Release 0.10.0**                                                                                                                                        |             |             |
 
 ## Sprint 7 — 1.0 release & IDE extensions
