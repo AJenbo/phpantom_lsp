@@ -17,9 +17,10 @@
 //! ```toml
 //! [phpstan]
 //! # Command/path for phpstan. When unset, auto-detected: Composer's
-//! # bin-dir (default vendor/bin) if composer.json depends directly on
-//! # phpstan/phpstan, or larastan/larastan on a Laravel project, then
-//! # $PATH regardless of composer.json.
+//! # bin-dir (default vendor/bin) if the workspace root has a phpstan.neon
+//! # or phpstan.neon.dist config file, or composer.json depends directly
+//! # on phpstan/phpstan, or a package ending in /larastan (larastan/larastan
+//! # or a fork) on a Laravel project, then $PATH regardless of composer.json.
 //! # Set to "" to disable.
 //! # command = "vendor/bin/phpstan"
 //!
@@ -61,6 +62,16 @@ pub(crate) struct ResolvedPhpStan {
     pub path: PathBuf,
 }
 
+/// Check whether the workspace root has a `phpstan.neon` or
+/// `phpstan.neon.dist` config file.
+///
+/// A hand-authored PHPStan config is itself evidence that the project
+/// wants PHPStan run, independent of what `composer.json` declares.
+fn has_phpstan_neon_config(workspace_root: &Path) -> bool {
+    workspace_root.join("phpstan.neon").is_file()
+        || workspace_root.join("phpstan.neon.dist").is_file()
+}
+
 /// Attempt to resolve the PHPStan binary from configuration and the
 /// workspace environment.
 ///
@@ -71,21 +82,27 @@ pub(crate) struct ResolvedPhpStan {
 ///   installed PHPStan, e.g. a `.phar` outside the Composer bin dir, is
 ///   wired up).
 /// - Config value `None` → auto-detect:
-///   - `<bin_dir>/phpstan` under the workspace root, but only when the
-///     project depends directly (`require` or `require-dev`) on the
-///     dependency that certifies it: `larastan/larastan` on a Laravel
-///     project, `phpstan/phpstan` otherwise. Plain PHPStan does not
-///     understand Eloquent magic, facades, or container bindings, so a
-///     Laravel project that depends on `phpstan/phpstan` directly but has
-///     not installed Larastan is left alone rather than run through an
-///     analyser that would misread its own framework and report false
-///     positives — the same reasoning that gates Mago's analyzer on
-///     `analyzer_understands_laravel`. This also avoids proxying to a
-///     stale `vendor/bin/phpstan` left behind by a project that no longer
-///     depends on either.
+///   - `<bin_dir>/phpstan` under the workspace root, but only when one of
+///     the following certifies the project actually uses PHPStan:
+///     - the workspace root has a `phpstan.neon` or `phpstan.neon.dist`
+///       config file. A project that hand-authors a PHPStan config wants
+///       PHPStan run, independent of what `composer.json` declares.
+///     - otherwise, the project depends directly (`require` or
+///       `require-dev`) on the dependency that certifies it: a package
+///       ending in `/larastan` (`larastan/larastan` or a fork such as
+///       `calebdw/larastan`) on a Laravel project, `phpstan/phpstan`
+///       otherwise. Plain PHPStan does not understand Eloquent magic,
+///       facades, or container bindings, so a Laravel project that depends
+///       on `phpstan/phpstan` directly but has not installed Larastan (and
+///       has no `phpstan.neon`) is left alone rather than run through an
+///       analyser that would misread its own framework and report false
+///       positives — the same reasoning that gates Mago's analyzer on
+///       `analyzer_understands_laravel`. This also avoids proxying to a
+///       stale `vendor/bin/phpstan` left behind by a project that no
+///       longer depends on either.
 ///   - otherwise `$PATH`, unconditionally — a `phpstan` the user installed
 ///     globally was a deliberate choice, not leftover state, so the
-///     `composer.json` check does not apply to it.
+///     `composer.json`/config-file check does not apply to it.
 ///   - otherwise `None`.
 pub(crate) fn resolve_phpstan(
     workspace_root: Option<&Path>,
@@ -102,13 +119,16 @@ pub(crate) fn resolve_phpstan(
         }),
         // Auto-detect.
         None => {
-            let depends_on_phpstan = composer_json.is_some_and(|pkg| {
-                if crate::composer::is_laravel_project(pkg) {
-                    crate::composer::has_dependency(pkg, "larastan/larastan")
-                } else {
-                    crate::composer::has_dependency(pkg, "phpstan/phpstan")
-                }
-            });
+            let has_phpstan_config = workspace_root.is_some_and(has_phpstan_neon_config);
+
+            let depends_on_phpstan = has_phpstan_config
+                || composer_json.is_some_and(|pkg| {
+                    if crate::composer::is_laravel_project(pkg) {
+                        crate::composer::has_larastan_dependency(pkg)
+                    } else {
+                        crate::composer::has_dependency(pkg, "phpstan/phpstan")
+                    }
+                });
 
             if depends_on_phpstan && let Some(root) = workspace_root {
                 let bin = bin_dir.unwrap_or("vendor/bin");
@@ -1017,6 +1037,34 @@ mod tests {
     }
 
     #[test]
+    fn resolve_auto_detect_larastan_fork_on_laravel_project() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin_path = dir.path().join("vendor").join("bin");
+        std::fs::create_dir_all(&bin_path).unwrap();
+        let phpstan = bin_path.join("phpstan");
+        std::fs::write(&phpstan, "#!/bin/sh\n").unwrap();
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&phpstan, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let config = PhpStanConfig::default();
+        // larastan/larastan is slow to update, so users sometimes depend on
+        // a fork (e.g. calebdw/larastan) instead. It must certify Larastan
+        // the same way the upstream package does.
+        let package: crate::composer::ComposerPackage = r#"{"require": {
+            "laravel/framework": "^11.0",
+            "calebdw/larastan": "^2.9"
+        }}"#
+        .parse()
+        .unwrap();
+        let result = resolve_phpstan(Some(dir.path()), &config, None, Some(&package));
+        assert_eq!(result.unwrap().path, phpstan);
+    }
+
+    #[test]
     fn resolve_auto_detect_skipped_on_laravel_project_without_larastan() {
         let dir = tempfile::tempdir().unwrap();
         let bin_path = dir.path().join("vendor").join("bin");
@@ -1043,6 +1091,57 @@ mod tests {
         .unwrap();
         let result = resolve_phpstan(Some(dir.path()), &config, None, Some(&package));
         assert_ne!(result.map(|r| r.path), Some(phpstan));
+    }
+
+    #[test]
+    fn resolve_auto_detect_via_phpstan_neon_without_composer_dependency() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin_path = dir.path().join("vendor").join("bin");
+        std::fs::create_dir_all(&bin_path).unwrap();
+        let phpstan = bin_path.join("phpstan");
+        std::fs::write(&phpstan, "#!/bin/sh\n").unwrap();
+        std::fs::write(dir.path().join("phpstan.neon"), "").unwrap();
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&phpstan, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let config = PhpStanConfig::default();
+        // A hand-authored phpstan.neon certifies PHPStan use on its own,
+        // even with no composer.json (or one that names neither package).
+        let result = resolve_phpstan(Some(dir.path()), &config, None, None);
+        assert_eq!(result.unwrap().path, phpstan);
+    }
+
+    #[test]
+    fn resolve_auto_detect_via_phpstan_neon_dist_on_laravel_project_without_larastan() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin_path = dir.path().join("vendor").join("bin");
+        std::fs::create_dir_all(&bin_path).unwrap();
+        let phpstan = bin_path.join("phpstan");
+        std::fs::write(&phpstan, "#!/bin/sh\n").unwrap();
+        std::fs::write(dir.path().join("phpstan.neon.dist"), "").unwrap();
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&phpstan, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let config = PhpStanConfig::default();
+        // Same Laravel-without-Larastan project as the test above, but this
+        // one hand-authors a phpstan.neon.dist: the config file overrides
+        // the Larastan gate rather than being blocked by it.
+        let package: crate::composer::ComposerPackage = r#"{"require": {
+            "laravel/framework": "^11.0",
+            "phpstan/phpstan": "^2.1"
+        }}"#
+        .parse()
+        .unwrap();
+        let result = resolve_phpstan(Some(dir.path()), &config, None, Some(&package));
+        assert_eq!(result.unwrap().path, phpstan);
     }
 
     // ── write_temp_file ─────────────────────────────────────────────

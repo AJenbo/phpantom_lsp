@@ -1129,6 +1129,21 @@ pub(crate) fn has_dependency(package: &ComposerPackage, dep: &str) -> bool {
     package.require.contains_key(dep) || package.require_dev.contains_key(dep)
 }
 
+/// Check whether the project depends on Larastan or one of its forks.
+///
+/// `larastan/larastan` is slow to pick up compatibility fixes, so users
+/// sometimes depend on a fork instead (e.g. `calebdw/larastan`) that
+/// publishes the same `Larastan\Larastan` package under a different
+/// vendor prefix. Matching on the `/larastan` suffix rather than the
+/// exact `larastan/larastan` name catches those forks too.
+pub(crate) fn has_larastan_dependency(package: &ComposerPackage) -> bool {
+    package
+        .require
+        .keys()
+        .chain(package.require_dev.keys())
+        .any(|name| name.to_ascii_lowercase().ends_with("/larastan"))
+}
+
 /// Detect whether the project depends on Laravel or a standalone
 /// Illuminate component.
 ///
