@@ -792,7 +792,14 @@ pub(crate) fn seed_params<'b>(
     has_scope_attr: bool,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    for param in parameters {
+    // While a body is being read for its return type, the call site that
+    // asked has already resolved the arguments; a parameter they decide
+    // more precisely than the signature seeds from them instead.
+    let call_args = method_name.and_then(|name| {
+        crate::type_engine::call_resolution::call_site_param_types(&ctx.current_class.fqn(), name)
+    });
+
+    for (index, param) in parameters.enumerate() {
         let pname = bytes_to_str(param.variable.name).to_string();
         let is_variadic = param.ellipsis.is_some();
         let native_type = param.hint.as_ref().map(|h| extract_hint_type(h));
@@ -846,6 +853,17 @@ pub(crate) fn seed_params<'b>(
             ctx,
         );
 
+        // A variadic parameter collects the arguments into an array
+        // rather than taking the one at its index, so the call site's
+        // types don't line up with it.
+        if !is_variadic
+            && let Some(arg_type) = call_args.as_ref().and_then(|args| args.get(index))
+            && let Some(seeded) = seed_from_call_site(arg_type, &param_results, ctx)
+        {
+            scope.seed(&pname, seeded);
+            continue;
+        }
+
         if !param_results.is_empty() {
             scope.seed(&pname, param_results);
         } else {
@@ -855,6 +873,45 @@ pub(crate) fn seed_params<'b>(
             scope.set_empty(&pname);
         }
     }
+}
+
+/// The scope entry a parameter gets from the argument the call site
+/// passed it, or `None` when the declaration already says as much.
+///
+/// The call site only wins where it is strictly more specific than the
+/// declaration: an untyped parameter, or one whose declared type the
+/// argument is a proper subtype of (`string` handed `'shell'`,
+/// `\ReflectionClass` handed a `ReflectionObject<Configuration>`).  A
+/// wider or unrelated argument is a call the declaration already rejects,
+/// and reading the body as if it were valid would only spread the error.
+fn seed_from_call_site(
+    arg_type: &PhpType,
+    declared: &[ResolvedType],
+    ctx: &ForwardWalkCtx<'_>,
+) -> Option<Vec<ResolvedType>> {
+    if !arg_type.is_informative() {
+        return None;
+    }
+    if !declared.is_empty() {
+        let declared_type = ResolvedType::types_joined(declared);
+        if declared_type.equivalent(arg_type)
+            || !crate::class_lookup::is_subtype_of_typed(arg_type, &declared_type, ctx.class_loader)
+        {
+            return None;
+        }
+    }
+
+    let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+        arg_type,
+        &ctx.current_class.name,
+        ctx.all_classes,
+        ctx.class_loader,
+    );
+    Some(if classes.is_empty() {
+        vec![ResolvedType::from_type_string(arg_type.clone())]
+    } else {
+        ResolvedType::from_classes_with_hint(classes, arg_type.clone())
+    })
 }
 
 /// Seed a fresh scope for a property hook body.

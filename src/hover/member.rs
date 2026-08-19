@@ -474,6 +474,9 @@ impl Backend {
                     self,
                     &owner.fqn(),
                     method,
+                    // Hovering the declaration itself asks what the method
+                    // returns in general, not at one call site.
+                    &[],
                 )
                 .filter(|t| !t.is_mixed() && !t.is_void())
             } else {

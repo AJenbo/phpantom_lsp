@@ -4833,6 +4833,35 @@ class ReflectionInstantiationDemo
         // members (label()), because the read is not `mixed`
         return $property->getValue($holder);          // ?Scaffolding\ReflectedWidget
     }
+
+    /**
+     * A reflection-based accessor, which is how the read above is usually
+     * written: the object and the property name both arrive as arguments,
+     * so nothing the signature could say would be true of every call.  The
+     * `@return mixed` is the honest declaration, and the real type is read
+     * off the body once a call site has decided the arguments.
+     *
+     * @return mixed Value of $object->$property
+     */
+    public static function fetchProperty($object, string $name)
+    {
+        $property = self::propertyOf(new \ReflectionObject($object), $name);
+
+        return $property->getValue($object);
+    }
+
+    /** The declared `\ReflectionProperty` keeps the class and name it bound. */
+    private static function propertyOf(\ReflectionClass $reflection, string $name): \ReflectionProperty
+    {
+        return $reflection->getProperty($name);
+    }
+
+    public function accessedWidget(Scaffolding\ReflectedHolder $holder): ?Scaffolding\ReflectedWidget
+    {
+        // Try: `self::fetchProperty($holder, 'widget')->` —
+        // Scaffolding\ReflectedWidget members, from the two arguments alone
+        return self::fetchProperty($holder, 'widget'); // ?Scaffolding\ReflectedWidget
+    }
 }
 
 // ── Lazy initialisation inside a guarded `if` ───────────────────────────────

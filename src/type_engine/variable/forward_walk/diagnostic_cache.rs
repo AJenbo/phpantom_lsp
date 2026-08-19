@@ -103,6 +103,27 @@ pub(crate) fn is_diagnostic_scope_active() -> bool {
     DIAGNOSTIC_SCOPE.with(|cell| cell.borrow().is_some())
 }
 
+/// Puts back the snapshots [`suspend_diagnostic_scope`] set aside.
+pub(crate) struct DiagnosticScopeSuspendGuard(Option<ScopeSnapshotMap>);
+
+impl Drop for DiagnosticScopeSuspendGuard {
+    fn drop(&mut self) {
+        DIAGNOSTIC_SCOPE.with(|cell| {
+            *cell.borrow_mut() = self.0.take();
+        });
+    }
+}
+
+/// Deactivate the diagnostic scope cache until the returned guard drops.
+///
+/// The snapshots describe each body as its own declarations define it.  A
+/// body being read for its return type with its parameters seeded from a
+/// call site is a different scope at the very same offsets, so serving it
+/// from the snapshots would answer the question that was not asked.
+pub(crate) fn suspend_diagnostic_scope() -> DiagnosticScopeSuspendGuard {
+    DiagnosticScopeSuspendGuard(DIAGNOSTIC_SCOPE.with(|cell| cell.borrow_mut().take()))
+}
+
 /// Insert a scope snapshot into the diagnostic scope cache at the given
 /// byte offset.
 pub(crate) fn record_scope_snapshot(offset: u32, scope: &ScopeState) {

@@ -71,23 +71,42 @@ pub(crate) fn resolve_reflected_property_at_call(
     ctx: &ResolutionCtx<'_>,
 ) -> Option<PhpType> {
     match method_name {
-        "getProperty" => reflect_property(arg_texts, receiver),
+        "getProperty" => reflect_property(arg_texts, receiver, ctx),
         "getValue" => reflected_property_type(receiver, ctx),
         _ => None,
     }
 }
 
 /// `ReflectionClass<C>::getProperty('name')` → `ReflectionProperty<C, 'name'>`.
-fn reflect_property(arg_texts: &[&str], receiver: &[ResolvedType]) -> Option<PhpType> {
-    let name =
-        crate::text_scan::unquote_php_string(crate::call_args::text_arg_value(arg_texts.first()?))?;
+fn reflect_property(
+    arg_texts: &[&str],
+    receiver: &[ResolvedType],
+    ctx: &ResolutionCtx<'_>,
+) -> Option<PhpType> {
     let subject = receiver
         .iter()
         .find_map(|rt| reflected_class_arg(&rt.type_string))?;
+    let arg = crate::call_args::text_arg_value(arg_texts.first()?);
+    // The name is usually written out, but a variable holding it says
+    // just as much once it resolves to a single literal — which is what
+    // an accessor that forwards its own `string $property` parameter
+    // gives, read from the call site that decided it.
+    let name = match crate::text_scan::unquote_php_string(arg) {
+        Some(name) => name.to_string(),
+        None => literal_string_value(&crate::Backend::resolve_arg_text_to_type(arg, ctx)?)?,
+    };
     Some(PhpType::generic(
         "ReflectionProperty",
-        vec![subject.clone(), PhpType::literal_string_value(name)],
+        vec![subject.clone(), PhpType::literal_string_value(&name)],
     ))
+}
+
+/// The one string a type stands for, when it stands for exactly one.
+fn literal_string_value(ty: &PhpType) -> Option<String> {
+    let TypeKind::Literal(literal) = ty.kind() else {
+        return None;
+    };
+    Some(literal.string_content()?.into_owned())
 }
 
 /// `ReflectionProperty<C, 'name'>::getValue()` → the declared type of

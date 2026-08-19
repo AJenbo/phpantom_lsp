@@ -11,7 +11,7 @@ use mago_syntax::cst::*;
 use crate::Backend;
 use crate::atom::{atom, bytes_to_str};
 use crate::php_type::{CallableParam, PhpType, TypeKind};
-use crate::types::{ClassInfo, ResolvedType};
+use crate::types::{ClassInfo, MethodInfo, ResolvedType};
 use crate::virtual_members::laravel::validated_shape;
 
 use crate::type_engine::call_resolution::MethodReturnCtx;
@@ -1937,6 +1937,117 @@ fn lsb_class_for_call(
         })
 }
 
+/// The types the call site's arguments resolve to, indexed by the
+/// parameter each one binds to.
+///
+/// A parameter no argument supplies, or whose argument resolves to
+/// nothing, reads back as `mixed`: uninformative, so the body falls back
+/// to what its own signature says about it.
+///
+/// Resolving an argument costs as much as resolving any other
+/// expression, and the great majority of calls never need this, so the
+/// result is cached in `cell` for the several fallbacks that may each ask
+/// for it while resolving one call.
+fn resolve_call_site_arg_types<'c>(
+    method: Option<&MethodInfo>,
+    argument_list: &ArgumentList<'_>,
+    ctx: &VarResolutionCtx<'_>,
+    cell: &'c std::cell::OnceCell<Vec<PhpType>>,
+) -> &'c [PhpType] {
+    cell.get_or_init(|| {
+        let Some(method) = method else {
+            return Vec::new();
+        };
+        if argument_list.arguments.is_empty() || method.parameters.is_empty() {
+            return Vec::new();
+        }
+        let types: Vec<PhpType> =
+            crate::call_args::bind_args_to_params(&method.parameters, argument_list)
+                .into_iter()
+                .map(|bound| {
+                    let Some(expr) = bound else {
+                        return PhpType::mixed();
+                    };
+                    let resolved = resolve_rhs_expression(expr, ctx);
+                    if resolved.is_empty() {
+                        PhpType::mixed()
+                    } else {
+                        ResolvedType::types_joined(&resolved)
+                    }
+                })
+                .collect();
+        // A call that decided nothing asks the same question as no call
+        // site at all, so answer it under the same memo key rather than
+        // walking the body again for every such site.
+        if types.iter().any(PhpType::is_informative) {
+            types
+        } else {
+            Vec::new()
+        }
+    })
+}
+
+/// A declared return type replaced by the one the arguments decide, when
+/// they decide something strictly more specific.
+///
+/// `getProperty(\ReflectionClass $r, string $name): \ReflectionProperty`
+/// really returns a `ReflectionProperty<Configuration, 'shell'>` once the
+/// call site has fixed both arguments, but the declaration erases that
+/// and every caller further along the chain loses it. Reading the body
+/// recovers it, and the result is only accepted when it is the declared
+/// class with type arguments added — a strict subtype, so it can narrow
+/// the declaration but never contradict it.
+///
+/// Reading a body where a return type is already declared is the
+/// expensive case, so this only runs while an outer body-return
+/// inference is already walking a body: that is the only place a
+/// refinement still has a caller to reach.
+fn refine_declared_return(
+    declared: PhpType,
+    method: Option<&MethodInfo>,
+    owner: &ClassInfo,
+    ctx: &VarResolutionCtx<'_>,
+    call_args: &dyn Fn() -> Vec<PhpType>,
+) -> PhpType {
+    if !crate::type_engine::call_resolution::body_inference_in_progress() {
+        return declared;
+    }
+    let (Some(method), Some(backend)) = (method, ctx.backend) else {
+        return declared;
+    };
+    // Only a bare class name can gain type arguments, and only a real
+    // method has a body to read them out of.
+    if method.name_offset == 0
+        || method.is_virtual
+        || method.parameters.is_empty()
+        || !matches!(declared.kind(), TypeKind::Named(_))
+    {
+        return declared;
+    }
+    let Some(declared_name) = declared.base_name() else {
+        return declared;
+    };
+    // Nothing the call decided means nothing the declaration doesn't
+    // already say, so there is no refinement to go looking for.
+    let args = call_args();
+    if args.is_empty() {
+        return declared;
+    }
+    let Some(inferred) = crate::type_engine::call_resolution::try_infer_body_return_type(
+        backend,
+        &owner.fqn(),
+        method,
+        &args,
+    ) else {
+        return declared;
+    };
+    let refines = matches!(inferred.kind(), TypeKind::Generic(g) if !g.args.is_empty())
+        && inferred
+            .base_name()
+            .is_some_and(|name| name.eq_ignore_ascii_case(declared_name));
+    if refines { inferred } else { declared }
+}
+
 /// Resolve a method call's return type against a single, fully determined
 /// owner class: template substitution, `@psalm-if-this-is` narrowing (via
 /// the caller-supplied `template_subs`), PHPStan conditional return types,
@@ -1965,16 +2076,6 @@ pub(super) fn resolve_owner_method_call(
     let text_args = arg_texts.join(", ");
     let rctx = ctx.as_resolution_ctx();
     let var_resolver = build_var_resolver_from_ctx(ctx);
-    let mr_ctx = MethodReturnCtx {
-        all_classes: ctx.all_classes,
-        class_loader: ctx.class_loader,
-        backend: ctx.backend,
-        template_subs,
-        var_resolver: Some(&var_resolver),
-        cache: ctx.resolved_class_cache,
-        calling_class_name: Some(&ctx.current_class.name),
-        is_static,
-    };
 
     // Try the owner directly first — it may already be fully resolved with
     // generic substitutions applied.  The cache is keyed by bare FQN and
@@ -2118,7 +2219,26 @@ pub(super) fn resolve_owner_method_call(
         );
     }
 
-    let ret_type_string = native_ret_type_string;
+    // The argument types, resolved at most once however many of the
+    // fallbacks below end up asking for them.
+    let resolved_args = std::cell::OnceCell::new();
+    let call_args =
+        || resolve_call_site_arg_types(method_ref, argument_list, ctx, &resolved_args).to_vec();
+
+    let ret_type_string = native_ret_type_string
+        .map(|d| refine_declared_return(d, method_ref, owner, ctx, &call_args));
+
+    let mr_ctx = MethodReturnCtx {
+        all_classes: ctx.all_classes,
+        class_loader: ctx.class_loader,
+        backend: ctx.backend,
+        template_subs,
+        var_resolver: Some(&var_resolver),
+        cache: ctx.resolved_class_cache,
+        calling_class_name: Some(&ctx.current_class.name),
+        is_static,
+        call_args: Some(&call_args),
+    };
 
     let results =
         Backend::resolve_method_return_types_with_args(owner, method_name, &text_args, &mr_ctx);
@@ -2151,6 +2271,7 @@ pub(super) fn resolve_owner_method_call(
             backend,
             &owner.fqn(),
             method_ref.unwrap(),
+            &call_args(),
         )
         && !inferred.is_void()
         && !inferred.is_mixed()
@@ -2260,6 +2381,10 @@ pub(super) fn resolve_rhs_static_call(
                             cache: ctx.resolved_class_cache,
                             calling_class_name: Some(&ctx.current_class.name),
                             is_static: true,
+                            // Only reached when the target has no such
+                            // method, so the call resolves through a
+                            // magic method with no parameters to seed.
+                            call_args: None,
                         };
                         // Get the method's return type string.
                         let merged = crate::virtual_members::resolve_class_fully_maybe_cached(

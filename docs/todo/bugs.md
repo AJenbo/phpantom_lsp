@@ -86,97 +86,6 @@ their edits through the separate class-rename handler, which understands
 have to be folded consistently too. Constants are correctly
 case-sensitive in PHP and must stay as they are.
 
-### B217. A `mixed`-returning accessor loses the type its arguments decide
-
-**Impact: Low-Medium · Complexity: High**
-
-Find References resolves a member access's receiver to a type and keeps
-the access only when that type is in the target's hierarchy. A receiver
-whose type cannot be resolved is skipped, which is the right call over
-matching by spelling, but it means a genuine reference through an
-untyped value is silently dropped. Rename runs the same search, so such
-a site is also left un-rewritten.
-
-What remains is the case where the receiver's type is decided by the
-*arguments* of a call to a user function that declares no return type of
-its own:
-
-```php
-class Sudo {
-    /** @return mixed Value of $object->property */
-    public static function fetchProperty($object, string $property)
-    {
-        $prop = self::getProperty(new \ReflectionObject($object), $property);
-
-        return $prop->getValue($object);
-    }
-
-    private static function getProperty(\ReflectionClass $refl, string $property): \ReflectionProperty
-    {
-        return $refl->getProperty($property);
-    }
-}
-
-function probe(Configuration $config): void {
-    $shell = Sudo::fetchProperty($config, 'shell');
-    echo $shell::VERSION;  // not counted as a reference to Shell::VERSION
-}
-```
-
-Measured on the conformance suite's navigation corpus, this is the one
-missing reference in `Psy\Shell::VERSION` (20 of 21,
-`src/functions.php:383`), and the code above is `Psy\Sudo` verbatim.
-
-The reflected read itself types: `getProperty('shell')` on a
-`ReflectionClass`/`ReflectionObject` with a known class yields the
-declared type of that property, so the same access written in one frame
-is found. Specialising the shape above one step at a time says exactly
-where the type is lost:
-
-| The callee, specialised | Inside its body | At the call site |
-| ----------------------- | --------------- | ---------------- |
-| `static`, no declared return, `Configuration $object`, literal name | `$prop` is `ReflectionProperty<Configuration, 'shell'>` | nothing |
-| the same with `@return mixed` | `$prop` resolves | `mixed` |
-| `$object` untyped, `string $property` (as psysh writes it) | `$prop` is a bare `ReflectionProperty` | nothing |
-
-So the type already exists inside the body — it just never leaves the
-function. Four things are in the way, and the first two are
-[T42](type-inference.md#t42-body-return-inference-is-instance-call-only-and-stops-at-return-mixed),
-which is worth doing on its own:
-
-- **Body-return inference never runs for a static call.** The fallback
-  lives at the tail of `resolve_owner_method_call`;
-  `resolve_rhs_static_call` has none. Every link in the chain above is
-  `static`.
-- **A declared `@return mixed` short-circuits it.** The hint is returned
-  before the inference fallback is reached. `mixed` says nothing and
-  every type is a subtype of it, so refining it can only narrow.
-- **Parameters are seeded from the declaration, not the call site.**
-  This is the third row of the table, and it is the real work:
-  `seed_params` reads the signature, and the resolution context that
-  invokes inference carries neither the resolved argument types nor the
-  `content`/`cursor_offset` needed to resolve them. The body-inference
-  memo is keyed `(class FQN, method)` and would have to grow the
-  argument types too, or one call site's answer gets served to another.
-- **The helper's declared `: \ReflectionProperty` erases the binding.**
-  Accepting an inferred refinement needs a rule — same base class, adds
-  generic arguments, inferred wins — which is sound because the
-  refinement is a strict subtype, but it means inference has to run
-  where a return type is already declared. That is the performance
-  cliff; the tightest gate found so far is to allow it only while
-  already inside an inference frame.
-
-Note that 0.9.0 scored 21 of 21 here. The hit came from the name
-matching removed in f10aedba, which compared the receiver's variable
-name against the short class names in the target hierarchy and paired
-`$shell` with `Shell` on spelling alone. That heuristic was the source
-of false references and wrong rename edits, so the drop is a loss of a
-coincidence, not of a working feature. **Do not restore it.** The fix
-is to type the receiver.
-
-Intelephense and Phpactor miss the same line; the DEVSENSE server finds
-it.
-
 ### B218. `new ReflectionProperty(Foo::class, 'bar')` forgets what it reflects
 
 **Impact: Low · Complexity: Medium**
@@ -203,6 +112,54 @@ paths need the same rule the two call paths got, or literal binding has
 to be widened to a `@template TName of string`, which is what PHPStan
 does for literal string types and would want measuring against the whole
 corpus first.
+
+### B224. A stored `preg_match` result loses the groups it matched
+
+**Impact: Medium · Complexity: Medium**
+
+`preg_match` writes its groups into an out-parameter, and the shape the
+pattern describes is seeded at the call so a group read types as a
+string. Storing the call's *result* in a variable first loses it:
+
+```php
+function guarded(string $html): void {
+    $m = [];
+    if (preg_match('#(a)(b)#', $html, $m)) {
+        strrpos($m[1], 'x');       // string — correct
+    }
+}
+
+function stored(string $html): void {
+    $m = [];
+    $ok = preg_match('#(a)(b)#', $html, $m);
+    strrpos($m[1], 'x');           // null — should be string|null
+    if ($ok) {
+        strrpos($m[1], 'x');       // null — should be string
+    }
+}
+```
+
+Two separate steps are missing, and the first is the one that produces
+the false positive above:
+
+- **The seeding never runs.** `process_pass_by_ref` hands the whole
+  statement expression to `seed_pass_by_ref_primitives`, which reads a
+  `preg_call` off it; an assignment is not a call, so the out-parameter
+  keeps whatever the `$m = []` before it left, and a group read off an
+  empty shape is `null` rather than the `string|null` the call leaves.
+  `seed_pass_by_ref_in_condition` already looks through an assignment to
+  its right-hand side, which is what the statement path needs too.
+- **The guard proves nothing.** `apply_preg_match_narrowing` reads the
+  call out of the condition, so a condition that only names the variable
+  holding the result narrows nothing. The walker already records what a
+  boolean stands for when it is an `instanceof` (`VarAssertion`); a
+  `preg_match` outcome needs the same treatment, so `if ($ok)` narrows
+  `$m` to the matched shape and the `else` branch to the empty one.
+
+Found while fixing the accessor-argument typing: a body read for its
+return type now resolves further than it used to, so it reaches group
+reads that were previously left unresolved. `HTMLPurifier_Lexer` in the
+corpus shows all three false positives.
 
 ### B183. A Laravel Folio route is reported as unknown
 

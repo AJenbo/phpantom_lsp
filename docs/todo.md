@@ -103,8 +103,8 @@ unlikely to move the needle for most users.
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Medium      |
 |     | **[Bugs](todo/bugs.md)**                                                                                                                                                    |             |             |
 | B183 | [A Laravel Folio route is reported as unknown](todo/bugs.md#b183-a-laravel-folio-route-is-reported-as-unknown)                                                              | High        | Medium      |
-| B217 | [A `mixed`-returning accessor loses the type its arguments decide](todo/bugs.md#b217-a-mixed-returning-accessor-loses-the-type-its-arguments-decide)                         | Low-Medium  | High        |
 | B222 | [Class reference matching is case-sensitive](todo/bugs.md#b222-class-reference-matching-is-case-sensitive)                                                                   | Medium      | Medium      |
+| B224 | [A stored `preg_match` result loses the groups it matched](todo/bugs.md#b224-a-stored-preg_match-result-loses-the-groups-it-matched)                                          | Medium      | Medium      |
 | B218 | [`new ReflectionProperty(Foo::class, 'bar')` forgets what it reflects](todo/bugs.md#b218-new-reflectionpropertyfooclass-bar-forgets-what-it-reflects)                        | Low         | Medium      |
 | B188 | [A concrete `ArrayAccess::offsetGet()` override is ignored on subscript read](todo/bugs.md#b188-a-concrete-arrayaccessoffsetget-override-is-ignored-on-subscript-read)       | Low-Medium  | Medium      |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |

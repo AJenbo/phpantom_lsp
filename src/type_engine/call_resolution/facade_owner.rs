@@ -161,6 +161,9 @@ fn facade_accessor_concrete_owner(
             backend,
             &facade.fqn(),
             accessor,
+            // A facade accessor takes no arguments, so there is nothing
+            // a call site could decide about it.
+            &[],
         )
         && let Some(concrete_name) = facade_accessor_class_name(&inferred, Some(backend))
         && let Some(concrete) = class_loader(&concrete_name)

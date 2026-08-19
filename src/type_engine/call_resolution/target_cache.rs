@@ -20,8 +20,21 @@ use crate::types::*;
 
 // ─── Thread-local memos ─────────────────────────────────────────────────────
 
-/// Memoized body-return-inference results, keyed by `(FQN, method)`.
-type BodyInferMemo = HashMap<(Atom, Atom), Option<PhpType>>;
+/// What a body-return inference was asked: the method, plus the argument
+/// types the call site decided its parameters with.
+///
+/// The arguments are part of the key because they change the answer — a
+/// method whose return type is decided by what it was handed gives a
+/// different type to every call site that hands it something different.
+type BodyInferKey = (Atom, Atom, Box<[PhpType]>);
+
+/// Memoized body-return-inference results.
+type BodyInferMemo = HashMap<BodyInferKey, Option<PhpType>>;
+
+/// The body-return inferences currently walking a body, each with the
+/// argument types its call site decided, keyed by `(declaring FQN,
+/// method)`.
+type CallSiteArgFrames = Vec<((Atom, Atom), Box<[PhpType]>)>;
 
 thread_local! {
     /// When `Some`, `resolve_instance_method_callable` caches results
@@ -55,6 +68,19 @@ thread_local! {
     /// (forward walker + full resolution), so even non-recursive
     /// chains are expensive.
     static BODY_INFER_DEPTH: Cell<u8> = const { Cell::new(0) };
+
+    /// The call-site argument types of every body-return inference
+    /// currently walking a body, so the walker can seed that body's
+    /// parameters with what the call actually passed rather than with
+    /// what the signature declares.
+    ///
+    /// Keyed by the class that *declares* the method, which is the class
+    /// the walker reports as its own: a method inherited from a trait is
+    /// read out of the trait's file, so keying by the receiver would
+    /// never match.  Bounded by [`MAX_BODY_INFER_DEPTH`], so a linear
+    /// scan is cheaper than hashing.
+    static BODY_INFER_ARGS: RefCell<CallSiteArgFrames> =
+        const { RefCell::new(Vec::new()) };
 }
 
 pub(crate) struct CallableTargetCacheGuard {
@@ -118,6 +144,57 @@ fn with_body_infer_memo() -> BodyInferMemoGuard {
     BodyInferMemoGuard { owns: true }
 }
 
+// ── Call-site argument frames ───────────────────────────────────────────────
+
+/// Pops the frame it pushed, so an inference that unwinds cannot leave a
+/// call's argument types seeding an unrelated body.
+struct CallSiteArgsGuard;
+
+impl Drop for CallSiteArgsGuard {
+    fn drop(&mut self) {
+        BODY_INFER_ARGS.with(|cell| {
+            cell.borrow_mut().pop();
+        });
+    }
+}
+
+/// Publish `args` as the argument types for the body of `class_fqn::method`
+/// until the returned guard drops.
+fn push_call_site_args(class_fqn: &str, method: Atom, args: &[PhpType]) -> CallSiteArgsGuard {
+    BODY_INFER_ARGS.with(|cell| {
+        cell.borrow_mut()
+            .push(((atom(class_fqn), method), args.into()));
+    });
+    CallSiteArgsGuard
+}
+
+/// The argument types the call site passed to `class_fqn::method_name`,
+/// when its body is the one currently being walked for a return type.
+///
+/// Indexed by declared parameter, so entry `i` is what parameter `i`
+/// received; a parameter no argument decided reads back as `mixed`.
+pub(crate) fn call_site_param_types(class_fqn: &str, method_name: &str) -> Option<Box<[PhpType]>> {
+    let class_fqn = class_fqn.trim_start_matches('\\');
+    BODY_INFER_ARGS.with(|cell| {
+        cell.borrow()
+            .iter()
+            .find(|((fqn, method), _)| {
+                fqn.trim_start_matches('\\').eq_ignore_ascii_case(class_fqn)
+                    && method.eq_ignore_ascii_case(method_name)
+            })
+            .map(|(_, args)| args.clone())
+    })
+}
+
+/// Whether a body-return inference is already walking a body.
+///
+/// Reading a method body where a return type is *declared* only pays for
+/// itself while an outer inference is running, because that is the only
+/// time a refinement the arguments decide can still reach a caller.
+pub(crate) fn body_inference_in_progress() -> bool {
+    BODY_INFER_DEPTH.with(|cell| cell.get()) > 0
+}
+
 /// Maximum nesting depth for body return inference chains.
 ///
 /// A→B→C is 3 levels deep.  Real PHP code rarely has long chains of
@@ -133,23 +210,40 @@ const MAX_BODY_INFER_DEPTH: u8 = 3;
 /// no `@return` docblock.  Returns `None` when the method is already
 /// being inferred (re-entry), when the chain is too deep, or when
 /// inference itself produces no useful result.
+///
+/// `call_args` are the types the call site decided the method's
+/// parameters with, indexed by declared parameter (`mixed` where the
+/// call decided nothing).  They seed the body's scope, so a method whose
+/// result depends on what it was handed answers per call site rather
+/// than once for the whole project.  Pass `&[]` from a caller that has
+/// no particular call site in mind.
 pub(crate) fn try_infer_body_return_type(
     backend: &Backend,
     class_fqn: &str,
     method: &MethodInfo,
+    call_args: &[PhpType],
 ) -> Option<PhpType> {
-    // Build the memo / re-entry key as an interned `(FQN, method)`
-    // tuple.  Both halves come from bounded symbol-name spaces and are
-    // already interned, so the key allocates nothing and adds no new
-    // entries to the global interner (a joined `"FQN::method"` string
-    // would leak one entry per distinct pair for the process lifetime).
-    let key = (atom(class_fqn), method.name);
+    // Build the memo / re-entry key from an interned `(FQN, method)`
+    // pair.  Both halves come from bounded symbol-name spaces and are
+    // already interned, so the key adds no new entries to the global
+    // interner (a joined `"FQN::method"` string would leak one entry per
+    // distinct pair for the process lifetime).  The memo keeps the
+    // argument types too, since they are what the answer depends on.
+    let visited_key = (atom(class_fqn), method.name);
+    let memo_key = (
+        visited_key.0,
+        visited_key.1,
+        Box::<[PhpType]>::from(call_args),
+    );
 
     // Serve a memoized result from an earlier completed inference in
     // this request.  Checked before the depth cap so that deep call
     // chains still benefit from results computed at shallower depths.
-    let memoized =
-        BODY_INFER_MEMO.with(|cell| cell.borrow().as_ref().and_then(|m| m.get(&key).cloned()));
+    let memoized = BODY_INFER_MEMO.with(|cell| {
+        cell.borrow()
+            .as_ref()
+            .and_then(|m| m.get(&memo_key).cloned())
+    });
     if let Some(cached) = memoized {
         return cached;
     }
@@ -160,10 +254,13 @@ pub(crate) fn try_infer_body_return_type(
         return None;
     }
 
-    // Check + insert into the visited set (re-entry guard).
+    // Check + insert into the visited set (re-entry guard).  Keyed
+    // without the arguments on purpose: a method that calls itself with
+    // a different argument type on every hop would otherwise never
+    // re-enter the same key and recurse until the depth cap.
     let already_visiting = BODY_INFER_VISITED.with(|cell| {
         let mut set = cell.borrow_mut();
-        !set.insert(key)
+        !set.insert(visited_key)
     });
     if already_visiting {
         return None;
@@ -173,14 +270,14 @@ pub(crate) fn try_infer_body_return_type(
 
     // Filter out `mixed` and `void` — these are not useful as
     // inferred return types for completion/hover.
-    let result = infer_body_return_type(backend, class_fqn, method)
+    let result = infer_body_return_type(backend, class_fqn, method, call_args)
         .filter(|t| !t.is_mixed() && !t.is_void());
 
     // Restore depth and remove from visited set so the same method
     // can be inferred again from a different call chain.
     BODY_INFER_DEPTH.with(|cell| cell.set(depth));
     BODY_INFER_VISITED.with(|cell| {
-        cell.borrow_mut().remove(&key);
+        cell.borrow_mut().remove(&visited_key);
     });
 
     // Memoize only completed runs (the depth-cap and re-entry
@@ -191,7 +288,7 @@ pub(crate) fn try_infer_body_return_type(
     // precision for never walking the same body twice in one request.
     BODY_INFER_MEMO.with(|cell| {
         if let Some(memo) = cell.borrow_mut().as_mut() {
-            memo.insert(key, result.clone());
+            memo.insert(memo_key, result.clone());
         }
     });
 
@@ -207,6 +304,7 @@ fn infer_body_return_type(
     backend: &Backend,
     class_fqn: &str,
     method: &MethodInfo,
+    call_args: &[PhpType],
 ) -> Option<PhpType> {
     // The method may have been inherited from a trait or parent class
     // declared in a *different* file.  `method.name_offset` is relative
@@ -270,6 +368,24 @@ fn infer_body_return_type(
             break;
         }
     }
+
+    // Publish the call site's argument types against the class the
+    // walker will report as its own while it reads this body, so the
+    // parameters seed from what was passed instead of from the
+    // signature.  The two caches that answer "what does this expression
+    // resolve to at this offset" step aside for the same span: seeded
+    // parameters make a different scope out of the very same offsets,
+    // and neither cache keys on which call site asked.
+    let _seeded = (!call_args.is_empty()).then(|| {
+        let declaring_fqn = declaring_class
+            .as_ref()
+            .map_or_else(|| class_fqn.to_string(), |decl| decl.fqn().to_string());
+        (
+            push_call_site_args(&declaring_fqn, method.name, call_args),
+            crate::type_engine::variable::forward_walk::suspend_diagnostic_scope(),
+            crate::type_engine::resolver::with_isolated_chain_cache(),
+        )
+    });
 
     let result = backend.infer_return_type_for_function(&file_uri, &content, decl_line, true)?;
 
@@ -360,6 +476,6 @@ mod tests {
         let mut method = make_method("size", None);
         method.name_offset = 10;
 
-        assert!(try_infer_body_return_type(&backend, "Box", &method).is_none());
+        assert!(try_infer_body_return_type(&backend, "Box", &method, &[]).is_none());
     }
 }

@@ -706,6 +706,9 @@ function runDemoAssertions(): void
     $reflectedWidget = (new ReflectionInstantiationDemo())->reflectedWidget($holder);
     assert($reflectedWidget instanceof Scaffolding\ReflectedWidget, 'ReflectionProperty::getValue() must be Scaffolding\ReflectedWidget');
     assert((new ReflectionInstantiationDemo())->reflectedWidget(new Scaffolding\ReflectedHolder()) === null, 'A null private property must read back as null');
+    $accessedWidget = (new ReflectionInstantiationDemo())->accessedWidget($holder);
+    assert($accessedWidget instanceof Scaffolding\ReflectedWidget, 'An accessor must return what its arguments name');
+    assert(ReflectionInstantiationDemo::fetchProperty($holder, 'widget') === $widget, 'fetchProperty() must read the property the name argument gives');
 
     // ── Inline new chaining ─────────────────────────────────────────────
     $fromNew = (new Scaffolding\Canvas())->getBrush();

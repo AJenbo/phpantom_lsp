@@ -45,6 +45,13 @@ fn assigned_type(backend: &Backend, uri: &str, content: &str, var: &str) -> Stri
 fn assert_assigned_types(content: &str, expected: &[(&str, &str)]) {
     let backend = create_test_backend_with_full_stubs();
     let uri = "file:///reflection_property_types.php";
+    // Reading a method body for its return type re-opens the file the
+    // method was declared in, so the content has to be reachable by URI
+    // and not just parsed into the symbol index.
+    backend
+        .open_files()
+        .write()
+        .insert(uri.to_string(), std::sync::Arc::new(content.to_string()));
     backend.update_ast(uri, content);
     for (var, want) in expected {
         assert_eq!(&assigned_type(&backend, uri, content, var), want, "{var}");
@@ -130,4 +137,72 @@ fn an_undecidable_reflected_read_stays_mixed() {
             ("$unknownValue", "mixed"),
         ],
     );
+}
+
+/// A reflection-based accessor, which is where a reflected read is usually
+/// written: the class and the property name arrive as arguments, so nothing
+/// in the accessor's own signature can say what it hands back.
+///
+/// `Accessor::fetchProperty()` is `Psy\Sudo::fetchProperty()` verbatim, down
+/// to the `@return mixed` and the untyped `$object`.
+const ACCESSOR_FIXTURE: &str = r#"<?php
+class Shell {
+    const VERSION = 'v1.0.0';
+}
+class Configuration {
+    private ?Shell $shell = null;
+    private int $verbosity = 0;
+}
+class Accessor {
+    /**
+     * @return mixed Value of $object->property
+     */
+    public static function fetchProperty($object, string $property)
+    {
+        $prop = self::getProperty(new \ReflectionObject($object), $property);
+
+        return $prop->getValue($object);
+    }
+
+    private static function getProperty(\ReflectionClass $refl, string $property): \ReflectionProperty
+    {
+        return $refl->getProperty($property);
+    }
+
+    public function forward(Configuration $config, string $property)
+    {
+        return self::fetchProperty($config, $property);
+    }
+}
+function probe(Configuration $config, string $dynamicName): void {
+    $shell = Accessor::fetchProperty($config, 'shell');
+    $verbosity = Accessor::fetchProperty($config, 'verbosity');
+    $dynamic = Accessor::fetchProperty($config, $dynamicName);
+    $forwarded = (new Accessor())->forward($config, 'shell');
+}
+"#;
+
+/// The accessor's result is whatever its arguments decided, so the same
+/// method answers differently at each call site.
+#[test]
+fn an_accessor_returns_what_its_arguments_decide() {
+    assert_assigned_types(
+        ACCESSOR_FIXTURE,
+        &[("$shell", "Shell"), ("$verbosity", "int")],
+    );
+}
+
+/// A call that decides nothing keeps the declared `mixed`: reading the body
+/// may only narrow what the signature promised, never contradict it.
+#[test]
+fn an_accessor_called_with_an_undecided_name_stays_mixed() {
+    assert_assigned_types(ACCESSOR_FIXTURE, &[("$dynamic", "mixed")]);
+}
+
+/// A wrapper that forwards its own parameters on keeps the chain intact:
+/// the name the outermost call fixed is what the innermost reflection read
+/// looks up.
+#[test]
+fn a_wrapper_forwards_what_its_own_call_site_decided() {
+    assert_assigned_types(ACCESSOR_FIXTURE, &[("$forwarded", "Shell")]);
 }

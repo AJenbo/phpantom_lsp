@@ -70,6 +70,29 @@ pub(crate) fn with_chain_resolution_cache() -> ChainCacheGuard {
     ChainCacheGuard { owns: true }
 }
 
+/// Puts back the chain cache [`with_isolated_chain_cache`] set aside.
+pub(crate) struct IsolatedChainCacheGuard(Option<HashMap<String, Vec<ResolvedType>>>);
+
+impl Drop for IsolatedChainCacheGuard {
+    fn drop(&mut self) {
+        CHAIN_CACHE.with(|cell| {
+            *cell.borrow_mut() = self.0.take();
+        });
+    }
+}
+
+/// Swap the chain cache for an empty one until the returned guard drops.
+///
+/// A cached chain is keyed by the text of the expression and the types of
+/// the variables in it, falling back to the file offset it was written
+/// at.  Reading a method body with its parameters seeded from a call site
+/// asks about the same text at the same offset as every other call site
+/// does, so the entries either side of that walk describe a different
+/// scope than the one being resolved and neither may be shared with it.
+pub(crate) fn with_isolated_chain_cache() -> IsolatedChainCacheGuard {
+    IsolatedChainCacheGuard(CHAIN_CACHE.with(|cell| cell.borrow_mut().replace(HashMap::new())))
+}
+
 /// Type alias for the optional function-loader closure passed through
 /// the resolution chain.  Reduces clippy `type_complexity` warnings.
 pub(crate) type FunctionLoaderFn<'a> = Option<&'a dyn Fn(&str, u32) -> Option<FunctionInfo>>;

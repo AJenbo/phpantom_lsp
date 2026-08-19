@@ -56,7 +56,20 @@ pub(crate) struct MethodReturnCtx<'a> {
     /// When `true`, the magic-method fallback checks `__callStatic`
     /// instead of `__call`.
     pub is_static: bool,
+    /// The types the call site's arguments resolve to, indexed by
+    /// declared parameter, for a method whose return type has to be read
+    /// off its body.
+    ///
+    /// Resolving an argument is as expensive as resolving any other
+    /// expression and almost every call needs none of it, so this is a
+    /// closure the body-inference fallback calls only once it is certain
+    /// it is going to read a body.  `None` from a caller that has no
+    /// argument AST to resolve.
+    pub call_args: CallSiteArgResolver<'a>,
 }
+
+/// See [`MethodReturnCtx::call_args`].
+pub(crate) type CallSiteArgResolver<'a> = Option<&'a dyn Fn() -> Vec<PhpType>>;
 
 /// Build a [`VarClassStringResolver`] closure from a [`ResolutionCtx`].
 ///
@@ -679,6 +692,10 @@ impl Backend {
                         cache: ctx.resolved_class_cache,
                         calling_class_name: ctx.current_class.map(|c| c.name.as_str()),
                         is_static: false,
+                        // A chain link is reached from resolved receiver
+                        // types, not from the call AST, so there is no
+                        // argument list here to resolve.
+                        call_args: None,
                     };
                     if let Some((date_class, date_return_type)) =
                         Self::configured_laravel_date_return(&owner, method_name, ctx.class_loader)
@@ -744,6 +761,7 @@ impl Backend {
                                 cache: ctx.resolved_class_cache,
                                 calling_class_name: ctx.current_class.map(|c| c.name.as_str()),
                                 is_static: true,
+                                call_args: None,
                             };
                             ClassInfo::extend_unique_arc(
                                 &mut union_results,
@@ -846,6 +864,7 @@ impl Backend {
                         cache: ctx.resolved_class_cache,
                         calling_class_name: ctx.current_class.map(|c| c.name.as_str()),
                         is_static: true,
+                        call_args: None,
                     };
                     if let Some((date_class, date_return_type)) =
                         Self::configured_laravel_date_return(&merged, method_name, ctx.class_loader)
@@ -1652,8 +1671,15 @@ impl Backend {
             if method.name_offset != 0
                 && !method.is_virtual
                 && let Some(backend) = mr_ctx.backend
-                && let Some(inferred) =
-                    try_infer_body_return_type(backend, &class_info.fqn(), method)
+                && let Some(inferred) = try_infer_body_return_type(
+                    backend,
+                    &class_info.fqn(),
+                    method,
+                    &mr_ctx
+                        .call_args
+                        .map(|resolve| resolve())
+                        .unwrap_or_default(),
+                )
             {
                 // A body-inferred `return $this` yields a self-like marker.
                 // Map it to the receiver class so the chain continues with
