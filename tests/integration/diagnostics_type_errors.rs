@@ -1688,6 +1688,65 @@ function test(): void {
 }
 
 #[test]
+fn no_diagnostic_for_non_falsy_string_to_non_empty_string() {
+    // `non-falsy-string` (and its Psalm synonym `truthy-string`) excludes
+    // both `""` and `"0"`, so it is strictly narrower than
+    // `non-empty-string`, which excludes only `""`. Passing one where the
+    // other is expected is sound.
+    let php = r#"<?php
+/** @param non-empty-string $value */
+function takes_non_empty_string(string $value): void {}
+
+/** @param non-falsy-string $v */
+function probe(string $v): void {
+    takes_non_empty_string($v);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Should not flag non-falsy-string passed to non-empty-string param, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_diagnostic_for_truthy_string_to_non_empty_string() {
+    let php = r#"<?php
+/** @param non-empty-string $value */
+function takes_non_empty_string(string $value): void {}
+
+/** @param truthy-string $v */
+function probe(string $v): void {
+    takes_non_empty_string($v);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Should not flag truthy-string passed to non-empty-string param, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_diagnostic_for_truthy_string_to_non_falsy_string() {
+    // truthy-string and non-falsy-string are synonyms.
+    let php = r#"<?php
+/** @param non-falsy-string $value */
+function takes_non_falsy_string(string $value): void {}
+
+/** @param truthy-string $v */
+function probe(string $v): void {
+    takes_non_falsy_string($v);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Should not flag truthy-string passed to non-falsy-string param, got: {diags:?}"
+    );
+}
+
+#[test]
 fn no_diagnostic_for_numeric_string_literal_to_numeric_string_precise() {
     // A numeric string literal like '42' IS a valid numeric-string.
     let php = r#"<?php

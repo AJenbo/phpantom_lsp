@@ -606,7 +606,10 @@ pub(crate) fn is_named_subtype(sub: &str, sup: &str) -> bool {
                 | "non-empty-literal-string"
         ),
 
-        "non-empty-string" | "truthy-string" | "non-falsy-string" => matches!(
+        // `non-falsy-string` and its Psalm synonym `truthy-string` exclude
+        // both `""` and `"0"`, so they are strictly narrower than
+        // `non-empty-string`, which excludes only `""`.
+        "non-empty-string" => matches!(
             sub_n,
             "non-empty-literal-string"
                 | "non-empty-lowercase-string"
@@ -616,6 +619,22 @@ pub(crate) fn is_named_subtype(sub: &str, sup: &str) -> bool {
                 | "interface-string"
                 | "trait-string"
                 | "enum-string"
+                | "truthy-string"
+                | "non-falsy-string"
+        ),
+
+        "truthy-string" | "non-falsy-string" => matches!(
+            sub_n,
+            "non-empty-literal-string"
+                | "non-empty-lowercase-string"
+                | "non-empty-uppercase-string"
+                | "callable-string"
+                | "class-string"
+                | "interface-string"
+                | "trait-string"
+                | "enum-string"
+                | "truthy-string"
+                | "non-falsy-string"
         ),
 
         "literal-string" => matches!(sub_n, "non-empty-literal-string"),
