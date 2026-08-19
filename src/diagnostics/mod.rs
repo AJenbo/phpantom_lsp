@@ -133,8 +133,9 @@
 //!
 //! - **PHPCS proxy diagnostics** — run PHP_CodeSniffer via
 //!   `phpcs --report=json` and surface coding standard violations as
-//!   LSP diagnostics.  Auto-detected when `squizlabs/php_codesniffer`
-//!   is in `require-dev`; configurable under `[phpcs]`.
+//!   LSP diagnostics.  Auto-detected via `vendor/bin/phpcs` or `$PATH`,
+//!   independent of what `composer.json` declares; configurable under
+//!   `[phpcs]`.
 //!
 //!   PHPCS runs in its own **dedicated worker task**, following the
 //!   same pattern as the PHPStan worker.  At most one PHPCS process
