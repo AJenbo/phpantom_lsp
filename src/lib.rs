@@ -410,7 +410,19 @@ impl LaravelStringKeyCache {
         {
             self.gate_abilities = None;
         }
-        if uri.contains("/routes/") {
+        // A Folio page registers a route without ever touching `routes/`, so
+        // its own edits have to invalidate the route cache too — gated on
+        // the page mentioning `Folio` at all (its `name()` import or a
+        // fully-qualified call), the same way the `Gate::` check above
+        // avoids paying for every unrelated Blade edit.  `bootstrap/app.php`
+        // is where a Folio mount is most commonly registered
+        // (`withRouting(pages: ...)`), and it is not a service provider, so
+        // it needs its own trigger rather than riding along with one.
+        if uri.contains("/routes/")
+            || uri.ends_with("/bootstrap/app.php")
+            || (uri.ends_with(".blade.php")
+                && memchr::memmem::find(content.as_bytes(), b"Folio").is_some())
+        {
             self.routes = None;
         }
         if uri.contains("/config/") {

@@ -966,6 +966,13 @@ pub(crate) fn chain_uri_prefix<'a>(expr: &Expression<'a>, content: &str) -> Stri
     chain_modifier_value(expr, content, b"prefix", &join_uri_segments)
 }
 
+/// The `->uri('...')` value a Folio mount chain sets
+/// (`Folio::path(...)->uri('admin')`), joined the same way a route group's
+/// URI prefix is.
+pub(crate) fn chain_uri_modifier<'a>(expr: &Expression<'a>, content: &str) -> String {
+    chain_modifier_value(expr, content, b"uri", &join_uri_segments)
+}
+
 /// The route-name prefix a chain sets ahead of a `resource()` registration.
 ///
 /// `RouteRegistrar` aliases `->name()` onto `->as()`, so both spellings feed

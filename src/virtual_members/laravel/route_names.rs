@@ -644,7 +644,7 @@ fn open_included_file<'a>(
 /// and URI prefixes before walking it.  A `foreach` is likewise absent: its
 /// body is walked once per element with the loop variables bound, which the
 /// callers do themselves.
-fn for_each_nested_statement(stmt: &Statement<'_>, f: &mut dyn FnMut(&Statement<'_>)) {
+pub(super) fn for_each_nested_statement(stmt: &Statement<'_>, f: &mut dyn FnMut(&Statement<'_>)) {
     let mut visit = |statements: &[Statement<'_>]| statements.iter().for_each(&mut *f);
 
     match stmt {
@@ -774,6 +774,8 @@ pub(crate) fn resolve_route_definitions(backend: &Backend, name: &str) -> Vec<Lo
             ));
         }
     }
+
+    results.extend(super::folio::resolve_folio_route_definition(backend, name));
 
     results
 }
@@ -1384,6 +1386,11 @@ pub(crate) fn enumerate_all_routes(backend: &Backend) -> RouteDiscovery {
             }
         }
     }
+
+    // Folio pages register no `Route::` call at all, so they are invisible
+    // to everything above and are discovered by their own filesystem-based
+    // scan instead.
+    routes.extend(super::folio::enumerate_folio_routes(backend));
 
     // Sorting the project's own registrations ahead of a package's, and
     // known URIs ahead of unknown ones, then deduping to one entry per

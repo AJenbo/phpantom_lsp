@@ -115,6 +115,7 @@ mod env_vars;
 mod facade;
 mod factory;
 pub(crate) mod factory_count;
+mod folio;
 pub(crate) mod gates;
 mod helpers;
 mod higher_order_proxy;

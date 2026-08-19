@@ -570,11 +570,17 @@ impl Backend {
                 );
                 let detail = if let Some(loc) = locations.first() {
                     let path = loc.uri.path();
-                    let short_path = path
-                        .rsplit("/routes/")
-                        .next()
-                        .map(|p| format!("routes/{}", p))
-                        .unwrap_or_else(|| path.to_string());
+                    // A conventional route file lives under `routes/`, so
+                    // that segment onward is the useful part; a Folio page
+                    // lives anywhere under the view roots, so it falls back
+                    // to a workspace-relative path the same way View does.
+                    let short_path = path.rsplit_once("/routes/").map_or_else(
+                        || {
+                            self.workspace_relative_path(loc.uri.as_str())
+                                .unwrap_or_else(|| path.to_string())
+                        },
+                        |(_, rest)| format!("routes/{}", rest),
+                    );
                     format!("Defined in `{}`", short_path)
                 } else {
                     "Route name".to_string()
@@ -603,18 +609,12 @@ impl Backend {
                     self, kind, key, uri,
                 );
                 let detail = if let Some(loc) = locations.first() {
-                    let path = loc.uri.path();
                     // Show the path relative to the workspace root so
                     // custom view directories (from `config/view.php`)
                     // display cleanly rather than as absolute paths.
                     let short_path = self
-                        .workspace
-                        .workspace_root
-                        .read()
-                        .as_deref()
-                        .and_then(|root| path.strip_prefix(&format!("{}/", root.to_string_lossy())))
-                        .map(|rel| rel.to_string())
-                        .unwrap_or_else(|| path.to_string());
+                        .workspace_relative_path(loc.uri.as_str())
+                        .unwrap_or_else(|| loc.uri.path().to_string());
                     format!("`{}`", short_path)
                 } else {
                     "View template".to_string()

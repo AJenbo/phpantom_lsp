@@ -2842,6 +2842,7 @@ impl Backend {
             + resources.trans_dirs.len()
             + resources.route_files.len()
             + resources.class_component_namespaces.len()
+            + resources.folio_mounts.len()
             > 0;
         let has_bindings = !resources.bindings.is_empty();
         *self.laravel_provider_resources.write() = resources;

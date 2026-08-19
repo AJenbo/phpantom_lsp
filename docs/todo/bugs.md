@@ -126,43 +126,25 @@ anywhere in the enclosing function body (not only the ones preceding the
 read in this pass), since the assignment that matters can sit in a
 branch this call never takes.
 
-### B183. A Laravel Folio route is reported as unknown
+### B225. A route group whose name spells out nothing still flags its routes
 
-**Impact: High · Complexity: Medium**
+**Impact: Low · Complexity: Medium**
 
-Folio registers routes from the filesystem: a page file under a mounted
-directory becomes a route, and `Laravel\Folio\name()` inside the page
-names it. The route index only reads registrations it can see in
-`routes/`, service providers, and resource declarations, so a Folio
-route does not exist as far as any consumer is concerned. The worst
-symptom is a false positive:
+A group whose name is entirely a variable and which sits under no
+enclosing literal group (`Route::name($panelId)->group(...)` at the top
+of a routes file) records no open prefix, so every `route()` call naming
+one of its routes is still reported as unknown.
 
-```php
-// resources/views/folio/explore/index.blade.php
-use function Laravel\Folio\name;
-name('explore');
-
-// anywhere else
-route('explore');  // Unknown route: 'explore'
-```
-
-Three more follow from the same cause: go-to-definition on the name
-answers nothing, completion inside `route('')` omits every Folio route,
-and hover falls back to the bare `Route name` label instead of naming
-the file that declares it.
-
-The mount points come from `Folio::path(...)` / `Folio::route(...)` calls
-in a service provider (`FolioServiceProvider` by convention), and the
-name comes from a `name()` call in the page file, imported as
-`use function Laravel\Folio\name;`. Both need reading before the route
-index can answer for these names. The URI a page maps to is derived from
-its path relative to the mount, with `[param]` and `[...param]` segments
-becoming route parameters, which is also what route-parameter completion
-would need.
-
-Reproduced against a Folio-based Laravel application; `route('home')`
-from `routes/web.php` in the same file resolves correctly, so the gap is
-specific to filesystem-derived routes.
+The obvious fix is the wrong one: an open prefix of `""` is a prefix of
+every route name there is, so the diagnostic
+(`route_open_prefixes.iter().any(|prefix| key.starts_with(prefix))` in
+`diagnostics/mod.rs`) would stand down for the whole project rather than
+for the one group. What is needed instead is for the collector
+(`virtual_members/laravel/route_names.rs`) to record which *names* fall
+under an unknowable group rather than which prefixes, so an unnamed
+group opens only the suffixes it registers (`pages.dashboard` under an
+unknown prefix means any name *ending* in it is unjudgeable) and every
+other name in the project stays checked.
 
 ## Array types
 

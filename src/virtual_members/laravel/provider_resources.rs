@@ -150,6 +150,12 @@ pub(crate) struct ProviderResources {
     /// source we cannot enumerate (a database table, say) and the set of
     /// valid translation keys is unknowable.
     pub custom_translation_loader: bool,
+    /// `Folio::path(...)`/`Folio::route(...)` mount registrations, typically
+    /// made from a service provider's `boot()` for a second page directory
+    /// (the primary mount usually lives in `bootstrap/app.php`'s
+    /// `withRouting(pages: ...)`, which this scan does not reach since it is
+    /// not a provider — see `super::folio::discover_folio_mounts`).
+    pub folio_mounts: Vec<super::folio::FolioMount>,
 }
 
 impl ProviderResources {
@@ -166,6 +172,7 @@ impl ProviderResources {
             .extend(other.anonymous_component_paths);
         self.shared_view_vars.extend(other.shared_view_vars);
         self.view_composers.extend(other.view_composers);
+        self.folio_mounts.extend(other.folio_mounts);
         for (key, binding) in other.bindings {
             self.record_binding(key, binding);
         }
@@ -657,6 +664,9 @@ pub(crate) fn extract_provider_resources(
     } else {
         resources.route_files.extend(grouped_route_files);
     }
+
+    resources.folio_mounts =
+        super::folio::scan_folio_mounts_in_program(program, content, file_dir, workspace_root);
 
     resources
 }

@@ -172,6 +172,7 @@ mod laravel_request_input;
 mod laravel_request_keys;
 mod laravel_route_controller;
 mod laravel_route_discovery;
+mod laravel_route_folio;
 mod laravel_route_macros;
 mod laravel_route_ownership;
 mod laravel_route_params;
