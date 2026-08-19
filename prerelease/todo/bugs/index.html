@@ -906,32 +906,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b222-class-reference-matching-is-case-sensitive" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B222. Class reference matching is case-sensitive
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b218-new-reflectionpropertyfooclass-bar-forgets-what-it-reflects" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         B218. <code>new ReflectionProperty(Foo::class, 'bar')</code> forgets what it reflects
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b224-a-stored-preg_match-result-loses-the-groups-it-matched" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B224. A stored <code>preg_match</code> result loses the groups it matched
       </span>
     </span>
   </a>
@@ -950,10 +928,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b224-a-route-group-whose-name-spells-out-nothing-still-flags-its-routes" class="md-nav__link">
+  <a href="#b225-a-route-group-whose-name-spells-out-nothing-still-flags-its-routes" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B224. A route group whose name spells out nothing still flags its routes
+        B225. A route group whose name spells out nothing still flags its routes
       </span>
     </span>
   </a>
@@ -1544,32 +1522,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b222-class-reference-matching-is-case-sensitive" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B222. Class reference matching is case-sensitive
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b218-new-reflectionpropertyfooclass-bar-forgets-what-it-reflects" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         B218. <code>new ReflectionProperty(Foo::class, 'bar')</code> forgets what it reflects
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b224-a-stored-preg_match-result-loses-the-groups-it-matched" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B224. A stored <code>preg_match</code> result loses the groups it matched
       </span>
     </span>
   </a>
@@ -1588,10 +1544,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b224-a-route-group-whose-name-spells-out-nothing-still-flags-its-routes" class="md-nav__link">
+  <a href="#b225-a-route-group-whose-name-spells-out-nothing-still-flags-its-routes" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B224. A route group whose name spells out nothing still flags its routes
+        B225. A route group whose name spells out nothing still flags its routes
       </span>
     </span>
   </a>
@@ -1693,34 +1649,16 @@ poisoned by the first file's cached entry:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">// file A: use A\Pen;           file B: use B\Pen;</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">Pen::make()-&gt;write();           Pen::make()-&gt;write();  // may resolve against A\Pen</span>
 </code></pre></div>
-<h3 id="b222-class-reference-matching-is-case-sensitive">B222. Class reference matching is case-sensitive<a class="headerlink" href="#b222-class-reference-matching-is-case-sensitive" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<p>PHP resolves class names case-insensitively, but <code>class_names_match</code>
-(<code>references/mod.rs</code>), the <code>ReferenceIndexKey::Class</code> keys, and
-<code>build_class_rename_edit</code> all compare them case-sensitively:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">class Widget {}</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">$a = new WIDGET();  // renaming Widget to Gadget leaves this calling WIDGET</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">$b = new Widget();</span>
-</code></pre></div>
-<p>Find References omits the <code>WIDGET</code> site and rename leaves it behind,
-which breaks the file it was supposed to fix. This is the same defect
-fixed for functions in the reference index and <code>find_function_references</code>
-(where the key is now folded to ASCII lowercase and the comparisons use
-<code>eq_ignore_ascii_case</code>); classes need the same treatment, but they reach
-their edits through the separate class-rename handler, which understands
-<code>use</code> imports, aliases, and collisions, so the alias and import spellings
-have to be folded consistently too. Constants are correctly
-case-sensitive in PHP and must stay as they are.</p>
 <h3 id="b218-new-reflectionpropertyfooclass-bar-forgets-what-it-reflects">B218. <code>new ReflectionProperty(Foo::class, 'bar')</code> forgets what it reflects<a class="headerlink" href="#b218-new-reflectionpropertyfooclass-bar-forgets-what-it-reflects" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
 <p>A reflection value built by <code>ReflectionClass::getProperty('bar')</code> carries
 the class and the property name, so reading it types as the property
 declares. Constructing the same value directly does not:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">$viaClass = (new \ReflectionClass(Configuration::class))-&gt;getProperty(&#39;shell&#39;);</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">$viaClass-&gt;getValue($config);   // ?Shell</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">$direct = new \ReflectionProperty(Configuration::class, &#39;shell&#39;);</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">$direct-&gt;getValue($config);     // mixed</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">$viaClass = (new \ReflectionClass(Configuration::class))-&gt;getProperty(&#39;shell&#39;);</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">$viaClass-&gt;getValue($config);   // ?Shell</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">$direct = new \ReflectionProperty(Configuration::class, &#39;shell&#39;);</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">$direct-&gt;getValue($config);     // mixed</span>
 </code></pre></div>
 <p>The two spellings are interchangeable in real code, so the second should
 resolve like the first. The binding cannot come from the constructor's
@@ -1732,48 +1670,6 @@ paths need the same rule the two call paths got, or literal binding has
 to be widened to a <code>@template TName of string</code>, which is what PHPStan
 does for literal string types and would want measuring against the whole
 corpus first.</p>
-<h3 id="b224-a-stored-preg_match-result-loses-the-groups-it-matched">B224. A stored <code>preg_match</code> result loses the groups it matched<a class="headerlink" href="#b224-a-stored-preg_match-result-loses-the-groups-it-matched" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<p><code>preg_match</code> writes its groups into an out-parameter, and the shape the
-pattern describes is seeded at the call so a group read types as a
-string. Storing the call's <em>result</em> in a variable first loses it:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">function guarded(string $html): void {</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">    $m = [];</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    if (preg_match(&#39;#(a)(b)#&#39;, $html, $m)) {</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">        strrpos($m[1], &#39;x&#39;);       // string — correct</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">    }</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">}</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="x">function stored(string $html): void {</span>
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="x">    $m = [];</span>
-<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="x">    $ok = preg_match(&#39;#(a)(b)#&#39;, $html, $m);</span>
-<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="x">    strrpos($m[1], &#39;x&#39;);           // null — should be string|null</span>
-<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="x">    if ($ok) {</span>
-<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="x">        strrpos($m[1], &#39;x&#39;);       // null — should be string</span>
-<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a><span class="x">    }</span>
-<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a><span class="x">}</span>
-</code></pre></div>
-<p>Two separate steps are missing, and the first is the one that produces
-the false positive above:</p>
-<ul>
-<li><strong>The seeding never runs.</strong> <code>process_pass_by_ref</code> hands the whole
-  statement expression to <code>seed_pass_by_ref_primitives</code>, which reads a
-  <code>preg_call</code> off it; an assignment is not a call, so the out-parameter
-  keeps whatever the <code>$m = []</code> before it left, and a group read off an
-  empty shape is <code>null</code> rather than the <code>string|null</code> the call leaves.
-  <code>seed_pass_by_ref_in_condition</code> already looks through an assignment to
-  its right-hand side, which is what the statement path needs too.</li>
-<li><strong>The guard proves nothing.</strong> <code>apply_preg_match_narrowing</code> reads the
-  call out of the condition, so a condition that only names the variable
-  holding the result narrows nothing. The walker already records what a
-  boolean stands for when it is an <code>instanceof</code> (<code>VarAssertion</code>); a
-  <code>preg_match</code> outcome needs the same treatment, so <code>if ($ok)</code> narrows
-  <code>$m</code> to the matched shape and the <code>else</code> branch to the empty one.</li>
-</ul>
-<p>Found while fixing the accessor-argument typing: a body read for its
-return type now resolves further than it used to, so it reaches group
-reads that were previously left unresolved. <code>HTMLPurifier_Lexer</code> in the
-corpus shows all three false positives.</p>
 <h3 id="b183-a-laravel-folio-route-is-reported-as-unknown">B183. A Laravel Folio route is reported as unknown<a class="headerlink" href="#b183-a-laravel-folio-route-is-reported-as-unknown" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: High · Complexity: Medium</strong></p>
 <p>Folio registers routes from the filesystem: a page file under a mounted
@@ -1782,12 +1678,12 @@ names it. The route index only reads registrations it can see in
 <code>routes/</code>, service providers, and resource declarations, so a Folio
 route does not exist as far as any consumer is concerned. The worst
 symptom is a false positive:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">// resources/views/folio/explore/index.blade.php</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">use function Laravel\Folio\name;</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">name(&#39;explore&#39;);</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">// anywhere else</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">route(&#39;explore&#39;);  // Unknown route: &#39;explore&#39;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">// resources/views/folio/explore/index.blade.php</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">use function Laravel\Folio\name;</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">name(&#39;explore&#39;);</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">// anywhere else</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">route(&#39;explore&#39;);  // Unknown route: &#39;explore&#39;</span>
 </code></pre></div>
 <p>Three more follow from the same cause: go-to-definition on the name
 answers nothing, completion inside <code>route('')</code> omits every Folio route,
@@ -1804,7 +1700,7 @@ would need.</p>
 <p>Reproduced against a Folio-based Laravel application; <code>route('home')</code>
 from <code>routes/web.php</code> in the same file resolves correctly, so the gap is
 specific to filesystem-derived routes.</p>
-<h3 id="b224-a-route-group-whose-name-spells-out-nothing-still-flags-its-routes">B224. A route group whose name spells out nothing still flags its routes<a class="headerlink" href="#b224-a-route-group-whose-name-spells-out-nothing-still-flags-its-routes" title="Permanent link">&para;</a></h3>
+<h3 id="b225-a-route-group-whose-name-spells-out-nothing-still-flags-its-routes">B225. A route group whose name spells out nothing still flags its routes<a class="headerlink" href="#b225-a-route-group-whose-name-spells-out-nothing-still-flags-its-routes" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
 <p>A group whose name is entirely a variable and which sits under no
 enclosing literal group (<code>Route::name($panelId)-&gt;group(...)</code> at the top
