@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787162581801,
+  "lastUpdate": 1787172556399,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -23935,6 +23935,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 68.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "f03738a00ea9fb4abfb4d529a0e8f4c69fc92162",
+          "message": "Fix narrowing edge cases",
+          "timestamp": "2026-08-19T22:23:17+02:00",
+          "tree_id": "b654742cf6076d18efad3b3f7ebe3e20b7d67148",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/f03738a00ea9fb4abfb4d529a0e8f4c69fc92162"
+        },
+        "date": 1787172549478,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 36.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 72.9,
             "unit": "MiB"
           }
         ]
