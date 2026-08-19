@@ -31,6 +31,28 @@ pub(super) fn make_hover(contents: String) -> Hover {
     }
 }
 
+/// Wrap arbitrary text in a Markdown inline code span.
+///
+/// The value comes from a project's own `.env` or translation files, so it
+/// can hold anything: the fence grows past the longest run of backticks in
+/// it, a leading or trailing backtick is padded away from the fence, and a
+/// line break (which would end the span) becomes a space.
+pub(super) fn inline_code(value: &str) -> String {
+    let flat = value.replace(['\r', '\n'], " ");
+    let longest_run = flat
+        .split(|c| c != '`')
+        .map(str::len)
+        .max()
+        .unwrap_or_default();
+    let fence = "`".repeat(longest_run + 1);
+    let padding = if flat.starts_with('`') || flat.ends_with('`') {
+        " "
+    } else {
+        ""
+    };
+    format!("{fence}{padding}{flat}{padding}{fence}")
+}
+
 /// Format a deprecation message as a Markdown line for hover output.
 ///
 /// Returns `"🪦 **deprecated**"` when the message is empty, or

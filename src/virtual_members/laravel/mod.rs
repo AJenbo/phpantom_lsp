@@ -153,7 +153,7 @@ pub(crate) use config_keys::{
     resolve_config_key_definition_fallback,
 };
 pub(crate) use const_eval::ClassContext;
-pub(crate) use env_vars::{enumerate_env_keys, env_declaration_file};
+pub(crate) use env_vars::{enumerate_env_keys, env_declaration, env_name_is_sensitive};
 pub(crate) use gates::{
     LaravelGateIndex, enumerate_gate_abilities, model_policy_abilities, scan_gate_registrations,
 };
@@ -183,7 +183,7 @@ pub(crate) use storage::{
     FILESYSTEM_MANAGER_FQN, LaravelStorageDriverIndex, StorageDriverRegistration,
     extract_storage_driver_registrations, patch_storage_disk_type,
 };
-pub(crate) use trans_keys::{collect_trans_declarations, unresolved_trans_type};
+pub(crate) use trans_keys::{collect_trans_declarations, trans_line, unresolved_trans_type};
 pub(crate) use validation_rules::{safe_call_receiver_variable, safe_source_variable};
 pub(crate) use view_data::{SharedViewVar, composer_class_vars};
 pub(crate) use view_names::canonical_view_name;

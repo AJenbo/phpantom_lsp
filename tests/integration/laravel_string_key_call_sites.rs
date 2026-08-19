@@ -29,6 +29,30 @@ async fn open(backend: &phpantom_lsp::Backend, uri: &Url, text: &str) {
         .await;
 }
 
+/// The Markdown a hover at `line`/`character` of an already-open `uri` holds.
+async fn hover_text(
+    backend: &phpantom_lsp::Backend,
+    uri: &Url,
+    line: u32,
+    character: u32,
+) -> String {
+    let hover = backend
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position { line, character },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .unwrap()
+        .expect("the position should hover");
+    match hover.contents {
+        HoverContents::Markup(markup) => markup.value,
+        other => panic!("expected markup hover, got {other:?}"),
+    }
+}
+
 /// Every location go-to-definition offers at `line`/`character` of `relative`.
 async fn definitions(
     backend: &phpantom_lsp::Backend,
@@ -283,6 +307,124 @@ async fn find_references_gathers_every_read_of_an_environment_variable() {
             "expected a reference in {expected}, got {found:?}"
         );
     }
+}
+
+/// A hover over an environment variable says what it is set to, the way
+/// every other string-key hover says what its key resolves to.  A name that
+/// reads as naming a credential is the exception.
+#[tokio::test]
+async fn env_hover_shows_the_value_unless_the_name_reads_as_a_secret() {
+    let caller = "<?php\nnamespace App;\nclass Demo {\n\
+        \x20   public function go(): void {\n\
+        \x20       env('MAIL_MAILER');\n\
+        \x20       env('STRIPE_SECRET');\n\
+        \x20       env('MAIL_FROM');\n\
+        \x20   }\n}\n";
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER,
+        &[
+            ("app/Demo.php", caller),
+            (
+                ".env",
+                "MAIL_MAILER=log  # the mailer\nSTRIPE_SECRET=sk_test_123\nMAIL_FROM=\n",
+            ),
+        ],
+    );
+    backend.initialized(InitializedParams {}).await;
+    let uri = Url::from_file_path(dir.path().join("app/Demo.php")).unwrap();
+    open(&backend, &uri, caller).await;
+
+    let declared = hover_text(&backend, &uri, 4, 16).await;
+    assert!(
+        declared.contains("`log`") && declared.contains("Declared in `.env`"),
+        "got {declared}"
+    );
+
+    let secret = hover_text(&backend, &uri, 5, 16).await;
+    assert!(
+        !secret.contains("sk_test_123") && secret.contains("Value hidden"),
+        "got {secret}"
+    );
+
+    let empty = hover_text(&backend, &uri, 6, 16).await;
+    assert!(empty.contains("Set to an empty value"), "got {empty}");
+}
+
+/// Completion inside `env('')` offers the project's variables — the helper
+/// is the common spelling, and `Env::get('')` already completed.
+#[tokio::test]
+async fn the_env_helper_completes_the_projects_variables() {
+    let caller = "<?php\nnamespace App;\nclass Demo {\n\
+        \x20   public function go(): void {\n\
+        \x20       env('');\n\
+        \x20   }\n}\n";
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER,
+        &[
+            ("app/Demo.php", caller),
+            (".env", "APP_NAME=Acme\nMAIL_MAILER=log\n"),
+        ],
+    );
+    backend.initialized(InitializedParams {}).await;
+    let uri = Url::from_file_path(dir.path().join("app/Demo.php")).unwrap();
+    open(&backend, &uri, caller).await;
+
+    let items = match backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position::new(4, 13),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap()
+    {
+        Some(CompletionResponse::Array(items)) => items,
+        Some(CompletionResponse::List(list)) => list.items,
+        None => Vec::new(),
+    };
+
+    let labels: Vec<&str> = items.iter().map(|item| item.label.as_str()).collect();
+    for expected in ["APP_NAME", "MAIL_MAILER"] {
+        assert!(labels.contains(&expected), "got {labels:?}");
+    }
+}
+
+/// A hover over a translation key shows the line it resolves to, which is
+/// the one thing the reader cannot already see.
+#[tokio::test]
+async fn translation_hover_shows_the_translated_line() {
+    let caller = "<?php\nnamespace App;\nclass Demo {\n\
+        \x20   public function go(): void {\n\
+        \x20       __('boards.explore');\n\
+        \x20       __('boards.nested');\n\
+        \x20   }\n}\n";
+    let lang = "<?php\nreturn [\n\
+        \x20   'explore' => 'Explore :name',\n\
+        \x20   'nested' => ['deep' => 'Deep'],\n];\n";
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER,
+        &[("app/Demo.php", caller), ("lang/en/boards.php", lang)],
+    );
+    backend.initialized(InitializedParams {}).await;
+    let uri = Url::from_file_path(dir.path().join("app/Demo.php")).unwrap();
+    open(&backend, &uri, caller).await;
+
+    let leaf = hover_text(&backend, &uri, 4, 16).await;
+    assert!(
+        leaf.contains("`Explore :name`") && leaf.contains("Defined in `lang/en/boards.php`"),
+        "got {leaf}"
+    );
+
+    // A group has no single line, so the hover keeps naming only the file.
+    let group = hover_text(&backend, &uri, 5, 16).await;
+    assert!(
+        group.contains("Defined in `lang/en/boards.php`"),
+        "got {group}"
+    );
 }
 
 /// `Env::get()` is the class the `env()` helper calls through, so both

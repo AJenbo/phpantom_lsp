@@ -103,10 +103,7 @@ unlikely to move the needle for most users.
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Medium      |
 |     | **[Bugs](todo/bugs.md)**                                                                                                                                                    |             |             |
 | B183 | [A Laravel Folio route is reported as unknown](todo/bugs.md#b183-a-laravel-folio-route-is-reported-as-unknown)                                                              | High        | Medium      |
-| B219 | [The `env()` helper offers no key completion](todo/bugs.md#b219-the-env-helper-offers-no-key-completion)                                                                     | Medium      | Low         |
 | B217 | [A `mixed`-returning accessor loses the type its arguments decide](todo/bugs.md#b217-a-mixed-returning-accessor-loses-the-type-its-arguments-decide)                         | Low-Medium  | High        |
-| B220 | [Translation hover does not show the translated string](todo/bugs.md#b220-translation-hover-does-not-show-the-translated-string)                                             | Low-Medium  | Low         |
-| B221 | [Env hover withholds the value for no real reason](todo/bugs.md#b221-env-hover-withholds-the-value-for-no-real-reason)                                                       | Medium      | Low         |
 | B222 | [Class reference matching is case-sensitive](todo/bugs.md#b222-class-reference-matching-is-case-sensitive)                                                                   | Medium      | Medium      |
 | B218 | [`new ReflectionProperty(Foo::class, 'bar')` forgets what it reflects](todo/bugs.md#b218-new-reflectionpropertyfooclass-bar-forgets-what-it-reflects)                        | Low         | Medium      |
 | B188 | [A concrete `ArrayAccess::offsetGet()` override is ignored on subscript read](todo/bugs.md#b188-a-concrete-arrayaccessoffsetget-override-is-ignored-on-subscript-read)       | Low-Medium  | Medium      |

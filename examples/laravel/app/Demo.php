@@ -471,6 +471,8 @@ class Demo
      *  3. "Find All References" on "app.name" to see all usage sites (including Blade views).
      *  4. "Find All References" on "DB_PASSWORD" to see every read of it,
      *     including the one in config/database.php and the .env line itself.
+     *  5. Hover "APP_NAME" to see the value .env sets it to, and type inside
+     *     an empty env('') to complete every variable the project declares.
      */
     public function laravelConfigEnv(): void
     {
@@ -494,7 +496,9 @@ class Demo
         // Environment variables are indexed wherever they are read, so
         // Ctrl+Click, hover, completion, and Find All References work the
         // same on both spellings of the read.
-        env('DB_PASSWORD');
+        env('APP_NAME');                  // hover shows: PHPantom
+        env('DB_PASSWORD');               // a name that reads as a credential
+                                          // hovers as set, without the value
         Env::get('APP_KEY');
     }
 

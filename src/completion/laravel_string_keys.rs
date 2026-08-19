@@ -323,6 +323,7 @@ fn detect_laravel_string_key_context(
                 (Some(LaravelStringKind::View), None)
             }
             "__" | "trans" | "trans_choice" => (Some(LaravelStringKind::Trans), None),
+            "env" => (Some(LaravelStringKind::Env), None),
             // The Blade preprocessor lowers `@can`/`@cannot`/`@canany` to
             // this call, so completion inside the directive works too.
             "blade_can_directive" => (Some(LaravelStringKind::GateAbility), None),
@@ -1033,12 +1034,14 @@ mod tests {
         assert!(matches!(ctx.kind, LaravelStringKind::Config));
         assert_eq!(ctx.prefix, "app.");
 
-        let content = "<?php\nEnv::get('APP_";
-        let col = content.lines().nth(1).unwrap().len() as u32;
-        let ctx = detect_laravel_string_key_context(content, Position::new(1, col))
-            .expect("should detect Env::get() as an environment context");
-        assert!(matches!(ctx.kind, LaravelStringKind::Env));
-        assert_eq!(ctx.prefix, "APP_");
+        for call in ["Env::get('APP_", "env('APP_"] {
+            let content = format!("<?php\n{call}");
+            let col = content.lines().nth(1).unwrap().len() as u32;
+            let ctx = detect_laravel_string_key_context(&content, Position::new(1, col))
+                .unwrap_or_else(|| panic!("should detect `{call}` as an environment context"));
+            assert!(matches!(ctx.kind, LaravelStringKind::Env), "for `{call}`");
+            assert_eq!(ctx.prefix, "APP_", "for `{call}`");
+        }
     }
 
     /// `#[RedirectToRoute]` names a route rather than a config key, but only

@@ -54,16 +54,47 @@ pub(crate) fn resolve_env_definitions(backend: &Backend, key: &str) -> Vec<Locat
     declarations
 }
 
-/// The dotenv file that declares `key`, as a workspace-relative name.
+/// What a dotenv file says about one variable: which file declares it and
+/// the value it is set to.
+pub(crate) struct EnvDeclaration {
+    /// The dotenv file, as a workspace-relative name.
+    pub file: &'static str,
+    /// The value as written, with surrounding quotes and any trailing
+    /// comment removed.  Empty for a name declared with no value.
+    pub value: String,
+}
+
+/// The dotenv file that declares `key`, and the value it gives it.
 ///
 /// Separate from [`resolve_env_definitions`], which points at a file even
 /// when nothing in it declares the name: hover has to tell the two apart.
-pub(crate) fn env_declaration_file(backend: &Backend, key: &str) -> Option<&'static str> {
+pub(crate) fn env_declaration(backend: &Backend, key: &str) -> Option<EnvDeclaration> {
     let root = backend.workspace.workspace_root.read().clone()?;
-    ENV_FILES.into_iter().find(|name| {
-        std::fs::read_to_string(root.join(name))
-            .is_ok_and(|content| declaring_line(&content, key).is_some())
+    ENV_FILES.into_iter().find_map(|file| {
+        let content = std::fs::read_to_string(root.join(file)).ok()?;
+        let value = declared_value(&content, key)?;
+        Some(EnvDeclaration { file, value })
     })
+}
+
+/// Whether a variable's name reads as naming a credential, in which case
+/// hover shows that it is set rather than what it is set to.
+///
+/// Matched on the whole name split into words, so `API_TOKEN` is a secret
+/// while `TOKENIZER_PATH` is not.
+pub(crate) fn env_name_is_sensitive(key: &str) -> bool {
+    const SENSITIVE_WORDS: [&str; 8] = [
+        "SECRET",
+        "PASSWORD",
+        "PASSWD",
+        "TOKEN",
+        "KEY",
+        "SALT",
+        "CREDENTIALS",
+        "DSN",
+    ];
+    key.split(|c: char| !c.is_ascii_alphanumeric())
+        .any(|word| SENSITIVE_WORDS.contains(&word.to_ascii_uppercase().as_str()))
 }
 
 /// Every variable name the project's dotenv files declare, sorted and
@@ -94,18 +125,69 @@ pub(crate) fn enumerate_env_keys(backend: &Backend) -> Vec<String> {
 /// The variable one dotenv line declares, or `None` for a comment, a blank
 /// line, or anything else that is not an assignment.
 fn declared_key(line: &str) -> Option<&str> {
+    declared_entry(line).map(|(key, _)| key)
+}
+
+/// The variable and the raw right-hand side one dotenv line declares.
+fn declared_entry(line: &str) -> Option<(&str, &str)> {
     let line = line.trim();
     if line.starts_with('#') {
         return None;
     }
     // Laravel's dotenv reader accepts an `export ` prefix.
     let line = line.strip_prefix("export ").unwrap_or(line).trim_start();
-    let key = line.split_once('=')?.0.trim_end();
+    let (key, raw) = line.split_once('=')?;
+    let key = key.trim_end();
     (!key.is_empty()
         && key
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.'))
-    .then_some(key)
+    .then_some((key, raw))
+}
+
+/// The value `key` is set to, or `None` when this file does not declare it.
+fn declared_value(env_content: &str, key: &str) -> Option<String> {
+    env_content
+        .lines()
+        .filter_map(declared_entry)
+        .find(|(name, _)| *name == key)
+        .map(|(_, raw)| unquote_value(raw))
+}
+
+/// One dotenv right-hand side as the reader would see it: quotes stripped,
+/// an unquoted trailing comment dropped.
+fn unquote_value(raw: &str) -> String {
+    let raw = raw.trim_start();
+    let mut chars = raw.chars();
+    let Some(quote @ ('"' | '\'')) = chars.next() else {
+        // A `#` only opens a comment when whitespace precedes it, so
+        // `APP_URL=http://x#y` keeps its fragment.
+        let end = raw
+            .char_indices()
+            .find(|(i, c)| *c == '#' && raw[..*i].ends_with(char::is_whitespace))
+            .map_or(raw.len(), |(i, _)| i);
+        return raw[..end].trim_end().to_string();
+    };
+    let mut value = String::new();
+    let mut escaped = false;
+    for c in chars {
+        if escaped {
+            // Only the quote itself and a backslash are escapes; anything
+            // else keeps the backslash it was written with.
+            if c != quote && c != '\\' {
+                value.push('\\');
+            }
+            value.push(c);
+            escaped = false;
+        } else if c == '\\' && quote == '"' {
+            escaped = true;
+        } else if c == quote {
+            break;
+        } else {
+            value.push(c);
+        }
+    }
+    value
 }
 
 /// The zero-based line `key` is declared on, or `None` when this file does
@@ -149,5 +231,37 @@ mod tests {
         let env = "DB_HOSTNAME=example.test\n";
         assert_eq!(declaring_line(env, "DB_HOST"), None);
         assert_eq!(declaring_line(env, "DB_HOSTNAME"), Some(0));
+    }
+
+    #[test]
+    fn reads_the_value_a_name_is_set_to() {
+        let env = "APP_NAME=Laravel\nAPP_DEBUG=\n";
+        assert_eq!(declared_value(env, "APP_NAME").as_deref(), Some("Laravel"));
+        assert_eq!(declared_value(env, "APP_DEBUG").as_deref(), Some(""));
+        assert_eq!(declared_value(env, "MISSING"), None);
+    }
+
+    /// Quotes belong to the file, not the value, and a `#` only opens a
+    /// comment when it follows whitespace outside them.
+    #[test]
+    fn a_value_is_read_the_way_the_dotenv_reader_reads_it() {
+        assert_eq!(unquote_value(" \"Acme App\" "), "Acme App");
+        assert_eq!(unquote_value("'Acme # App'"), "Acme # App");
+        assert_eq!(unquote_value("log  # the mailer"), "log");
+        assert_eq!(
+            unquote_value("http://acme.test#top"),
+            "http://acme.test#top"
+        );
+        assert_eq!(unquote_value(r#""say \"hi\"""#), "say \"hi\"");
+    }
+
+    /// A word of the name decides, so a name that merely contains the
+    /// letters of one is not a credential.
+    #[test]
+    fn only_whole_words_make_a_name_look_like_a_secret() {
+        assert!(env_name_is_sensitive("STRIPE_SECRET"));
+        assert!(env_name_is_sensitive("APP_KEY"));
+        assert!(!env_name_is_sensitive("APP_NAME"));
+        assert!(!env_name_is_sensitive("KEYCLOAK_URL"));
     }
 }

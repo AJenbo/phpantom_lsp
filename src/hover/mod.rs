@@ -632,7 +632,15 @@ impl Backend {
                         .next()
                         .map(|p| format!("lang/{}", p))
                         .unwrap_or_else(|| path.to_string());
-                    format!("Defined in `{}`", short_path)
+                    // The line as written: a `:placeholder` is left in
+                    // place, since what it stands for is decided by the
+                    // call site rather than by the translation.
+                    match crate::virtual_members::laravel::trans_line(self, key, &loc.uri) {
+                        Some(line) => {
+                            format!("{}\n\nDefined in `{}`", inline_code(&line), short_path)
+                        }
+                        None => format!("Defined in `{}`", short_path),
+                    }
                 } else {
                     "Translation key".to_string()
                 };
@@ -702,12 +710,21 @@ impl Backend {
                 ("Container", detail)
             }
             LaravelStringKind::Env => {
-                // The value itself is deliberately not shown: a `.env` holds
-                // credentials, and a hover is the one place they would appear
-                // without being asked for.
-                let detail = match crate::virtual_members::laravel::env_declaration_file(self, key)
-                {
-                    Some(file) => format!("Declared in `{}`", file),
+                // The value is shown like every sibling hover shows what its
+                // key resolves to, except for names that read as naming a
+                // credential: those are the ones worth not putting on screen
+                // during a screen share.
+                let detail = match crate::virtual_members::laravel::env_declaration(self, key) {
+                    Some(decl) => {
+                        let value = if crate::virtual_members::laravel::env_name_is_sensitive(key) {
+                            "Value hidden".to_string()
+                        } else if decl.value.is_empty() {
+                            "Set to an empty value".to_string()
+                        } else {
+                            inline_code(&decl.value)
+                        };
+                        format!("{}\n\nDeclared in `{}`", value, decl.file)
+                    }
                     None => "Not declared in `.env`".to_string(),
                 };
                 ("Env", detail)
