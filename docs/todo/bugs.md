@@ -17,84 +17,13 @@ No outstanding items.
 
 ## Type comparison
 
-### B182. `non-falsy-string` still accepts a literal string that can be `0`
-
-**Impact: Low · Complexity: Low**
-
-The `non-falsy-string` supertype arm in `php_type/subtype.rs` accepts
-`non-empty-literal-string`, `non-empty-lowercase-string`, and
-`non-empty-uppercase-string` as subtypes, carried over unpruned from the
-`non-empty-string` arm. All three are inhabited by the literal `"0"`,
-which is falsy, so a `non-empty-literal-string`-typed value passed where
-`non-falsy-string` is required produces no diagnostic even though `"0"`
-would violate it. False negative only; pre-existing in the shared arm
-before it was split, and still present in the split-off strict arm.
+No outstanding items.
 
 ## Standard-library return types
 
 No outstanding items.
 
 ## Narrowing
-
-### B184. A negated `get_class()` check over-narrows and drops valid subclasses
-
-**Impact: Medium · Complexity: Low-Medium**
-
-`narrow_type_by_instanceof`'s negated branch
-(`type_engine/types/narrowing/instanceof.rs`) ignores
-`extraction.exact`, so a negated exact-class check is treated the same
-as `!instanceof`, which wrongly excludes subclasses that would in fact
-pass the exact check:
-
-```php
-/** @var list<Dog|Puppy|Cat> $a  (Puppy extends Dog) */
-$b = array_filter($a, fn ($v) => get_class($v) !== Dog::class);
-// reports array<int, Cat>; Puppy's get_class() is "Puppy", so it should survive too
-```
-
-The positive branch already handles `exact` correctly; only the negated
-branch needs the same check.
-
-### B185. A union member's generic arguments are lost when narrowed by `instanceof`
-
-**Impact: Medium · Complexity: Medium**
-
-`instanceof_member` (`type_engine/types/narrowing/instanceof.rs`) calls
-`member.class_name()`, which only matches `TypeKind::Named`. A `Generic`
-union member such as `Collection<User>` falls into the `else` arm and is
-replaced by the bare checked class (`Collection`) instead of reaching the
-`is_subtype_of_named` path that would preserve its type arguments:
-
-```php
-/** @var list<Collection<User>|string> $a */
-$b = array_filter($a, fn ($v) => $v instanceof Collection);
-// $b is array<int, Collection>; should be array<int, Collection<User>>
-```
-
-`$b[0]->first()` then loses the `User` type. A non-generic member
-escapes this path via an early subtype check elsewhere; only the
-union-narrowing path is affected.
-
-### B186. A negated loose null comparison is narrowed as if it were strict
-
-**Impact: Low · Complexity: Low**
-
-`try_extract_null_comparison` (`type_engine/types/narrowing/guards.rs`)
-collapses `!==` and `!=` to the same `Some(false)` result in its negation
-arm, so `!($v != null)` (equivalent to the loose `$v == null`) is treated
-as proving `null`, even though the function's own direct-comparison arm
-correctly refuses to narrow `$v == null` (loose equality also matches
-`''`, `0`, `[]`). Only the negated spelling slips through:
-
-```php
-/** @var list<?string> $xs */
-$kept = array_filter($xs, fn ($v) => !($v != null));
-// reports array<int, null>; kept entries also include ''
-```
-
-Contrived spelling, so low real-world reach, but the negation arm should
-distinguish `NotIdentical` from `NotEqual` the same way the direct arm
-distinguishes `Identical` from `Equal`.
 
 ### B187. Unsetting an array element is not modeled, so a loop can be assumed to run
 
@@ -114,27 +43,6 @@ executed, when the array it iterates was actually emptied first).
 No outstanding items.
 
 ## Symbol resolution
-
-### B191. The property hook call rewrite matches any class, not just `parent`
-
-**Impact: Medium · Complexity: Low**
-
-`extract_property_hook_call` (`symbol_map/extraction/expressions/calls.rs`)
-rewrites any `X::$y::get()` / `X::$y::set(...)` static call into a
-property-hook invocation, but PHP 8.4 only defines this syntax for
-`parent::`. The extraction never checks `property_access.class`, so
-legitimate code using the same token shape for an unrelated purpose is
-hijacked:
-
-```php
-Registry::$instance::get('service'); // a real static property + static call
-```
-
-Here the `get` call's `MemberAccess` span is dropped entirely (hover and
-go-to-definition on `get` answer nothing, and its unknown-method/
-argument-count checks are skipped), and `$instance` is emitted as
-`is_static: false`, so hover shows a static property as an instance one.
-Restrict the match to a `parent` class reference.
 
 ### B196. The chain resolution cache key omits file identity
 

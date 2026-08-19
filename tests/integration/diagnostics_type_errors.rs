@@ -1746,6 +1746,87 @@ function probe(string $v): void {
     );
 }
 
+/// The `non-empty-…` refinements are all inhabited by the literal `"0"`,
+/// which is falsy, so each one stops at `non-empty-string` and none of them
+/// satisfies `non-falsy-string`.
+#[test]
+fn flags_non_empty_refinements_passed_to_non_falsy_string() {
+    for refinement in [
+        "non-empty-string",
+        "non-empty-literal-string",
+        "non-empty-lowercase-string",
+        "non-empty-uppercase-string",
+    ] {
+        let php = format!(
+            r#"<?php
+/** @param non-falsy-string $value */
+function takes_non_falsy_string(string $value): void {{}}
+
+/** @param non-empty-string $lenient */
+function takes_non_empty_string(string $lenient): void {{}}
+
+/** @param {refinement} $v */
+function probe(string $v): void {{
+    takes_non_empty_string($v);
+}}
+"#
+        );
+        let diags = collect(&php);
+        assert!(
+            !has_type_error(&diags),
+            "{refinement} is a non-empty-string, got: {diags:?}"
+        );
+
+        let php = php.replace("takes_non_empty_string($v);", "takes_non_falsy_string($v);");
+        let diags = collect(&php);
+        assert!(
+            has_type_error(&diags),
+            "{refinement} admits \"0\", so it is not a non-falsy-string, got: {diags:?}"
+        );
+    }
+}
+
+/// A bare `string` might satisfy any of the value-shape string refinements
+/// at runtime, so passing one where such a refinement is declared is a
+/// MAYBE and stays silent. Every member of the family has to be listed for
+/// that: one left out turns into a false positive on the first call site
+/// that uses it. `class-string` and `interface-string` are the deliberate
+/// exception, and are reported the way PHPStan reports them.
+#[test]
+fn no_diagnostic_for_bare_string_passed_to_any_string_refinement() {
+    for refinement in [
+        "non-empty-string",
+        "numeric-string",
+        "literal-string",
+        "non-empty-literal-string",
+        "lowercase-string",
+        "non-empty-lowercase-string",
+        "uppercase-string",
+        "non-empty-uppercase-string",
+        "truthy-string",
+        "non-falsy-string",
+        "callable-string",
+        "trait-string",
+        "enum-string",
+    ] {
+        let php = format!(
+            r#"<?php
+/** @param {refinement} $value */
+function takes(string $value): void {{}}
+
+function probe(string $v): void {{
+    takes($v);
+}}
+"#
+        );
+        let diags = collect(&php);
+        assert!(
+            !has_type_error(&diags),
+            "a bare string might be a {refinement} at runtime, got: {diags:?}"
+        );
+    }
+}
+
 #[test]
 fn no_diagnostic_for_numeric_string_literal_to_numeric_string_precise() {
     // A numeric string literal like '42' IS a valid numeric-string.

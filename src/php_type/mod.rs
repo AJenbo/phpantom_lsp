@@ -1199,12 +1199,15 @@ impl PhpType {
         matches!(self.as_literal(), Some(LiteralValue::Int(_)))
     }
 
-    /// Whether this type is `string` or any PHPDoc string refinement (case-insensitive).
+    /// Whether this type is `string` or any PHPDoc string refinement
+    /// (case-insensitive), plus `ClassString(…)`, `InterfaceString(…)` and
+    /// string literals.
     ///
-    /// Returns `true` for `string`, `non-empty-string`, `numeric-string`,
-    /// `literal-string`, `truthy-string`, `callable-string`, `class-string`,
-    /// `interface-string`, `lowercase-string`, `non-falsy-string`,
-    /// `ClassString(…)`, `InterfaceString(…)`, and string literals.
+    /// The list below is the whole string family from
+    /// [`is_scalar_name`](crate::php_type::is_scalar_name_pub); leaving one
+    /// out makes that spelling look like a different kind of type, and
+    /// `is_compatible_refinement_typed` then discards it in favour of the
+    /// bare `string` a parameter declares natively.
     pub fn is_string_subtype(&self) -> bool {
         match self.kind() {
             TypeKind::Named(s) => matches!(
@@ -1213,11 +1216,17 @@ impl PhpType {
                     | "non-empty-string"
                     | "numeric-string"
                     | "literal-string"
+                    | "non-empty-literal-string"
                     | "truthy-string"
                     | "callable-string"
                     | "class-string"
                     | "interface-string"
+                    | "trait-string"
+                    | "enum-string"
                     | "lowercase-string"
+                    | "non-empty-lowercase-string"
+                    | "uppercase-string"
+                    | "non-empty-uppercase-string"
                     | "non-falsy-string"
             ),
             TypeKind::ClassString(_) | TypeKind::InterfaceString(_) => true,

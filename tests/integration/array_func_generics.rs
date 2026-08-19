@@ -416,6 +416,85 @@ function probe(array $maybe, array $users, array $mixed): void {
     );
 }
 
+/// `get_class($v) !== Foo::class` is not `!($v instanceof Foo)`: it rules out
+/// exactly one class, so a subclass, whose `get_class()` names the subclass,
+/// passes the comparison and survives the filter.
+#[test]
+fn array_filter_keeps_subclasses_past_a_negated_exact_class_check() {
+    let content = r#"<?php
+class Animal {}
+class Dog extends Animal {}
+class Puppy extends Dog {}
+class Cat extends Animal {}
+/**
+ * @param list<Dog|Puppy|Cat> $pets
+ */
+function probe(array $pets): void {
+    $not_exactly_a_dog = array_filter($pets, fn ($v) => get_class($v) !== Dog::class);
+    $not_a_dog_at_all = array_filter($pets, fn ($v) => !($v instanceof Dog));
+    $exactly_a_dog = array_filter($pets, fn ($v) => get_class($v) === Dog::class);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$not_exactly_a_dog", "array<int, Puppy|Cat>"),
+            ("$not_a_dog_at_all", "array<int, Cat>"),
+            ("$exactly_a_dog", "array<int, Dog>"),
+        ],
+    );
+}
+
+/// An `instanceof` check on a union member that already names the checked
+/// class keeps that member as it was written, type arguments included — the
+/// member is the more specific of the two, so replacing it with the bare
+/// class would throw away what the chain after the filter needs.
+#[test]
+fn array_filter_keeps_the_type_arguments_of_a_narrowed_union_member() {
+    let content = r#"<?php
+class User {}
+/**
+ * @template T
+ */
+class Collection {
+    /** @return T */
+    public function first() {}
+}
+/**
+ * @param list<Collection<User>|string> $items
+ */
+function probe(array $items): void {
+    $collections = array_filter($items, fn ($v) => $v instanceof Collection);
+}
+"#;
+    assert_assigned_types(content, &[("$collections", "array<int, Collection<User>>")]);
+}
+
+/// Only the strict comparison proves a value is null. `!($v != null)` is the
+/// loose `$v == null` spelled backwards, and that also admits `''`, `0` and
+/// `[]`, so it narrows nothing.
+#[test]
+fn array_filter_does_not_read_a_negated_loose_null_check_as_a_strict_one() {
+    let content = r#"<?php
+/**
+ * @param list<string|null> $xs
+ */
+function probe(array $xs): void {
+    $loose = array_filter($xs, fn ($v) => !($v != null));
+    $strict = array_filter($xs, fn ($v) => !($v !== null));
+    $present = array_filter($xs, fn ($v) => !($v === null));
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$loose", "array<int, string|null>"),
+            ("$strict", "array<int, null>"),
+            ("$present", "array<int, string>"),
+        ],
+    );
+}
+
 /// A callback handed only the key says nothing about the values, and a
 /// callback that admits every value it could receive leaves the element type
 /// as it found it.

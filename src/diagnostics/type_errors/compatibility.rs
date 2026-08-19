@@ -1128,12 +1128,18 @@ fn is_refined_scalar_pair(arg: &PhpType, param: &PhpType) -> bool {
             "non-empty-string"
                 | "numeric-string"
                 | "class-string"
+                | "interface-string"
+                | "trait-string"
+                | "enum-string"
                 | "literal-string"
+                | "non-empty-literal-string"
                 | "callable-string"
                 | "truthy-string"
                 | "non-falsy-string"
                 | "lowercase-string"
                 | "non-empty-lowercase-string"
+                | "uppercase-string"
+                | "non-empty-uppercase-string"
         ) | (
             "int" | "integer",
             "positive-int"

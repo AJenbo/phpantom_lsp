@@ -71,17 +71,22 @@ pub(super) fn extract_instantiation_expr<'a>(
     }
 }
 
-// ─── Property hook invocation: `Base::$prop::get()` ─────────────────────────
+// ─── Property hook invocation: `parent::$prop::get()` ───────────────────────
 
-/// Extract `Base::$prop::get()` / `Base::$prop::set($v)`, the PHP 8.4
-/// spelling for calling a property's hook directly.
+/// Extract `parent::$prop::get()` / `parent::$prop::set($v)`, the PHP 8.4
+/// spelling for calling a property's overridden hook directly.
 ///
 /// It parses as a static method call on a static property access, but
-/// neither half is static: `$prop` is an *instance* property of `Base`,
+/// neither half is static: `$prop` is an *instance* property of the parent,
 /// and `get`/`set` names its hook rather than a method. Reading it
-/// literally reports both as missing members of `Base`. The navigable
+/// literally reports both as missing members of the parent. The navigable
 /// parts are the class and the property, so those get spans and the
 /// accessor gets none — the same way `Foo::class` leaves `class` alone.
+///
+/// PHP defines this syntax for `parent` and nothing else, so any other
+/// class reference is a genuine static property holding a class name
+/// followed by a genuine static call (`Registry::$instance::get('x')`) and
+/// must be left to the ordinary extraction path.
 ///
 /// Returns whether the call had this shape and was extracted here.
 fn extract_property_hook_call<'a>(
@@ -102,6 +107,9 @@ fn extract_property_hook_call<'a>(
     let Access::StaticProperty(property_access) = access else {
         return false;
     };
+    if !matches!(property_access.class, Expression::Parent(_)) {
+        return false;
+    }
     let Variable::Direct(variable) = &property_access.property else {
         return false;
     };

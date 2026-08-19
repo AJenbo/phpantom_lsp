@@ -892,29 +892,48 @@ fn narrow_by_condition_inner(
     filter_type_by_guard(ty, kind, !negated, class_loader)
 }
 
+/// What a `null` comparison concludes about the value that passes it.
+struct NullComparison {
+    /// Whether passing the comparison proves the value *is* null.
+    expects_null: bool,
+    /// Whether the operator carrying that conclusion was the strict one.
+    strict: bool,
+}
+
 /// Whether `expr` compares `var_name` against `null`, and whether passing
 /// it proves the value *is* null.
 ///
 /// Only the strict operators prove a value is null: `$v == null` is also
 /// true for `''`, `0` and `[]`, so reporting `null` for it would claim
-/// more than the comparison shows. Proving a value is *not* null needs no
-/// such care, since anything that survives either `!==` or `!=` is
+/// more than the comparison shows — and neither does the negated spelling
+/// of the same thing, `!($v != null)`. Proving a value is *not* null needs
+/// no such care, since anything that survives either `!==` or `!=` is
 /// non-null.
 fn try_extract_null_comparison(expr: &Expression<'_>, var_name: &str) -> Option<bool> {
+    let comparison = extract_null_comparison(expr, var_name)?;
+    (!comparison.expects_null || comparison.strict).then_some(comparison.expects_null)
+}
+
+/// The raw conclusion of a `null` comparison on `var_name`, before the
+/// loose operators are ruled out.
+///
+/// Strictness travels through the negations so that the caller can judge
+/// `!($v != null)` by the operator that actually appears in it.
+fn extract_null_comparison(expr: &Expression<'_>, var_name: &str) -> Option<NullComparison> {
     match expr {
-        Expression::Parenthesized(inner) => try_extract_null_comparison(inner.expression, var_name),
+        Expression::Parenthesized(inner) => extract_null_comparison(inner.expression, var_name),
         Expression::UnaryPrefix(prefix) if prefix.operator.is_not() => {
-            // `!($v !== null)` proves the value is null, which only the
-            // strict operator it negates is allowed to say.
-            match try_extract_null_comparison(prefix.operand, var_name)? {
-                true => None,
-                false => Some(true),
-            }
+            extract_null_comparison(prefix.operand, var_name).map(|c| NullComparison {
+                expects_null: !c.expects_null,
+                strict: c.strict,
+            })
         }
         Expression::Binary(bin) => {
-            let expects_null = match bin.operator {
-                BinaryOperator::Identical(_) => true,
-                BinaryOperator::NotIdentical(_) | BinaryOperator::NotEqual(_) => false,
+            let (expects_null, strict) = match bin.operator {
+                BinaryOperator::Identical(_) => (true, true),
+                BinaryOperator::Equal(_) => (true, false),
+                BinaryOperator::NotIdentical(_) => (false, true),
+                BinaryOperator::NotEqual(_) => (false, false),
                 _ => return None,
             };
             let (subject, literal) = if is_null_literal(bin.rhs) {
@@ -925,7 +944,10 @@ fn try_extract_null_comparison(expr: &Expression<'_>, var_name: &str) -> Option<
             if !is_null_literal(literal) || expr_to_subject_key(subject)? != var_name {
                 return None;
             }
-            Some(expects_null)
+            Some(NullComparison {
+                expects_null,
+                strict,
+            })
         }
         _ => None,
     }

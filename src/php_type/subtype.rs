@@ -623,12 +623,13 @@ pub(crate) fn is_named_subtype(sub: &str, sup: &str) -> bool {
                 | "non-falsy-string"
         ),
 
+        // The `non-empty-*` refinements are absent here on purpose: each
+        // one still admits `"0"`, which is falsy, so none of them is a
+        // subtype of the strict arm. What remains are the string kinds
+        // that name a PHP symbol, and a symbol name can never be `"0"`.
         "truthy-string" | "non-falsy-string" => matches!(
             sub_n,
-            "non-empty-literal-string"
-                | "non-empty-lowercase-string"
-                | "non-empty-uppercase-string"
-                | "callable-string"
+            "callable-string"
                 | "class-string"
                 | "interface-string"
                 | "trait-string"

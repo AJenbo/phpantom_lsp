@@ -1048,9 +1048,7 @@ pub(in crate::type_engine) fn narrow_type_by_instanceof(
         .iter()
         .filter_map(|member| {
             if extraction.negated {
-                // Ruling the class out leaves every member that is not one
-                // of its instances exactly as it was.
-                (!crate::class_lookup::is_subtype_of_named(member, class_name, loader))
+                (!instanceof_rules_out(member, extraction, class_name, loader))
                     .then(|| member.clone())
             } else {
                 instanceof_member(member, extraction, class_name, loader)
@@ -1079,6 +1077,46 @@ fn instanceof_union_members(ty: &PhpType) -> Vec<PhpType> {
     }
 }
 
+/// The class a union member names, whether it was written bare (`Foo`) or
+/// with type arguments (`Foo<T>`).
+///
+/// [`PhpType::class_name`] answers only for the bare spelling, so a
+/// generic member would otherwise look like one that names no class at
+/// all and be replaced by the checked class, dropping its arguments.
+fn member_class_name(member: &PhpType) -> Option<&str> {
+    member
+        .base_name()
+        .filter(|n| crate::php_type::is_class_like_name(n))
+}
+
+/// Whether a negated check rules a single union member out entirely.
+///
+/// `!($v instanceof Foo)` rejects every instance of `Foo`, subclasses
+/// included. An exact identity check (`get_class($v) !== Foo::class`)
+/// rejects only `Foo` itself: a subclass's `get_class()` names the
+/// subclass, so it passes the comparison and survives.
+fn instanceof_rules_out(
+    member: &PhpType,
+    extraction: &InstanceofExtraction,
+    class_name: &str,
+    loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> bool {
+    if !extraction.exact {
+        return crate::class_lookup::is_subtype_of_named(member, class_name, loader);
+    }
+    let Some(member_name) = member_class_name(member) else {
+        return false;
+    };
+    // The two names may be spelled differently (short vs qualified), so
+    // compare what they resolve to rather than how they were written.
+    match loader(member_name) {
+        Some(cls) => loader(class_name).is_some_and(|checked| cls.fqn() == checked.fqn()),
+        None => {
+            member_name.eq_ignore_ascii_case(class_name.strip_prefix('\\').unwrap_or(class_name))
+        }
+    }
+}
+
 /// What a positive `instanceof` check leaves of a single union member,
 /// or `None` when the member cannot pass it.
 fn instanceof_member(
@@ -1093,7 +1131,7 @@ fn instanceof_member(
     }
     // A member that names no class of its own (`object`, `mixed`) is
     // whatever the check proves.
-    let Some(member_name) = member.class_name().filter(|n| loader(n).is_some()) else {
+    let Some(member_name) = member_class_name(member).filter(|n| loader(n).is_some()) else {
         return Some(extraction.class_type.clone());
     };
     // An exact identity check (`get_class($v) === Foo::class`) admits the

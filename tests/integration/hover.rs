@@ -1334,6 +1334,41 @@ class Usage {
     assert!(text.contains("int"), "should show type: {}", text);
 }
 
+/// `Registry::$instance::get(…)` has the same token shape as the PHP 8.4
+/// property-hook invocation `parent::$prop::get()`, but only `parent` spells
+/// that: everywhere else it is a real static property holding a class name,
+/// followed by a real static call.  Reading it as a hook invocation dropped
+/// the call's own span and reported the property as an instance one.
+#[test]
+fn hover_static_property_holding_a_class_name_called_through() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Service {
+    public static function get(string $key): string { return $key; }
+}
+class Registry {
+    /** @var class-string<Service> */
+    public static string $instance = Service::class;
+}
+class Usage {
+    public function run(): void {
+        echo Registry::$instance::get('service');
+    }
+}
+"#;
+
+    // Hover on `$instance` in `Registry::$instance::get('service')` (line 10)
+    let hover = hover_at(&backend, uri, content, 10, 27).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("instance"),
+        "should contain property name: {}",
+        text
+    );
+    assert!(text.contains("static"), "should indicate static: {}", text);
+}
+
 // ─── Constant hover ─────────────────────────────────────────────────────────
 
 #[test]

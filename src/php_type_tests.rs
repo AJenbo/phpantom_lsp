@@ -2560,6 +2560,42 @@ mod subtype_tests {
         assert!(PhpType::named(atom("class-string")).is_subtype_of(&PhpType::string()));
     }
 
+    /// `non-falsy-string` excludes `"0"` on top of the `""` that
+    /// `non-empty-string` excludes, so the `non-empty-…` refinements, all of
+    /// which are inhabited by `"0"`, stop at `non-empty-string`. The string
+    /// kinds that name a PHP symbol carry on: a symbol name can never be
+    /// `"0"`.
+    #[test]
+    fn only_the_string_kinds_that_exclude_zero_are_non_falsy() {
+        for name in [
+            "non-empty-literal-string",
+            "non-empty-lowercase-string",
+            "non-empty-uppercase-string",
+            "non-empty-string",
+        ] {
+            let ty = PhpType::named(atom(name));
+            assert!(
+                ty.is_subtype_of(&PhpType::named(atom("non-empty-string"))),
+                "{name} should be a non-empty-string"
+            );
+            assert!(
+                !ty.is_subtype_of(&PhpType::named(atom("non-falsy-string"))),
+                "{name} admits \"0\", so it is not a non-falsy-string"
+            );
+            assert!(
+                !ty.is_subtype_of(&PhpType::named(atom("truthy-string"))),
+                "{name} admits \"0\", so it is not a truthy-string"
+            );
+        }
+
+        for name in ["class-string", "callable-string", "enum-string"] {
+            assert!(
+                PhpType::named(atom(name)).is_subtype_of(&PhpType::named(atom("non-falsy-string"))),
+                "{name} names a PHP symbol, which is never \"0\""
+            );
+        }
+    }
+
     #[test]
     fn list_is_subtype_of_array() {
         assert!(PhpType::named(atom("list")).is_subtype_of(&PhpType::array()));
