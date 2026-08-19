@@ -173,6 +173,25 @@ mod tests {
         );
     }
 
+    /// The value half of a filter is most often tested against `null`
+    /// directly rather than through `is_null()`, and both spellings prove
+    /// the same thing. The loose `== null` is the exception: it is also
+    /// true for `''` and `0`, so it cannot report `null`.
+    #[test]
+    fn a_null_comparison_narrows_the_parameter_it_tests() {
+        let nullable = PhpType::nullable(PhpType::string());
+        let narrow = |callback: &str| {
+            narrow_callback_param_text(callback, 0, &nullable, None).map(|ty| ty.to_string())
+        };
+        assert_eq!(narrow("fn ($v) => $v !== null").as_deref(), Some("string"));
+        assert_eq!(narrow("fn ($v) => $v != null").as_deref(), Some("string"));
+        assert_eq!(narrow("fn ($v) => null !== $v").as_deref(), Some("string"));
+        assert_eq!(narrow("fn ($v) => $v === null").as_deref(), Some("null"));
+        assert_eq!(narrow("fn ($v) => !($v !== null)").as_deref(), Some("null"));
+        assert_eq!(narrow("fn ($v) => $v == null"), None);
+        assert_eq!(narrow("fn ($v) => $v !== ''"), None);
+    }
+
     #[test]
     fn a_named_guard_narrows_the_argument_it_is_handed() {
         assert_eq!(narrow("'is_string'", 0).as_deref(), Some("string"));

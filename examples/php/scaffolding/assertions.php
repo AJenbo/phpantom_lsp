@@ -251,6 +251,10 @@ function runDemoAssertions(): void
     assert(array_key_first((new Scaffolding\ScaffoldingArrayFunc())->byName()) === 'blue', 'array_key_first() over a string-keyed array yields a string');
     $stringKeyed = array_filter((new Scaffolding\ScaffoldingArrayFunc())->mixedKeys(), fn($key) => is_string($key), ARRAY_FILTER_USE_KEY);
     assert(array_keys($stringKeyed) === ['ink'], 'array_filter() with ARRAY_FILTER_USE_KEY keeps only the keys its callback approves of');
+    $named = array_filter((new Scaffolding\ScaffoldingArrayFunc())->optionalLabels(), fn($label) => $label !== null);
+    assert($named === ['ink' => 'ink'], 'array_filter() with a value callback keeps only the entries it approves of, so no null survives');
+    $writers = array_values(array_filter((new Scaffolding\ScaffoldingArrayFunc())->mixedWriters(), fn($writer) => $writer instanceof Scaffolding\Pen));
+    assert(count($writers) === 2 && $writers[0] instanceof Scaffolding\Pen, 'array_filter() with an instanceof callback keeps only that class');
 
     // ── array<T>|false keeps its element type after a false check ────────
     $pens = Scaffolding\loadPensOrFail();

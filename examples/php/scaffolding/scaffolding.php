@@ -768,6 +768,9 @@ class ScaffoldingArrayFunc
     /** @return array<string|int, string> */
     public function mixedKeys(): array { return ['ink' => 'gel', 7 => 'nib']; }
 
+    /** @return list<Pen|Pencil> */
+    public function mixedWriters(): array { return [new Pen('blue'), new Pencil(), new Pen('red')]; }
+
     /** @return list<int> */
     public function weights(): array { return [2, 3, 4]; }
 }

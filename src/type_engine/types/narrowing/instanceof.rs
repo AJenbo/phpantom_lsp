@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use crate::atom::{atom, bytes_to_str, literal_bytes_to_str};
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::types::ClassInfo;
 
 use mago_syntax::cst::*;
@@ -1001,4 +1001,96 @@ fn collect_negated_and_instanceof_classes<'b>(
             }
         }
     }
+}
+
+/// Narrow `ty` to the values an `instanceof`-style check keeps (or, when
+/// the check is negated, the ones it rejects).
+///
+/// Each member of the union answers on its own: one that already names a
+/// subtype of the checked class is the more specific of the two and
+/// stays as it is, one the checked class is a subtype of narrows to the
+/// class, and one that is unrelated (or not an object at all) cannot
+/// pass and is dropped.
+///
+/// Returns `None` when nothing can be said — no class loader, a class
+/// name that does not resolve, a `self`/`static`/`parent` reference the
+/// enclosing scope alone could resolve, or a check every member already
+/// satisfies.
+pub(in crate::type_engine) fn narrow_type_by_instanceof(
+    ty: &PhpType,
+    extraction: &InstanceofExtraction,
+    class_loader: GuardClassLoader<'_>,
+) -> Option<PhpType> {
+    let loader = class_loader?;
+    let class_name = extraction.class_type.class_name()?;
+    if extraction.class_type.is_self_like() || class_name.eq_ignore_ascii_case("parent") {
+        return None;
+    }
+    loader(class_name)?;
+
+    let members = instanceof_union_members(ty);
+    let kept: Vec<PhpType> = members
+        .iter()
+        .filter_map(|member| {
+            if extraction.negated {
+                // Ruling the class out leaves every member that is not one
+                // of its instances exactly as it was.
+                (!crate::class_lookup::is_subtype_of_named(member, class_name, loader))
+                    .then(|| member.clone())
+            } else {
+                instanceof_member(member, extraction, class_name, loader)
+            }
+        })
+        .collect();
+
+    if kept.is_empty() || kept == members {
+        return None;
+    }
+    // A lone survivor is that type, not a union of one: `PhpType::union`
+    // only collapses a single member when it deduplicated to get there.
+    match kept.len() {
+        1 => kept.into_iter().next(),
+        _ => Some(PhpType::union(kept)),
+    }
+}
+
+/// The alternatives a value of `ty` can take, with `?T` spelled out as
+/// the `T|null` it stands for so each half is judged separately.
+fn instanceof_union_members(ty: &PhpType) -> Vec<PhpType> {
+    match ty.kind() {
+        TypeKind::Nullable(inner) => vec![inner.clone(), PhpType::null()],
+        TypeKind::Union(members) => members.to_vec(),
+        _ => vec![ty.clone()],
+    }
+}
+
+/// What a positive `instanceof` check leaves of a single union member,
+/// or `None` when the member cannot pass it.
+fn instanceof_member(
+    member: &PhpType,
+    extraction: &InstanceofExtraction,
+    class_name: &str,
+    loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<PhpType> {
+    if !member.is_object_like() {
+        // `null`, a scalar and an array all fail `instanceof` outright.
+        return None;
+    }
+    // A member that names no class of its own (`object`, `mixed`) is
+    // whatever the check proves.
+    let Some(member_name) = member.class_name().filter(|n| loader(n).is_some()) else {
+        return Some(extraction.class_type.clone());
+    };
+    // An exact identity check (`get_class($v) === Foo::class`) admits the
+    // class itself and nothing below it, so a member naming a subclass
+    // cannot pass.
+    if extraction.exact {
+        return crate::class_lookup::is_subtype_of_names(class_name, member_name, loader)
+            .then(|| extraction.class_type.clone());
+    }
+    if crate::class_lookup::is_subtype_of_named(member, class_name, loader) {
+        return Some(member.clone());
+    }
+    crate::class_lookup::is_subtype_of_names(class_name, member_name, loader)
+        .then(|| extraction.class_type.clone())
 }

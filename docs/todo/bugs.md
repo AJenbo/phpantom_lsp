@@ -37,7 +37,31 @@ No outstanding items.
 
 ## Array types
 
-No outstanding items.
+### B181. `array_filter()` reports a `list` the filter cannot preserve
+
+**Impact: Low-Medium · Complexity: Medium**
+
+`array_filter()` keeps the key of every entry it keeps, so filtering a
+`list` leaves gaps in the numbering and the result is `array<int, T>`
+rather than `list<T>`. PHPantom hands back the container it was given:
+
+```php
+/** @param list<int> $values */
+function probe(array $values): void {
+    $kept = array_filter($values, fn ($v) => $v > 3);  // reported as list<int>
+    $kept[0];  // [3, 4] filtered this way starts at key 1, so this is unset
+}
+```
+
+The over-claim runs both ways: reading `$kept[0]` looks safe when it is
+not, and a function declared `@return list<int>` that hands back an
+unwrapped `array_filter()` result is accepted where PHPStan reports it.
+The rule that rebuilds the container for the preserving family lives in
+`type_engine/variable/array_func_rules.rs`; `array_filter` needs to drop
+to `array<int, T>` there while the renumbering functions around it
+(`array_values`, `array_merge`) keep answering `list<T>`, and the demo
+files and tests that currently assert `list<…>` for a filtered list need
+updating with it.
 
 ## Docblock handling
 

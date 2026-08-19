@@ -111,11 +111,10 @@ pub(in crate::type_engine) fn array_func_raw_type(
                 if !args.has_arg(1) {
                     return Some(filter_element_type(&raw).unwrap_or(raw));
                 }
-                // A callback handed the key decides which keys survive, so
-                // what it asserts about them describes the result.
-                if let Some(narrowed) = filter_key_type(&raw, args) {
-                    return Some(narrowed);
-                }
+                // A callback decides which entries survive, so what it
+                // asserts about the value or the key it is handed
+                // describes the result.
+                return Some(filter_callback_type(&raw, args).unwrap_or(raw));
             }
             return Some(raw);
         }
@@ -398,19 +397,55 @@ fn filter_element_type(raw: &PhpType) -> Option<PhpType> {
     if truthy == *element {
         return None;
     }
+    with_element_type(raw, truthy)
+}
+
+/// Rebuild an iterable type around a new element type, keeping the
+/// container it already names.
+fn with_element_type(raw: &PhpType, element: PhpType) -> Option<PhpType> {
     match raw.kind() {
-        TypeKind::Array(_) => Some(PhpType::array_of(truthy)),
+        TypeKind::Array(_) => Some(PhpType::array_of(element)),
         TypeKind::Generic(g) if !g.args.is_empty() => {
             let mut args = g.args.clone();
             // Same `<TKey, TValue>` convention `extract_value_type` reads:
             // the value is the second argument when there are two or more,
             // and the lone argument otherwise (`list<V>`).
             let value_idx = if args.len() >= 2 { 1 } else { args.len() - 1 };
-            args[value_idx] = truthy;
+            args[value_idx] = element;
             Some(PhpType::generic_atom(g.name, args))
         }
         _ => None,
     }
+}
+
+/// Rebuild an `array_filter` result with what its callback proves about
+/// the entries it keeps.
+///
+/// The callback is handed the value, the key, or both depending on the
+/// mode argument, and each narrows the half it arrives in. Returns
+/// `None` when neither is narrowed.
+fn filter_callback_type(raw: &PhpType, args: &dyn ArrayFuncArgs) -> Option<PhpType> {
+    let narrowed_value = filter_value_type(raw, args);
+    let base = narrowed_value.as_ref().unwrap_or(raw);
+    filter_key_type(base, args).or(narrowed_value)
+}
+
+/// Rebuild an `array_filter` result with its element type narrowed to
+/// what the callback asserts about the value it was handed.
+///
+/// Returns `None` unless the call runs in one of the two modes that pass
+/// the value (the default and `ARRAY_FILTER_USE_BOTH`) and the callback
+/// proves something the element type does not already say.
+fn filter_value_type(raw: &PhpType, args: &dyn ArrayFuncArgs) -> Option<PhpType> {
+    let param_index = filter_value_param_index(args)?;
+    let element = raw.extract_value_type(false)?;
+    let narrowed = args.callback_param_narrowing(1, param_index, element)?;
+    // A callback that admits every value it could receive says nothing,
+    // and the rebuilt union would only reorder the members.
+    if element.is_subtype_of(&narrowed) {
+        return None;
+    }
+    with_element_type(raw, narrowed)
 }
 
 /// Rebuild an `array_filter` result with its key type narrowed to what
@@ -446,6 +481,23 @@ fn filter_key_type(raw: &PhpType, args: &dyn ArrayFuncArgs) -> Option<PhpType> {
         TypeKind::Generic(g) if is_array_like_name(g.name.as_str()) => {
             Some(PhpType::generic_array(narrowed, value))
         }
+        _ => None,
+    }
+}
+
+/// Which of the callback's parameters receives the value, from
+/// `array_filter`'s mode argument.
+///
+/// The default mode passes the value alone, and `ARRAY_FILTER_USE_BOTH`
+/// passes it ahead of the key. `ARRAY_FILTER_USE_KEY` never shows the
+/// callback a value, and a mode written as anything this cannot read
+/// might be that one.
+fn filter_value_param_index(args: &dyn ArrayFuncArgs) -> Option<usize> {
+    if !args.has_arg(2) {
+        return Some(0);
+    }
+    match args.arg_atom_text(2)?.as_str() {
+        "ARRAY_FILTER_USE_BOTH" | "1" | "0" => Some(0),
         _ => None,
     }
 }

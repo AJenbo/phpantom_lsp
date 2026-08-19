@@ -3403,6 +3403,18 @@ class ArrayFuncDemo
         $stringKeyed = array_filter($src->mixedKeys(), fn($key) => is_string($key), ARRAY_FILTER_USE_KEY);
         strtoupper(array_keys($stringKeyed)[0]);   // list<string>: the int key is gone
 
+        // The default mode hands the callback the value instead, so a
+        // callback that tests it says as much about the entries that
+        // survive as the truthiness test above does.
+        $named = array_filter($src->optionalLabels(), fn($label) => $label !== null);
+        strtoupper($named['ink']);        // array<string, string>: the null half is gone
+
+        // An instanceof check filters for a type, and the result carries it.
+        // array_filter keeps the original keys, so array_values renumbers
+        // them before the first entry is read back.
+        $pens = array_values(array_filter($src->mixedWriters(), fn($writer) => $writer instanceof Scaffolding\Pen));
+        $pens[0]->write();                // list<Scaffolding\Pen>, so Pen's members are here
+
         // An all-int array cannot sum to a float.
         $total = array_sum($src->weights());
         intdiv($total, 1);                // int

@@ -186,8 +186,8 @@ function probe(array $names, array $users): void {
 }
 
 /// `array_filter` with no callback keeps exactly the truthy members, so the
-/// element type drops `null`. With a callback the surviving members are
-/// whatever it approves of, which says nothing about their type.
+/// element type drops `null`. A callback the analysis cannot read leaves the
+/// element type alone, since anything it approves of could be in there.
 #[test]
 fn array_filter_without_a_callback_drops_falsy_members() {
     let content = r#"<?php
@@ -334,6 +334,70 @@ function probe(array $data): void {
             ("$conjunction", "array<string, string>"),
             ("$named", "array<string, string>"),
             ("$inline", "list<string>"),
+        ],
+    );
+}
+
+/// In the two modes that hand the callback the value, what its body asserts
+/// about it describes the result's element type — the whole point of
+/// `array_filter($items, fn ($i) => $i !== null)`.
+#[test]
+fn array_filter_narrows_the_element_type_from_its_callback() {
+    let content = r#"<?php
+class User {}
+class Admin extends User {}
+/**
+ * @param array<string, string|null> $maybe
+ * @param list<User|Admin> $users
+ * @param array<int|string> $mixed
+ */
+function probe(array $maybe, array $users, array $mixed): void {
+    $present = array_filter($maybe, fn ($v) => $v !== null);
+    $guarded = array_filter($maybe, fn ($v) => !is_null($v));
+    $named = array_filter($mixed, 'is_int');
+    $closure = array_filter($mixed, function ($v) { return is_string($v); });
+    $instances = array_filter($users, fn ($v) => $v instanceof Admin);
+    $both = array_filter($maybe, fn ($v, $k) => $v !== null, ARRAY_FILTER_USE_BOTH);
+    $inline = array_values(array_filter($maybe, fn ($v) => $v !== null));
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$present", "array<string, string>"),
+            ("$guarded", "array<string, string>"),
+            ("$named", "array<int>"),
+            ("$closure", "array<string>"),
+            ("$instances", "list<Admin>"),
+            ("$both", "array<string, string>"),
+            ("$inline", "list<string>"),
+        ],
+    );
+}
+
+/// A callback handed only the key says nothing about the values, and a
+/// callback that admits every value it could receive leaves the element type
+/// as it found it.
+#[test]
+fn array_filter_keeps_the_element_type_a_callback_says_nothing_about() {
+    let content = r#"<?php
+/**
+ * @param array<string, string|null> $maybe
+ */
+function probe(array $maybe, callable $cb): void {
+    $key_mode = array_filter($maybe, fn ($k) => is_string($k), ARRAY_FILTER_USE_KEY);
+    $opaque = array_filter($maybe, $cb);
+    $unrelated = array_filter($maybe, fn ($v) => strlen((string) $v) > 2);
+    $every = array_filter($maybe, fn ($v) => is_string($v) || is_null($v));
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$key_mode", "array<string, string|null>"),
+            ("$opaque", "array<string, string|null>"),
+            ("$unrelated", "array<string, string|null>"),
+            ("$every", "array<string, string|null>"),
         ],
     );
 }
