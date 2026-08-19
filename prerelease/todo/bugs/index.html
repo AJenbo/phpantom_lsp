@@ -1044,17 +1044,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b215-a-file-closed-mid-computation-can-have-stale-diagnostics-reinserted-after-the-close-purge" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B215. A file closed mid-computation can have stale diagnostics reinserted after the close purge
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1744,17 +1733,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b215-a-file-closed-mid-computation-can-have-stale-diagnostics-reinserted-after-the-close-purge" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B215. A file closed mid-computation can have stale diagnostics reinserted after the close purge
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -2008,21 +1986,6 @@ means stopping a running pass, clearing <code>WorkspaceDiagnostics</code>, and
 telling the editor to drop what it was shown, and re-enabling afterwards
 has to be able to start a fresh pass (<code>workspace_diag_pass_started</code> is
 one-way today).</p>
-<h3 id="b215-a-file-closed-mid-computation-can-have-stale-diagnostics-reinserted-after-the-close-purge">B215. A file closed mid-computation can have stale diagnostics reinserted after the close purge<a class="headerlink" href="#b215-a-file-closed-mid-computation-can-have-stale-diagnostics-reinserted-after-the-close-purge" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<p>Several diagnostic write-back paths check <code>open_files</code> once before
-starting a multi-step computation and never re-check before the final
-write. <code>assemble_and_push</code>'s read-merge-write across the six per-source
-diagnostic caches is not atomic, so two concurrent completions (e.g. a
-fast-phase worker and an external tool) can interleave such that the
-stale merge's write lands last. Separately, the main diagnostic worker
-(<code>diagnostics/mod.rs</code>) checks <code>open_files</code> only before starting
-<code>publish_diagnostics_for_file</code>; a close landing mid-compute (the fast/slow
-phases can take seconds) lets the tail of that computation re-insert
-<code>last_fast</code>/<code>last_full</code>/<code>result_ids</code> after <code>clear_diagnostics_for_file</code>
-has purged them. Both self-heal on the file's next open/edit, but until
-then a closed file's cache holds diagnostics that should have been
-cleared.</p>
 
 
 
