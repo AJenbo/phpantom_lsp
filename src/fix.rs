@@ -63,6 +63,14 @@ pub struct FixOptions {
     pub with_phpstan: bool,
     /// Output format.
     pub output_format: OutputFormat,
+    /// The global `.phpantom.toml` to merge underneath the project's own,
+    /// or `None` to fix against the project config alone.
+    ///
+    /// The CLI passes [`crate::config::global_config_path`] so a
+    /// command-line run honours the same defaults the editor does. Tests
+    /// leave it `None` so the machine's config directory cannot change
+    /// what they assert.
+    pub global_config: Option<PathBuf>,
 }
 
 /// A single fix applied to a file.
@@ -224,7 +232,7 @@ pub async fn run(options: FixOptions) -> i32 {
     }
 
     // ── 1. Load config ──────────────────────────────────────────────
-    let cfg = match config::load_config(root) {
+    let cfg = match config::load_config_from(root, options.global_config.as_deref()) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("Warning: failed to load .phpantom.toml: {e}");

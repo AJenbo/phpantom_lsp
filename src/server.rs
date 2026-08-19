@@ -307,7 +307,10 @@ impl LanguageServer for Backend {
             // Read `.phpantom.toml` before anything else so that settings
             // (e.g. PHP version override, diagnostic toggles) are active
             // from the very first file load.
-            match crate::config::load_config(&root) {
+            match crate::config::load_config_from(
+                &root,
+                self.workspace.global_config_path.as_deref(),
+            ) {
                 Ok(cfg) => {
                     *self.workspace.config.lock() = cfg;
                 }

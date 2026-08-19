@@ -46,7 +46,7 @@ pub async fn run(options: AnalyseOptions) -> i32 {
     }
 
     // ── 1. Load config ──────────────────────────────────────────────
-    let cfg = match config::load_config(root) {
+    let cfg = match config::load_config_from(root, options.global_config.as_deref()) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("Warning: failed to load .phpantom.toml: {e}");

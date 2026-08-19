@@ -673,19 +673,19 @@ fn load_toml_table(path: &Path) -> Result<Option<toml::Table>, ConfigError> {
     Ok(Some(table))
 }
 
-/// Load the project configuration, merging the global config (from the
-/// user's XDG config directory) with the project-level `.phpantom.toml`.
+/// Load the project configuration, merging the global config layer at
+/// `global_path` with the project-level `.phpantom.toml`.
 ///
 /// Project settings override global settings.  When neither file exists,
 /// returns `Config::default()`.
-pub fn load_config(workspace_root: &Path) -> Result<Config, ConfigError> {
-    load_config_from(workspace_root, global_config_path().as_deref())
-}
-
-/// Load the config with an explicit global-config location.
 ///
-/// `global_path` of `None` skips the global layer entirely.
-fn load_config_from(
+/// `global_path` of `None` skips the global layer entirely, leaving the
+/// project's own `.phpantom.toml` (or the built-in defaults) as the only
+/// source of settings.  The location is always passed in rather than
+/// read from [`global_config_path`] here, so that a test (or any other
+/// isolated run) cannot be steered by whatever happens to sit in the
+/// config directory of whoever is running it.
+pub fn load_config_from(
     workspace_root: &Path,
     global_path: Option<&Path>,
 ) -> Result<Config, ConfigError> {
@@ -764,10 +764,8 @@ mod tests {
     use super::*;
     use std::io::Write;
 
-    /// Load a project config with the global layer switched off.
-    ///
-    /// Deliberately shadows [`super::load_config`] for the tests below
-    /// so none of them picks up the real
+    /// Load a project config with the global layer switched off, so none
+    /// of the tests below picks up the real
     /// `~/.config/phpantom_lsp/.phpantom.toml` of the machine running
     /// them.  The global layer is covered by the tests that call
     /// [`load_config_from`] with a temp path instead.

@@ -1104,6 +1104,11 @@ impl Backend {
     /// the cost of building three large `HashMap`s (14,597 entries total)
     /// that most tests never consult.  Tests that need specific stubs
     /// override the relevant fields after construction.
+    ///
+    /// The workspace environment is also isolated from the global
+    /// `.phpantom.toml`, so a test asserts against the project config it
+    /// writes itself rather than against the config directory of whoever
+    /// happens to be running the suite.
     fn test_defaults() -> Self {
         let (laravel_aliases, resolved_class_cache) = new_alias_slot_and_cache();
         Self {
@@ -1115,7 +1120,7 @@ impl Backend {
             reference_index: reference_index::new_reference_index(),
             skip_reference_index: false,
             symbols: SymbolIndex::new(),
-            workspace: WorkspaceEnv::new(),
+            workspace: WorkspaceEnv::new_isolated(),
             parse_errors: Arc::new(RwLock::new(HashMap::new())),
             did_change_parse_locks: Arc::new(Mutex::new(HashMap::new())),
             whole_file_coalesce: Arc::new(WholeFileCoalesce::default()),
@@ -1241,7 +1246,10 @@ impl Backend {
     /// behaviour.
     pub fn new_test_with_full_stubs() -> Self {
         virtual_members::phpdoc::clear_mixin_cache();
-        let backend = Self::defaults();
+        let backend = Self {
+            workspace: WorkspaceEnv::new_isolated(),
+            ..Self::defaults()
+        };
         backend.set_php_version(backend.php_version());
         backend
     }
@@ -1292,7 +1300,7 @@ impl Backend {
             workspace: WorkspaceEnv {
                 workspace_root: Arc::new(RwLock::new(Some(workspace_root))),
                 psr4_mappings: Arc::new(RwLock::new(psr4_mappings)),
-                ..WorkspaceEnv::new()
+                ..WorkspaceEnv::new_isolated()
             },
             ..Self::test_defaults()
         }

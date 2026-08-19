@@ -326,6 +326,7 @@ async fn async_main() {
                 output_format,
                 debug: debug || verbose >= 2,
                 verbosity: verbose,
+                global_config: phpantom_lsp::config::global_config_path(),
             };
 
             let exit_code = phpantom_lsp::analyse::run(options).await;
@@ -361,6 +362,7 @@ async fn async_main() {
                 use_colour,
                 with_phpstan,
                 output_format,
+                global_config: phpantom_lsp::config::global_config_path(),
             };
 
             let exit_code = phpantom_lsp::fix::run(options).await;

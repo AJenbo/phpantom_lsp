@@ -195,16 +195,16 @@ impl Backend {
     /// [`apply_watched_file_changes`](Self::apply_watched_file_changes))
     /// and for the global config file (polled by the background watcher
     /// spawned in `initialized`), so either one takes effect immediately
-    /// instead of requiring a restart. Always goes through
-    /// [`load_config`](crate::config::load_config) so the project layer
-    /// keeps overriding the global one no matter which file changed.
+    /// instead of requiring a restart. Always reloads both layers so the
+    /// project one keeps overriding the global one no matter which file
+    /// changed.
     ///
     /// `config` lives behind an `Arc` precisely so that a write made here
     /// on a cloned `Backend` (a blocking-task or background-worker clone)
     /// is visible to every other clone, including the long-lived one that
     /// answers LSP requests.
     pub(crate) fn reload_config(&self, root: &std::path::Path) {
-        match crate::config::load_config(root) {
+        match crate::config::load_config_from(root, self.workspace.global_config_path.as_deref()) {
             Ok(cfg) => *self.workspace.config.lock() = cfg,
             Err(e) => {
                 tracing::warn!("Failed to reload .phpantom.toml: {}", e);
@@ -233,7 +233,7 @@ impl Backend {
     /// [`shutdown_flag`](Self) is set, same as the other background
     /// workers spawned in `initialized`.
     pub(crate) async fn global_config_watcher(&self, root: PathBuf) {
-        let Some(path) = crate::config::global_config_path() else {
+        let Some(path) = self.workspace.global_config_path.clone() else {
             return;
         };
 
@@ -442,5 +442,36 @@ mod tests {
             backend.config().diagnostics.extra_arguments_enabled(),
             "a reload on a clone must be visible on the original Backend"
         );
+    }
+
+    /// A reload merges the configured global config file, not the one
+    /// belonging to whoever runs the process: point a backend at a global
+    /// file of our own and its settings must show up, while the default
+    /// test backend (which has no global layer at all) reloads the
+    /// project config on its own.
+    #[test]
+    fn reload_config_merges_the_configured_global_layer() {
+        let dir = tempfile::tempdir().unwrap();
+        let global = dir
+            .path()
+            .join("global")
+            .join(crate::config::CONFIG_FILE_NAME);
+        std::fs::create_dir_all(global.parent().unwrap()).unwrap();
+        std::fs::write(&global, "[diagnostics]\nextra-arguments = true\n").unwrap();
+
+        let project = dir.path().join("project");
+        std::fs::create_dir_all(&project).unwrap();
+
+        let isolated = Backend::new_test();
+        isolated.reload_config(&project);
+        assert!(
+            !isolated.config().diagnostics.extra_arguments_enabled(),
+            "a test backend must not pick up any global config"
+        );
+
+        let mut backend = Backend::new_test();
+        backend.workspace.global_config_path = Some(global);
+        backend.reload_config(&project);
+        assert!(backend.config().diagnostics.extra_arguments_enabled());
     }
 }

@@ -1173,6 +1173,8 @@ class Gate {
         // Suppresses the progress bar, which has no terminal to draw on here.
         debug: true,
         verbosity: 0,
+        // Never the machine's own; the test asserts on the project alone.
+        global_config: None,
     })
     .await
 }
