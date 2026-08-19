@@ -235,6 +235,7 @@ mod readonly_writes;
 mod return_type_errors;
 mod stale;
 pub(crate) mod state;
+mod subject_cache;
 pub(crate) mod suppression;
 mod syntax_errors;
 mod type_errors;

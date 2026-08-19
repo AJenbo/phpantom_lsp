@@ -3145,6 +3145,86 @@ class Dto {
     );
 }
 
+// ─── Per-scope subject typing ───────────────────────────────────────────────
+
+#[test]
+fn same_named_parameter_in_two_methods_types_per_method() {
+    let backend = create_test_backend();
+    let uri = "file:///test_deprecated_same_param_name.php";
+    let text = r#"<?php
+class HttpRequest {
+    /** @deprecated Use input() instead */
+    public function get(string $key): mixed { return null; }
+    public function input(string $key): mixed { return null; }
+}
+
+class PendingRequest {
+    public function get(string $url): string { return ''; }
+}
+
+class Probe {
+    public function fromHttpRequest(HttpRequest $request): void {
+        $request->input('name');
+    }
+
+    public function fromHttpClient(PendingRequest $request): void {
+        $request->get('https://example.com');
+    }
+}
+"#;
+
+    let diags = deprecated_diagnostics(&backend, uri, text);
+    let deprecated: Vec<_> = diags.iter().filter(|d| has_deprecated_tag(d)).collect();
+
+    assert!(
+        deprecated.is_empty(),
+        "PendingRequest::get() is not deprecated; the HttpRequest-typed $request \
+         from the earlier method must not leak into fromHttpClient(), got: {:?}",
+        deprecated
+    );
+}
+
+#[test]
+fn same_named_parameter_still_flags_the_deprecated_one() {
+    let backend = create_test_backend();
+    let uri = "file:///test_deprecated_same_param_name_hit.php";
+    let text = r#"<?php
+class PendingRequest {
+    public function get(string $url): string { return ''; }
+}
+
+class HttpRequest {
+    /** @deprecated Use input() instead */
+    public function get(string $key): mixed { return null; }
+}
+
+class Probe {
+    public function fromHttpClient(PendingRequest $request): void {
+        $request->get('https://example.com');
+    }
+
+    public function fromHttpRequest(HttpRequest $request): void {
+        $request->get('name');
+    }
+}
+"#;
+
+    let diags = deprecated_diagnostics(&backend, uri, text);
+    let deprecated: Vec<_> = diags.iter().filter(|d| has_deprecated_tag(d)).collect();
+
+    assert_eq!(
+        deprecated.len(),
+        1,
+        "Only HttpRequest::get() is deprecated, got: {:?}",
+        deprecated
+    );
+    assert!(
+        deprecated[0].message.contains("HttpRequest::get"),
+        "Expected the diagnostic to name HttpRequest::get, got: {:?}",
+        deprecated[0]
+    );
+}
+
 // ─── Deprecated member reached through a chain subject ──────────────────────
 
 #[test]

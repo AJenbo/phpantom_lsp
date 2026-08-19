@@ -9,10 +9,13 @@
 //! not noisy.  The message includes the deprecation reason when one is
 //! provided in the tag (e.g. `@deprecated Use NewHelper instead`).
 //!
-//! Variable type resolution is cached per `(variable_name, enclosing_class)`
-//! pair so that multiple member accesses on the same variable (e.g.
-//! `$user->getName()` and `$user->getEmail()`) only trigger a single
-//! resolution pass instead of re-parsing the file for each access.
+//! Variable type resolution is cached per [`SubjectCacheKey`] so that
+//! multiple member accesses on the same variable (e.g. `$user->getName()`
+//! and `$user->getEmail()`) only trigger a single resolution pass instead
+//! of re-parsing the file for each access.  The key is shared with the
+//! unknown-member pass, which is what keeps a same-named variable in
+//! another method (or another branch of an `instanceof` check) from
+//! reusing this one's type.
 
 use std::collections::HashMap;
 
@@ -25,7 +28,8 @@ use crate::types::AccessKind;
 use crate::types::ClassInfo;
 use crate::virtual_members::resolve_class_fully_cached;
 
-use super::helpers::{FileDiagnosticContext, resolve_to_fqn};
+use super::helpers::{FileDiagnosticContext, find_innermost_enclosing_class, resolve_to_fqn};
+use super::subject_cache::SubjectCacheKey;
 
 impl Backend {
     /// Collect `@deprecated` usage diagnostics for a single file.
@@ -55,13 +59,12 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
-        // Cache of resolved variable types.  Keyed by
-        // `(variable_name, enclosing_class_name)` so that all member
-        // accesses on the same variable within the same class share a
-        // single resolution pass.  This turns O(n * parse) into O(k *
-        // parse) where k is the number of distinct variables, not the
-        // number of member accesses.
-        let mut var_type_cache: HashMap<(String, String), Option<ClassInfo>> = HashMap::new();
+        // Cache of resolved variable types, keyed the same way as the
+        // unknown-member pass so that all member accesses guaranteed to
+        // see the same type share a single resolution pass.  This turns
+        // O(n * parse) into O(k * parse) where k is the number of
+        // distinct subjects, not the number of member accesses.
+        let mut var_type_cache: HashMap<SubjectCacheKey, Option<ClassInfo>> = HashMap::new();
 
         let symbol_map = &ctx.symbol_map;
         let file_resolved_names = &ctx.file.resolved_names;
@@ -148,30 +151,26 @@ impl Backend {
                     let base_class = match base_class {
                         Some(c) => c,
                         None if subject_str.starts_with('$') => {
-                            let enclosing_name = local_classes
-                                .iter()
-                                .find(|c| {
-                                    !c.name.starts_with("__anonymous@")
-                                        && span.start >= c.start_offset
-                                        && span.start <= c.end_offset
-                                })
-                                .map(|c| c.name.to_string())
-                                .unwrap_or_default();
+                            let enclosing_class =
+                                find_innermost_enclosing_class(local_classes, span.start);
 
-                            let cache_key = (subject_str.trim().to_string(), enclosing_name);
+                            let access_kind = if *is_static {
+                                AccessKind::DoubleColon
+                            } else {
+                                AccessKind::Arrow
+                            };
 
-                            let cached = var_type_cache.entry(cache_key).or_insert_with_key(|_| {
-                                let enclosing_class = local_classes
-                                    .iter()
-                                    .find(|c| {
-                                        !c.name.starts_with("__anonymous@")
-                                            && span.start >= c.start_offset
-                                            && span.start <= c.end_offset
-                                    })
-                                    .map(|c| ClassInfo::clone(c));
+                            let cache_key = SubjectCacheKey::build(
+                                symbol_map,
+                                enclosing_class,
+                                subject_str.trim(),
+                                access_kind,
+                                span.start,
+                            );
 
+                            let cached = var_type_cache.entry(cache_key).or_insert_with(|| {
                                 let rctx = ResolutionCtx {
-                                    current_class: enclosing_class.as_ref(),
+                                    current_class: enclosing_class,
                                     all_classes: local_classes,
                                     content,
                                     cursor_offset: span.start,
@@ -181,11 +180,11 @@ impl Backend {
                                     resolved_class_cache: Some(cache),
                                     function_loader: Some(&function_loader),
                                     scope_var_resolver: None,
-                                    is_in_static_method: false,
+                                    is_in_static_method: symbol_map.is_in_static_method(span.start),
                                     preserve_static: false,
                                 };
 
-                                resolve_variable_subject(subject_str, *is_static, &rctx)
+                                resolve_variable_subject(subject_str, access_kind, &rctx)
                             });
 
                             match cached {
@@ -413,15 +412,9 @@ fn resolve_subject_to_class_name(
 /// avoiding backward-scanner fallthroughs.
 fn resolve_variable_subject(
     subject_text: &str,
-    is_static: bool,
+    access_kind: AccessKind,
     rctx: &ResolutionCtx<'_>,
 ) -> Option<ClassInfo> {
-    let access_kind = if is_static {
-        AccessKind::DoubleColon
-    } else {
-        AccessKind::Arrow
-    };
-
     match resolve_subject_outcome(subject_text.trim(), access_kind, rctx) {
         SubjectOutcome::Resolved(classes) => {
             classes.into_iter().next().map(|arc| ClassInfo::clone(&arc))
