@@ -566,17 +566,49 @@ pub(crate) fn resolve_class_with_inheritance(
     merged
 }
 
-/// Whether `class` declares no `@template` of its own but fixes exactly
-/// one ancestor's generics via `@extends`, with an arg count matching
-/// `new_arg_count` — the shape [`rebind_extends_only_generics`] needs.
-pub(crate) fn is_extends_only_generic_rebindable(class: &ClassInfo, new_arg_count: usize) -> bool {
-    class.template_params.is_empty()
-        && matches!(class.extends_generics.as_slice(), [(_, args)] if args.len() == new_arg_count)
+/// Whether `class` declares no `@template` of its own but still takes
+/// `new_arg_count` type arguments through its parent — the shape
+/// [`rebind_extends_only_generics`] needs.
+pub(crate) fn is_extends_only_generic_rebindable(
+    class: &ClassInfo,
+    new_arg_count: usize,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> bool {
+    rebindable_parent(class, new_arg_count, class_loader).is_some()
 }
 
-/// Re-derive `class` with its single `@extends` generic binding replaced
-/// by `new_args`, baking the override into every inherited member the
-/// same way the original binding was baked.
+/// The parent whose `@extends` binding [`rebind_extends_only_generics`]
+/// would override, for a class that declares no `@template` of its own.
+///
+/// Two shapes qualify: the class fixes exactly one ancestor's generics
+/// via `@extends`, or it names no generics at all and simply extends a
+/// generic parent. The latter is how nearly every custom Eloquent
+/// builder is written (`class UserBuilder extends Builder {}`): PHP has
+/// no generics, so the subclass silently stands in for `Builder<TModel>`
+/// and a caller that knows the model (`UserBuilder<User>`) has to be
+/// able to bind it.
+fn rebindable_parent(
+    class: &ClassInfo,
+    new_arg_count: usize,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<Atom> {
+    if !class.template_params.is_empty() {
+        return None;
+    }
+    match class.extends_generics.as_slice() {
+        [(parent, args)] if args.len() == new_arg_count => Some(*parent),
+        [] => {
+            let parent_name = class.parent_class.as_deref()?;
+            let parent = class_loader(parent_name)?;
+            (parent.template_params.len() == new_arg_count).then(|| atom(parent_name))
+        }
+        _ => None,
+    }
+}
+
+/// Re-derive `class` with its `@extends` generic binding replaced by
+/// `new_args`, returning the overridden raw class alongside the class
+/// re-merged through the parent chain under that binding.
 ///
 /// A `static<TNewKey, TValue>` return type rebind (Laravel's
 /// `Collection::keyBy()`/`groupBy()`/`mapWithKeys()` and friends) names
@@ -584,19 +616,17 @@ pub(crate) fn is_extends_only_generic_rebindable(class: &ClassInfo, new_arg_coun
 /// its key/value types through `@extends` (`final class Sub extends
 /// Collection {}` with `@extends Collection<int, Item>`) has no
 /// `@template` of its own for [`apply_generic_args`] to substitute
-/// against. Overriding the `@extends` binding and re-running the parent
+/// against. Neither has a custom Eloquent builder, which usually names
+/// no generics at all. Overriding the binding and re-running the parent
 /// chain merge reproduces the same baking the original binding went
 /// through, just with the rebind's args in place of the old ones.
 ///
 /// Returns `None` when `class` is not shaped like [`is_extends_only_generic_rebindable`]
 /// describes.
 ///
-/// Only base inheritance merge runs (traits + parent chain) — no virtual
-/// member providers, interface merging, or Laravel patches, the same
-/// trade-off [`crate::virtual_members::resolve_class_base_cached`] makes.
-/// This covers a rebind through real declared methods; a macro registered
-/// on the base collection class after the rebind will not be visible on
-/// the result (see `docs/todo/laravel.md`).
+/// The caller is responsible for layering virtual members, interface
+/// members, and framework patches back on — that is what the returned
+/// raw class is for.
 ///
 /// `class` may be a raw (unmerged) or already fully-resolved `ClassInfo`
 /// — `extends_generics` passes through inheritance merge unchanged either
@@ -610,18 +640,14 @@ pub(crate) fn rebind_extends_only_generics(
     class: &ClassInfo,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     new_args: &[PhpType],
-) -> Option<ClassInfo> {
-    let [(parent_name, parent_args)] = class.extends_generics.as_slice() else {
-        return None;
-    };
-    if parent_args.len() != new_args.len() {
-        return None;
-    }
+) -> Option<(ClassInfo, ClassInfo)> {
+    let parent_name = rebindable_parent(class, new_args.len(), class_loader)?;
     let fqn = class.fqn();
     let raw = class_loader(fqn.as_str()).filter(|raw| raw.fqn().eq_ignore_ascii_case(fqn.as_str()));
     let mut overridden = raw.as_deref().unwrap_or(class).clone();
-    overridden.extends_generics = vec![(*parent_name, new_args.to_vec())];
-    Some(resolve_class_with_inheritance(&overridden, class_loader))
+    overridden.extends_generics = vec![(parent_name, new_args.to_vec())];
+    let merged = resolve_class_with_inheritance(&overridden, class_loader);
+    Some((overridden, merged))
 }
 
 /// Look up a method's return type through the inheritance chain.

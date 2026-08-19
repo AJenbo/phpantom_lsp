@@ -14,10 +14,12 @@ use App\Http\Controllers\BakeryController;
 use App\Mail\OrderShipped;
 use App\Http\Requests\StoreBakeryRequest;
 use App\Http\Requests\UpdateBakeryRequest;
+use App\Models\Baker;
 use App\Models\Bakery;
 use App\Models\BlogAuthor;
 use App\Models\BlogPost;
 use App\Models\Customer;
+use App\Models\Loaf;
 use App\Models\PostCollection;
 use App\Models\Review;
 use App\Models\ReviewCollection;
@@ -154,6 +156,14 @@ class Demo
         // Conditionable when()/unless() chain continuation
         BlogAuthor::where('active', 1)->when(true, fn($q) => $q)->get();
         BlogAuthor::where('active', 1)->unless(false, fn($q) => $q)->first();
+
+        // Custom builders keep the model they were built for, whether or
+        // not the builder class declares generics. LoafBuilder declares
+        // none (see app/Models/LoafBuilder.php), BakerBuilder does.
+        Loaf::query()->stale()->where('crust', 'sourdough')->firstOrFail()->getWeight();
+        Loaf::query()->whereKey(1)->first()->getWeight();     // → Loaf|null
+        Loaf::query()->stale()->get();                        // → Collection<Loaf>
+        Baker::query()->active()->firstOrFail()->getName();   // → Baker
 
         // Paginators carry the model element type through foreach
         foreach (BlogAuthor::where('active', 1)->paginate() as $author) {

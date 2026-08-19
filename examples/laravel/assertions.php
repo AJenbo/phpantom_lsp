@@ -146,6 +146,34 @@ check(
     $result instanceof \Illuminate\Database\Eloquent\Builder
 );
 
+// #[UseEloquentBuilder] hands the query off to the custom builder, and the
+// builder keeps a reference to the model it was built for — which is why the
+// analyzer can name the concrete model at the end of the chain even though
+// LoafBuilder declares no `@template` of its own.
+$result = \App\Models\Loaf::query();
+check(
+    'Loaf::query() returns LoafBuilder (#[UseEloquentBuilder])',
+    $result instanceof \App\Models\LoafBuilder
+);
+check(
+    'LoafBuilder::stale() keeps the chain on LoafBuilder',
+    $result->stale() instanceof \App\Models\LoafBuilder
+);
+check(
+    'LoafBuilder holds the Loaf model it queries',
+    $result->getModel() instanceof \App\Models\Loaf
+);
+
+$result = \App\Models\Baker::query();
+check(
+    'Baker::query() returns BakerBuilder (#[UseEloquentBuilder])',
+    $result instanceof \App\Models\BakerBuilder
+);
+check(
+    'BakerBuilder holds the Baker model it queries',
+    $result->getModel() instanceof \App\Models\Baker
+);
+
 // Model::fresh() on instance (non-existing model returns null)
 $result = $bakery->fresh();
 check(

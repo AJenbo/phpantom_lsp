@@ -418,14 +418,16 @@ fn resolve_named_type(
 
             // Apply generic substitution if the type hint carried generic
             // arguments and the class has template parameters of its own
-            // to substitute, or (a `static<TNewKey, TValue>` rebind on a
-            // concrete collection subclass) fixes a single ancestor's
-            // generics via `@extends` instead.
+            // to substitute, or inherits them from a generic parent it
+            // never bound (a `static<TNewKey, TValue>` rebind on a
+            // concrete collection subclass, a custom Eloquent builder
+            // specialised to its model).
             if !generic_args.is_empty()
                 && (!cls.template_params.is_empty()
                     || crate::inheritance::is_extends_only_generic_rebindable(
                         &cls,
                         generic_args.len(),
+                        class_loader,
                     ))
             {
                 let generic_arg_strings: Vec<String> =
