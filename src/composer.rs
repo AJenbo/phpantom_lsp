@@ -1167,6 +1167,32 @@ pub(crate) fn is_laravel_project(package: &ComposerPackage) -> bool {
         })
 }
 
+/// Detect whether the project is a Laravel *application* rather than a
+/// library that uses an Illuminate component.
+///
+/// The distinction matters wherever the question is "does this project need
+/// a Laravel-aware analyser?": plain PHPStan misreads an application's
+/// Eloquent models, facades, and container bindings, but a library that
+/// requires `illuminate/support` for its collections has nothing for
+/// Larastan to explain. [`is_laravel_project`] deliberately answers the
+/// wider question of whether Laravel-aware *resolution* is worth doing at
+/// all, which such a library does benefit from.
+pub(crate) fn is_laravel_application(package: &ComposerPackage) -> bool {
+    package
+        .require
+        .keys()
+        .chain(package.require_dev.keys())
+        .any(|name| {
+            [
+                "laravel/framework",
+                "laravel/laravel",
+                "illuminate/foundation",
+            ]
+            .iter()
+            .any(|app| name.eq_ignore_ascii_case(app))
+        })
+}
+
 /// Packages that answer authorization checks from a runtime permission
 /// table rather than from `Gate::define()` calls or policy classes.
 ///
@@ -1296,6 +1322,27 @@ mod tests {
     fn non_laravel_project_is_not_detected() {
         let p = pkg(r#"{"require": {"php": "^8.2", "symfony/console": "^7.0"}}"#);
         assert!(!is_laravel_project(&p));
+    }
+
+    // ── is_laravel_application ──────────────────────────────────────
+
+    /// An application is the framework, or the skeleton, or the component
+    /// that boots one.  A library reaching for a single Illuminate
+    /// component is not one, even though Laravel-aware resolution still
+    /// helps it.
+    #[test]
+    fn an_illuminate_component_alone_is_not_an_application() {
+        for json in [
+            r#"{"require": {"laravel/framework": "^11.0"}}"#,
+            r#"{"require": {"laravel/laravel": "^11.0"}}"#,
+            r#"{"require": {"illuminate/foundation": "^11.0"}}"#,
+        ] {
+            assert!(is_laravel_application(&pkg(json)), "for {json}");
+        }
+
+        let library = pkg(r#"{"require": {"illuminate/support": "^11.0"}}"#);
+        assert!(is_laravel_project(&library));
+        assert!(!is_laravel_application(&library));
     }
 
     // ── has_runtime_permission_package ──────────────────────────────

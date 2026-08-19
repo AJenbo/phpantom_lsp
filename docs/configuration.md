@@ -27,10 +27,12 @@ phpantom_lsp init --global
 ```
 
 It lives at `$XDG_CONFIG_HOME/phpantom_lsp/.phpantom.toml` (typically
-`~/.config/phpantom_lsp/.phpantom.toml` on Linux,
-`~/Library/Application Support/phpantom_lsp/.phpantom.toml` on macOS,
+`~/.config/phpantom_lsp/.phpantom.toml` on Linux and macOS alike, and
 `%APPDATA%\phpantom_lsp\.phpantom.toml` on Windows), takes exactly the
-same keys as a project config, and is read first. A project config is
+same keys as a project config, and is read first. macOS follows the XDG
+path rather than `~/Library/Application Support`, which is where a
+command-line tool's config is expected to be, and keeps the path the
+same across a machine you use both platforms on. A project config is
 then merged over it key by key, not wholesale, so a project only has to
 spell out the settings where it differs from your defaults: with
 `workspace = true` and `extra-arguments = true` set globally, a project
@@ -111,7 +113,7 @@ highlighting remains in charge of ordinary PHP syntax.
 
 | Key            | Type    | Default  | Description |
 | -------------- | ------- | -------- | ----------- |
-| `command`      | string  | unset    | Command or path for PHPStan. Unset: auto-detect via `vendor/bin/phpstan` (only when `composer.json` requires `phpstan/phpstan` directly) then `$PATH`. `""`: disable. |
+| `command`      | string  | unset    | Command or path for PHPStan. Unset: auto-detect via `vendor/bin/phpstan` (only when the project has a PHPStan config file or `composer.json` requires `phpstan/phpstan` or Larastan directly) then `$PATH`. A Laravel application with neither Larastan nor a config file is left alone entirely, since plain PHPStan misreads the framework. `""`: disable. |
 | `memory-limit` | string  | `"1G"`   | Memory limit passed to PHPStan via `--memory-limit`. |
 | `timeout`      | integer | `60000`  | Max runtime in milliseconds before PHPStan is killed. |
 

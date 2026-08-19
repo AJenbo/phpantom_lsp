@@ -401,47 +401,6 @@ the project rather than limited to the slow files themselves. Fix by
 spawning a replacement worker on retire (or budgeting a small number of
 retries) rather than shrinking the pool permanently.
 
-### B200. The Laravel-without-required-analyzer gate is defeated by its own PATH fallback
-
-**Impact: Medium · Complexity: Low-Medium**
-
-`resolve_phpstan` (`phpstan.rs`) deliberately refuses to certify
-`vendor/bin/phpstan` on a Laravel project that lacks Larastan, "rather
-than run through an analyser that would misread its own framework" — but
-then falls through to `which("phpstan")` on `$PATH` unconditionally. A
-user with a global PHPStan install gets exactly the misreading the gate
-was written to prevent, on every save, using a binary that additionally
-lacks the project's own vendored extensions. `resolve_mago` (`mago.rs`)
-has the same shape (additionally gated by `enabled_services`, but with
-the same fallback once past that gate).
-
-### B201. `phpstan.dist.neon` is accepted as project config but does not certify the vendored binary
-
-**Impact: Low-Medium · Complexity: Low**
-
-`has_project_config` (`phpstan.rs`) accepts `phpstan.neon`,
-`phpstan.neon.dist`, and `phpstan.dist.neon` as valid project config
-files, but `has_phpstan_neon_config`, used by `resolve_phpstan` to decide
-whether `vendor/bin/phpstan` may be used, only checks the first two. A
-project using the `phpstan.dist.neon` spelling with PHPStan only as a
-transitive dependency passes the workspace-run gate but is then refused
-the vendored binary, and (per B200) falls back to a PATH binary or
-nothing despite having valid config. The two file lists should be a
-single shared function.
-
-### B202. Any `illuminate/*` dependency is treated as a full Laravel app
-
-**Impact: Low · Complexity: Low**
-
-`is_laravel_project` (`composer.rs`) matches any `illuminate/*` package,
-so a plain library that requires e.g. `illuminate/support` plus
-`phpstan/phpstan` directly (with no root neon file) is denied
-`vendor/bin/phpstan` for lacking `*/larastan`, even though it isn't a
-Laravel application and doesn't need Larastan. Narrow in practice (such
-libraries usually ship their own `phpstan.neon.dist`, which triggers a
-separate acceptance path), but the heuristic conflates "uses an
-Illuminate component" with "is a Laravel app needing Larastan".
-
 ### B203. A custom Eloquent builder rebind can cache a degraded result on cache re-entry
 
 **Impact: Medium · Complexity: Medium-High**
@@ -469,30 +428,6 @@ Builder` and neither declares its own `@template` — fails the arity
 check at the first level (`UserBuilder` has zero params) and silently
 degrades to the `TModel of Model` bound, reproducing the exact symptom a
 recent fix addressed, one inheritance level deeper.
-
-### B205. The documented macOS global config path does not match where it is read from
-
-**Impact: Low-Medium · Complexity: Low**
-
-`global_config_path()` (`config.rs`) uses `etcetera::choose_base_strategy()`,
-which resolves to the XDG path (`~/.config/phpantom_lsp/.phpantom.toml`)
-on macOS as well as Linux. `docs/configuration.md` documents
-`~/Library/Application Support/phpantom_lsp/.phpantom.toml` for macOS. A
-macOS user who hand-creates the documented path gets a config file that
-is never read. Decide which path is intended (switching to
-`choose_app_strategy` migrates existing users' config location, so this
-is worth doing before or clearly noted at release) and align the other
-side.
-
-### B206. `config-schema.json` is missing the new Mago lint/analyze keys
-
-**Impact: Low · Complexity: Low**
-
-The `mago.lint` and `mago.analyze` config keys were added to `Config`
-and documented in `docs/configuration.md`, but `config-schema.json`'s
-`mago` section still only lists `command` and the timeouts. Editors that
-use the schema for `.phpantom.toml` autocomplete/validation offer no
-completion for the new keys and may flag them as unknown.
 
 ### B207. A `phpcs.xml` silently switches a Mago-formatted project's formatter to phpcbf
 

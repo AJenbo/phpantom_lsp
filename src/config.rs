@@ -605,8 +605,14 @@ pub const DEFAULT_CONFIG_CONTENT: &str = r#"#:schema https://github.com/PHPantom
 /// Return the path to the global config file, if the platform's config
 /// directory can be determined.
 ///
-/// On Linux this is typically `$XDG_CONFIG_HOME/phpantom/.phpantom.toml`
-/// (defaulting to `~/.config/phpantom_lsp/.phpantom.toml`).
+/// `$XDG_CONFIG_HOME/phpantom_lsp/.phpantom.toml`, defaulting to
+/// `~/.config/phpantom_lsp/.phpantom.toml`, on Linux and macOS alike, and
+/// `%APPDATA%\phpantom_lsp\.phpantom.toml` on Windows.  macOS deliberately
+/// follows the XDG path rather than `~/Library/Application Support`, which
+/// is where a command-line tool's config is expected to be; changing it
+/// would move every existing user's config out from under them, so
+/// `choose_base_strategy` is the intended call here rather than
+/// `choose_app_strategy`.
 pub fn global_config_path() -> Option<PathBuf> {
     etcetera::choose_base_strategy()
         .ok()

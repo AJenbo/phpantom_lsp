@@ -220,6 +220,14 @@
           "type": "string",
           "description": "Command or path to run Mago. Unset: auto-detect via vendor/bin/mago then $PATH. Empty string: disable Mago integration. Any other value: use as the command."
         },
+        "lint": {
+          "type": "boolean",
+          "description": "Proxy mago lint diagnostics. Unset: only when mago.toml has a [linter] table."
+        },
+        "analyze": {
+          "type": "boolean",
+          "description": "Proxy mago analyze diagnostics. Unset: only when mago.toml has an [analyzer] table, and on a Laravel project only when it also wires up an extension, since Mago's analyser cannot otherwise see through Eloquent or the facades."
+        },
         "lint-timeout": {
           "type": "integer",
           "description": "Maximum runtime in milliseconds before mago lint is killed.",
