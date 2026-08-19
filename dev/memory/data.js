@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787160498437,
+  "lastUpdate": 1787161535385,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -23867,6 +23867,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 66.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "e12c300555e5e933deeb6998d2aabc9f0c018e3e",
+          "message": "A project-wide PHPStan/PHPCS/Mago scan no longer undoes a result it was\novertaken by",
+          "timestamp": "2026-08-19T19:28:09+02:00",
+          "tree_id": "84ab4319da3d243b2abd539ed9ebc959c8b51249",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/e12c300555e5e933deeb6998d2aabc9f0c018e3e"
+        },
+        "date": 1787161525311,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 65.7,
             "unit": "MiB"
           }
         ]
