@@ -22,7 +22,10 @@
 //! 1. **Native pass** — the same fast + slow collectors that diagnose
 //!    open files run over every unopened user file, on a throttled
 //!    worker pool (half the cores) so interactive requests stay
-//!    responsive.  Results stream to the editor in batches.
+//!    responsive.  Results stream to the editor as files finish.  A
+//!    file whose analysis never returns is given up on and reported
+//!    rather than stalling every file queued behind it; the pass is
+//!    driven by `drive_native_pass`, which is where that happens.
 //! 2. **External tools** — after the native pass, each configured
 //!    external tool (PHPStan, PHPCS, Mago lint/analyze) runs once over
 //!    the whole project.  A tool only runs when it is enabled,
@@ -45,25 +48,265 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use tower_lsp::lsp_types::Diagnostic;
+use parking_lot::Mutex;
+use tower_lsp::lsp_types::{Diagnostic, MessageType};
 
 use crate::Backend;
 use crate::diagnostics::ignore_rules::{self, CompiledIgnoreRule};
 use crate::progress::ScanProgress;
 
-/// Number of files processed per blocking batch.  Between batches the
-/// async orchestrator updates progress, streams new results to the
-/// editor, and checks the shutdown flag.
-const NATIVE_BATCH_SIZE: usize = 128;
-
 /// Minimum time between streaming deliveries while the native pass is
 /// running.  A `workspace/diagnostic/refresh` makes the editor re-pull
-/// every file it knows about, so refreshing after every batch would be
-/// wasteful.
+/// every file it knows about, so refreshing every time a file finishes
+/// would be wasteful.
 const DELIVERY_INTERVAL: Duration = Duration::from_secs(3);
+
+/// How often the orchestrator harvests finished files, updates
+/// progress, and checks whether a worker has stopped making progress.
+const POLL_INTERVAL: Duration = Duration::from_millis(100);
+
+/// Where to report a file the pass could not analyse.
+const ISSUE_URL: &str = "https://github.com/PHPantom-dev/phpantom_lsp/issues";
+
+/// How long one file may occupy a worker before the pass names it in
+/// the progress message, and before it gives up on it altogether.
+///
+/// Both are measured against the budget for a whole project: a large
+/// one is meant to come in around 15 seconds even on a debug build, so
+/// a single file still going after ten has hit a bug in the type engine
+/// rather than merely brought a lot of code.  Giving up that early is
+/// safe because it is not permanent: opening the file diagnoses it
+/// through the live pipeline, and closing it recomputes its entry, so a
+/// file abandoned because the machine was thrashing rather than because
+/// analysis wedged comes back on its own.
+///
+/// The thresholds live in a struct rather than as plain constants so the
+/// give-up path can be tested without waiting out the real timeout.
+#[derive(Clone, Copy)]
+struct FileWatchdog {
+    /// How long before the progress message starts naming the file.
+    notice: Duration,
+    /// How long before the worker is retired and the file skipped.
+    give_up: Duration,
+}
+
+impl Default for FileWatchdog {
+    fn default() -> Self {
+        Self {
+            notice: Duration::from_secs(2),
+            give_up: Duration::from_secs(10),
+        }
+    }
+}
+
+/// The work queue the native pass's workers drain.
+struct NativeQueue {
+    /// Index of the next file to claim.  Workers claim with a
+    /// `fetch_add`, so each file is handed to exactly one worker.
+    next: AtomicUsize,
+    /// Files fully processed, whether or not they had diagnostics.
+    done: AtomicUsize,
+    /// Finished files waiting for the orchestrator to store and deliver.
+    results: Mutex<Vec<(String, Vec<Diagnostic>)>>,
+}
+
+impl NativeQueue {
+    fn new() -> Self {
+        Self {
+            next: AtomicUsize::new(0),
+            done: AtomicUsize::new(0),
+            results: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+/// One worker's externally visible state.
+///
+/// The orchestrator polls this to drive progress and to notice a file
+/// that has stopped making progress.  The in-flight file is published
+/// as an index into the shared URI list rather than as a name, so a
+/// worker allocates nothing to say what it is doing.
+struct WorkerSlot {
+    /// Index of the file being analysed, or [`Self::IDLE`].
+    file: AtomicUsize,
+    /// When that file was claimed, in milliseconds since the pass began.
+    claimed_ms: AtomicU64,
+    /// Set by the orchestrator to tell the worker to claim no more files.
+    retired: AtomicBool,
+    /// Set by the worker just before its loop exits.
+    finished: AtomicBool,
+}
+
+impl WorkerSlot {
+    /// The [`Self::file`] value meaning "between files".
+    const IDLE: usize = usize::MAX;
+
+    fn new() -> Self {
+        Self {
+            file: AtomicUsize::new(Self::IDLE),
+            claimed_ms: AtomicU64::new(0),
+            retired: AtomicBool::new(false),
+            finished: AtomicBool::new(false),
+        }
+    }
+
+    /// Publish the file this worker just claimed.
+    ///
+    /// The timestamp is stored before the index so a reader that sees a
+    /// new index can never pair it with the previous file's claim time.
+    /// The opposite pairing is possible and harmless: it under-reports
+    /// how long the new file has been running, which at worst delays a
+    /// verdict by one poll.
+    fn claim(&self, file: usize, claimed_ms: u64) {
+        self.claimed_ms.store(claimed_ms, Ordering::Relaxed);
+        self.file.store(file, Ordering::Release);
+    }
+
+    fn release(&self) {
+        self.file.store(Self::IDLE, Ordering::Release);
+    }
+
+    /// The file this worker is on and how long it has been on it, or
+    /// `None` when it is between files.
+    fn in_flight(&self, now_ms: u64) -> Option<(usize, Duration)> {
+        let file = self.file.load(Ordering::Acquire);
+        if file == Self::IDLE {
+            return None;
+        }
+        let claimed = self.claimed_ms.load(Ordering::Relaxed);
+        Some((file, Duration::from_millis(now_ms.saturating_sub(claimed))))
+    }
+
+    fn retire(&self) {
+        self.retired.store(true, Ordering::Release);
+    }
+
+    fn is_retired(&self) -> bool {
+        self.retired.load(Ordering::Acquire)
+    }
+
+    fn finish(&self) {
+        self.finished.store(true, Ordering::Release);
+    }
+
+    fn is_finished(&self) -> bool {
+        self.finished.load(Ordering::Acquire)
+    }
+}
+
+/// What a native workspace pass got through.
+#[derive(Default)]
+pub(crate) struct NativePassOutcome {
+    /// Files the pass set out to diagnose.
+    total: usize,
+    /// Files fully diagnosed.
+    diagnosed: usize,
+    /// Files the pass gave up on, named for a user-facing message.  Each
+    /// is a file whose analysis did not finish, so this pass produced
+    /// nothing for it.
+    skipped: Vec<String>,
+}
+
+impl NativePassOutcome {
+    /// Files the pass never got to at all.
+    ///
+    /// Non-zero only when every worker was retired (or none could be
+    /// spawned) with files still queued, which is the one case where the
+    /// pass stops short of the whole project.
+    fn unchecked(&self) -> usize {
+        self.total
+            .saturating_sub(self.diagnosed)
+            .saturating_sub(self.skipped.len())
+    }
+
+    /// The one-line summary for the progress end message.
+    fn summary(&self) -> String {
+        let mut summary = format!("Diagnosed {} files", self.diagnosed);
+        if !self.skipped.is_empty() {
+            summary.push_str(&format!(", {} timed out", self.skipped.len()));
+        }
+        let unchecked = self.unchecked();
+        if unchecked > 0 {
+            summary.push_str(&format!(", {unchecked} not checked"));
+        }
+        summary
+    }
+}
+
+/// Spawn `count` workers that drain `queue` by running `work` over each
+/// file they claim, and return their slots.
+///
+/// The workers are detached rather than scoped because a worker that
+/// wedges on one file must not be able to hold up the rest of the scan.
+/// A scope has to join every thread it spawned, so a single file whose
+/// analysis never returns would block the whole pass, and with it every
+/// file still queued behind it, for the rest of the session.  A
+/// detached worker can instead be retired by the orchestrator, which
+/// stops counting it and carries on.  Nothing can kill the wedged
+/// thread from outside, so it keeps running until its file finishes (if
+/// it ever does), then sees the flag and exits without claiming
+/// another.
+///
+/// Each worker gets a [`crate::PARSE_WORKER_STACK_SIZE`] stack because
+/// it parses and walks PHP ASTs.  A worker that fails to spawn reports
+/// itself finished, so the pass runs with the workers it did get rather
+/// than failing outright.
+fn spawn_native_workers<F>(
+    count: usize,
+    uris: Arc<Vec<String>>,
+    queue: Arc<NativeQueue>,
+    shutdown: Arc<AtomicBool>,
+    started: Instant,
+    work: Arc<F>,
+) -> Vec<Arc<WorkerSlot>>
+where
+    F: Fn(&str) -> Option<Vec<Diagnostic>> + Send + Sync + 'static,
+{
+    (0..count)
+        .map(|id| {
+            let slot = Arc::new(WorkerSlot::new());
+            let worker = Arc::clone(&slot);
+            let uris = Arc::clone(&uris);
+            let queue = Arc::clone(&queue);
+            let shutdown = Arc::clone(&shutdown);
+            let work = Arc::clone(&work);
+            let spawned = std::thread::Builder::new()
+                .name(format!("ws-diag-worker-{id}"))
+                .stack_size(crate::PARSE_WORKER_STACK_SIZE)
+                .spawn(move || {
+                    while !worker.is_retired() && !shutdown.load(Ordering::Acquire) {
+                        let file = queue.next.fetch_add(1, Ordering::Relaxed);
+                        if file >= uris.len() {
+                            break;
+                        }
+                        worker.claim(file, started.elapsed().as_millis() as u64);
+                        let diags = work(&uris[file]);
+                        worker.release();
+                        if let Some(diags) = diags {
+                            queue.results.lock().push((uris[file].clone(), diags));
+                        }
+                        queue.done.fetch_add(1, Ordering::Relaxed);
+                    }
+                    worker.finish();
+                });
+            match spawned {
+                // Dropping the handle detaches the thread, which is
+                // what lets a wedged one be abandoned.
+                Ok(_) => {}
+                Err(err) => {
+                    tracing::warn!(
+                        "PHPantom: workspace diagnostics worker {id} not spawned: {err}"
+                    );
+                    slot.finish();
+                }
+            }
+            slot
+        })
+        .collect()
+}
 
 /// Diagnostics for files that are not open in the editor.
 ///
@@ -286,7 +529,27 @@ impl Backend {
             .as_ref()
             .map(|tok| self.spawn_progress_poller(tok.clone(), Arc::clone(&progress)));
 
-        let diagnosed = self.run_native_workspace_pass(&progress).await;
+        let outcome = self.run_native_workspace_pass(&progress).await;
+
+        // Stopping short of the whole project is worth saying out loud:
+        // the files it gave up on were logged as they happened, but the
+        // ones behind them in the queue were never looked at, and a
+        // silently short scan is what makes this look like a scan that
+        // simply stopped.  A shutdown cuts the pass off by design, so it
+        // is not reported.
+        if outcome.unchecked() > 0 && !self.shutdown_flag.load(Ordering::Acquire) {
+            self.log(
+                MessageType::WARNING,
+                format!(
+                    "Workspace diagnostics stopped with {} of {} files unchecked, after giving \
+                     up on every file it had in hand. Those files keep the diagnostics they \
+                     already had, if any.",
+                    outcome.unchecked(),
+                    outcome.total
+                ),
+            )
+            .await;
+        }
 
         if self.config().diagnostics.workspace_external_enabled()
             && !self.shutdown_flag.load(Ordering::Acquire)
@@ -298,16 +561,18 @@ impl Backend {
             poller.finish().await;
         }
         if let Some(ref tok) = progress_token {
-            self.progress_end(tok, Some(format!("Diagnosed {} files", diagnosed)))
-                .await;
+            self.progress_end(tok, Some(outcome.summary())).await;
         }
     }
 
     /// Run the native collectors over every unopened user file.
     ///
-    /// Returns the number of files diagnosed.  Results stream to the
-    /// editor between batches, throttled by [`DELIVERY_INTERVAL`].
-    pub(crate) async fn run_native_workspace_pass(&self, progress: &ScanProgress) -> usize {
+    /// Results stream to the editor as workers finish files, throttled
+    /// by [`DELIVERY_INTERVAL`].
+    pub(crate) async fn run_native_workspace_pass(
+        &self,
+        progress: &ScanProgress,
+    ) -> NativePassOutcome {
         // ── Eager class population ──────────────────────────────────
         // Resolve every known class in dependency-first order so the
         // per-file collectors below hit a warm cache instead of
@@ -318,65 +583,189 @@ impl Backend {
         progress.set_percentage(1, "Resolving classes");
         self.eager_populate_resolved_classes().await;
 
-        // ── Per-file diagnostics, batched ───────────────────────────
         let mut uris = self.workspace_diagnostic_target_uris();
         uris.sort();
-        let total = uris.len();
-        let ignore_rules = Arc::new(ignore_rules::compile_ignore_rules(
-            &self.config().diagnostics.ignore,
-        ));
+        if uris.is_empty() {
+            return NativePassOutcome::default();
+        }
 
-        let mut done = 0usize;
+        let ignore_rules = ignore_rules::compile_ignore_rules(&self.config().diagnostics.ignore);
+        let backend = self.clone_for_blocking();
+        let work = Arc::new(move |uri: &str| {
+            backend.collect_workspace_file_diagnostics(uri, &ignore_rules)
+        });
+
+        // Half the available cores, so interactive requests (hover,
+        // completion) stay responsive while the pass runs in the
+        // background.  Never fewer than two: giving up on a file retires
+        // the worker that was on it, and a pool of one would take the
+        // rest of the queue down with it.
+        let workers = std::thread::available_parallelism()
+            .map(|n| (n.get() / 2).max(2))
+            .unwrap_or(2)
+            .min(uris.len());
+
+        let uris = Arc::new(uris);
+        let queue = Arc::new(NativeQueue::new());
+        let started = Instant::now();
+        let slots = spawn_native_workers(
+            workers,
+            Arc::clone(&uris),
+            Arc::clone(&queue),
+            Arc::clone(&self.shutdown_flag),
+            started,
+            work,
+        );
+
+        self.drive_native_pass(
+            &uris,
+            &queue,
+            &slots,
+            started,
+            FileWatchdog::default(),
+            progress,
+        )
+        .await
+    }
+
+    /// Poll the running workers until each has finished or been retired,
+    /// storing and delivering results as they arrive.
+    ///
+    /// This is where the pass survives a file it cannot get through.  A
+    /// worker that has spent [`FileWatchdog::give_up`] on one file is
+    /// retired: the file is recorded as skipped and named in the log,
+    /// the worker claims nothing further, and the pass carries on with
+    /// the rest of the queue rather than waiting on it forever.  A file
+    /// merely past [`FileWatchdog::notice`] is named in the progress
+    /// message first, so slow analysis is visible as slow analysis
+    /// instead of looking like a scan that died.
+    ///
+    /// Progress is reported per file rather than per batch of them, so
+    /// the count keeps moving while the pass does.
+    async fn drive_native_pass(
+        &self,
+        uris: &[String],
+        queue: &NativeQueue,
+        slots: &[Arc<WorkerSlot>],
+        started: Instant,
+        watchdog: FileWatchdog,
+        progress: &ScanProgress,
+    ) -> NativePassOutcome {
+        let total = uris.len();
+        let mut outcome = NativePassOutcome {
+            total,
+            ..Default::default()
+        };
+        let mut retired = vec![false; slots.len()];
         let mut pending_updates: Vec<String> = Vec::new();
         let mut last_delivery = Instant::now();
+        let mut last_message = String::new();
 
-        for chunk in uris.chunks(NATIVE_BATCH_SIZE) {
-            if self.shutdown_flag.load(Ordering::Acquire) {
-                return done;
+        loop {
+            // Read this before harvesting: a worker pushes its result
+            // before marking itself finished, so a harvest that follows
+            // an all-stopped reading is guaranteed to see every result.
+            let all_stopped = slots
+                .iter()
+                .enumerate()
+                .all(|(id, slot)| retired[id] || slot.is_finished());
+            self.store_native_results(queue, &mut pending_updates);
+
+            // ── Watchdog ────────────────────────────────────────────
+            let now_ms = started.elapsed().as_millis() as u64;
+            let mut longest: Option<(usize, Duration)> = None;
+            for (id, slot) in slots.iter().enumerate() {
+                if retired[id] {
+                    continue;
+                }
+                let Some((file, elapsed)) = slot.in_flight(now_ms) else {
+                    continue;
+                };
+                if elapsed < watchdog.give_up {
+                    if longest.is_none_or(|(_, worst)| elapsed > worst) {
+                        longest = Some((file, elapsed));
+                    }
+                    continue;
+                }
+                slot.retire();
+                retired[id] = true;
+                let name = self.message_path(&uris[file]);
+                let secs = elapsed.as_secs();
+                tracing::warn!("PHPantom: workspace diagnostics gave up on {name} after {secs}s");
+                self.log(
+                    MessageType::WARNING,
+                    format!(
+                        "Workspace diagnostics gave up on {name} after {secs}s and moved on to \
+                         the rest of the project. Open the file to have it diagnosed on its own. \
+                         Please report it at {ISSUE_URL}"
+                    ),
+                )
+                .await;
+                outcome.skipped.push(name);
             }
 
-            let batch: Vec<String> = chunk.to_vec();
-            let backend = self.clone_for_blocking();
-            let rules = Arc::clone(&ignore_rules);
-            let results = crate::server::run_blocking_cancel_safe(move || {
-                backend.collect_workspace_batch(&batch, &rules)
-            })
-            .await
-            .unwrap_or_default();
-
-            done += chunk.len();
+            let done = queue.done.load(Ordering::Relaxed);
+            outcome.diagnosed = done;
+            let message = match longest {
+                Some((file, elapsed)) if elapsed >= watchdog.notice => format!(
+                    "Checking files ({done}/{total}), still analysing {} ({}s)",
+                    self.message_path(&uris[file]),
+                    elapsed.as_secs()
+                ),
+                _ => format!("Checking files ({done}/{total})"),
+            };
             // The native pass maps into 1..80 of the progress bar; the
             // external tool runs that follow use the remaining 80..100.
-            progress.set_percentage(
-                (1 + done * 79 / total.max(1)) as u32,
-                format!("Checking files ({done}/{total})"),
-            );
-
-            // Store results; skip files that were opened mid-pass (the
-            // live pipeline owns them now).
-            {
-                let open = self.open_files.read();
-                let mut ws = self.diag.workspace_diags.lock();
-                for (uri, diags) in results {
-                    if open.contains_key(&uri) {
-                        continue;
-                    }
-                    if ws.set_native(&uri, diags) {
-                        pending_updates.push(uri);
-                    }
-                }
+            // Reporting only on a changed message keeps the poller from
+            // sending a notification every poll, since this loop runs
+            // far more often than a file finishes.
+            if message != last_message {
+                progress.set_percentage((1 + done * 79 / total) as u32, message.clone());
+                last_message = message;
             }
 
-            let finished = done >= total;
+            let stopping = all_stopped || self.shutdown_flag.load(Ordering::Acquire);
             if !pending_updates.is_empty()
-                && (finished || last_delivery.elapsed() >= DELIVERY_INTERVAL)
+                && (stopping || last_delivery.elapsed() >= DELIVERY_INTERVAL)
             {
                 self.flush_workspace_diag_updates(std::mem::take(&mut pending_updates))
                     .await;
                 last_delivery = Instant::now();
             }
+            if stopping {
+                return outcome;
+            }
+            tokio::time::sleep(POLL_INTERVAL).await;
         }
-        done
+    }
+
+    /// Move finished files out of the queue into the workspace store,
+    /// collecting the URIs whose diagnostics changed.
+    ///
+    /// Files opened while the pass ran are dropped: the live per-file
+    /// pipeline owns them now.
+    fn store_native_results(&self, queue: &NativeQueue, updated: &mut Vec<String>) {
+        let finished = std::mem::take(&mut *queue.results.lock());
+        if finished.is_empty() {
+            return;
+        }
+        let open = self.open_files.read();
+        let mut ws = self.diag.workspace_diags.lock();
+        for (uri, diags) in finished {
+            if open.contains_key(&uri) {
+                continue;
+            }
+            if ws.set_native(&uri, diags) {
+                updated.push(uri);
+            }
+        }
+    }
+
+    /// A file's workspace-relative path for a progress or log message,
+    /// falling back to the URI when it sits outside the workspace root.
+    fn message_path(&self, uri: &str) -> String {
+        self.workspace_relative_path(uri)
+            .unwrap_or_else(|| uri.to_string())
     }
 
     /// The URIs the workspace pass should diagnose: every parsed user
@@ -395,62 +784,6 @@ impl Backend {
             })
             .cloned()
             .collect()
-    }
-
-    /// Diagnose a batch of files on a throttled worker pool.
-    ///
-    /// Uses half the available cores so interactive requests (hover,
-    /// completion) stay responsive while the pass runs in the
-    /// background.  Workers get [`crate::PARSE_WORKER_STACK_SIZE`]
-    /// stacks because they parse and walk PHP ASTs.
-    fn collect_workspace_batch(
-        &self,
-        uris: &[String],
-        ignore_rules: &[CompiledIgnoreRule],
-    ) -> Vec<(String, Vec<Diagnostic>)> {
-        let n_threads = std::thread::available_parallelism()
-            .map(|n| (n.get() / 2).max(1))
-            .unwrap_or(2)
-            .min(uris.len().max(1));
-
-        let next_idx = AtomicUsize::new(0);
-
-        std::thread::scope(|s| {
-            let handles: Vec<_> = (0..n_threads)
-                .map(|_| {
-                    let backend = self;
-                    let next_idx = &next_idx;
-                    std::thread::Builder::new()
-                        .name("ws-diag-worker".into())
-                        .stack_size(crate::PARSE_WORKER_STACK_SIZE)
-                        .spawn_scoped(s, move || {
-                            let mut results: Vec<(String, Vec<Diagnostic>)> = Vec::new();
-                            loop {
-                                let i = next_idx.fetch_add(1, Ordering::Relaxed);
-                                if i >= uris.len() {
-                                    break;
-                                }
-                                let uri = &uris[i];
-                                if backend.shutdown_flag.load(Ordering::Acquire) {
-                                    break;
-                                }
-                                if let Some(diags) =
-                                    backend.collect_workspace_file_diagnostics(uri, ignore_rules)
-                                {
-                                    results.push((uri.clone(), diags));
-                                }
-                            }
-                            results
-                        })
-                        .expect("failed to spawn ws-diag-worker thread")
-                })
-                .collect();
-
-            handles
-                .into_iter()
-                .flat_map(|h| h.join().unwrap_or_default())
-                .collect()
-        })
     }
 
     /// Compute the full native diagnostic set for one file from disk.
@@ -537,7 +870,7 @@ impl Backend {
             .supports_pull_diagnostics
             .load(std::sync::atomic::Ordering::Acquire)
         {
-            let _ = client.workspace_diagnostic_refresh().await;
+            self.request_diagnostic_refresh().await;
             return;
         }
 
@@ -1050,6 +1383,173 @@ mod tests {
                         && u.unchanged_document_diagnostic_report.result_id == result_id
             )),
             "a matching previous result id should answer Unchanged"
+        );
+    }
+
+    #[test]
+    fn worker_slot_reports_the_file_it_is_on() {
+        let slot = WorkerSlot::new();
+        assert!(
+            slot.in_flight(1_000).is_none(),
+            "a worker between files has nothing in flight"
+        );
+
+        slot.claim(7, 400);
+        let (file, elapsed) = slot.in_flight(1_000).expect("claimed");
+        assert_eq!(file, 7);
+        assert_eq!(elapsed, Duration::from_millis(600));
+
+        // A clock reading older than the claim (the orchestrator's
+        // snapshot can predate it by a poll) must not underflow into a
+        // huge elapsed time and trip the watchdog.
+        assert_eq!(
+            slot.in_flight(100).expect("claimed").1,
+            Duration::ZERO,
+            "elapsed must saturate rather than wrap"
+        );
+
+        slot.release();
+        assert!(slot.in_flight(1_000).is_none());
+    }
+
+    #[test]
+    fn outcome_summary_reports_files_it_gave_up_on() {
+        let mut outcome = NativePassOutcome {
+            total: 12,
+            diagnosed: 12,
+            skipped: Vec::new(),
+        };
+        assert_eq!(outcome.summary(), "Diagnosed 12 files");
+        assert_eq!(outcome.unchecked(), 0);
+
+        // One file timed out, and the whole project is still accounted
+        // for: 11 diagnosed plus the one given up on.
+        outcome.diagnosed = 11;
+        outcome.skipped.push("src/Huge.php".to_string());
+        assert_eq!(outcome.summary(), "Diagnosed 11 files, 1 timed out");
+        assert_eq!(outcome.unchecked(), 0);
+
+        // Every worker was retired before the queue drained, so the rest
+        // of the project was never looked at and must be reported.
+        outcome.diagnosed = 4;
+        assert_eq!(
+            outcome.summary(),
+            "Diagnosed 4 files, 1 timed out, 7 not checked"
+        );
+        assert_eq!(outcome.unchecked(), 7);
+    }
+
+    /// A file whose analysis never returns must not take the rest of the
+    /// project down with it: the pass gives up on that one file, reports
+    /// it, and still diagnoses everything else.
+    ///
+    /// The work function stands in for the collectors so the wedge is
+    /// deterministic; everything else here is the production pass.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn native_pass_gives_up_on_a_wedged_file_and_finishes_the_rest() {
+        let backend = Backend::new_test();
+        let uris: Vec<String> = (0..4).map(|i| format!("file:///f{i}.php")).collect();
+        let work = Arc::new(|uri: &str| {
+            if uri.ends_with("f0.php") {
+                // Far longer than the watchdog below allows, so the
+                // pass has to abandon this worker to make progress.
+                std::thread::sleep(Duration::from_secs(5));
+            }
+            Some(vec![diag("unknown_class", 1)])
+        });
+
+        let uris = Arc::new(uris);
+        let queue = Arc::new(NativeQueue::new());
+        let started = Instant::now();
+        let slots = spawn_native_workers(
+            2,
+            Arc::clone(&uris),
+            Arc::clone(&queue),
+            Arc::clone(&backend.shutdown_flag),
+            started,
+            work,
+        );
+
+        let watchdog = FileWatchdog {
+            notice: Duration::from_millis(100),
+            give_up: Duration::from_secs(1),
+        };
+        let progress = ScanProgress::new();
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(20),
+            backend.drive_native_pass(&uris, &queue, &slots, started, watchdog, &progress),
+        )
+        .await
+        .expect("the pass must return without waiting for the wedged file");
+
+        assert_eq!(
+            outcome.skipped,
+            vec!["file:///f0.php".to_string()],
+            "the wedged file should be reported as skipped"
+        );
+        assert_eq!(
+            outcome.diagnosed, 3,
+            "the other three files should still be diagnosed"
+        );
+        assert_eq!(
+            outcome.unchecked(),
+            0,
+            "the surviving worker should have drained the queue"
+        );
+
+        // Their results must have reached the workspace store, not just
+        // the completed counter.
+        let ws = backend.diag.workspace_diags.lock();
+        for i in 1..4 {
+            let uri = format!("file:///f{i}.php");
+            assert_eq!(ws.merged(&uri).len(), 1, "{uri} should be stored");
+        }
+        assert!(
+            ws.result_id("file:///f0.php").is_none(),
+            "the wedged file never finished, so it has no results"
+        );
+    }
+
+    /// Shutdown mid-pass returns promptly instead of draining the queue.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn native_pass_stops_on_shutdown() {
+        let backend = Backend::new_test();
+        let uris = Arc::new(
+            (0..64)
+                .map(|i| format!("file:///s{i}.php"))
+                .collect::<Vec<_>>(),
+        );
+        backend
+            .shutdown_flag
+            .store(true, std::sync::atomic::Ordering::Release);
+
+        let queue = Arc::new(NativeQueue::new());
+        let started = Instant::now();
+        let slots = spawn_native_workers(
+            2,
+            Arc::clone(&uris),
+            Arc::clone(&queue),
+            Arc::clone(&backend.shutdown_flag),
+            started,
+            Arc::new(|_: &str| Some(Vec::new())),
+        );
+
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(20),
+            backend.drive_native_pass(
+                &uris,
+                &queue,
+                &slots,
+                started,
+                FileWatchdog::default(),
+                &ScanProgress::new(),
+            ),
+        )
+        .await
+        .expect("shutdown must end the pass");
+        assert!(
+            outcome.skipped.is_empty(),
+            "a clean shutdown is not a file the pass gave up on"
         );
     }
 

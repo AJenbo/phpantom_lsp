@@ -1022,6 +1022,10 @@ impl Backend {
 /// How long to wait after the last keystroke before publishing diagnostics.
 const DIAGNOSTIC_DEBOUNCE_MS: u64 = 500;
 
+/// How long to wait for a client to acknowledge a diagnostic refresh
+/// before giving up on it.
+const REFRESH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
 impl Backend {
     /// Deliver diagnostics for a single file.
     ///
@@ -1296,7 +1300,14 @@ impl Backend {
             return;
         }
         if let Some(client) = &self.client {
-            let _ = client.workspace_diagnostic_refresh().await;
+            // A server-to-client request, so a client that is busy (or
+            // that never answers at all) would otherwise park this task
+            // indefinitely, and the background workspace pass awaits
+            // this as it streams results.  A refresh is best-effort
+            // (the editor re-pulls on its own schedule too), so timing
+            // out costs nothing.
+            let _ =
+                tokio::time::timeout(REFRESH_TIMEOUT, client.workspace_diagnostic_refresh()).await;
         }
     }
 
