@@ -1053,6 +1053,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#d18-arrayint-t-is-accepted-wherever-a-listt-is-declared" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D18. <code>array&lt;int, T&gt;</code> is accepted wherever a <code>list&lt;T&gt;</code> is declared
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1638,6 +1649,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#d18-arrayint-t-is-accepted-wherever-a-listt-is-declared" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D18. <code>array&lt;int, T&gt;</code> is accepted wherever a <code>list&lt;T&gt;</code> is declared
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1884,6 +1906,34 @@ would let the nullability check cover the class-name case as well.</p>
 comparison through <code>is_type_compatible</code> rather than the nullability test
 alone. Both halves want the same measurement, so they are one change rather
 than two.</p>
+<hr />
+<h2 id="d18-arrayint-t-is-accepted-wherever-a-listt-is-declared">D18. <code>array&lt;int, T&gt;</code> is accepted wherever a <code>list&lt;T&gt;</code> is declared<a class="headerlink" href="#d18-arrayint-t-is-accepted-wherever-a-listt-is-declared" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Medium-High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">/**</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x"> * @param list&lt;int&gt; $values</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x"> * @return list&lt;int&gt;</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x"> */</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">function keep(array $values): array {</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">    return array_filter($values, fn ($v) =&gt; $v &gt; 3);  // array&lt;int, int&gt;, not flagged</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">}</span>
+</code></pre></div>
+<p><code>is_type_compatible</code> in <code>src/diagnostics/type_errors/compatibility.rs</code>
+carries an explicit MAYBE hatch for <code>array&lt;int, X&gt;</code> reaching a <code>list&lt;X&gt;</code>
+parameter or return type, on the grounds that PHP codebases spell the two
+interchangeably. The core <code>is_subtype_of</code> already rejects the direction
+(only <code>list&lt;X&gt;</code> satisfies <code>array&lt;int, X&gt;</code>, not the reverse), so the hatch
+is the only thing standing between us and PHPStan's report here.</p>
+<p>Now that <code>array_filter()</code> reports the <code>array&lt;int, T&gt;</code> it actually
+produces, the hatch is what keeps the second half of the over-claim
+alive: a function that hands back an unwrapped filter result still
+passes a declared <code>list&lt;T&gt;</code>.</p>
+<p><strong>Fix:</strong> Drop the <code>array&lt;int, X&gt; → list&lt;X&gt;</code> arm and audit the corpus
+under <code>projects/</code> for what it starts reporting. The arm exists because
+plain <code>array&lt;int, X&gt;</code> is what an unannotated array resolves to in many
+places, so retiring it wants the resolver to answer <code>list&lt;X&gt;</code> for the
+shapes that genuinely are lists (literal arrays, <code>array_values()</code>,
+appended-to locals) first. Pay for it with resolver precision, the same
+way the supertype-where-subtype hatch was retired.</p>
 
 
 
