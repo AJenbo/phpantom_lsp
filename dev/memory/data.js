@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787112112638,
+  "lastUpdate": 1787112826296,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -23663,6 +23663,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 70.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "424edc09bc81adca0b668e0d39e9b5e405b520e6",
+          "message": "A project with its own `phpcs.xml` runs phpcs, even when\n`squizlabs/php_codesniffer` is only a transitive dependency",
+          "timestamp": "2026-08-19T05:57:20+02:00",
+          "tree_id": "a6a1c1c0c85563115841744dd227962c0eb2d965",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/424edc09bc81adca0b668e0d39e9b5e405b520e6"
+        },
+        "date": 1787112817915,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 73.4,
             "unit": "MiB"
           }
         ]
