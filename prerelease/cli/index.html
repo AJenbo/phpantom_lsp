@@ -2262,7 +2262,7 @@ not overwrite).</p>
 <a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>phpantom_lsp<span class="w"> </span>init<span class="w"> </span>--global<span class="w">   </span><span class="c1"># user-wide defaults, inherited by every project</span>
 </code></pre></div>
 <p><code>--global</code> writes to the platform config directory
-(<code>~/.config/phpantom_lsp/.phpantom.toml</code> on Linux) instead, creating it
+(<code>~/.config/phpantom_lsp/.phpantom.toml</code> on Linux and macOS) instead, creating it
 if needed. Every project reads that file first and merges its own
 <code>.phpantom.toml</code> over it key by key, so put the settings you want
 everywhere in the global file and keep project configs to the

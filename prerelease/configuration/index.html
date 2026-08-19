@@ -1777,10 +1777,12 @@ than in a <code>.phpantom.toml</code> per repository:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>phpantom_lsp<span class="w"> </span>init<span class="w"> </span>--global
 </code></pre></div>
 <p>It lives at <code>$XDG_CONFIG_HOME/phpantom_lsp/.phpantom.toml</code> (typically
-<code>~/.config/phpantom_lsp/.phpantom.toml</code> on Linux,
-<code>~/Library/Application Support/phpantom_lsp/.phpantom.toml</code> on macOS,
+<code>~/.config/phpantom_lsp/.phpantom.toml</code> on Linux and macOS alike, and
 <code>%APPDATA%\phpantom_lsp\.phpantom.toml</code> on Windows), takes exactly the
-same keys as a project config, and is read first. A project config is
+same keys as a project config, and is read first. macOS follows the XDG
+path rather than <code>~/Library/Application Support</code>, which is where a
+command-line tool's config is expected to be, and keeps the path the
+same across a machine you use both platforms on. A project config is
 then merged over it key by key, not wholesale, so a project only has to
 spell out the settings where it differs from your defaults: with
 <code>workspace = true</code> and <code>extra-arguments = true</code> set globally, a project
@@ -1980,7 +1982,7 @@ highlighting remains in charge of ordinary PHP syntax.</p>
 <td><code>command</code></td>
 <td>string</td>
 <td>unset</td>
-<td>Command or path for PHPStan. Unset: auto-detect via <code>vendor/bin/phpstan</code> (only when <code>composer.json</code> requires <code>phpstan/phpstan</code> directly) then <code>$PATH</code>. <code>""</code>: disable.</td>
+<td>Command or path for PHPStan. Unset: auto-detect via <code>vendor/bin/phpstan</code> (only when the project has a PHPStan config file or <code>composer.json</code> requires <code>phpstan/phpstan</code> or Larastan directly) then <code>$PATH</code>. A Laravel application with neither Larastan nor a config file is left alone entirely, since plain PHPStan misreads the framework. <code>""</code>: disable.</td>
 </tr>
 <tr>
 <td><code>memory-limit</code></td>
