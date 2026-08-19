@@ -293,6 +293,8 @@ fn extract_call<'a>(
                         || name_clean.eq_ignore_ascii_case("resolve")
                     {
                         Some(crate::symbol_map::LaravelStringKind::ContainerBinding)
+                    } else if name_clean.eq_ignore_ascii_case("env") {
+                        Some(crate::symbol_map::LaravelStringKind::Env)
                     } else {
                         None
                     };
@@ -363,6 +365,30 @@ fn extract_call<'a>(
                 if is_laravel_container_expr(method_call.object) {
                     try_emit_container_key_span(
                         &member_name,
+                        &method_call.argument_list,
+                        ctx.content,
+                        &mut ctx.spans,
+                    );
+                }
+                // `redirect()->route('users.index')`, `url()->signedRoute(…)`,
+                // and `response()->redirectToRoute(…)` all name a route.
+                // Keyed on the receiver: `route()` is a plain enough method
+                // name that only the helper it hangs off says it names one.
+                if is_route_name_helper_receiver(method_call.object)
+                    && is_route_name_method(&member_name)
+                {
+                    try_emit_laravel_string_span(
+                        crate::symbol_map::LaravelStringKind::Route,
+                        &method_call.argument_list,
+                        ctx.content,
+                        &mut ctx.spans,
+                    );
+                }
+                // `$request->routeIs('admin.*', 'account.*')` asks whether the
+                // current route is any of the names it lists.
+                if is_request_route_pattern_method(&member_name) {
+                    try_emit_laravel_string_spans_all(
+                        crate::symbol_map::LaravelStringKind::Route,
                         &method_call.argument_list,
                         ctx.content,
                         &mut ctx.spans,
@@ -668,11 +694,50 @@ fn extract_call<'a>(
                         &mut ctx.spans,
                     );
                 }
+                // `URL::signedRoute('orders.show')`,
+                // `Redirect::route('home')`, `Response::redirectToRoute(…)`.
+                if is_route_name_facade_call(clean_subject, &member_name) {
+                    try_emit_laravel_string_span(
+                        crate::symbol_map::LaravelStringKind::Route,
+                        &static_call.argument_list,
+                        ctx.content,
+                        &mut ctx.spans,
+                    );
+                }
+                // `Route::is('admin.*')` / `Route::currentRouteNamed(…)` list
+                // the names the current route is checked against.
+                if (clean_subject.eq_ignore_ascii_case("Route")
+                    || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\Route"))
+                    && is_route_facade_pattern_method(&member_name)
+                {
+                    try_emit_laravel_string_spans_all(
+                        crate::symbol_map::LaravelStringKind::Route,
+                        &static_call.argument_list,
+                        ctx.content,
+                        &mut ctx.spans,
+                    );
+                }
+                // `Env::get('APP_NAME')` reads the same variable the `env()`
+                // helper it backs does.
+                if (clean_subject.eq_ignore_ascii_case("Env")
+                    || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Env"))
+                    && matches!(
+                        member_name.to_ascii_lowercase().as_str(),
+                        "get" | "getorfail"
+                    )
+                {
+                    try_emit_laravel_string_span(
+                        crate::symbol_map::LaravelStringKind::Env,
+                        &static_call.argument_list,
+                        ctx.content,
+                        &mut ctx.spans,
+                    );
+                }
                 if (clean_subject.eq_ignore_ascii_case("Lang")
                     || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\Lang"))
                     && matches!(
                         member_name.to_ascii_lowercase().as_str(),
-                        "get" | "has" | "choice"
+                        "get" | "has" | "hasforlocale" | "choice"
                     )
                 {
                     try_emit_laravel_string_span(

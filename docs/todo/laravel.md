@@ -524,36 +524,6 @@ requires the live container. These genuinely cannot be resolved without
 booting, and a snapshot of them is the "true for one boot" half-truth we are
 choosing not to ship.
 
-#### L22. Broaden recognized call sites for Laravel string keys
-
-**Impact: High · Complexity: Medium**
-
-Detection breadth multiplies everything else in this section: the
-symbol-map spans already feed go-to-definition, references, hover, and
-diagnostics for every call site we recognize. `to_route()` (as a route
-name), `Lang::has()`, and the typed config accessors (`Config::string()`,
-`integer()`, `boolean()`, `float()`, `array()`, `collection()`, `set()`,
-`prepend()`, `push()`, and the `#[Config]` attribute) are recognized via
-`is_config_repository_method`. Remaining gaps by kind:
-
-- **Route names** — `signedRoute()`, `temporarySignedRoute()`,
-  `redirectToRoute()`; the same methods on the `Redirect`, `URL`, and
-  `Response` facades and on `redirect()`/`url()` helper chains
-  (`redirect()->route('x')`); `Route::is()` and `$request->routeIs()`
-  (glob-aware); and the `#[RedirectToRoute]` attribute.
-- **View names** — add `MailMessage::view()`/`markdown()`, which is a
-  notification's mail message rather than a mailable or the view
-  factory, and the mailable `#[Content]` attribute (`view`/`markdown`
-  arguments, named or positional).
-- **Translation keys** — add `Lang::hasForLocale()`. (`@lang`
-  and other Blade directives arrive via the Blade preprocessor;
-  see `blade.md`.)
-- **Config keys** — add `getMany()` (array argument).
-- **Env vars** — add `Env::get()`, and index env keys as proper
-  `LaravelStringKey` spans instead of the current definition-only
-  ad-hoc fallback, so references (and completion/diagnostics)
-  work uniformly.
-
 #### L24. Translation depth: JSON lang files, locales, placeholders
 
 **Impact: Medium-High · Complexity: Medium-High**

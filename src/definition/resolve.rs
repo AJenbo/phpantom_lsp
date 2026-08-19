@@ -75,12 +75,7 @@ impl Backend {
 
         // Path helpers: `base_path('routes/web.php')` and friends name a file
         // under a conventional directory of the project root.
-        if let Some(loc) = laravel::resolve_path_helper_definition(self, content, position) {
-            return vec![loc];
-        }
-
-        // env() fallback: not yet indexed in the symbol map.
-        laravel::resolve_env_definition(self, content, position)
+        laravel::resolve_path_helper_definition(self, content, position)
             .into_iter()
             .collect()
     }

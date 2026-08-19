@@ -4892,3 +4892,150 @@ fn a_gate_definition_is_recorded_as_a_write() {
         "a definition is not bound to a model"
     );
 }
+
+// ── Broadened Laravel call sites ────────────────────────────────────
+
+/// Every key of `kind` the map records, in source order.
+fn string_keys_of(map: &SymbolMap, wanted: LaravelStringKind) -> Vec<String> {
+    map.spans
+        .iter()
+        .filter_map(|span| match &span.kind {
+            SymbolKind::LaravelStringKey { kind, key, .. } if *kind == wanted => Some(key.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The signed-URL and redirect helpers name a route just as `route()` does,
+/// whether they are reached through a facade or through the helper call that
+/// returns the same object.
+#[test]
+fn a_route_name_is_read_from_every_helper_that_takes_one() {
+    for call in [
+        "URL::signedRoute('orders.show')",
+        "URL::temporarySignedRoute('orders.show', 60)",
+        "\\Illuminate\\Support\\Facades\\URL::route('orders.show')",
+        "Redirect::route('orders.show')",
+        "Redirect::signedRoute('orders.show')",
+        "Response::redirectToRoute('orders.show')",
+        "redirect()->route('orders.show')",
+        "redirect()->temporarySignedRoute('orders.show', 60)",
+        "url()->signedRoute('orders.show')",
+        "response()->redirectToRoute('orders.show')",
+    ] {
+        let map = parse_and_extract(&format!("<?php\n{call};\n"));
+        assert_eq!(
+            string_keys_of(&map, LaravelStringKind::Route),
+            vec!["orders.show".to_string()],
+            "`{call}` should name a route"
+        );
+    }
+}
+
+/// The route helpers are recognised by their receiver, so a same-named method
+/// on an unrelated object is left alone.
+#[test]
+fn a_route_method_on_an_unrelated_receiver_names_nothing() {
+    for call in [
+        "$builder->route('orders.show')",
+        // `redirect('/home')` returns the response, not the redirector.
+        "redirect('/home')->route('orders.show')",
+    ] {
+        let map = parse_and_extract(&format!("<?php\n{call};\n"));
+        assert!(
+            string_keys_of(&map, LaravelStringKind::Route).is_empty(),
+            "`{call}` should name no route"
+        );
+    }
+}
+
+/// The "is the current route named …?" predicates are variadic, so every
+/// argument names a route — and `$request->is()` reads URIs rather than
+/// names, so it names none.
+#[test]
+fn every_argument_of_a_route_check_names_a_route() {
+    let map = parse_and_extract("<?php\nRoute::is('admin.*', 'account.index');\n");
+    assert_eq!(
+        string_keys_of(&map, LaravelStringKind::Route),
+        vec!["admin.*".to_string(), "account.index".to_string()]
+    );
+
+    let map = parse_and_extract("<?php\n$request->routeIs('admin.*');\n");
+    assert_eq!(
+        string_keys_of(&map, LaravelStringKind::Route),
+        vec!["admin.*".to_string()]
+    );
+
+    let map = parse_and_extract("<?php\n$request->is('admin/*');\n");
+    assert!(string_keys_of(&map, LaravelStringKind::Route).is_empty());
+}
+
+/// A form request's `#[RedirectToRoute]` names the route a failed validation
+/// bounces back to, but only where the file imports the Laravel attribute.
+#[test]
+fn a_redirect_to_route_attribute_names_a_route() {
+    let imported = "<?php\nuse Illuminate\\Foundation\\Http\\Attributes\\RedirectToRoute;\n\
+                    #[RedirectToRoute('login')]\nclass StoreRequest {}\n";
+    assert_eq!(
+        string_keys_of(&parse_and_extract(imported), LaravelStringKind::Route),
+        vec!["login".to_string()]
+    );
+
+    let qualified = "<?php\n#[\\Illuminate\\Foundation\\Http\\Attributes\\RedirectToRoute('login')]\n\
+                     class StoreRequest {}\n";
+    assert_eq!(
+        string_keys_of(&parse_and_extract(qualified), LaravelStringKind::Route),
+        vec!["login".to_string()]
+    );
+
+    let unrelated = "<?php\n#[RedirectToRoute('login')]\nclass StoreRequest {}\n";
+    assert!(
+        string_keys_of(&parse_and_extract(unrelated), LaravelStringKind::Route).is_empty(),
+        "an attribute of the same name from elsewhere names no route"
+    );
+}
+
+/// `getMany()` takes a list rather than one key, in either of the two
+/// spellings the repository reads it in.
+#[test]
+fn get_many_names_every_config_key_it_lists() {
+    let map = parse_and_extract("<?php\nConfig::getMany(['app.name', 'app.timezone' => 'UTC']);\n");
+    assert_eq!(
+        string_keys_of(&map, LaravelStringKind::Config),
+        vec!["app.name".to_string(), "app.timezone".to_string()]
+    );
+
+    let map = parse_and_extract("<?php\nconfig()->getMany(['app.name']);\n");
+    assert_eq!(
+        string_keys_of(&map, LaravelStringKind::Config),
+        vec!["app.name".to_string()]
+    );
+}
+
+/// `hasForLocale()` asks the same question of the same keys `has()` does.
+#[test]
+fn has_for_locale_names_a_translation_key() {
+    let map = parse_and_extract("<?php\nLang::hasForLocale('messages.saved', 'da');\n");
+    assert_eq!(
+        string_keys_of(&map, LaravelStringKind::Trans),
+        vec!["messages.saved".to_string()]
+    );
+}
+
+/// Both spellings of an environment read record the variable they name.
+#[test]
+fn an_environment_variable_is_read_from_both_spellings() {
+    for call in [
+        "env('APP_NAME')",
+        "env('APP_NAME', 'Laravel')",
+        "Env::get('APP_NAME')",
+        "\\Illuminate\\Support\\Env::getOrFail('APP_NAME')",
+    ] {
+        let map = parse_and_extract(&format!("<?php\n{call};\n"));
+        assert_eq!(
+            string_keys_of(&map, LaravelStringKind::Env),
+            vec!["APP_NAME".to_string()],
+            "`{call}` should name an environment variable"
+        );
+    }
+}

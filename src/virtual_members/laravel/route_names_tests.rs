@@ -963,3 +963,37 @@ Route::name('admin.')->group(function () {
         "a fully static group should not record an open prefix, got: {prefixes:?}"
     );
 }
+
+/// A name without a star is compared as itself, so the overwhelmingly common
+/// call site pays nothing for the pattern support.
+#[test]
+fn a_plain_name_matches_only_itself() {
+    assert!(route_name_matches("orders.show", "orders.show"));
+    assert!(!route_name_matches("orders.show", "orders.showAll"));
+    assert!(!route_name_matches("orders.show", "orders"));
+}
+
+/// `Route::is('admin.*')` matches whatever the project registers under the
+/// prefix, the way Laravel's own `Str::is()` does.
+#[test]
+fn a_star_stands_for_any_run_of_characters() {
+    assert!(route_name_matches("admin.*", "admin.users.index"));
+    assert!(route_name_matches("admin.*", "admin."));
+    assert!(!route_name_matches("admin.*", "administration.index"));
+    assert!(route_name_matches("*.index", "admin.users.index"));
+    assert!(!route_name_matches("*.index", "admin.users.show"));
+    assert!(route_name_matches("*", "anything.at.all"));
+}
+
+/// A star between two literals has to leave room for both, and the segment
+/// after the last star is anchored at the end rather than found anywhere.
+#[test]
+fn the_segments_around_a_star_are_anchored() {
+    assert!(route_name_matches("orders.*.edit", "orders.items.edit"));
+    assert!(!route_name_matches("orders.*.edit", "orders.items.editAll"));
+    // The earliest match of an inner segment must not strand the rest: the
+    // trailing `c` here is the second one in the name.
+    assert!(route_name_matches("a*c", "acbc"));
+    assert!(route_name_matches("a*b*c", "axbyc"));
+    assert!(!route_name_matches("a*b*c", "axc"));
+}

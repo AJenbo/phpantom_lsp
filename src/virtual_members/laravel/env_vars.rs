@@ -1,123 +1,153 @@
-use std::ops::ControlFlow;
+//! Environment-variable names: `env('APP_NAME')` and `Env::get('APP_NAME')`.
+//!
+//! The symbol map records both spellings as
+//! [`crate::symbol_map::LaravelStringKind::Env`] spans, so find-references
+//! and hover come from the same index every other Laravel string key uses.
+//! What a name resolves *to* is the line that declares it in the project's
+//! `.env`, which is what this module supplies.
 
-use mago_syntax::cst::*;
 use tower_lsp::lsp_types::{Location, Position, Url};
 
 use crate::Backend;
-use crate::atom::bytes_to_str;
-use crate::util::strip_fqn_prefix;
 
-use super::helpers::{extract_string_literal, walk_all_php_expressions};
+/// The dotenv files a project declares its variables in, in the order a
+/// reader should prefer them.
+///
+/// `.env` is the one the framework actually loads; `.env.example` is the
+/// committed inventory of what a project expects, and is all a fresh clone
+/// has before anyone copies it.
+const ENV_FILES: [&str; 2] = [".env", ".env.example"];
 
-/// Resolve `env('KEY')` to the matching line in `.env`.
-pub(crate) fn resolve_env_definition(
-    backend: &Backend,
-    content: &str,
-    position: Position,
-) -> Option<Location> {
-    // Quick byte scan: skip the full parse when the file contains no env() calls.
-    if !content.contains("env(") {
-        return None;
+/// Resolve an environment-variable name to the line declaring it in each
+/// dotenv file that does.
+///
+/// A name neither file declares still resolves to the top of the first file
+/// that exists: an environment a process runs with is not on disk, so a name
+/// missing from `.env` is usually one that belongs there, and opening the
+/// file says more than refusing to navigate.
+pub(crate) fn resolve_env_definitions(backend: &Backend, key: &str) -> Vec<Location> {
+    let Some(root) = backend.workspace.workspace_root.read().clone() else {
+        return Vec::new();
+    };
+    let mut fallback = None;
+    let mut declarations = Vec::new();
+    for name in ENV_FILES {
+        let path = root.join(name);
+        let (Ok(content), Ok(uri)) = (std::fs::read_to_string(&path), Url::from_file_path(&path))
+        else {
+            continue;
+        };
+        match declaring_line(&content, key) {
+            Some(line) => declarations.push(crate::definition::point_location(
+                uri,
+                Position::new(line, 0),
+            )),
+            None if fallback.is_none() => {
+                fallback = Some(crate::definition::point_location(uri, Position::new(0, 0)));
+            }
+            None => {}
+        }
     }
-    let cursor_offset = crate::text_position::position_to_offset(content, position) as usize;
-    let key = find_env_usage_at_cursor(content, cursor_offset)?;
+    if declarations.is_empty() {
+        return fallback.into_iter().collect();
+    }
+    declarations
+}
 
+/// The dotenv file that declares `key`, as a workspace-relative name.
+///
+/// Separate from [`resolve_env_definitions`], which points at a file even
+/// when nothing in it declares the name: hover has to tell the two apart.
+pub(crate) fn env_declaration_file(backend: &Backend, key: &str) -> Option<&'static str> {
     let root = backend.workspace.workspace_root.read().clone()?;
-    let env_path = root.join(".env");
-    if !env_path.exists() {
-        return None;
-    }
-
-    let env_uri = Url::from_file_path(&env_path).ok()?;
-    let env_content = std::fs::read_to_string(&env_path).ok()?;
-    let pos = find_env_key_line(&env_content, &key);
-
-    Some(crate::definition::point_location(env_uri, pos))
+    ENV_FILES.into_iter().find(|name| {
+        std::fs::read_to_string(root.join(name))
+            .is_ok_and(|content| declaring_line(&content, key).is_some())
+    })
 }
 
-/// Return the env key for the `env('KEY')` call under cursor.
-fn find_env_usage_at_cursor(content: &str, cursor_offset: usize) -> Option<String> {
-    let mut found: Option<String> = None;
-    walk_all_php_expressions(content, &mut |expr| {
-        if let Some((key, s, e)) = try_env_call(expr, content)
-            && cursor_offset >= s
-            && cursor_offset <= e
-        {
-            found = Some(key.to_string());
-            return ControlFlow::Break(());
-        }
-        ControlFlow::Continue(())
-    });
-    found
-}
-
-fn try_env_call<'c>(expr: &Expression<'_>, content: &'c str) -> Option<(&'c str, usize, usize)> {
-    let Expression::Call(Call::Function(fc)) = expr else {
-        return None;
+/// Every variable name the project's dotenv files declare, sorted and
+/// deduplicated.
+///
+/// Read from disk on demand rather than cached: there are at most two files,
+/// and an edit to `.env` has to show up in the next completion.
+pub(crate) fn enumerate_env_keys(backend: &Backend) -> Vec<String> {
+    let Some(root) = backend.workspace.workspace_root.read().clone() else {
+        return Vec::new();
     };
-    let Expression::Identifier(ident) = fc.function else {
-        return None;
-    };
-    if !strip_fqn_prefix(bytes_to_str(ident.value())).eq_ignore_ascii_case("env") {
-        return None;
-    }
-    let first_arg = fc.argument_list.arguments.iter().next()?.value();
-    extract_string_literal(first_arg, content)
+    let mut keys: Vec<String> = ENV_FILES
+        .iter()
+        .filter_map(|name| std::fs::read_to_string(root.join(name)).ok())
+        .flat_map(|content| {
+            content
+                .lines()
+                .filter_map(declared_key)
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    keys.sort();
+    keys.dedup();
+    keys
 }
 
-/// Find the line number of `KEY=` in `.env` content.
-fn find_env_key_line(env_content: &str, key: &str) -> Position {
-    for (line_idx, line) in env_content.lines().enumerate() {
-        let trimmed = line.trim_start();
-        if let Some(rest) = trimmed.strip_prefix(key)
-            && rest.trim_start().starts_with('=')
-        {
-            return Position::new(line_idx as u32, 0);
-        }
+/// The variable one dotenv line declares, or `None` for a comment, a blank
+/// line, or anything else that is not an assignment.
+fn declared_key(line: &str) -> Option<&str> {
+    let line = line.trim();
+    if line.starts_with('#') {
+        return None;
     }
-    Position::new(0, 0)
+    // Laravel's dotenv reader accepts an `export ` prefix.
+    let line = line.strip_prefix("export ").unwrap_or(line).trim_start();
+    let key = line.split_once('=')?.0.trim_end();
+    (!key.is_empty()
+        && key
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.'))
+    .then_some(key)
+}
+
+/// The zero-based line `key` is declared on, or `None` when this file does
+/// not declare it.
+fn declaring_line(env_content: &str, key: &str) -> Option<u32> {
+    env_content
+        .lines()
+        .position(|line| declared_key(line) == Some(key))
+        .map(|index| index as u32)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn env_key_at(content: &str, offset: usize) -> Option<String> {
-        find_env_usage_at_cursor(content, offset)
-    }
-
-    #[test]
-    fn detects_env_call() {
-        let php = "<?php\n$v = env('APP_NAME');\n";
-        let offset = php.find("APP_NAME").unwrap();
-        assert_eq!(env_key_at(php, offset), Some("APP_NAME".into()));
-    }
-
-    #[test]
-    fn ignores_non_env_string() {
-        let php = "<?php\n$v = 'APP_NAME';\n";
-        let offset = php.find("APP_NAME").unwrap();
-        assert!(env_key_at(php, offset).is_none());
-    }
-
-    #[test]
-    fn detects_env_with_default() {
-        let php = "<?php\nenv('DB_HOST', 'localhost');\n";
-        let offset = php.find("DB_HOST").unwrap();
-        assert_eq!(env_key_at(php, offset), Some("DB_HOST".into()));
-    }
-
     #[test]
     fn finds_env_key_line() {
         let env = "APP_NAME=Laravel\nDB_HOST=127.0.0.1\n";
-        let pos = find_env_key_line(env, "DB_HOST");
-        assert_eq!(pos.line, 1);
+        assert_eq!(declaring_line(env, "DB_HOST"), Some(1));
     }
 
     #[test]
-    fn missing_env_key_returns_line_zero() {
+    fn an_undeclared_key_has_no_line() {
         let env = "APP_NAME=Laravel\n";
-        let pos = find_env_key_line(env, "MISSING");
-        assert_eq!(pos.line, 0);
+        assert_eq!(declaring_line(env, "MISSING"), None);
+    }
+
+    /// A commented-out variable is documentation of what could be set, not a
+    /// declaration, and a key mentioned inside a value is not one either.
+    #[test]
+    fn only_assignments_declare_a_variable() {
+        let env = "# DB_HOST=127.0.0.1\nAPP_NAME=Laravel\nexport MAIL_MAILER=log\nnonsense\n";
+        let declared: Vec<&str> = env.lines().filter_map(declared_key).collect();
+        assert_eq!(declared, vec!["APP_NAME", "MAIL_MAILER"]);
+    }
+
+    /// A name that shares a prefix with a declared one is a different
+    /// variable.
+    #[test]
+    fn a_prefix_of_a_declared_name_is_not_declared() {
+        let env = "DB_HOSTNAME=example.test\n";
+        assert_eq!(declaring_line(env, "DB_HOST"), None);
+        assert_eq!(declaring_line(env, "DB_HOSTNAME"), Some(0));
     }
 }

@@ -153,7 +153,7 @@ pub(crate) use config_keys::{
     resolve_config_key_definition_fallback,
 };
 pub(crate) use const_eval::ClassContext;
-pub(crate) use env_vars::resolve_env_definition;
+pub(crate) use env_vars::{enumerate_env_keys, env_declaration_file};
 pub(crate) use gates::{
     LaravelGateIndex, enumerate_gate_abilities, model_policy_abilities, scan_gate_registrations,
 };
@@ -176,7 +176,9 @@ pub(crate) use provider_resources::{
     extract_provider_resources,
 };
 pub(crate) use request_fields::{request_fields_at_position, resolve_request_field_definition};
-pub(crate) use route_names::{RouteDiscovery, enumerate_all_routes, route_uri_parameters};
+pub(crate) use route_names::{
+    RouteDiscovery, enumerate_all_routes, route_name_matches, route_uri_parameters,
+};
 pub(crate) use storage::{
     FILESYSTEM_MANAGER_FQN, LaravelStorageDriverIndex, StorageDriverRegistration,
     extract_storage_driver_registrations, patch_storage_disk_type,

@@ -161,11 +161,9 @@ impl Backend {
                     continue;
                 };
                 for site in call.sites {
-                    if crate::class_lookup::is_subtype_of_named(
-                        &ty,
-                        site.receiver.fqn(),
-                        &class_loader,
-                    ) {
+                    if site.receiver.fqns().iter().any(|fqn| {
+                        crate::class_lookup::is_subtype_of_named(&ty, fqn, &class_loader)
+                    }) {
                         confirmed.push(site.to_span());
                     }
                 }

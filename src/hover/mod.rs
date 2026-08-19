@@ -701,6 +701,17 @@ impl Backend {
                 };
                 ("Container", detail)
             }
+            LaravelStringKind::Env => {
+                // The value itself is deliberately not shown: a `.env` holds
+                // credentials, and a hover is the one place they would appear
+                // without being asked for.
+                let detail = match crate::virtual_members::laravel::env_declaration_file(self, key)
+                {
+                    Some(file) => format!("Declared in `{}`", file),
+                    None => "Not declared in `.env`".to_string(),
+                };
+                ("Env", detail)
+            }
         };
 
         Some(make_hover(format!("**{}** `{}`\n\n{}", label, key, detail)))

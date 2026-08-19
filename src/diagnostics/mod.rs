@@ -683,10 +683,13 @@ impl Backend {
                             // in, which the Blade pass below has and this
                             // one does not.  And anything at all can be bound
                             // at runtime, so an unrecognised container key
-                            // proves nothing.
+                            // proves nothing — nor does an environment
+                            // variable absent from `.env`, since the
+                            // environment a process runs with is not on disk.
                             LaravelStringKind::Section
                             | LaravelStringKind::Stack
-                            | LaravelStringKind::ContainerBinding => return None,
+                            | LaravelStringKind::ContainerBinding
+                            | LaravelStringKind::Env => return None,
                         };
                         Some((checked, key.clone(), span.start, span.end))
                     } else {
@@ -846,7 +849,17 @@ impl Backend {
                     {
                         continue;
                     }
-                    (route_keys.contains(key), "route", "invalid_laravel_route")
+                    // A `Route::is('admin.*')` check names a pattern rather
+                    // than one route, and matches whatever the project has
+                    // under it.
+                    let valid = if key.contains('*') {
+                        route_keys.iter().any(|name| {
+                            crate::virtual_members::laravel::route_name_matches(key, name)
+                        })
+                    } else {
+                        route_keys.contains(key)
+                    };
+                    (valid, "route", "invalid_laravel_route")
                 }
                 CheckedStringKind::Config => {
                     // Only judge a key whose config file we actually read.
