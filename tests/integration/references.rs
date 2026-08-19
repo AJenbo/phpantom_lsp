@@ -2366,3 +2366,58 @@ $w = new Widget();
         results
     );
 }
+
+/// `new self()` and `new static()` instantiate through the `self`/`static`
+/// keywords rather than a named `ClassReference`, and must be reported
+/// alongside plain `new ClassName()` sites.
+#[test]
+fn constructor_references_include_new_self_and_static() {
+    let backend = create_test_backend();
+    let uri = "file:///tmp/test_refs_ctor_new_self_static.php";
+    let content = r#"<?php
+
+class ConfigPaths {
+    public function __construct() {}
+
+    public static function home(): ConfigPaths {
+        return new self();
+    }
+
+    public static function viaStatic(): ConfigPaths {
+        return new static();
+    }
+}
+"#;
+
+    open_file(&backend, uri, content);
+
+    // Cursor on ConfigPaths's `__construct` declaration (line 3).
+    let results = backend
+        .find_references(uri, content, Position::new(3, 22), true)
+        .expect("should find references");
+
+    assert_no_duplicates(
+        &results,
+        "constructor_references_include_new_self_and_static",
+    );
+
+    assert!(
+        has_location_on_line(&results, 3),
+        "missing constructor declaration: {results:#?}"
+    );
+    assert!(
+        has_location_on_line(&results, 6),
+        "missing new self() call: {results:#?}"
+    );
+    assert!(
+        has_location_on_line(&results, 10),
+        "missing new static() call: {results:#?}"
+    );
+    assert_eq!(
+        results.len(),
+        3,
+        "Expected 3 references (declaration + new self + new static), got {}: {:#?}",
+        results.len(),
+        results
+    );
+}

@@ -254,6 +254,37 @@ impl Backend {
                         };
                         scoped.contains(&normalize_fqn(strip_fqn_prefix(resolved)))
                     }
+                    // `new self()` / `new static()` / `new parent()` carry
+                    // `SelfStaticParent` spans rather than `ClassReference`,
+                    // so they need the same enclosing-class resolution as
+                    // `self::__construct()` below.  The same span kind is
+                    // also emitted for `parent::__construct()`'s subject
+                    // (handled by the `MemberAccess` arm below), so this
+                    // only fires when the keyword is actually the operand
+                    // of `new`.
+                    SymbolKind::SelfStaticParent(ssp_kind)
+                        if *ssp_kind != SelfStaticParentKind::This =>
+                    {
+                        if file_content.is_none() {
+                            file_content = self.reference_file_content_arc(file_uri);
+                        }
+                        match &file_content {
+                            Some(content) if is_new_operand(content, span.start) => {
+                                match self.resolve_keyword_to_fqn(
+                                    ssp_kind,
+                                    file_uri,
+                                    &file_namespace,
+                                    span.start,
+                                ) {
+                                    Some(fqn) => {
+                                        scoped.contains(&normalize_fqn(strip_fqn_prefix(&fqn)))
+                                    }
+                                    None => false,
+                                }
+                            }
+                            _ => false,
+                        }
+                    }
                     // Explicit constructor delegation written as
                     // `parent::__construct()`, `self::__construct()`, or
                     // `Foo::__construct()` lands here.  Resolve the subject
@@ -407,4 +438,27 @@ impl Backend {
             }
         }
     }
+}
+
+/// Whether the `self`/`static`/`parent` keyword at `start` is the operand of
+/// `new` (`new self()`) rather than the subject of a static access
+/// (`self::__construct()`), which the same `SelfStaticParent` span kind is
+/// also used for.
+fn is_new_operand(content: &str, start: u32) -> bool {
+    let bytes = content.as_bytes();
+    let mut i = start as usize;
+    while i > 0 && bytes[i - 1].is_ascii_whitespace() {
+        i -= 1;
+    }
+    if i < 3 {
+        return false;
+    }
+    let word_start = i - 3;
+    if word_start > 0 {
+        let prev = bytes[word_start - 1];
+        if prev.is_ascii_alphanumeric() || prev == b'_' {
+            return false;
+        }
+    }
+    bytes[word_start..i].eq_ignore_ascii_case(b"new")
 }
