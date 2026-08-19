@@ -1755,6 +1755,38 @@ pub(super) fn merge_nested_array_write(
     }
 }
 
+/// Apply an `unset($var[key1][key2]…)` element removal to a (possibly
+/// nested) array type.
+///
+/// `keys` holds the array-access keys from outermost to innermost, each
+/// `Some(literal)` for a string-literal key or `None` for a dynamic one —
+/// mirroring [`ArrayWriteKey::Shape`]/[`ArrayWriteKey::Keyed`] but without
+/// carrying a value type, since removal needs no new one. The innermost
+/// level applies [`PhpType::after_element_unset`]; outer levels reuse the
+/// same auto-vivifying descent as [`merge_nested_array_write`] to find the
+/// slot the removal lands in, then write the updated slot back.
+pub(super) fn apply_nested_array_unset(base: &PhpType, keys: &[Option<String>]) -> PhpType {
+    debug_assert!(!keys.is_empty());
+    let key = keys[0].as_deref();
+    if keys.len() == 1 {
+        return base.after_element_unset(key);
+    }
+    let inner_base = match key {
+        Some(k) => shape_slot_base(base, k),
+        None => keyed_slot_base(base),
+    };
+    let inner_updated = apply_nested_array_unset(&inner_base, &keys[1..]);
+    match key {
+        Some(k) => merge_shape_key(base, k, &inner_updated),
+        None => {
+            let key_type = base
+                .iterable_key_type()
+                .unwrap_or_else(|| PhpType::union(vec![PhpType::int(), PhpType::string()]));
+            merge_keyed_type(base, &key_type, &inner_updated)
+        }
+    }
+}
+
 /// Extend a tracked shape with the entry a `[]` append writes.
 ///
 /// PHP hands an append the next free integer key, so the shape keeps every

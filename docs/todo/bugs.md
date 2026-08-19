@@ -25,18 +25,7 @@ No outstanding items.
 
 ## Narrowing
 
-### B187. Unsetting an array element is not modeled, so a loop can be assumed to run
-
-**Impact: Low · Complexity: Medium**
-
-`unset()` handling in
-`type_engine/variable/forward_walk/assignment.rs` only clears a direct
-variable, not an element unset (`unset($arr['k'])`). A `non-empty-array`
-or shape type therefore survives being emptied out element by element,
-so `process_foreach` still treats the loop body as guaranteed to run and
-drops the pre-loop sentinel value, producing a wrong post-loop type (a
-variable assigned only inside the loop is typed as if the loop always
-executed, when the array it iterates was actually emptied first).
+No outstanding items.
 
 ## Arithmetic
 

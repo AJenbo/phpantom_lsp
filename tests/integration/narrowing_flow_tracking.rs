@@ -1259,3 +1259,64 @@ function floorStock(array $qtys): int
 "#
     ));
 }
+
+/// Unsetting the entry a `non-empty-array` guarantee relies on empties it
+/// out one element at a time, so the loop can no longer be assumed to run
+/// and the pre-loop sentinel survives.
+#[test]
+fn unsetting_an_element_drops_the_non_empty_array_guarantee() {
+    assert_type_error(&format!(
+        r#"{FLOOR_SCAFFOLD}
+/** @param non-empty-array<int, int> $qtys */
+function floorStock(array $qtys): int
+{{
+    unset($qtys[0]);
+    $max = null;
+    foreach ($qtys as $qty) {{
+        $max = $qty;
+    }}
+    return takesInt($max);
+}}
+"#
+    ));
+}
+
+/// Unsetting a shape's only required entry leaves only optional ones, so
+/// the shape no longer proves the loop body runs.
+#[test]
+fn unsetting_a_shapes_required_entry_drops_the_pre_loop_sentinel_proof() {
+    assert_type_error(&format!(
+        r#"{FLOOR_SCAFFOLD}
+/** @param array{{first: int, second?: int}} $qtys */
+function floorStock(array $qtys): int
+{{
+    unset($qtys['first']);
+    $max = null;
+    foreach ($qtys as $qty) {{
+        $max = $qty;
+    }}
+    return takesInt($max);
+}}
+"#
+    ));
+}
+
+/// Negative control: unsetting one required entry off a shape with two
+/// leaves the other required entry intact, so the loop still provably runs.
+#[test]
+fn unsetting_one_of_two_required_shape_entries_keeps_the_other_proof() {
+    assert_no_type_errors(&format!(
+        r#"{FLOOR_SCAFFOLD}
+/** @param array{{first: int, second: int}} $qtys */
+function floorStock(array $qtys): int
+{{
+    unset($qtys['first']);
+    $max = null;
+    foreach ($qtys as $qty) {{
+        $max = $qty;
+    }}
+    return takesInt($max);
+}}
+"#
+    ));
+}

@@ -82,8 +82,41 @@ pub(crate) fn process_statement<'b>(
         }
         Statement::Unset(unset_stmt) => {
             for val in unset_stmt.values.iter() {
-                if let Expression::Variable(Variable::Direct(dv)) = val {
-                    scope.remove(bytes_to_str(dv.name));
+                match val {
+                    Expression::Variable(Variable::Direct(dv)) => {
+                        scope.remove(bytes_to_str(dv.name));
+                    }
+                    // `unset($arr['key'])` removes one element rather than
+                    // the whole variable, so a `non-empty-array` or shape
+                    // type must lose whatever emptiness guarantee that
+                    // element was supplying — otherwise a later `foreach`
+                    // over the same array still assumes its body runs.
+                    Expression::ArrayAccess(array_access) => {
+                        if let Some((base_name, key_chain)) =
+                            super::super::resolution::extract_nested_array_access_chain(
+                                array_access,
+                            )
+                        {
+                            let Some(base_type) = scope
+                                .get(&base_name)
+                                .last()
+                                .map(|rt| rt.type_string.clone())
+                            else {
+                                continue;
+                            };
+                            let keys: Vec<Option<String>> = key_chain
+                                .iter()
+                                .map(|idx| {
+                                    super::super::resolution::extract_array_key_for_shape(idx)
+                                })
+                                .collect();
+                            let updated = super::super::resolution::apply_nested_array_unset(
+                                &base_type, &keys,
+                            );
+                            scope.set(&base_name, vec![ResolvedType::from_type_string(updated)]);
+                        }
+                    }
+                    _ => {}
                 }
             }
         }

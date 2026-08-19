@@ -2607,6 +2607,62 @@ impl PhpType {
         }
     }
 
+    /// The type left behind after `unset($var[$key])` (or an element unset
+    /// off a nested array-access chain) removes one entry.
+    ///
+    /// `key` is the literal string key being removed, when known — `None`
+    /// for a dynamic key (`unset($arr[$i])`). A non-array-like type (an
+    /// `ArrayAccess` object routes through `offsetUnset` instead of real
+    /// array mutation) comes back unchanged.
+    ///
+    /// A shape drops the matching entry outright when the key is known,
+    /// since that key provably no longer exists. A dynamic key could have
+    /// removed any one of the shape's entries, so every entry becomes
+    /// optional instead — none of them is provably still there. Either way
+    /// a shape that loses its only required entries is no longer provably
+    /// non-empty, which is what lets a following `foreach` know its body
+    /// might not run. Losing an entry also breaks a list's sequential-key
+    /// promise, so a list shape is demoted to a plain array shape.
+    ///
+    /// A `non-empty-array`/`non-empty-list` (tracked by name, not by
+    /// entries) loses that promise unconditionally: removing any one
+    /// element could have emptied it out entirely.
+    pub fn after_element_unset(&self, key: Option<&str>) -> PhpType {
+        match self.kind() {
+            TypeKind::Nullable(inner) => PhpType::nullable(inner.after_element_unset(key)),
+            TypeKind::Union(members) => {
+                PhpType::union(members.iter().map(|m| m.after_element_unset(key)).collect())
+            }
+            TypeKind::Named(name) if name == "non-empty-array" => PhpType::named(atom("array")),
+            TypeKind::Named(name) if name == "non-empty-list" => PhpType::named(atom("list")),
+            TypeKind::Generic(generic) if generic.name == "non-empty-array" => {
+                PhpType::generic_atom(atom("array"), generic.args.clone())
+            }
+            TypeKind::Generic(generic) if generic.name == "non-empty-list" => {
+                PhpType::generic_atom(atom("list"), generic.args.clone())
+            }
+            TypeKind::ArrayShape(entries) => {
+                let updated: Vec<ShapeEntry> = match key {
+                    Some(key) => entries
+                        .iter()
+                        .filter(|entry| entry.key.as_deref() != Some(key))
+                        .cloned()
+                        .collect(),
+                    None => entries
+                        .iter()
+                        .cloned()
+                        .map(|mut entry| {
+                            entry.optional = true;
+                            entry
+                        })
+                        .collect(),
+                };
+                PhpType::array_shape(updated)
+            }
+            _ => self.clone(),
+        }
+    }
+
     /// Unwrap one layer of `Nullable`, returning the inner type.
     ///
     /// For `Nullable(inner)` returns `inner`, for everything else returns `self`.
