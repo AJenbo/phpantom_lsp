@@ -1657,10 +1657,14 @@ impl Backend {
             // the editor closes many files in a burst, each didClose
             // handler would await a response while the client is busy
             // sending more messages, deadlocking the tower-lsp
-            // service loop.
+            // service loop.  The detached task still gets the same cap
+            // as `request_diagnostic_refresh`, so a client that never
+            // answers leaves no task parked for the session.
             let client = client.clone();
             tokio::spawn(async move {
-                let _ = client.workspace_diagnostic_refresh().await;
+                let _ =
+                    tokio::time::timeout(REFRESH_TIMEOUT, client.workspace_diagnostic_refresh())
+                        .await;
             });
         }
 

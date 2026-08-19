@@ -217,6 +217,12 @@ impl Backend {
         // recomputed against the new settings rather than served stale.
         self.resolved_class_cache.write().clear();
         self.member_completion_cache.lock().clear();
+
+        // Switching workspace diagnostics on is the one setting whose
+        // consumer has already run and returned by the time a reload
+        // lands, so it needs starting here rather than merely being read
+        // the next time something asks.
+        self.start_workspace_diagnostics_on_reload();
     }
 
     /// Poll the global config file for changes and reload on edit.

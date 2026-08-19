@@ -384,23 +384,6 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B199. A workspace diagnostics scan never replaces a worker retired by the give-up timeout
-
-**Impact: Medium-High · Complexity: Medium**
-
-The native diagnostics scan spawns a fixed worker pool once per pass
-(`(cores/2).max(2)`, `diagnostics/workspace.rs`) and, when a worker is
-retired after exceeding the 10s per-file give-up, never spawns a
-replacement. On a small machine (2 workers on a 4-core box), and because
-the file list is sorted (clustering files from the same directory), two
-pathological files can wedge both workers in quick succession; once both
-are retired, every remaining file in the queue is permanently unchecked
-for the rest of the session, since the pass is single-shot per session.
-A warning is logged, but the degradation is total for the remainder of
-the project rather than limited to the slow files themselves. Fix by
-spawning a replacement worker on retire (or budgeting a small number of
-retries) rather than shrinking the pool permanently.
-
 ### B203. A custom Eloquent builder rebind can cache a degraded result on cache re-entry
 
 **Impact: Medium · Complexity: Medium-High**
@@ -482,45 +465,23 @@ never flagged. No false positives result — the bodies are simply
 unchecked — but the coverage gap is now user-visible since hooks are a
 supported, documented feature.
 
-### B211. Enabling workspace diagnostics through a live config reload has no effect until restart
+### B223. Switching workspace diagnostics off mid-session leaves its results in place
 
 **Impact: Low · Complexity: Medium**
 
-`run_workspace_diagnostics` has exactly one caller: the startup task,
-which already returns early if `[diagnostics] workspace` was off at
-startup. `reload_config` (`indexing/watch.rs`) never re-triggers it, so
-flipping the setting on via a live-reloaded project or global config (a
-feature this release adds) does nothing until the editor is restarted,
-contradicting `docs/configuration.md`'s claim that only the PHP version
-and indexing strategy require a restart.
-
-### B212. The workspace scan watchdog can mislabel a file that just finished as timed out
-
-**Impact: Low · Complexity: Low**
-
-Between the workspace-scan watchdog's `slot.in_flight()` read and its
-`slot.retire()` call (`diagnostics/workspace.rs`), the worker can finish
-the timed-out file and move on to the next one. The retire then logs the
-just-finished file as abandoned ("gave up on X after 10s... please
-report it") even though it completed and its diagnostics were published,
-and retires the worker while it is genuinely mid-flight on the file it
-just claimed — if the pass then reaches `all_stopped` before that new
-file finishes, its result is never harvested and it is reported as not
-checked. Roughly a 100ms window (the watchdog poll interval); no state
-corruption, just an incorrect log message and an occasional dropped file.
-
-### B213. Two diagnostic refresh requests await the client with no timeout
-
-**Impact: Low-Medium · Complexity: Low**
-
-`request_diagnostic_refresh` was given a 10s cap in a recent commit
-specifically because "a client that is busy (or never answers) would
-otherwise park this task indefinitely." `did_change_watched_files`
-(`server.rs`) and the background index-completion task each still await
-`client.workspace_diagnostic_refresh()` directly, with no timeout, and
-both fire in the same bursty scenarios (branch switches, initial index
-completion) that motivated the timeout elsewhere. Convert both call
-sites to `request_diagnostic_refresh()`.
+`[diagnostics] workspace` is now read again on a live config reload, but
+only in the enabling direction. Turning it off while the native pass is
+running does not stop it: `drive_native_pass` only checks the shutdown
+flag, so the pass runs to completion and publishes results for files the
+user has just said they do not want diagnosed. Turning it off after the
+pass finished leaves the stored results reported for the rest of the
+session too, and `recompute_workspace_diags_for_closed_file` keeps
+updating them on every close (it is gated on
+`workspace_diag_pass_started`, not on the setting). Doing this properly
+means stopping a running pass, clearing `WorkspaceDiagnostics`, and
+telling the editor to drop what it was shown, and re-enabling afterwards
+has to be able to start a fresh pass (`workspace_diag_pass_started` is
+one-way today).
 
 ### B214. A closure inside an arrow-bodied property hook gets no variable snapshot
 

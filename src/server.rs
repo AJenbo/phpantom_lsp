@@ -926,11 +926,8 @@ impl LanguageServer for Backend {
         // Open files may reference a class that was just added or removed; ask
         // the editor to re-pull diagnostics so stale "unknown class" errors
         // (or missing ones) are corrected.
-        if did_work
-            && self.supports_pull_diagnostics.load(Ordering::Acquire)
-            && let Some(ref client) = self.client
-        {
-            let _ = client.workspace_diagnostic_refresh().await;
+        if did_work {
+            self.request_diagnostic_refresh().await;
         }
     }
 
@@ -1817,13 +1814,7 @@ impl Backend {
                     .await;
             }
 
-            if progress_backend
-                .supports_pull_diagnostics
-                .load(Ordering::Acquire)
-                && let Some(ref client) = progress_backend.client
-            {
-                let _ = client.workspace_diagnostic_refresh().await;
-            }
+            progress_backend.request_diagnostic_refresh().await;
 
             // Files opened before the index finished were rendering
             // member/class reference counts computed from a still-filling

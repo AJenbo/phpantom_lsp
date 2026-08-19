@@ -24,8 +24,9 @@
 //!    worker pool (half the cores) so interactive requests stay
 //!    responsive.  Results stream to the editor as files finish.  A
 //!    file whose analysis never returns is given up on and reported
-//!    rather than stalling every file queued behind it; the pass is
-//!    driven by `drive_native_pass`, which is where that happens.
+//!    rather than stalling every file queued behind it, and the worker
+//!    it wedged is replaced so the pool keeps its throughput; the pass
+//!    is driven by `drive_native_pass`, which is where that happens.
 //! 2. **External tools** — after the native pass, each configured
 //!    external tool (PHPStan, PHPCS, Mago lint/analyze) runs once over
 //!    the whole project.  A tool only runs when it is enabled,
@@ -70,6 +71,19 @@ const POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 /// Where to report a file the pass could not analyse.
 const ISSUE_URL: &str = "https://github.com/PHPantom-dev/phpantom_lsp/issues";
+
+/// How many retired workers one pass will replace.
+///
+/// Retiring a worker without replacing it shrinks the pool for the rest
+/// of the session, and the pool is as small as two on a four-core
+/// machine: two pathological files in a row would otherwise leave every
+/// file still queued behind them unchecked until the editor restarts.
+/// Replacements are budgeted rather than unlimited because a worker
+/// whose file never returns keeps its thread (and its
+/// [`crate::PARSE_WORKER_STACK_SIZE`] stack) for the rest of the
+/// session, so a project that wedges everything it is handed stops
+/// adding threads instead of accumulating them.
+const MAX_WORKER_REPLACEMENTS: usize = 8;
 
 /// How long one file may occupy a worker before the pass names it in
 /// the progress message, and before it gives up on it altogether.
@@ -184,6 +198,24 @@ impl WorkerSlot {
         self.retired.store(true, Ordering::Release);
     }
 
+    /// Retire the worker and report whether it is still on `file`.
+    ///
+    /// The watchdog reads a slot and acts on it a moment later, and in
+    /// between the worker can finish the file it timed out on and claim
+    /// the next one.  Retiring first and confirming afterwards is what
+    /// makes the answer trustworthy: once the flag is set the worker can
+    /// claim nothing further, so a slot still holding the same file is
+    /// genuinely stuck inside it, while any other reading means the file
+    /// completed and must not be blamed.
+    ///
+    /// The flag stays set either way.  It cannot be taken back without
+    /// racing the worker's own read of it, and a worker retired on a
+    /// false alarm costs only the thread it is replaced with.
+    fn retire_on(&self, file: usize) -> bool {
+        self.retire();
+        self.file.load(Ordering::Acquire) == file
+    }
+
     fn is_retired(&self) -> bool {
         self.retired.load(Ordering::Acquire)
     }
@@ -213,9 +245,10 @@ pub(crate) struct NativePassOutcome {
 impl NativePassOutcome {
     /// Files the pass never got to at all.
     ///
-    /// Non-zero only when every worker was retired (or none could be
-    /// spawned) with files still queued, which is the one case where the
-    /// pass stops short of the whole project.
+    /// Non-zero only when every worker was retired past the pass's
+    /// replacement budget (or none could be spawned) with files still
+    /// queued, which is the one case where the pass stops short of the
+    /// whole project.
     fn unchecked(&self) -> usize {
         self.total
             .saturating_sub(self.diagnosed)
@@ -236,76 +269,120 @@ impl NativePassOutcome {
     }
 }
 
-/// Spawn `count` workers that drain `queue` by running `work` over each
-/// file they claim, and return their slots.
-///
-/// The workers are detached rather than scoped because a worker that
-/// wedges on one file must not be able to hold up the rest of the scan.
-/// A scope has to join every thread it spawned, so a single file whose
-/// analysis never returns would block the whole pass, and with it every
-/// file still queued behind it, for the rest of the session.  A
-/// detached worker can instead be retired by the orchestrator, which
-/// stops counting it and carries on.  Nothing can kill the wedged
-/// thread from outside, so it keeps running until its file finishes (if
-/// it ever does), then sees the flag and exits without claiming
-/// another.
-///
-/// Each worker gets a [`crate::PARSE_WORKER_STACK_SIZE`] stack because
-/// it parses and walks PHP ASTs.  A worker that fails to spawn reports
-/// itself finished, so the pass runs with the workers it did get rather
-/// than failing outright.
-fn spawn_native_workers<F>(
-    count: usize,
+/// The state one native pass shares with its workers, and everything
+/// needed to spawn another one mid-pass.
+struct NativePass<F> {
+    /// The files to diagnose, indexed by the slot's in-flight file.
     uris: Arc<Vec<String>>,
+    /// The queue every worker drains.
     queue: Arc<NativeQueue>,
     shutdown: Arc<AtomicBool>,
+    /// When the pass began; claim times are measured against it.
     started: Instant,
+    /// The per-file analysis, shared by every worker.
     work: Arc<F>,
-) -> Vec<Arc<WorkerSlot>>
+    /// One slot per worker spawned, retired ones included, in spawn
+    /// order.  A worker only ever appends to this, so a slot's index is
+    /// stable for the life of the pass.
+    slots: Vec<Arc<WorkerSlot>>,
+    /// Replacements spawned so far, capped at [`MAX_WORKER_REPLACEMENTS`].
+    replacements: usize,
+}
+
+impl<F> NativePass<F>
 where
     F: Fn(&str) -> Option<Vec<Diagnostic>> + Send + Sync + 'static,
 {
-    (0..count)
-        .map(|id| {
-            let slot = Arc::new(WorkerSlot::new());
-            let worker = Arc::clone(&slot);
-            let uris = Arc::clone(&uris);
-            let queue = Arc::clone(&queue);
-            let shutdown = Arc::clone(&shutdown);
-            let work = Arc::clone(&work);
-            let spawned = std::thread::Builder::new()
-                .name(format!("ws-diag-worker-{id}"))
-                .stack_size(crate::PARSE_WORKER_STACK_SIZE)
-                .spawn(move || {
-                    while !worker.is_retired() && !shutdown.load(Ordering::Acquire) {
-                        let file = queue.next.fetch_add(1, Ordering::Relaxed);
-                        if file >= uris.len() {
-                            break;
-                        }
-                        worker.claim(file, started.elapsed().as_millis() as u64);
-                        let diags = work(&uris[file]);
-                        worker.release();
-                        if let Some(diags) = diags {
-                            queue.results.lock().push((uris[file].clone(), diags));
-                        }
-                        queue.done.fetch_add(1, Ordering::Relaxed);
+    fn new(uris: Vec<String>, shutdown: Arc<AtomicBool>, work: Arc<F>) -> Self {
+        Self {
+            uris: Arc::new(uris),
+            queue: Arc::new(NativeQueue::new()),
+            shutdown,
+            started: Instant::now(),
+            work,
+            slots: Vec::new(),
+            replacements: 0,
+        }
+    }
+
+    /// Spawn the pass's initial pool.
+    fn spawn_workers(&mut self, count: usize) {
+        for _ in 0..count {
+            self.spawn_worker();
+        }
+    }
+
+    /// Spawn one worker that drains the queue by running the pass's work
+    /// over each file it claims, and record its slot.
+    ///
+    /// The workers are detached rather than scoped because a worker that
+    /// wedges on one file must not be able to hold up the rest of the
+    /// scan.  A scope has to join every thread it spawned, so a single
+    /// file whose analysis never returns would block the whole pass, and
+    /// with it every file still queued behind it, for the rest of the
+    /// session.  A detached worker can instead be retired by the
+    /// orchestrator, which stops counting it and carries on.  Nothing
+    /// can kill the wedged thread from outside, so it keeps running
+    /// until its file finishes (if it ever does), then sees the flag and
+    /// exits without claiming another.
+    ///
+    /// Each worker gets a [`crate::PARSE_WORKER_STACK_SIZE`] stack
+    /// because it parses and walks PHP ASTs.  A worker that fails to
+    /// spawn reports itself finished, so the pass runs with the workers
+    /// it did get rather than failing outright.
+    fn spawn_worker(&mut self) {
+        let id = self.slots.len();
+        let slot = Arc::new(WorkerSlot::new());
+        let worker = Arc::clone(&slot);
+        let uris = Arc::clone(&self.uris);
+        let queue = Arc::clone(&self.queue);
+        let shutdown = Arc::clone(&self.shutdown);
+        let work = Arc::clone(&self.work);
+        let started = self.started;
+        let spawned = std::thread::Builder::new()
+            .name(format!("ws-diag-worker-{id}"))
+            .stack_size(crate::PARSE_WORKER_STACK_SIZE)
+            .spawn(move || {
+                while !worker.is_retired() && !shutdown.load(Ordering::Acquire) {
+                    let file = queue.next.fetch_add(1, Ordering::Relaxed);
+                    if file >= uris.len() {
+                        break;
                     }
-                    worker.finish();
-                });
-            match spawned {
-                // Dropping the handle detaches the thread, which is
-                // what lets a wedged one be abandoned.
-                Ok(_) => {}
-                Err(err) => {
-                    tracing::warn!(
-                        "PHPantom: workspace diagnostics worker {id} not spawned: {err}"
-                    );
-                    slot.finish();
+                    worker.claim(file, started.elapsed().as_millis() as u64);
+                    let diags = work(&uris[file]);
+                    worker.release();
+                    if let Some(diags) = diags {
+                        queue.results.lock().push((uris[file].clone(), diags));
+                    }
+                    queue.done.fetch_add(1, Ordering::Relaxed);
                 }
+                worker.finish();
+            });
+        match spawned {
+            // Dropping the handle detaches the thread, which is what
+            // lets a wedged one be abandoned.
+            Ok(_) => {}
+            Err(err) => {
+                tracing::warn!("PHPantom: workspace diagnostics worker {id} not spawned: {err}");
+                slot.finish();
             }
-            slot
-        })
-        .collect()
+        }
+        self.slots.push(slot);
+    }
+
+    /// Take over from a worker the watchdog just retired, so the pool
+    /// keeps the size it started with.
+    ///
+    /// Returns `false` once the pass has spent its replacement budget,
+    /// from which point retiring a worker does shrink the pool.
+    fn replace_retired_worker(&mut self) -> bool {
+        if self.replacements >= MAX_WORKER_REPLACEMENTS {
+            return false;
+        }
+        self.replacements += 1;
+        self.spawn_worker();
+        true
+    }
 }
 
 /// Diagnostics for files that are not open in the editor.
@@ -487,12 +564,74 @@ impl Backend {
         }
     }
 
+    /// Start the pass when a live config reload has just switched it on.
+    ///
+    /// The full background index runs the pass from its own tail, and
+    /// gives up on it when `[diagnostics] workspace` was off at the time,
+    /// so without this the setting only took effect on the next restart.
+    /// Called from [`Backend::reload_config`], which covers a project's
+    /// own `.phpantom.toml` and the polled global config alike.
+    ///
+    /// Nothing happens while the index is still running: its tail reads
+    /// the setting again when it gets there and starts the pass itself.
+    /// The same is true of a workspace indexed under another strategy —
+    /// the pass reads the whole index, so it only ever runs behind a
+    /// `full` one.
+    pub(crate) fn start_workspace_diagnostics_on_reload(&self) {
+        if self.client.is_none() || !self.workspace_diagnostics_due_after_reload() {
+            return;
+        }
+        // `reload_config` is synchronous, and runs on a blocking thread
+        // for a watched-file batch and on the runtime for the global
+        // config poller.  Both carry the runtime context; a unit test
+        // calling it directly does not, and has no pass to start.
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        let backend = self.clone_for_diagnostic_worker();
+        runtime.spawn(async move {
+            // The same gating the index tail applies: a pull client's
+            // results are only deliverable through workspace pulls, so a
+            // client that has never pulled does not pay for the scan.
+            if backend.supports_pull_diagnostics.load(Ordering::Acquire) {
+                backend.wait_for_first_workspace_pull().await;
+                if backend.shutdown_flag.load(Ordering::Acquire) {
+                    return;
+                }
+            }
+            backend.run_workspace_diagnostics().await;
+        });
+    }
+
+    /// Whether a config reload has left the workspace pass owed a run.
+    ///
+    /// Split out from [`Self::start_workspace_diagnostics_on_reload`] so
+    /// the conditions can be checked without a client to deliver to.
+    fn workspace_diagnostics_due_after_reload(&self) -> bool {
+        let config = self.config();
+        config.diagnostics.workspace_enabled()
+            && config.indexing.strategy() == crate::config::IndexingStrategy::Full
+            && self.workspace.workspace_root.read().is_some()
+            && !self
+                .diag
+                .workspace_diag_pass_started
+                .load(Ordering::Acquire)
+            // The pass reads the whole index, so it waits for the full
+            // background index to have finished.  While that is still
+            // running, its own tail re-reads the setting and starts the
+            // pass itself.
+            && self.workspace_indexed.load(Ordering::Acquire)
+            && !self.full_index_in_progress.load(Ordering::Acquire)
+    }
+
     /// Run the background workspace diagnostics pass.
     ///
     /// Called from the tail of the full background index task, so the
-    /// whole workspace is already parsed when this starts.  Guarded
-    /// against duplicate invocation; waits for `init_complete` so the
-    /// post-index cache clears in `initialized` cannot race the pass.
+    /// whole workspace is already parsed when this starts, and from
+    /// [`Self::start_workspace_diagnostics_on_reload`] when the setting
+    /// is switched on mid-session.  Guarded against duplicate
+    /// invocation; waits for `init_complete` so the post-index cache
+    /// clears in `initialized` cannot race the pass.
     pub(crate) async fn run_workspace_diagnostics(&self) {
         if !self.config().diagnostics.workspace_enabled() {
             return;
@@ -605,27 +744,11 @@ impl Backend {
             .unwrap_or(2)
             .min(uris.len());
 
-        let uris = Arc::new(uris);
-        let queue = Arc::new(NativeQueue::new());
-        let started = Instant::now();
-        let slots = spawn_native_workers(
-            workers,
-            Arc::clone(&uris),
-            Arc::clone(&queue),
-            Arc::clone(&self.shutdown_flag),
-            started,
-            work,
-        );
+        let mut pass = NativePass::new(uris, Arc::clone(&self.shutdown_flag), work);
+        pass.spawn_workers(workers);
 
-        self.drive_native_pass(
-            &uris,
-            &queue,
-            &slots,
-            started,
-            FileWatchdog::default(),
-            progress,
-        )
-        .await
+        self.drive_native_pass(&mut pass, FileWatchdog::default(), progress)
+            .await
     }
 
     /// Poll the running workers until each has finished or been retired,
@@ -634,29 +757,34 @@ impl Backend {
     /// This is where the pass survives a file it cannot get through.  A
     /// worker that has spent [`FileWatchdog::give_up`] on one file is
     /// retired: the file is recorded as skipped and named in the log,
-    /// the worker claims nothing further, and the pass carries on with
-    /// the rest of the queue rather than waiting on it forever.  A file
-    /// merely past [`FileWatchdog::notice`] is named in the progress
-    /// message first, so slow analysis is visible as slow analysis
-    /// instead of looking like a scan that died.
+    /// the worker claims nothing further, a replacement takes its place
+    /// (see [`NativePass::replace_retired_worker`]) and the pass carries
+    /// on with the rest of the queue rather than waiting on it forever.
+    /// A file merely past [`FileWatchdog::notice`] is named in the
+    /// progress message first, so slow analysis is visible as slow
+    /// analysis instead of looking like a scan that died.
     ///
     /// Progress is reported per file rather than per batch of them, so
     /// the count keeps moving while the pass does.
-    async fn drive_native_pass(
+    async fn drive_native_pass<F>(
         &self,
-        uris: &[String],
-        queue: &NativeQueue,
-        slots: &[Arc<WorkerSlot>],
-        started: Instant,
+        pass: &mut NativePass<F>,
         watchdog: FileWatchdog,
         progress: &ScanProgress,
-    ) -> NativePassOutcome {
-        let total = uris.len();
+    ) -> NativePassOutcome
+    where
+        F: Fn(&str) -> Option<Vec<Diagnostic>> + Send + Sync + 'static,
+    {
+        let total = pass.uris.len();
         let mut outcome = NativePassOutcome {
             total,
             ..Default::default()
         };
-        let mut retired = vec![false; slots.len()];
+        // Indexed like `pass.slots`, and grown with it: a worker is only
+        // counted retired once the watchdog has confirmed it was stuck on
+        // the file it timed out.
+        let mut retired = vec![false; pass.slots.len()];
+        let mut budget_reported = false;
         let mut pending_updates: Vec<String> = Vec::new();
         let mut last_delivery = Instant::now();
         let mut last_message = String::new();
@@ -665,20 +793,21 @@ impl Backend {
             // Read this before harvesting: a worker pushes its result
             // before marking itself finished, so a harvest that follows
             // an all-stopped reading is guaranteed to see every result.
-            let all_stopped = slots
+            let all_stopped = pass
+                .slots
                 .iter()
                 .enumerate()
                 .all(|(id, slot)| retired[id] || slot.is_finished());
-            self.store_native_results(queue, &mut pending_updates);
+            self.store_native_results(&pass.queue, &mut pending_updates);
 
             // ── Watchdog ────────────────────────────────────────────
-            let now_ms = started.elapsed().as_millis() as u64;
+            let now_ms = pass.started.elapsed().as_millis() as u64;
             let mut longest: Option<(usize, Duration)> = None;
-            for (id, slot) in slots.iter().enumerate() {
+            for id in 0..pass.slots.len() {
                 if retired[id] {
                     continue;
                 }
-                let Some((file, elapsed)) = slot.in_flight(now_ms) else {
+                let Some((file, elapsed)) = pass.slots[id].in_flight(now_ms) else {
                     continue;
                 };
                 if elapsed < watchdog.give_up {
@@ -687,29 +816,50 @@ impl Backend {
                     }
                     continue;
                 }
-                slot.retire();
-                retired[id] = true;
-                let name = self.message_path(&uris[file]);
+                let name = self.message_path(&pass.uris[file]);
                 let secs = elapsed.as_secs();
-                tracing::warn!("PHPantom: workspace diagnostics gave up on {name} after {secs}s");
-                self.log(
-                    MessageType::WARNING,
-                    format!(
-                        "Workspace diagnostics gave up on {name} after {secs}s and moved on to \
-                         the rest of the project. Open the file to have it diagnosed on its own. \
-                         Please report it at {ISSUE_URL}"
-                    ),
-                )
-                .await;
-                outcome.skipped.push(name);
+                if pass.slots[id].retire_on(file) {
+                    retired[id] = true;
+                    tracing::warn!(
+                        "PHPantom: workspace diagnostics gave up on {name} after {secs}s"
+                    );
+                    self.log(
+                        MessageType::WARNING,
+                        format!(
+                            "Workspace diagnostics gave up on {name} after {secs}s and moved on \
+                             to the rest of the project. Open the file to have it diagnosed on \
+                             its own. Please report it at {ISSUE_URL}"
+                        ),
+                    )
+                    .await;
+                    outcome.skipped.push(name);
+                } else {
+                    // The worker finished the file as the deadline
+                    // passed, so it is not a file the pass gave up on.
+                    // It is still retired (the flag cannot be taken
+                    // back), and it stays uncounted here so the pass
+                    // waits for whatever it claimed next.
+                    tracing::debug!(
+                        "PHPantom: workspace diagnostics worker {id} finished {name} as its \
+                         {secs}s deadline passed"
+                    );
+                }
+                if !pass.replace_retired_worker() && !budget_reported {
+                    budget_reported = true;
+                    tracing::warn!(
+                        "PHPantom: workspace diagnostics has replaced {MAX_WORKER_REPLACEMENTS} \
+                         workers and will run with a smaller pool from here"
+                    );
+                }
+                retired.resize(pass.slots.len(), false);
             }
 
-            let done = queue.done.load(Ordering::Relaxed);
+            let done = pass.queue.done.load(Ordering::Relaxed);
             outcome.diagnosed = done;
             let message = match longest {
                 Some((file, elapsed)) if elapsed >= watchdog.notice => format!(
                     "Checking files ({done}/{total}), still analysing {} ({}s)",
-                    self.message_path(&uris[file]),
+                    self.message_path(&pass.uris[file]),
                     elapsed.as_secs()
                 ),
                 _ => format!("Checking files ({done}/{total})"),
@@ -1458,6 +1608,151 @@ mod tests {
         assert!(slot.in_flight(1_000).is_none());
     }
 
+    /// The watchdog reads a slot and retires it a moment later, so the
+    /// retirement only counts as "this file timed out" when the worker
+    /// is still on the file that was read.
+    #[test]
+    fn retiring_a_slot_only_blames_the_file_it_is_still_on() {
+        let stuck = WorkerSlot::new();
+        stuck.claim(3, 0);
+        assert!(stuck.retire_on(3), "a worker still inside file 3 is stuck");
+        assert!(stuck.is_retired());
+
+        // Finished the file between the watchdog's read and its retire:
+        // its diagnostics were published, so it is not a file the pass
+        // gave up on.
+        let finished = WorkerSlot::new();
+        finished.claim(3, 0);
+        finished.release();
+        assert!(!finished.retire_on(3));
+        assert!(
+            finished.is_retired(),
+            "the flag cannot be taken back without racing the worker"
+        );
+
+        // Same, but it had already claimed the next file.
+        let moved_on = WorkerSlot::new();
+        moved_on.claim(4, 0);
+        assert!(!moved_on.retire_on(3));
+    }
+
+    /// Retiring every worker in the pool must not take the rest of the
+    /// project down with it: each one is replaced, so the files queued
+    /// behind two wedged ones are still diagnosed.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn native_pass_replaces_every_worker_it_retires() {
+        let backend = Backend::new_test();
+        let uris: Vec<String> = (0..6).map(|i| format!("file:///w{i}.php")).collect();
+        // The first two files are claimed by the whole pool and never
+        // return within the watchdog's budget, so without a replacement
+        // the four behind them are never looked at.
+        let work = Arc::new(|uri: &str| {
+            if uri.ends_with("w0.php") || uri.ends_with("w1.php") {
+                std::thread::sleep(Duration::from_secs(5));
+            }
+            Some(vec![diag("unknown_class", 1)])
+        });
+
+        let mut pass = NativePass::new(uris, Arc::clone(&backend.shutdown_flag), work);
+        pass.spawn_workers(2);
+
+        let watchdog = FileWatchdog {
+            notice: Duration::from_millis(100),
+            give_up: Duration::from_secs(1),
+        };
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(20),
+            backend.drive_native_pass(&mut pass, watchdog, &ScanProgress::new()),
+        )
+        .await
+        .expect("the pass must return without waiting for the wedged files");
+
+        // Which worker claimed which of the two wedged files is up to
+        // the queue, so only the set of them is fixed.
+        let mut skipped = outcome.skipped.clone();
+        skipped.sort();
+        assert_eq!(
+            skipped,
+            vec!["file:///w0.php".to_string(), "file:///w1.php".to_string()],
+            "both wedged files should be reported as skipped"
+        );
+        assert_eq!(
+            outcome.unchecked(),
+            0,
+            "the replacement workers should have drained the queue"
+        );
+        assert_eq!(outcome.diagnosed, 4);
+        assert_eq!(
+            pass.replacements, 2,
+            "one replacement per retired worker, and no more"
+        );
+
+        let ws = backend.diag.workspace_diags.lock();
+        for i in 2..6 {
+            let uri = format!("file:///w{i}.php");
+            assert_eq!(ws.merged(&uri).len(), 1, "{uri} should be stored");
+        }
+    }
+
+    /// Switching `[diagnostics] workspace` on through a live config
+    /// reload must leave the pass owed a run: the index tail that
+    /// normally starts it has already returned by then, so the setting
+    /// used to do nothing until the editor restarted.
+    #[test]
+    fn a_reload_that_enables_workspace_diagnostics_leaves_the_pass_due() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let config = dir.path().join(crate::config::CONFIG_FILE_NAME);
+        let backend = Backend::new_test_with_workspace(dir.path().to_path_buf(), Vec::new());
+        // Stand in for a finished full background index.
+        backend.workspace_indexed.store(true, Ordering::Release);
+
+        std::fs::write(&config, "[diagnostics]\nworkspace = false\n").expect("write config");
+        backend.reload_config(dir.path());
+        assert!(!backend.workspace_diagnostics_due_after_reload());
+
+        std::fs::write(&config, "[diagnostics]\nworkspace = true\n").expect("write config");
+        backend.reload_config(dir.path());
+        assert!(
+            backend.workspace_diagnostics_due_after_reload(),
+            "enabling the setting mid-session must start the pass"
+        );
+
+        // An index that is still running starts the pass from its own
+        // tail, so a reload must not start a second one.
+        backend
+            .full_index_in_progress
+            .store(true, Ordering::Release);
+        assert!(!backend.workspace_diagnostics_due_after_reload());
+        backend
+            .full_index_in_progress
+            .store(false, Ordering::Release);
+
+        // Nor may a pass that has already run be run again.
+        backend
+            .diag
+            .workspace_diag_pass_started
+            .store(true, Ordering::Release);
+        assert!(!backend.workspace_diagnostics_due_after_reload());
+    }
+
+    /// The replacement budget is finite: a project that wedges every
+    /// worker it is handed stops accumulating threads.
+    #[test]
+    fn worker_replacements_are_budgeted() {
+        let mut pass = NativePass::new(
+            Vec::new(),
+            Arc::new(AtomicBool::new(true)),
+            Arc::new(|_: &str| None),
+        );
+        for _ in 0..MAX_WORKER_REPLACEMENTS {
+            assert!(pass.replace_retired_worker());
+        }
+        assert!(
+            !pass.replace_retired_worker(),
+            "the pool shrinks rather than growing without bound"
+        );
+    }
+
     #[test]
     fn outcome_summary_reports_files_it_gave_up_on() {
         let mut outcome = NativePassOutcome {
@@ -1504,17 +1799,8 @@ mod tests {
             Some(vec![diag("unknown_class", 1)])
         });
 
-        let uris = Arc::new(uris);
-        let queue = Arc::new(NativeQueue::new());
-        let started = Instant::now();
-        let slots = spawn_native_workers(
-            2,
-            Arc::clone(&uris),
-            Arc::clone(&queue),
-            Arc::clone(&backend.shutdown_flag),
-            started,
-            work,
-        );
+        let mut pass = NativePass::new(uris, Arc::clone(&backend.shutdown_flag), work);
+        pass.spawn_workers(2);
 
         let watchdog = FileWatchdog {
             notice: Duration::from_millis(100),
@@ -1523,7 +1809,7 @@ mod tests {
         let progress = ScanProgress::new();
         let outcome = tokio::time::timeout(
             Duration::from_secs(20),
-            backend.drive_native_pass(&uris, &queue, &slots, started, watchdog, &progress),
+            backend.drive_native_pass(&mut pass, watchdog, &progress),
         )
         .await
         .expect("the pass must return without waiting for the wedged file");
@@ -1560,36 +1846,23 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn native_pass_stops_on_shutdown() {
         let backend = Backend::new_test();
-        let uris = Arc::new(
-            (0..64)
-                .map(|i| format!("file:///s{i}.php"))
-                .collect::<Vec<_>>(),
-        );
+        let uris = (0..64)
+            .map(|i| format!("file:///s{i}.php"))
+            .collect::<Vec<_>>();
         backend
             .shutdown_flag
             .store(true, std::sync::atomic::Ordering::Release);
 
-        let queue = Arc::new(NativeQueue::new());
-        let started = Instant::now();
-        let slots = spawn_native_workers(
-            2,
-            Arc::clone(&uris),
-            Arc::clone(&queue),
+        let mut pass = NativePass::new(
+            uris,
             Arc::clone(&backend.shutdown_flag),
-            started,
             Arc::new(|_: &str| Some(Vec::new())),
         );
+        pass.spawn_workers(2);
 
         let outcome = tokio::time::timeout(
             Duration::from_secs(20),
-            backend.drive_native_pass(
-                &uris,
-                &queue,
-                &slots,
-                started,
-                FileWatchdog::default(),
-                &ScanProgress::new(),
-            ),
+            backend.drive_native_pass(&mut pass, FileWatchdog::default(), &ScanProgress::new()),
         )
         .await
         .expect("shutdown must end the pass");
