@@ -956,6 +956,7 @@ impl Backend {
             let phpstan_config = config.phpstan.clone();
             let shutdown = Arc::clone(&self.shutdown_flag);
             let root_clone = root.clone();
+            let generations = self.phpstan_tool.generation_snapshot();
             let result = crate::server::run_blocking_cancel_safe(move || {
                 crate::phpstan::run_phpstan_workspace(
                     &resolved,
@@ -966,7 +967,8 @@ impl Backend {
             })
             .await;
             if let Some(Ok(map)) = result {
-                self.store_workspace_external_results("phpstan", map).await;
+                self.store_workspace_external_results("phpstan", map, generations)
+                    .await;
             }
         }
 
@@ -984,12 +986,14 @@ impl Backend {
             let phpcs_config = config.phpcs.clone();
             let shutdown = Arc::clone(&self.shutdown_flag);
             let root_clone = root.clone();
+            let generations = self.phpcs_tool.generation_snapshot();
             let result = crate::server::run_blocking_cancel_safe(move || {
                 crate::phpcs::run_phpcs_workspace(&resolved, &root_clone, &phpcs_config, &shutdown)
             })
             .await;
             if let Some(Ok(map)) = result {
-                self.store_workspace_external_results("phpcs", map).await;
+                self.store_workspace_external_results("phpcs", map, generations)
+                    .await;
             }
         }
 
@@ -1016,6 +1020,7 @@ impl Backend {
                 let shutdown = Arc::clone(&self.shutdown_flag);
                 let root_clone = root.clone();
                 let resolved_clone = resolved.clone();
+                let generations = self.mago_lint_tool.generation_snapshot();
                 let result = crate::server::run_blocking_cancel_safe(move || {
                     crate::mago::run_mago_lint_workspace(
                         &resolved_clone,
@@ -1026,7 +1031,7 @@ impl Backend {
                 })
                 .await;
                 if let Some(Ok(map)) = result {
-                    self.store_workspace_external_results("mago-lint", map)
+                    self.store_workspace_external_results("mago-lint", map, generations)
                         .await;
                 }
 
@@ -1040,6 +1045,7 @@ impl Backend {
                 let mago_config = config.mago.clone();
                 let shutdown = Arc::clone(&self.shutdown_flag);
                 let root_clone = root.clone();
+                let generations = self.mago_analyze_tool.generation_snapshot();
                 let result = crate::server::run_blocking_cancel_safe(move || {
                     crate::mago::run_mago_analyze_workspace(
                         &resolved,
@@ -1050,11 +1056,22 @@ impl Backend {
                 })
                 .await;
                 if let Some(Ok(map)) = result {
-                    self.store_workspace_external_results("mago-analyze", map)
+                    self.store_workspace_external_results("mago-analyze", map, generations)
                         .await;
                 }
             }
         }
+    }
+
+    /// The single-file worker that shares a source's per-file cache.
+    fn external_tool_worker(&self, source: &str) -> Option<&crate::ExternalToolWorker> {
+        Some(match source {
+            "phpstan" => &self.phpstan_tool,
+            "phpcs" => &self.phpcs_tool,
+            "mago-lint" => &self.mago_lint_tool,
+            "mago-analyze" => &self.mago_analyze_tool,
+            _ => return None,
+        })
     }
 
     /// Store a project-wide external tool run's results and deliver.
@@ -1063,18 +1080,20 @@ impl Backend {
     /// caches instead (so the open buffer shows them immediately);
     /// everything else goes into the workspace store.  Config ignore
     /// rules are applied per file.
+    ///
+    /// `generations` is the source's write-counter snapshot taken before
+    /// the run started; any open file the single-file worker has written
+    /// to since then keeps that fresher result.
     async fn store_workspace_external_results(
         &self,
         source: &'static str,
         results: HashMap<PathBuf, Vec<Diagnostic>>,
+        generations: HashMap<String, u64>,
     ) {
-        let cache = match source {
-            "phpstan" => &self.phpstan_tool.last_diags,
-            "phpcs" => &self.phpcs_tool.last_diags,
-            "mago-lint" => &self.mago_lint_tool.last_diags,
-            "mago-analyze" => &self.mago_analyze_tool.last_diags,
-            _ => return,
+        let Some(worker) = self.external_tool_worker(source) else {
+            return;
         };
+        let cache = &worker.last_diags;
 
         let rules = ignore_rules::compile_ignore_rules(&self.config().diagnostics.ignore);
         let root = self.workspace.workspace_root.read().clone();
@@ -1141,7 +1160,12 @@ impl Backend {
             if !self.open_files.read().contains_key(&uri) {
                 continue;
             }
-            cache.lock().insert(uri.clone(), diags);
+            // Likewise, a single-file run of this same tool may have
+            // finished for the file in the meantime; its result is
+            // based on newer content, so leave it alone.
+            if !worker.store_scan_result(&generations, &uri, diags) {
+                continue;
+            }
             changed |= self.assemble_and_push(&uri).await;
         }
         // One refresh covers every file the tool touched, and only when
@@ -1624,8 +1648,9 @@ mod tests {
             .lock()
             .insert(uri.to_string(), vec![diag("argument.type", 3)]);
 
+        let generations = backend.phpstan_tool.generation_snapshot();
         backend
-            .store_workspace_external_results("phpstan", HashMap::new())
+            .store_workspace_external_results("phpstan", HashMap::new(), generations)
             .await;
 
         assert!(
@@ -1653,8 +1678,9 @@ mod tests {
 
         let mut results = HashMap::new();
         results.insert(PathBuf::from("/open.php"), vec![diag("argument.type", 5)]);
+        let generations = backend.phpstan_tool.generation_snapshot();
         backend
-            .store_workspace_external_results("phpstan", results)
+            .store_workspace_external_results("phpstan", results, generations)
             .await;
 
         let cached = backend.phpstan_tool.last_diags.lock().get(uri_str).cloned();
@@ -1662,6 +1688,83 @@ mod tests {
             cached.map(|d| d.len()),
             Some(1),
             "an open file's results should feed the live per-file cache"
+        );
+    }
+
+    /// A single-file run that finishes while a project-wide run of the
+    /// same tool is still in flight wins: the scan's older results must
+    /// not overwrite the fresher per-file ones for a file that stayed
+    /// open the whole time.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn store_workspace_external_results_keeps_fresher_per_file_result() {
+        let backend = Backend::new_test();
+        let uri_str = "file:///open.php";
+        backend
+            .open_files
+            .write()
+            .insert(uri_str.to_string(), Arc::new("<?php\n".to_string()));
+
+        // The project-wide run starts here.
+        let generations = backend.phpstan_tool.generation_snapshot();
+
+        // While it is running, the user edits the file and the per-file
+        // worker writes a corrected (empty) result.
+        backend.phpstan_tool.store_file_result(uri_str, Vec::new());
+
+        // The project-wide run now lands with its scan-time findings.
+        let mut results = HashMap::new();
+        results.insert(PathBuf::from("/open.php"), vec![diag("argument.type", 5)]);
+        backend
+            .store_workspace_external_results("phpstan", results, generations)
+            .await;
+
+        assert!(
+            backend
+                .phpstan_tool
+                .last_diags
+                .lock()
+                .get(uri_str)
+                .is_some_and(Vec::is_empty),
+            "the stale scan result must not resurrect a diagnostic the per-file run cleared"
+        );
+    }
+
+    /// The freshness check is per file: a single-file run for one open
+    /// file must not stop the same scan from updating a different open
+    /// file that nothing else has touched.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn store_workspace_external_results_skips_only_the_superseded_file() {
+        let backend = Backend::new_test();
+        let edited = "file:///edited.php";
+        let untouched = "file:///untouched.php";
+        {
+            let mut open = backend.open_files.write();
+            open.insert(edited.to_string(), Arc::new("<?php\n".to_string()));
+            open.insert(untouched.to_string(), Arc::new("<?php\n".to_string()));
+        }
+
+        let generations = backend.phpstan_tool.generation_snapshot();
+        backend.phpstan_tool.store_file_result(edited, Vec::new());
+
+        let mut results = HashMap::new();
+        results.insert(PathBuf::from("/edited.php"), vec![diag("argument.type", 5)]);
+        results.insert(
+            PathBuf::from("/untouched.php"),
+            vec![diag("argument.type", 7)],
+        );
+        backend
+            .store_workspace_external_results("phpstan", results, generations)
+            .await;
+
+        let cache = backend.phpstan_tool.last_diags.lock();
+        assert!(
+            cache.get(edited).is_some_and(Vec::is_empty),
+            "the edited file keeps its fresher per-file result"
+        );
+        assert_eq!(
+            cache.get(untouched).map(Vec::len),
+            Some(1),
+            "the untouched file still receives the scan's results"
         );
     }
 }

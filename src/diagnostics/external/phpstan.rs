@@ -163,10 +163,7 @@ impl Backend {
                 }
             }
 
-            {
-                let mut cache = self.phpstan_tool.last_diags.lock();
-                cache.insert(uri.clone(), phpstan_diags);
-            }
+            self.phpstan_tool.store_file_result(&uri, phpstan_diags);
 
             // Assemble and push so the editor sees fresh PHPStan
             // results merged with cached native diagnostics.  In pull

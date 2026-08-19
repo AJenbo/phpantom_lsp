@@ -1628,10 +1628,10 @@ impl Backend {
         self.diag.last_fast.lock().remove(uri_str);
         self.diag.last_slow.lock().remove(uri_str);
         // Remove cached PHPStan, PHPCS, and Mago diagnostics too.
-        self.phpstan_tool.last_diags.lock().remove(uri_str);
-        self.phpcs_tool.last_diags.lock().remove(uri_str);
-        self.mago_lint_tool.last_diags.lock().remove(uri_str);
-        self.mago_analyze_tool.last_diags.lock().remove(uri_str);
+        self.phpstan_tool.forget(uri_str);
+        self.phpcs_tool.forget(uri_str);
+        self.mago_lint_tool.forget(uri_str);
+        self.mago_analyze_tool.forget(uri_str);
         // Remove pull-diagnostic caches.
         self.diag.result_ids.lock().remove(uri_str);
         self.diag.last_full.lock().remove(uri_str);

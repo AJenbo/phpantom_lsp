@@ -494,27 +494,6 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B216. A project-wide external tool run can overwrite a fresher per-file result for a file that stays open
-
-**Impact: Low-Medium · Complexity: Medium-High**
-
-`store_workspace_external_results` (`diagnostics/workspace.rs`) writes a
-project-wide external tool's scan-time results straight into the
-per-file `last_diags` caches (`phpstan_tool`, `phpcs_tool`,
-`mago_lint_tool`, `mago_analyze_tool`) for any file that is open when it
-writes. If a concurrent per-file run of the same tool (triggered by an
-edit to that same open file) finishes and writes a fresher result to the
-same cache entry while the project-wide scan is still awaiting
-`flush_workspace_diag_updates` (up to the 10s `REFRESH_TIMEOUT`), the
-scan's unconditional `cache.lock().insert(...)` at the end can overwrite
-that fresher, already-corrected result with its own stale one — a
-last-write-wins race, since neither writer knows about the other. Fixing
-this needs some notion of freshness (e.g. a per-uri generation counter
-bumped by the per-file workers, with the project-wide writer skipping
-its own write when the generation has moved since the scan captured that
-file) rather than a simple open/closed re-check, which is why it is
-tracked separately from the closed-file race this was split off from.
-
 ### B199. A workspace diagnostics scan never replaces a worker retired by the give-up timeout
 
 **Impact: Medium-High · Complexity: Medium**

@@ -134,10 +134,7 @@ impl Backend {
                 }
             }
 
-            {
-                let mut cache = self.mago_lint_tool.last_diags.lock();
-                cache.insert(uri.clone(), mago_diags);
-            }
+            self.mago_lint_tool.store_file_result(&uri, mago_diags);
 
             // In pull mode this also tells the editor to re-pull, but
             // only when the run actually changed the file's diagnostics.
@@ -269,10 +266,7 @@ impl Backend {
                 }
             }
 
-            {
-                let mut cache = self.mago_analyze_tool.last_diags.lock();
-                cache.insert(uri.clone(), mago_diags);
-            }
+            self.mago_analyze_tool.store_file_result(&uri, mago_diags);
 
             // In pull mode this also tells the editor to re-pull, but
             // only when the run actually changed the file's diagnostics.

@@ -146,10 +146,7 @@ impl Backend {
                 }
             }
 
-            {
-                let mut cache = self.phpcs_tool.last_diags.lock();
-                cache.insert(uri.clone(), phpcs_diags);
-            }
+            self.phpcs_tool.store_file_result(&uri, phpcs_diags);
 
             // Assemble and push so the editor sees fresh PHPCS
             // results merged with cached native diagnostics.  In pull
