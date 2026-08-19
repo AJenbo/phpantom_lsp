@@ -934,10 +934,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b217-a-mixed-returning-accessor-loses-the-type-its-arguments-decide" class="md-nav__link">
+  <a href="#b218-new-reflectionpropertyfooclass-bar-forgets-what-it-reflects" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B217. A <code>mixed</code>-returning accessor loses the type its arguments decide
+        B218. <code>new ReflectionProperty(Foo::class, 'bar')</code> forgets what it reflects
       </span>
     </span>
   </a>
@@ -945,10 +945,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b218-new-reflectionpropertyfooclass-bar-forgets-what-it-reflects" class="md-nav__link">
+  <a href="#b224-a-stored-preg_match-result-loses-the-groups-it-matched" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B218. <code>new ReflectionProperty(Foo::class, 'bar')</code> forgets what it reflects
+        B224. A stored <code>preg_match</code> result loses the groups it matched
       </span>
     </span>
   </a>
@@ -1700,10 +1700,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b217-a-mixed-returning-accessor-loses-the-type-its-arguments-decide" class="md-nav__link">
+  <a href="#b218-new-reflectionpropertyfooclass-bar-forgets-what-it-reflects" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B217. A <code>mixed</code>-returning accessor loses the type its arguments decide
+        B218. <code>new ReflectionProperty(Foo::class, 'bar')</code> forgets what it reflects
       </span>
     </span>
   </a>
@@ -1711,10 +1711,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b218-new-reflectionpropertyfooclass-bar-forgets-what-it-reflects" class="md-nav__link">
+  <a href="#b224-a-stored-preg_match-result-loses-the-groups-it-matched" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B218. <code>new ReflectionProperty(Foo::class, 'bar')</code> forgets what it reflects
+        B224. A stored <code>preg_match</code> result loses the groups it matched
       </span>
     </span>
   </a>
@@ -1976,117 +1976,16 @@ their edits through the separate class-rename handler, which understands
 <code>use</code> imports, aliases, and collisions, so the alias and import spellings
 have to be folded consistently too. Constants are correctly
 case-sensitive in PHP and must stay as they are.</p>
-<h3 id="b217-a-mixed-returning-accessor-loses-the-type-its-arguments-decide">B217. A <code>mixed</code>-returning accessor loses the type its arguments decide<a class="headerlink" href="#b217-a-mixed-returning-accessor-loses-the-type-its-arguments-decide" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Complexity: High</strong></p>
-<p>Find References resolves a member access's receiver to a type and keeps
-the access only when that type is in the target's hierarchy. A receiver
-whose type cannot be resolved is skipped, which is the right call over
-matching by spelling, but it means a genuine reference through an
-untyped value is silently dropped. Rename runs the same search, so such
-a site is also left un-rewritten.</p>
-<p>What remains is the case where the receiver's type is decided by the
-<em>arguments</em> of a call to a user function that declares no return type of
-its own:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">class Sudo {</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    /** @return mixed Value of $object-&gt;property */</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">    public static function fetchProperty($object, string $property)</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">    {</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">        $prop = self::getProperty(new \ReflectionObject($object), $property);</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">        return $prop-&gt;getValue($object);</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">    }</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="x">    private static function getProperty(\ReflectionClass $refl, string $property): \ReflectionProperty</span>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="x">    {</span>
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="x">        return $refl-&gt;getProperty($property);</span>
-<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="x">    }</span>
-<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="x">}</span>
-<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>
-<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="x">function probe(Configuration $config): void {</span>
-<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="x">    $shell = Sudo::fetchProperty($config, &#39;shell&#39;);</span>
-<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a><span class="x">    echo $shell::VERSION;  // not counted as a reference to Shell::VERSION</span>
-<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a><span class="x">}</span>
-</code></pre></div>
-<p>Measured on the conformance suite's navigation corpus, this is the one
-missing reference in <code>Psy\Shell::VERSION</code> (20 of 21,
-<code>src/functions.php:383</code>), and the code above is <code>Psy\Sudo</code> verbatim.</p>
-<p>The reflected read itself types: <code>getProperty('shell')</code> on a
-<code>ReflectionClass</code>/<code>ReflectionObject</code> with a known class yields the
-declared type of that property, so the same access written in one frame
-is found. Specialising the shape above one step at a time says exactly
-where the type is lost:</p>
-<table>
-<thead>
-<tr>
-<th>The callee, specialised</th>
-<th>Inside its body</th>
-<th>At the call site</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>static</code>, no declared return, <code>Configuration $object</code>, literal name</td>
-<td><code>$prop</code> is <code>ReflectionProperty&lt;Configuration, 'shell'&gt;</code></td>
-<td>nothing</td>
-</tr>
-<tr>
-<td>the same with <code>@return mixed</code></td>
-<td><code>$prop</code> resolves</td>
-<td><code>mixed</code></td>
-</tr>
-<tr>
-<td><code>$object</code> untyped, <code>string $property</code> (as psysh writes it)</td>
-<td><code>$prop</code> is a bare <code>ReflectionProperty</code></td>
-<td>nothing</td>
-</tr>
-</tbody>
-</table>
-<p>So the type already exists inside the body — it just never leaves the
-function. Four things are in the way, and the first two are
-<a href="../type-inference/#t42-body-return-inference-is-instance-call-only-and-stops-at-return-mixed">T42</a>,
-which is worth doing on its own:</p>
-<ul>
-<li><strong>Body-return inference never runs for a static call.</strong> The fallback
-  lives at the tail of <code>resolve_owner_method_call</code>;
-  <code>resolve_rhs_static_call</code> has none. Every link in the chain above is
-  <code>static</code>.</li>
-<li><strong>A declared <code>@return mixed</code> short-circuits it.</strong> The hint is returned
-  before the inference fallback is reached. <code>mixed</code> says nothing and
-  every type is a subtype of it, so refining it can only narrow.</li>
-<li><strong>Parameters are seeded from the declaration, not the call site.</strong>
-  This is the third row of the table, and it is the real work:
-  <code>seed_params</code> reads the signature, and the resolution context that
-  invokes inference carries neither the resolved argument types nor the
-  <code>content</code>/<code>cursor_offset</code> needed to resolve them. The body-inference
-  memo is keyed <code>(class FQN, method)</code> and would have to grow the
-  argument types too, or one call site's answer gets served to another.</li>
-<li><strong>The helper's declared <code>: \ReflectionProperty</code> erases the binding.</strong>
-  Accepting an inferred refinement needs a rule — same base class, adds
-  generic arguments, inferred wins — which is sound because the
-  refinement is a strict subtype, but it means inference has to run
-  where a return type is already declared. That is the performance
-  cliff; the tightest gate found so far is to allow it only while
-  already inside an inference frame.</li>
-</ul>
-<p>Note that 0.9.0 scored 21 of 21 here. The hit came from the name
-matching removed in f10aedba, which compared the receiver's variable
-name against the short class names in the target hierarchy and paired
-<code>$shell</code> with <code>Shell</code> on spelling alone. That heuristic was the source
-of false references and wrong rename edits, so the drop is a loss of a
-coincidence, not of a working feature. <strong>Do not restore it.</strong> The fix
-is to type the receiver.</p>
-<p>Intelephense and Phpactor miss the same line; the DEVSENSE server finds
-it.</p>
 <h3 id="b218-new-reflectionpropertyfooclass-bar-forgets-what-it-reflects">B218. <code>new ReflectionProperty(Foo::class, 'bar')</code> forgets what it reflects<a class="headerlink" href="#b218-new-reflectionpropertyfooclass-bar-forgets-what-it-reflects" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
 <p>A reflection value built by <code>ReflectionClass::getProperty('bar')</code> carries
 the class and the property name, so reading it types as the property
 declares. Constructing the same value directly does not:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">$viaClass = (new \ReflectionClass(Configuration::class))-&gt;getProperty(&#39;shell&#39;);</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">$viaClass-&gt;getValue($config);   // ?Shell</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">$direct = new \ReflectionProperty(Configuration::class, &#39;shell&#39;);</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">$direct-&gt;getValue($config);     // mixed</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">$viaClass = (new \ReflectionClass(Configuration::class))-&gt;getProperty(&#39;shell&#39;);</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">$viaClass-&gt;getValue($config);   // ?Shell</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">$direct = new \ReflectionProperty(Configuration::class, &#39;shell&#39;);</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">$direct-&gt;getValue($config);     // mixed</span>
 </code></pre></div>
 <p>The two spellings are interchangeable in real code, so the second should
 resolve like the first. The binding cannot come from the constructor's
@@ -2098,6 +1997,48 @@ paths need the same rule the two call paths got, or literal binding has
 to be widened to a <code>@template TName of string</code>, which is what PHPStan
 does for literal string types and would want measuring against the whole
 corpus first.</p>
+<h3 id="b224-a-stored-preg_match-result-loses-the-groups-it-matched">B224. A stored <code>preg_match</code> result loses the groups it matched<a class="headerlink" href="#b224-a-stored-preg_match-result-loses-the-groups-it-matched" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p><code>preg_match</code> writes its groups into an out-parameter, and the shape the
+pattern describes is seeded at the call so a group read types as a
+string. Storing the call's <em>result</em> in a variable first loses it:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">function guarded(string $html): void {</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">    $m = [];</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    if (preg_match(&#39;#(a)(b)#&#39;, $html, $m)) {</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">        strrpos($m[1], &#39;x&#39;);       // string — correct</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">    }</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">}</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="x">function stored(string $html): void {</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="x">    $m = [];</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="x">    $ok = preg_match(&#39;#(a)(b)#&#39;, $html, $m);</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="x">    strrpos($m[1], &#39;x&#39;);           // null — should be string|null</span>
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="x">    if ($ok) {</span>
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="x">        strrpos($m[1], &#39;x&#39;);       // null — should be string</span>
+<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a><span class="x">    }</span>
+<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a><span class="x">}</span>
+</code></pre></div>
+<p>Two separate steps are missing, and the first is the one that produces
+the false positive above:</p>
+<ul>
+<li><strong>The seeding never runs.</strong> <code>process_pass_by_ref</code> hands the whole
+  statement expression to <code>seed_pass_by_ref_primitives</code>, which reads a
+  <code>preg_call</code> off it; an assignment is not a call, so the out-parameter
+  keeps whatever the <code>$m = []</code> before it left, and a group read off an
+  empty shape is <code>null</code> rather than the <code>string|null</code> the call leaves.
+  <code>seed_pass_by_ref_in_condition</code> already looks through an assignment to
+  its right-hand side, which is what the statement path needs too.</li>
+<li><strong>The guard proves nothing.</strong> <code>apply_preg_match_narrowing</code> reads the
+  call out of the condition, so a condition that only names the variable
+  holding the result narrows nothing. The walker already records what a
+  boolean stands for when it is an <code>instanceof</code> (<code>VarAssertion</code>); a
+  <code>preg_match</code> outcome needs the same treatment, so <code>if ($ok)</code> narrows
+  <code>$m</code> to the matched shape and the <code>else</code> branch to the empty one.</li>
+</ul>
+<p>Found while fixing the accessor-argument typing: a body read for its
+return type now resolves further than it used to, so it reaches group
+reads that were previously left unresolved. <code>HTMLPurifier_Lexer</code> in the
+corpus shows all three false positives.</p>
 <h3 id="b183-a-laravel-folio-route-is-reported-as-unknown">B183. A Laravel Folio route is reported as unknown<a class="headerlink" href="#b183-a-laravel-folio-route-is-reported-as-unknown" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: High · Complexity: Medium</strong></p>
 <p>Folio registers routes from the filesystem: a page file under a mounted
