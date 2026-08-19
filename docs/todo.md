@@ -34,7 +34,6 @@ contributor even though it's short.
 
 | #    | Item                                                                                                                                                      | Impact      | Complexity  |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
-| B217 | [Renaming a constant leaves `defined()` and `constant()` calls unrenamed](todo/bugs.md#b217-renaming-a-constant-leaves-defined-and-constant-calls-unrenamed) | Medium-High | Medium      |
 | B216 | [A project-wide external tool run can overwrite a fresher per-file result for a file that stays open](todo/bugs.md#b216-a-project-wide-external-tool-run-can-overwrite-a-fresher-per-file-result-for-a-file-that-stays-open) | Low-Medium  | Medium-High |
 |      | **Release 0.10.0**                                                                                                                                        |             |             |
 

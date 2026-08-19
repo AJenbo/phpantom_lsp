@@ -137,16 +137,35 @@ fn extract_property_hook_call<'a>(
     true
 }
 
-/// Emit the declaration span for the constant `define('NAME', …)` creates.
+/// How many raw source bytes the first decoded character of a string
+/// literal's body consumes.
+///
+/// Only `\\` and the literal's own quote character collapse two raw bytes
+/// into one decoded byte; every other leading byte (including a lone `\`
+/// PHP does not recognise as an escape) maps one-to-one.
+fn leading_char_raw_len(raw: &str, quote: u8) -> u32 {
+    let bytes = raw.as_bytes();
+    if bytes.len() >= 2 && bytes[0] == b'\\' && (bytes[1] == b'\\' || bytes[1] == quote) {
+        2
+    } else {
+        1
+    }
+}
+
+/// Emit a [`SymbolKind::ConstantReference`] span for the constant a
+/// string-literal argument names: the declaration `define('NAME', …)`
+/// creates, or the use `defined('NAME')` / `constant('NAME')` asks about.
 ///
 /// The name is a string literal rather than an identifier, so nothing else
-/// in the extractor sees it.  Without this span the defining call is not a
-/// reference to its own constant: renaming from a use site rewrites every
-/// use and leaves `define()` naming the old constant, so the code no longer
-/// defines what it reads.
-fn try_emit_define_name_span(
+/// in the extractor sees it. Without this span `define()` is not a
+/// reference to its own constant (renaming from a use site rewrites every
+/// use but leaves `define()` naming the old constant) and `defined()` /
+/// `constant()` calls are not references at all (a rename silently leaves
+/// them asking about the old name).
+fn try_emit_constant_name_span(
     argument_list: &ArgumentList<'_>,
     content: &str,
+    is_definition: bool,
     spans: &mut Vec<SymbolSpan>,
 ) {
     let Some(first) = argument_list.arguments.first() else {
@@ -166,25 +185,48 @@ fn try_emit_define_name_span(
     let Some(raw) = content.get(inner_start as usize..inner_end as usize) else {
         return;
     };
+    let Some(literal_text) =
+        content.get(literal.span.start.offset as usize..literal.span.end.offset as usize)
+    else {
+        return;
+    };
+    let Some(value) = literal.value.and_then(literal_bytes_to_str) else {
+        return;
+    };
 
     // Rename rewrites whatever the span covers, so a name that only reaches
-    // PHP through an escape (`define("FO\x4F", 1)`) must not claim to spell
-    // itself in the source.
-    if literal.value.and_then(literal_bytes_to_str) != Some(raw) {
+    // PHP through an escape this can't map back to source bytes (a hex,
+    // octal, or unicode escape) must not claim to spell itself in the
+    // source. `unescape_php_string_literal` resolves only `\\` and the
+    // matching quote escape, leaving every other backslash sequence
+    // literal, so agreement with the real decoded value means no other
+    // escape is in play — the mismatch, if any, is confined to those two.
+    if crate::util::unescape_php_string_literal(literal_text).as_deref() != Some(value) {
+        return;
+    }
+
+    // `constant('Foo::BAR')` / `defined('Foo::BAR')` name a class constant,
+    // not a global one; that member belongs to `MemberAccess`, which this
+    // does not emit.
+    if !is_definition && value.contains("::") {
         return;
     }
 
     // `define('\FOO', 1)` names the same constant `FOO` does, and the span
     // has to cover the name alone for the rename edit to leave the prefix.
-    let name = strip_fqn_prefix(raw);
-    let start = inner_start + (raw.len() - name.len()) as u32;
+    let name = strip_fqn_prefix(value);
+    let start = if name.len() == value.len() {
+        inner_start
+    } else {
+        inner_start + leading_char_raw_len(raw, literal_text.as_bytes()[0])
+    };
 
     spans.push(SymbolSpan {
         start,
         end: inner_end,
         kind: SymbolKind::ConstantReference {
             name: crate::atom::atom(name),
-            is_definition: true,
+            is_definition,
         },
     });
 }
@@ -233,9 +275,19 @@ fn extract_call<'a>(
                         );
                     }
                     if name_clean.eq_ignore_ascii_case("define") {
-                        try_emit_define_name_span(
+                        try_emit_constant_name_span(
                             &func_call.argument_list,
                             ctx.content,
+                            true,
+                            &mut ctx.spans,
+                        );
+                    } else if name_clean.eq_ignore_ascii_case("defined")
+                        || name_clean.eq_ignore_ascii_case("constant")
+                    {
+                        try_emit_constant_name_span(
+                            &func_call.argument_list,
+                            ctx.content,
+                            false,
                             &mut ctx.spans,
                         );
                     }

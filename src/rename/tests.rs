@@ -4974,3 +4974,37 @@ echo Holder::FOO;
         "an unrelated class constant of the same short name must not rename, got: {result}"
     );
 }
+
+#[tokio::test]
+async fn rename_of_a_constant_rewrites_defined_and_constant_calls() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test/defined_constant_calls.php").unwrap();
+    let text = "<?php
+define('FOO', 1);
+
+if (defined('FOO')) {
+    echo constant('FOO');
+}
+";
+
+    open_file(&backend, &uri, text).await;
+
+    let (line, character) = line_char_of(text, "define('FOO', 1);");
+    let edit = rename(&backend, &uri, line, character + 8, "BAR")
+        .await
+        .expect("the name in a define() call should rename");
+    let result = apply_edits(text, &edits_for_uri(&edit, &uri));
+
+    assert!(
+        result.contains("define('BAR', 1);"),
+        "the declaration takes the new name, got: {result}"
+    );
+    assert!(
+        result.contains("defined('BAR')"),
+        "the defined() guard takes the new name, got: {result}"
+    );
+    assert!(
+        result.contains("constant('BAR')"),
+        "the constant() read takes the new name, got: {result}"
+    );
+}

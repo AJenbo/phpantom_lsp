@@ -3061,6 +3061,134 @@ fn define_call_with_a_non_literal_name_declares_nothing() {
 }
 
 #[test]
+fn define_call_with_an_escaped_backslash_keeps_the_namespace() {
+    // The doubled backslash is a single-quoted string escape for `\`, so
+    // the constant this defines is the namespaced `App\FOO`, not the
+    // literal text `App\\FOO`.
+    let php = "<?php\ndefine('App\\\\FOO', 1);\n";
+    let map = parse_and_extract(php);
+
+    let name_offset = php.find("App").unwrap() as u32;
+    let hit = map
+        .lookup(name_offset)
+        .expect("an escaped namespaced define() names a constant");
+    assert!(
+        matches!(
+            hit.kind,
+            SymbolKind::ConstantReference { ref name, is_definition: true } if name == "App\\FOO"
+        ),
+        "Expected the declaration of App\\FOO, got {:?}",
+        hit.kind
+    );
+    assert_eq!(
+        (hit.start, hit.end),
+        (name_offset, name_offset + "App\\\\FOO".len() as u32),
+        "the span covers the whole escaped literal since nothing needs trimming off the front"
+    );
+}
+
+#[test]
+fn define_call_with_an_escaped_leading_backslash_strips_only_the_marker() {
+    // `\\App\\FOO` decodes to `\App\FOO` — a leading FQN marker in front of
+    // a namespaced name. Only the two raw bytes behind that marker should
+    // be trimmed from the front of the span.
+    let php = "<?php\ndefine('\\\\App\\\\FOO', 1);\n";
+    let map = parse_and_extract(php);
+
+    let quote_offset = php.find("define('").unwrap() as u32 + "define('".len() as u32;
+    let hit = map
+        .lookup(quote_offset + 2)
+        .expect("an escaped FQN-prefixed define() names a constant");
+    assert!(
+        matches!(
+            hit.kind,
+            SymbolKind::ConstantReference { ref name, is_definition: true } if name == "App\\FOO"
+        ),
+        "Expected the declaration of App\\FOO, got {:?}",
+        hit.kind
+    );
+    assert_eq!(
+        (hit.start, hit.end),
+        (
+            quote_offset + 2,
+            quote_offset + "\\\\App\\\\FOO".len() as u32
+        ),
+        "the leading escaped backslash (2 raw bytes) is trimmed, the rest of the literal is kept"
+    );
+}
+
+#[test]
+fn defined_call_names_the_constant_it_checks() {
+    let php = "<?php\nif (defined('FOO')) {}\n";
+    let map = parse_and_extract(php);
+
+    let name_offset = php.find("FOO").unwrap() as u32;
+    let hit = map.lookup(name_offset).expect("defined() names a constant");
+    assert!(
+        matches!(
+            hit.kind,
+            SymbolKind::ConstantReference {
+                ref name,
+                is_definition: false,
+            } if name == "FOO"
+        ),
+        "Expected a use of FOO, got {:?}",
+        hit.kind
+    );
+}
+
+#[test]
+fn constant_call_names_the_constant_it_reads() {
+    let php = "<?php\necho constant('FOO');\n";
+    let map = parse_and_extract(php);
+
+    let name_offset = php.find("FOO").unwrap() as u32;
+    let hit = map
+        .lookup(name_offset)
+        .expect("constant() names a constant");
+    assert!(
+        matches!(
+            hit.kind,
+            SymbolKind::ConstantReference {
+                ref name,
+                is_definition: false,
+            } if name == "FOO"
+        ),
+        "Expected a use of FOO, got {:?}",
+        hit.kind
+    );
+}
+
+#[test]
+fn constant_call_naming_a_class_constant_declares_nothing() {
+    // `constant('Foo::BAR')` names a class constant, not a global one; the
+    // member half belongs to `MemberAccess`, which this does not emit.
+    let php = "<?php\necho constant('Foo::BAR');\n";
+    let map = parse_and_extract(php);
+
+    let name_offset = php.find("Foo::BAR").unwrap() as u32;
+    assert!(
+        map.lookup(name_offset).is_none(),
+        "A class constant name should declare nothing, got {:?}",
+        map.lookup(name_offset).map(|hit| &hit.kind)
+    );
+}
+
+#[test]
+fn defined_call_with_a_non_literal_name_declares_nothing() {
+    let php = "<?php\nfunction t(string $name) { defined($name); }\n";
+    let map = parse_and_extract(php);
+
+    let name_offset = php.rfind("$name").unwrap() as u32;
+    let hit = map.lookup(name_offset).expect("the variable is navigable");
+    assert!(
+        matches!(hit.kind, SymbolKind::Variable { .. }),
+        "Expected a variable, got {:?}",
+        hit.kind
+    );
+}
+
+#[test]
 fn unquoted_offset_in_string_interpolation_is_not_a_class_reference() {
     // `"$data[code]"` reads `code` as the string key `'code'`, so the
     // offset is neither a constant nor a class name.

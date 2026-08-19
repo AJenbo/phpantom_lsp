@@ -115,32 +115,6 @@ No outstanding items.
 
 ## Symbol resolution
 
-### B217. Renaming a constant leaves `defined()` and `constant()` calls unrenamed
-
-**Impact: Medium-High · Complexity: Medium**
-
-`defined('FOO')` and `constant('FOO')` name a constant through a string
-literal, and the symbol map emits no `ConstantReference` span for either.
-Renaming `FOO` therefore rewrites the declaration and every ordinary use
-but leaves those calls asking about the old name, so a `defined()` guard
-silently stops guarding and `constant()` fails at runtime. Find
-References under-reports them for the same reason, and neither hovers or
-navigates.
-
-`try_emit_define_name_span`
-(`symbol_map/extraction/expressions/calls.rs`) already does this for
-`define()` and is the shape to follow, with two differences: the span is
-a use rather than a declaration (`is_definition: false`), and a string
-naming a class constant (`constant('Foo::BAR')`) must be excluded or
-routed to `MemberAccess` instead, since it names a member and not a
-global constant.
-
-The same helper also declines a name the source does not spell
-literally, so `define('App\\FOO', 1)` (an escaped backslash inside a
-single-quoted string, which reads as `App\FOO`) still produces no span
-and stays unrenamed. Covering it means spanning a sub-range of the
-literal that agrees with the escaped spelling.
-
 ### B190. Reference-count hints read zero for a global function called from namespaced code
 
 **Impact: Medium · Complexity: Medium**
