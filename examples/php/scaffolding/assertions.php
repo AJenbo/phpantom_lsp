@@ -800,6 +800,9 @@ function runDemoAssertions(): void
     assert($size[1] === '12' && $size[2] === 'kg', 'every group is stored under its number too');
     assert(preg_match('/(\d+)/', 'kg', $noMatch) === 0, 'a pattern that does not match returns 0');
     assert($noMatch === [], 'a failed match leaves the empty array behind, so none of the keys are there');
+    $matched = preg_match('/(?<port>\d+)/', 'host:8080', $address);
+    assert($matched === 1, 'storing the result loses nothing: the call still reports the match');
+    assert($address['port'] === '8080', 'and it still fills the array in, whether or not the result was stored');
     preg_match_all('/(\d+)/', '1, 2, 3', $numbers);
     assert($numbers[1] === ['1', '2', '3'], 'matching all collects every match of a group under its number');
     preg_match_all('/(\d+)/', 'none', $noNumbers);

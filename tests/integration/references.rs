@@ -166,6 +166,77 @@ class Baz {
 }
 
 #[test]
+fn class_references_include_differently_cased_spellings() {
+    // PHP resolves class names case-insensitively, so every spelling of
+    // `Widget` below is a reference to the same class.
+    let backend = create_test_backend();
+    let uri = "file:///tmp/test_refs_class_case.php";
+    let content = r#"<?php
+
+class Widget {}
+
+class Uses {
+    public function test(): void {
+        $a = new WIDGET();
+        $b = new Widget();
+        $c = new widget();
+    }
+}
+"#;
+
+    open_file(&backend, uri, content);
+
+    // Cursor on `Widget` in the class declaration (line 2, col 6).
+    let results = backend
+        .find_references(uri, content, Position::new(2, 6), true)
+        .expect("should find references");
+
+    assert_no_duplicates(&results, "class_references_case");
+    assert_eq!(
+        results.len(),
+        4,
+        "Expected the declaration plus all 3 spellings, got {}: {:#?}",
+        results.len(),
+        results
+    );
+}
+
+#[test]
+fn constructor_references_include_differently_cased_instantiations() {
+    let backend = create_test_backend();
+    let uri = "file:///tmp/test_refs_ctor_case.php";
+    let content = r#"<?php
+
+class Widget {
+    public function __construct(int $size) {}
+}
+
+class Uses {
+    public function test(): void {
+        $a = new WIDGET(1);
+        $b = new Widget(2);
+    }
+}
+"#;
+
+    open_file(&backend, uri, content);
+
+    // Cursor on `__construct` (line 3, col 20).
+    let results = backend
+        .find_references(uri, content, Position::new(3, 20), true)
+        .expect("should find constructor references");
+
+    assert_no_duplicates(&results, "constructor_references_case");
+    assert_eq!(
+        results.len(),
+        3,
+        "Expected the declaration plus both instantiations, got {}: {:#?}",
+        results.len(),
+        results
+    );
+}
+
+#[test]
 fn class_references_without_declaration_no_duplicates() {
     let backend = create_test_backend();
     let uri = "file:///tmp/test_refs_class_nodecl.php";

@@ -857,6 +857,34 @@ pub(crate) fn literal_is_subtype_of(lit: &LiteralValue, supertype: &PhpType) -> 
                     return true;
                 }
 
+                // Lowercase/uppercase string refinements are exactly what
+                // `strtolower`/`strtoupper` would leave unchanged; a content
+                // with no cased characters at all (digits, punctuation, "")
+                // satisfies both.
+                if matches!(
+                    sup_l.as_str(),
+                    "lowercase-string" | "non-empty-lowercase-string"
+                ) && !content.bytes().any(|b| b.is_ascii_uppercase())
+                    && (sup_l != "non-empty-lowercase-string" || !content.is_empty())
+                {
+                    return true;
+                }
+                if matches!(
+                    sup_l.as_str(),
+                    "uppercase-string" | "non-empty-uppercase-string"
+                ) && !content.bytes().any(|b| b.is_ascii_lowercase())
+                    && (sup_l != "non-empty-uppercase-string" || !content.is_empty())
+                {
+                    return true;
+                }
+
+                // `callable-string` enforcement needs the function/method
+                // symbol table, which this layer cannot see; stay silent
+                // rather than reject every function-name literal.
+                if sup_l == "callable-string" {
+                    return true;
+                }
+
                 return false;
             }
             false

@@ -214,7 +214,7 @@ fn find_class<'a>(classes: &'a [Arc<ClassInfo>], fqn: &str) -> Option<&'a ClassI
 }
 
 fn push_class_keys(keys: &mut HashSet<ReferenceIndexKey>, fqn: &str) {
-    push_name_keys(keys, fqn, ReferenceIndexKey::Class);
+    push_name_keys(keys, fqn, ReferenceIndexKey::class_owned);
 }
 
 /// Push both the fully-qualified and the short spelling of `name`.

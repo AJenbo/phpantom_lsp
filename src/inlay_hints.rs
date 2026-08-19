@@ -160,7 +160,7 @@ impl Backend {
             let class_fqn = class.fqn();
 
             if class.keyword_offset != 0 && offset_in_range(class.keyword_offset, range) {
-                let ref_count = self.ref_count(&ReferenceIndexKey::Class(class_fqn.to_string()));
+                let ref_count = self.ref_count(&ReferenceIndexKey::class(&class_fqn));
                 let mut label = reference_label(ref_count);
 
                 if class.kind == ClassLikeKind::Interface || class.is_abstract {

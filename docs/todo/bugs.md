@@ -51,30 +51,6 @@ poisoned by the first file's cached entry:
 Pen::make()->write();           Pen::make()->write();  // may resolve against A\Pen
 ```
 
-### B222. Class reference matching is case-sensitive
-
-**Impact: Medium · Complexity: Medium**
-
-PHP resolves class names case-insensitively, but `class_names_match`
-(`references/mod.rs`), the `ReferenceIndexKey::Class` keys, and
-`build_class_rename_edit` all compare them case-sensitively:
-
-```php
-class Widget {}
-$a = new WIDGET();  // renaming Widget to Gadget leaves this calling WIDGET
-$b = new Widget();
-```
-
-Find References omits the `WIDGET` site and rename leaves it behind,
-which breaks the file it was supposed to fix. This is the same defect
-fixed for functions in the reference index and `find_function_references`
-(where the key is now folded to ASCII lowercase and the comparisons use
-`eq_ignore_ascii_case`); classes need the same treatment, but they reach
-their edits through the separate class-rename handler, which understands
-`use` imports, aliases, and collisions, so the alias and import spellings
-have to be folded consistently too. Constants are correctly
-case-sensitive in PHP and must stay as they are.
-
 ### B218. `new ReflectionProperty(Foo::class, 'bar')` forgets what it reflects
 
 **Impact: Low · Complexity: Medium**
@@ -101,54 +77,6 @@ paths need the same rule the two call paths got, or literal binding has
 to be widened to a `@template TName of string`, which is what PHPStan
 does for literal string types and would want measuring against the whole
 corpus first.
-
-### B224. A stored `preg_match` result loses the groups it matched
-
-**Impact: Medium · Complexity: Medium**
-
-`preg_match` writes its groups into an out-parameter, and the shape the
-pattern describes is seeded at the call so a group read types as a
-string. Storing the call's *result* in a variable first loses it:
-
-```php
-function guarded(string $html): void {
-    $m = [];
-    if (preg_match('#(a)(b)#', $html, $m)) {
-        strrpos($m[1], 'x');       // string — correct
-    }
-}
-
-function stored(string $html): void {
-    $m = [];
-    $ok = preg_match('#(a)(b)#', $html, $m);
-    strrpos($m[1], 'x');           // null — should be string|null
-    if ($ok) {
-        strrpos($m[1], 'x');       // null — should be string
-    }
-}
-```
-
-Two separate steps are missing, and the first is the one that produces
-the false positive above:
-
-- **The seeding never runs.** `process_pass_by_ref` hands the whole
-  statement expression to `seed_pass_by_ref_primitives`, which reads a
-  `preg_call` off it; an assignment is not a call, so the out-parameter
-  keeps whatever the `$m = []` before it left, and a group read off an
-  empty shape is `null` rather than the `string|null` the call leaves.
-  `seed_pass_by_ref_in_condition` already looks through an assignment to
-  its right-hand side, which is what the statement path needs too.
-- **The guard proves nothing.** `apply_preg_match_narrowing` reads the
-  call out of the condition, so a condition that only names the variable
-  holding the result narrows nothing. The walker already records what a
-  boolean stands for when it is an `instanceof` (`VarAssertion`); a
-  `preg_match` outcome needs the same treatment, so `if ($ok)` narrows
-  `$m` to the matched shape and the `else` branch to the empty one.
-
-Found while fixing the accessor-argument typing: a body read for its
-return type now resolves further than it used to, so it reaches group
-reads that were previously left unresolved. `HTMLPurifier_Lexer` in the
-corpus shows all three false positives.
 
 ### B183. A Laravel Folio route is reported as unknown
 
@@ -188,7 +116,7 @@ Reproduced against a Folio-based Laravel application; `route('home')`
 from `routes/web.php` in the same file resolves correctly, so the gap is
 specific to filesystem-derived routes.
 
-### B224. A route group whose name spells out nothing still flags its routes
+### B225. A route group whose name spells out nothing still flags its routes
 
 **Impact: Low · Complexity: Medium**
 

@@ -2340,7 +2340,7 @@ fn workspace_indexing_batch_merges_disk_files() {
 
     let use_uri = crate::util::path_to_uri(&src.join("Use.php"));
     let class_candidates = backend
-        .reference_candidate_uris_for_keys(&[ReferenceIndexKey::Class("App\\Impl\\A".to_string())])
+        .reference_candidate_uris_for_keys(&[ReferenceIndexKey::class("App\\Impl\\A")])
         .expect("reference index should be active after workspace indexing");
     assert!(class_candidates.contains(use_uri.as_str()));
 

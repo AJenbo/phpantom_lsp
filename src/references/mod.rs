@@ -164,6 +164,15 @@ pub(super) fn normalize_fqn(fqn: &str) -> String {
     strip_fqn_prefix(fqn).to_string()
 }
 
+/// [`normalize_fqn`] plus ASCII case folding, for the sets that decide
+/// whether two spellings name the same class.  PHP resolves class names
+/// case-insensitively, so `App\WIDGET` and `App\Widget` have to compare
+/// equal; only use this for membership tests, never for a name that is
+/// shown to the user or written back into source.
+pub(super) fn fold_class_fqn(fqn: &str) -> String {
+    strip_fqn_prefix(fqn).to_ascii_lowercase()
+}
+
 pub(super) fn static_call_root(
     expr: &crate::type_engine::subject_expr::SubjectExpr,
 ) -> Option<(&str, &str)> {
@@ -209,13 +218,15 @@ pub(super) fn is_constructor_name(name: &str) -> bool {
 /// Check whether a resolved class name matches the target FQN.
 ///
 /// Two names match if their fully-qualified forms are equal, or if both
-/// are unqualified and their short names match.
+/// are unqualified and their short names match.  PHP resolves class names
+/// case-insensitively, so `WIDGET` and `Widget` are the same class and all
+/// the comparisons here fold case.
 pub(super) fn class_names_match(resolved: &str, target: &str, target_short: &str) -> bool {
-    if resolved == target {
+    if resolved.eq_ignore_ascii_case(target) {
         return true;
     }
     if !resolved.contains('\\') && !target.contains('\\') {
-        return resolved == target_short;
+        return resolved.eq_ignore_ascii_case(target_short);
     }
     // When the resolved name is unqualified but the target is
     // namespace-qualified, the resolved name might be a short-name
@@ -229,7 +240,7 @@ pub(super) fn class_names_match(resolved: &str, target: &str, target_short: &str
     // `Helper`, so matching by short name alone would produce false
     // positives.
     if !resolved.contains('\\') && target.contains('\\') {
-        return resolved == target_short;
+        return resolved.eq_ignore_ascii_case(target_short);
     }
     false
 }
@@ -237,7 +248,7 @@ pub(super) fn class_names_match(resolved: &str, target: &str, target_short: &str
 pub(super) fn class_candidate_keys(target: &str, target_short: &str) -> Vec<ReferenceIndexKey> {
     symbol_candidate_names(target, target_short)
         .into_iter()
-        .map(ReferenceIndexKey::Class)
+        .map(ReferenceIndexKey::class_owned)
         .collect()
 }
 

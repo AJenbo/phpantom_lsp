@@ -23,6 +23,11 @@ use crate::util::{build_fqn, short_name, strip_fqn_prefix};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum ReferenceIndexKey {
+    /// A class/interface/trait/enum name, ASCII-lowercased.  PHP resolves
+    /// class names case-insensitively, so `new WIDGET()` and `new Widget()`
+    /// name the same class and have to land on the same key; build one with
+    /// [`class`](ReferenceIndexKey::class) or
+    /// [`class_owned`](ReferenceIndexKey::class_owned) rather than by hand.
     Class(String),
     /// A function name, ASCII-lowercased.  PHP resolves function names
     /// case-insensitively, so `HELPER()` and `helper()` are the same
@@ -43,6 +48,20 @@ pub(crate) enum ReferenceIndexKey {
 }
 
 impl ReferenceIndexKey {
+    /// The key a class is indexed under, case-folded to match PHP's
+    /// case-insensitive class resolution.
+    pub(crate) fn class(name: &str) -> Self {
+        Self::Class(crate::ci_map::fold(name).into_owned())
+    }
+
+    /// [`class`](Self::class) for a name that is already owned, folding it
+    /// in place rather than allocating a second copy.  Every file the
+    /// workspace index publishes goes through here.
+    pub(crate) fn class_owned(mut name: String) -> Self {
+        name.make_ascii_lowercase();
+        Self::Class(name)
+    }
+
     /// The key a function is indexed under, case-folded to match PHP's
     /// case-insensitive function resolution.
     pub(crate) fn function(name: &str) -> Self {
@@ -621,7 +640,7 @@ fn class_keys(resolved: &str, source_name: &str) -> Vec<(ReferenceIndexKey, bool
     // `namespace App;` names `App\Widget` and nothing else.
     symbol_name_keys(resolved, source_name, false)
         .into_iter()
-        .map(|(name, counts)| (ReferenceIndexKey::Class(name), counts))
+        .map(|(name, counts)| (ReferenceIndexKey::class_owned(name), counts))
         .collect()
 }
 
@@ -698,8 +717,8 @@ mod tests {
             "<?php\nnamespace App;\nclass Foo {}\n$foo = new Foo();\n",
         );
 
-        let candidates = backend
-            .reference_candidate_uris_for_keys(&[ReferenceIndexKey::Class("App\\Foo".to_string())]);
+        let candidates =
+            backend.reference_candidate_uris_for_keys(&[ReferenceIndexKey::class("App\\Foo")]);
 
         assert!(candidates.is_none());
     }
@@ -710,8 +729,8 @@ mod tests {
         backend.skip_reference_index = true;
         backend.workspace_indexed.store(true, Ordering::Release);
 
-        let candidates = backend
-            .reference_candidate_uris_for_keys(&[ReferenceIndexKey::Class("App\\Foo".to_string())]);
+        let candidates =
+            backend.reference_candidate_uris_for_keys(&[ReferenceIndexKey::class("App\\Foo")]);
 
         assert!(candidates.is_none());
     }
@@ -726,11 +745,7 @@ mod tests {
         );
         backend.workspace_indexed.store(true, Ordering::Release);
 
-        assert_candidate_contains(
-            &backend,
-            ReferenceIndexKey::Class("App\\Foo".to_string()),
-            uri,
-        );
+        assert_candidate_contains(&backend, ReferenceIndexKey::class("App\\Foo"), uri);
         assert_candidate_contains(&backend, ReferenceIndexKey::function("App\\helper"), uri);
         assert_candidate_contains(
             &backend,
@@ -765,16 +780,12 @@ mod tests {
         backend.update_ast(uri, "<?php\nnamespace App;\nclass Foo {}\nnew Foo();\n");
         backend.workspace_indexed.store(true, Ordering::Release);
 
-        assert_candidate_contains(
-            &backend,
-            ReferenceIndexKey::Class("App\\Foo".to_string()),
-            uri,
-        );
+        assert_candidate_contains(&backend, ReferenceIndexKey::class("App\\Foo"), uri);
 
         backend.clear_file_maps(uri);
 
-        let candidates = backend
-            .reference_candidate_uris_for_keys(&[ReferenceIndexKey::Class("App\\Foo".to_string())]);
+        let candidates =
+            backend.reference_candidate_uris_for_keys(&[ReferenceIndexKey::class("App\\Foo")]);
         assert!(candidates.unwrap().is_empty());
     }
 
@@ -788,24 +799,16 @@ mod tests {
             uri.clone(),
             class_declaration_symbol_map("Old"),
         )]);
-        assert_candidate_contains(&backend, ReferenceIndexKey::Class("Old".to_string()), &uri);
+        assert_candidate_contains(&backend, ReferenceIndexKey::class("Old"), &uri);
 
         backend.reindex_references_for_symbol_maps_batch(vec![
             (uri.clone(), class_declaration_symbol_map("First")),
             (uri.clone(), class_declaration_symbol_map("Second")),
         ]);
 
-        assert_candidate_not_contains(&backend, ReferenceIndexKey::Class("Old".to_string()), &uri);
-        assert_candidate_not_contains(
-            &backend,
-            ReferenceIndexKey::Class("First".to_string()),
-            &uri,
-        );
-        assert_candidate_contains(
-            &backend,
-            ReferenceIndexKey::Class("Second".to_string()),
-            &uri,
-        );
+        assert_candidate_not_contains(&backend, ReferenceIndexKey::class("Old"), &uri);
+        assert_candidate_not_contains(&backend, ReferenceIndexKey::class("First"), &uri);
+        assert_candidate_contains(&backend, ReferenceIndexKey::class("Second"), &uri);
     }
 
     #[test]
@@ -853,24 +856,16 @@ mod tests {
             ),
         ]);
 
-        assert_candidate_contains(
-            &backend,
-            ReferenceIndexKey::Class("User".to_string()),
-            &user_uri,
-        );
+        assert_candidate_contains(&backend, ReferenceIndexKey::class("User"), &user_uri);
+        assert_candidate_not_contains(&backend, ReferenceIndexKey::class("Package"), &vendor_uri);
         assert_candidate_not_contains(
             &backend,
-            ReferenceIndexKey::Class("Package".to_string()),
-            &vendor_uri,
-        );
-        assert_candidate_not_contains(
-            &backend,
-            ReferenceIndexKey::Class("StubClass".to_string()),
+            ReferenceIndexKey::class("StubClass"),
             "phpantom-stub://core.php",
         );
         assert_candidate_not_contains(
             &backend,
-            ReferenceIndexKey::Class("StubFunctionClass".to_string()),
+            ReferenceIndexKey::class("StubFunctionClass"),
             "phpantom-stub-fn://core.php",
         );
     }
@@ -894,7 +889,7 @@ mod tests {
         )]);
 
         let candidates = backend
-            .reference_candidate_uris_for_keys(&[ReferenceIndexKey::Class("self".to_string())])
+            .reference_candidate_uris_for_keys(&[ReferenceIndexKey::class("self")])
             .expect("workspace should be marked indexed");
         assert!(candidates.is_empty());
     }
@@ -943,7 +938,7 @@ mod tests {
     #[test]
     fn evicting_unknown_uri_is_noop() {
         let mut index = ReferenceIndexInner::default();
-        let key = ReferenceIndexKey::Class("Foo".to_string());
+        let key = ReferenceIndexKey::class("Foo");
         let uri: Arc<str> = Arc::from("file:///project/src/Foo.php");
         index
             .by_key
@@ -1038,6 +1033,23 @@ mod tests {
             reference_count(&backend, ReferenceIndexKey::function("helper")),
             1
         );
+    }
+
+    #[test]
+    fn class_keys_ignore_the_case_the_reference_is_spelled_with() {
+        let backend = Backend::new_test();
+        let uri = "file:///project/src/Widget.php";
+        backend.update_ast(
+            uri,
+            "<?php\nnamespace App;\nclass Widget {}\n$a = new WIDGET();\n$b = new widget();\n",
+        );
+        backend.workspace_indexed.store(true, Ordering::Release);
+
+        assert_eq!(
+            reference_count(&backend, ReferenceIndexKey::class("App\\Widget")),
+            2
+        );
+        assert_candidate_contains(&backend, ReferenceIndexKey::class("App\\WIDGET"), uri);
     }
 
     /// How many references the whole index credits to `key`.

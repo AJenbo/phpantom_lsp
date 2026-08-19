@@ -1718,6 +1718,99 @@ async fn rename_class_same_file_no_use_statement() {
 }
 
 #[tokio::test]
+async fn rename_class_rewrites_differently_cased_references() {
+    // PHP resolves class names case-insensitively, so `new WIDGET()` is a
+    // reference to `Widget` and has to be rewritten with the rest.
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Widget {}\n",
+        "$a = new WIDGET();\n",
+        "$b = new Widget();\n",
+        "$c = new widget();\n",
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    let edit = rename(&backend, &uri, 1, 7, "Gadget").await;
+    assert!(edit.is_some(), "Expected a workspace edit");
+
+    let file_edits = edits_for_uri(&edit.unwrap(), &uri);
+    let result = apply_edits(text, &file_edits);
+
+    assert_eq!(
+        result.matches("Gadget").count(),
+        4,
+        "Every spelling of Widget should become Gadget; got:\n{}",
+        result
+    );
+    assert!(
+        !result.to_ascii_lowercase().contains("widget"),
+        "No spelling of the old name should remain; got:\n{}",
+        result
+    );
+}
+
+#[tokio::test]
+async fn rename_from_a_differently_cased_reference_uses_the_declared_name() {
+    // A same-namespace reference resolves to an FQN spelled the way the
+    // *reference* writes it, so starting the rename from `WIDGET` yields
+    // `Acme\Parts\WIDGET`.  Everything downstream reads the old short name
+    // back out of that FQN, and the file rename compares it to the file
+    // stem, so the name has to be canonicalized to the declaration first.
+    let backend = Backend::new_test();
+    backend
+        .supports_file_rename
+        .store(true, std::sync::atomic::Ordering::Release);
+
+    let uri_decl = Url::parse("file:///src/Widget.php").unwrap();
+    let uri_usage = Url::parse("file:///src/Usage.php").unwrap();
+
+    let text_decl = concat!(
+        "<?php\n",
+        "namespace Acme\\Parts;\n",
+        "\n",
+        "class Widget {}\n",
+    );
+
+    let text_usage = concat!(
+        "<?php\n",
+        "namespace Acme\\Parts;\n",
+        "\n",
+        "class Usage {\n",
+        "    public function make(): void {\n",
+        "        $w = new WIDGET();\n",
+        "    }\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri_decl, text_decl).await;
+    open_file(&backend, &uri_usage, text_usage).await;
+
+    // Line 5, col 21 is inside `WIDGET`.
+    let edit = rename(&backend, &uri_usage, 5, 21, "Gadget").await;
+    assert!(
+        edit.is_some(),
+        "Expected a workspace edit from the mis-cased reference site"
+    );
+
+    let ws = edit.unwrap();
+
+    let rf = extract_rename_file(&ws)
+        .expect("the declaration file is named after the class, so it should be renamed with it");
+    assert_eq!(rf.old_uri.to_string(), "file:///src/Widget.php");
+    assert_eq!(rf.new_uri.to_string(), "file:///src/Gadget.php");
+
+    let result = apply_edits(text_usage, &doc_change_edits_for_uri(&ws, &uri_usage));
+    assert!(
+        result.contains("new Gadget()"),
+        "The mis-cased reference should be rewritten; got:\n{}",
+        result
+    );
+}
+
+#[tokio::test]
 async fn rename_class_updates_use_import_from_reference_site() {
     // Trigger rename from a reference site (not the declaration) and
     // verify the use statement is still updated.

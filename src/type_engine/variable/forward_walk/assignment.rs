@@ -1583,6 +1583,9 @@ pub(crate) fn process_assignment_expr<'b>(
         // `$period = $agreement?->latestPeriod()` makes `$period`'s null
         // stand for `$agreement`'s, so ruling out one rules out the other.
         record_nullsafe_origin(&lhs_name, assignment.rhs, scope);
+        // `$ok = preg_match('/…/', $s, $m)` makes `$ok` stand for the
+        // match's outcome, so testing it later narrows `$m`.
+        record_preg_outcome(&lhs_name, assignment.rhs, scope, ctx);
     }
 }
 
@@ -2302,6 +2305,22 @@ pub(crate) fn process_pass_by_ref<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
+    // `$ok = preg_match($p, $s, $m);` makes the same call, and writes the
+    // same out-parameter, as the bare `preg_match($p, $s, $m);` statement
+    // does; none of the three passes below recognise anything but a call,
+    // so the assignment has to come off first.
+    let (expr, assigned) = pass_by_ref_call_expr(expr);
+
+    // The assignment lands once the call has returned, so a variable that
+    // is both the statement's target and an out-parameter of its call
+    // (`$file = end($file);`) ends up holding what was assigned to it, not
+    // what the callee wrote through the reference.  Everything the passes
+    // below decide about it is put back afterwards.
+    let assigned_before: Vec<(&str, Option<Vec<ResolvedType>>)> = assigned
+        .iter()
+        .map(|name| (*name, scope.locals.get(&atom(name)).cloned()))
+        .collect();
+
     // When a function call passes a variable to a parameter declared
     // as `Type &$param`, the variable acquires that type after the call.
     //
@@ -2367,6 +2386,42 @@ pub(crate) fn process_pass_by_ref<'b>(
     // `array`, `int`, `string` return empty from
     // `type_hint_to_classes_typed` and are missed.
     seed_pass_by_ref_primitives(expr, scope, ctx);
+
+    for (name, before) in assigned_before {
+        let key = atom(name);
+        match before {
+            Some(types) => scope.locals.insert(key, types),
+            None => scope.locals.remove(&key),
+        };
+    }
+}
+
+/// The call an expression statement makes, and the variables it assigns the
+/// result to.
+///
+/// A statement that stores the call's result (`$ok = f($out);`, and the
+/// chained `$a = $b = f($out);`) still makes the call and still lets the
+/// callee write through `$out`, so the assignment wrapper is looked
+/// through before the by-reference passes read the expression.  The
+/// assigned names come back with it because the assignment outlives the
+/// call: `$file = end($file);` leaves `$file` holding what `end()`
+/// returned, not the `array|object` its parameter is declared as.
+fn pass_by_ref_call_expr<'b>(expr: &'b Expression<'b>) -> (&'b Expression<'b>, Vec<&'b str>) {
+    let mut assigned = Vec::new();
+    let mut inner = expr;
+    loop {
+        match inner {
+            Expression::Assignment(assignment) => {
+                if let Expression::Variable(Variable::Direct(dv)) = assignment.lhs {
+                    assigned.push(bytes_to_str(dv.name));
+                }
+                inner = assignment.rhs;
+            }
+            Expression::Parenthesized(paren) => inner = paren.expression,
+            _ => break,
+        }
+    }
+    (inner, assigned)
 }
 
 /// Seed PHP superglobals (`$_SERVER`, `$_GET`, `$_POST`, etc.) into the

@@ -1643,6 +1643,14 @@ class ConditionalReturnDemo
         preg_match('/(\d+)/', '12kg', $maybe);
         strtoupper($maybe[1] ?? '');              // may be missing → ?string
 
+        // Storing the result first changes nothing: the call still filled
+        // the array in, and the variable holding the outcome stands for the
+        // match, so testing it later narrows the array the same way.
+        $matched = preg_match('/(?<port>\d+)/', 'host:8080', $address);
+        if ($matched) {
+            strtoupper($address['port']);         // guarded by the result → string
+        }
+
         // `preg_match_all()` collects every match of a group, so the same
         // key holds a list of them rather than one.
         preg_match_all('/(\d+)/', '1, 2, 3', $numbers);

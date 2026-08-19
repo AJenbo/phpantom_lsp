@@ -36,7 +36,7 @@ impl Backend {
                 } else {
                     ctx.resolve_name_at(name, offset)
                 };
-                Some(strip_fqn_prefix(&fqn).to_string())
+                Some(self.canonical_class_fqn(strip_fqn_prefix(&fqn)))
             }
             SymbolKind::ClassDeclaration { name } => {
                 let ctx = self.file_context(uri);
@@ -44,6 +44,24 @@ impl Backend {
             }
             _ => None,
         }
+    }
+
+    /// The spelling the class declares itself with.
+    ///
+    /// A reference may name a class in any casing (`new WIDGET()` reaches
+    /// `App\Widget`), but every later step of the rename reads the old
+    /// short name back out of this FQN: to decide whether an import is
+    /// aliased, whether the new name collides, and whether the file is
+    /// named after the class.  Answering those against the reference's
+    /// casing rather than the declaration's gets all three wrong, so the
+    /// name is canonicalized once here.
+    fn canonical_class_fqn(&self, fqn: &str) -> String {
+        self.symbols
+            .fqn_uri_index
+            .read()
+            .get_key_value(fqn)
+            .map(|(declared, _)| declared.to_string())
+            .unwrap_or_else(|| fqn.to_string())
     }
 
     /// Check whether renaming a class should also rename the file.
@@ -210,7 +228,7 @@ impl Backend {
             //   must use that alias.
             // - Otherwise, in-code refs switch from old short name to new short name.
             let (skip_alias_refs, in_code_replacement) = match &import_info {
-                Some(info) if info.alias != old_short_name => {
+                Some(info) if info.has_explicit_alias => {
                     // Explicit alias: in-code refs use the alias, leave them alone.
                     (true, info.alias.clone())
                 }
@@ -274,7 +292,11 @@ impl Backend {
                         range: loc.range,
                         new_text,
                     });
-                } else if skip_alias_refs && source_text == import_info.as_ref().unwrap().alias {
+                } else if skip_alias_refs
+                    && import_info
+                        .as_ref()
+                        .is_some_and(|info| source_text.eq_ignore_ascii_case(&info.alias))
+                {
                     // This reference uses the alias.  The alias is being
                     // preserved, so skip this edit entirely.
                     continue;
@@ -403,7 +425,7 @@ impl Backend {
                 && has_import_collision(&file_use_map, old_fqn_normalized, new_short_name);
 
             let (skip_alias_refs, in_code_replacement) = match &import_info {
-                Some(info) if info.alias != old_short_name => (true, info.alias.clone()),
+                Some(info) if info.has_explicit_alias => (true, info.alias.clone()),
                 Some(_) if has_collision => {
                     let alias = pick_collision_alias(new_short_name, &file_use_map);
                     (false, alias)
@@ -501,7 +523,7 @@ impl Backend {
                 } else if skip_alias_refs
                     && import_info
                         .as_ref()
-                        .is_some_and(|info| source_text == info.alias)
+                        .is_some_and(|info| source_text.eq_ignore_ascii_case(&info.alias))
                 {
                     continue;
                 } else if class_name_changed {
@@ -647,15 +669,23 @@ fn has_import_collision(
 
 /// Pick an alias name to avoid a collision.
 ///
-/// Tries `"{name}Alias"` first, then `"{name}Alias2"`, etc.
+/// Tries `"{name}Alias"` first, then `"{name}Alias2"`, etc.  An alias is
+/// a class name, so a candidate that differs from an existing import only
+/// in casing still collides.
 fn pick_collision_alias(base_name: &str, use_map: &HashMap<String, String>) -> String {
+    let is_free = |candidate: &str| {
+        !use_map
+            .keys()
+            .any(|alias| alias.eq_ignore_ascii_case(candidate))
+    };
+
     let candidate = format!("{}Alias", base_name);
-    if !use_map.contains_key(&candidate) {
+    if is_free(&candidate) {
         return candidate;
     }
     for i in 2..100 {
         let candidate = format!("{}Alias{}", base_name, i);
-        if !use_map.contains_key(&candidate) {
+        if is_free(&candidate) {
             return candidate;
         }
     }

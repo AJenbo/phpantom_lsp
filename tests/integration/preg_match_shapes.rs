@@ -149,6 +149,68 @@ function probe(string $s): void {
     );
 }
 
+/// Storing the call's result first must not cost the out-parameter its shape:
+/// the call still ran, so the groups it may have written are still there.
+#[test]
+fn storing_the_result_keeps_the_group_shape() {
+    let content = r#"<?php
+function probe(string $s): void {
+    $ok = preg_match('/(\d+)/', $s, $matches);
+    $whole = $matches;
+    $group = $matches[1];
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$whole", "array{0: string, 1: string}|array{}"),
+            ("$group", "string|null"),
+        ],
+    );
+}
+
+/// The assignment happens once the call has returned, so a variable that is
+/// both the statement's target and an out-parameter of its call keeps what it
+/// was assigned rather than what the parameter is declared as.
+#[test]
+fn assigning_a_calls_result_to_its_own_out_parameter_keeps_the_result() {
+    let content = r#"<?php
+function probe(string $s): void {
+    $parts = explode('/', $s);
+    $last = end($parts);
+    $file = explode('/', $s);
+    $file = end($file);
+    $tail = $file;
+}
+"#;
+    assert_assigned_types(content, &[("$last", "string"), ("$tail", "string")]);
+}
+
+/// The variable holding the result stands for the outcome of the match, so
+/// testing it narrows the out-parameter the way testing the call does.
+#[test]
+fn a_guard_on_the_stored_result_narrows_the_out_parameter() {
+    let content = r#"<?php
+function probe(string $s): void {
+    $ok = preg_match('/(\d+)/', $s, $matches);
+    if ($ok) {
+        $matched = $matches;
+        $group = $matches[1];
+    } else {
+        $failed = $matches;
+    }
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$matched", "array{0: string, 1: string}"),
+            ("$group", "string"),
+            ("$failed", "array{}"),
+        ],
+    );
+}
+
 /// The branch that runs when the match failed knows the array is empty.
 #[test]
 fn a_failed_match_leaves_the_empty_array() {

@@ -33,6 +33,24 @@ pub(crate) struct VarAssertion {
     pub allow_string: bool,
 }
 
+/// The `preg_match` outcome a variable holds the result of.
+///
+/// `$ok = preg_match('/(\d+)/', $s, $m);` records `$m` and the shape a
+/// successful match leaves in it under `$ok`, so a later test on `$ok`
+/// narrows `$m` exactly as testing the call itself does. The shape is
+/// stored rather than the call, because the condition that tests it is
+/// somewhere else entirely and has no view of the pattern.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct PregOutcome {
+    /// Scope key the outcome narrows (`"$m"`).
+    pub matches_var: Atom,
+    /// The shape a successful match leaves in it.
+    pub matched: PhpType,
+    /// The call was `preg_match_all`, whose failed match is shaped
+    /// differently from `preg_match`'s.
+    pub matches_all: bool,
+}
+
 /// The type-state of all variables at a single program point.
 ///
 /// This is the equivalent of PHPStan's `expressionTypes` map and Mago's
@@ -68,6 +86,12 @@ pub(crate) struct ScopeState {
     /// "not null now" is evidence of a narrowing only if null was in play.
     pub nullsafe_origins: AtomMap<Vec<Atom>>,
 
+    /// Variable name → the `preg_match` outcome its value is.
+    ///
+    /// The same idea as `assertions`, for the one check whose subject is
+    /// an out-parameter rather than the tested expression itself.
+    pub preg_outcomes: AtomMap<PregOutcome>,
+
     /// No value can reach this program point.
     ///
     /// Set when a condition narrows some variable down to nothing — the
@@ -85,6 +109,7 @@ impl ScopeState {
             locals: AtomMap::default(),
             assertions: AtomMap::default(),
             nullsafe_origins: AtomMap::default(),
+            preg_outcomes: AtomMap::default(),
             unreachable: false,
         }
     }
@@ -204,6 +229,11 @@ impl ScopeState {
             self.nullsafe_origins
                 .retain(|holder, receivers| !stale(holder) && !receivers.iter().any(stale));
         }
+        if !self.preg_outcomes.is_empty() {
+            self.preg_outcomes.remove(&key);
+            self.preg_outcomes
+                .retain(|holder, outcome| !stale(holder) && !stale(&outcome.matches_var));
+        }
     }
 
     /// Record that the value stored under `holder` came from a `?->` chain
@@ -225,6 +255,7 @@ impl ScopeState {
         if self.locals.len() != other.locals.len()
             || self.assertions != other.assertions
             || self.nullsafe_origins != other.nullsafe_origins
+            || self.preg_outcomes != other.preg_outcomes
         {
             return false;
         }
@@ -300,6 +331,14 @@ impl ScopeState {
         if !self.nullsafe_origins.is_empty() {
             self.nullsafe_origins
                 .retain(|name, receivers| other.nullsafe_origins.get(name) == Some(receivers));
+        }
+
+        // Likewise for a stored match outcome: a path that never ran the
+        // call, or reassigned either half of it, leaves the boolean
+        // standing for nothing at the joined point.
+        if !self.preg_outcomes.is_empty() {
+            self.preg_outcomes
+                .retain(|name, outcome| other.preg_outcomes.get(name) == Some(outcome));
         }
 
         for (name, other_types) in &other.locals {
