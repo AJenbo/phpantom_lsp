@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787111369603,
+  "lastUpdate": 1787111441020,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -23595,6 +23595,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 79,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "4352d560806ca8dcb8fd277c0456c4d6ef31a0ab",
+          "message": "One unanalysable file no longer stops workspace diagnostics",
+          "timestamp": "2026-08-19T05:31:44+02:00",
+          "tree_id": "587d5ad825779a37df2a93ebbfe5b6a823255b82",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/4352d560806ca8dcb8fd277c0456c4d6ef31a0ab"
+        },
+        "date": 1787111436918,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 82,
             "unit": "MiB"
           }
         ]
