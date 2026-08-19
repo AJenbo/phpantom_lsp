@@ -397,6 +397,17 @@ pub struct MagoConfig {
     /// - `""` — disable Mago.
     /// - Any other value — use as the command.
     pub command: Option<String>,
+    /// Whether to proxy `mago lint` diagnostics.
+    ///
+    /// - `None` (default) — proxy them when the workspace `mago.toml`
+    ///   configures the linter (it carries a `[linter]` table).
+    /// - `true` / `false` — always / never, whatever `mago.toml` says.
+    pub lint: Option<bool>,
+    /// Whether to proxy `mago analyze` diagnostics.
+    ///
+    /// Same three states as [`lint`](Self::lint), keyed on an
+    /// `[analyzer]` table in `mago.toml` when unset.
+    pub analyze: Option<bool>,
     /// Maximum runtime in milliseconds before `mago lint` is killed.
     /// Defaults to 30 000 ms (30 seconds).
     #[serde(rename = "lint-timeout")]
@@ -745,6 +756,9 @@ mod tests {
         assert!(config.phpcs.timeout.is_none());
         assert_eq!(config.phpcs.timeout_ms(), 30_000);
         assert!(config.mago.command.is_none());
+        // Unset means "follow mago.toml", not on or off.
+        assert!(config.mago.lint.is_none());
+        assert!(config.mago.analyze.is_none());
         assert!(config.mago.lint_timeout.is_none());
         assert!(config.mago.analyze_timeout.is_none());
         assert_eq!(config.mago.lint_timeout_ms(), 30_000);
@@ -1052,6 +1066,8 @@ timeout = 15000
 
 [mago]
 command = "/usr/local/bin/mago"
+lint = true
+analyze = false
 lint-timeout = 15000
 analyze-timeout = 45000
 "#,
@@ -1092,6 +1108,8 @@ analyze-timeout = 45000
         assert_eq!(config.phpcs.standard.as_deref(), Some("PSR12"));
         assert_eq!(config.phpcs.timeout_ms(), 15_000);
         assert_eq!(config.mago.command.as_deref(), Some("/usr/local/bin/mago"));
+        assert_eq!(config.mago.lint, Some(true));
+        assert_eq!(config.mago.analyze, Some(false));
         assert_eq!(config.mago.lint_timeout_ms(), 15_000);
         assert_eq!(config.mago.analyze_timeout_ms(), 45_000);
         assert!(!config.mago.is_disabled());

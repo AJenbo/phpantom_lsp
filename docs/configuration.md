@@ -108,9 +108,17 @@ Mago is only activated when `mago.toml` exists at the workspace root.
 
 | Key               | Type    | Default | Description |
 | ----------------- | ------- | ------- | ----------- |
-| `command`         | string  | unset   | Command or path for Mago. Unset: auto-detect via `vendor/bin/mago` then `$PATH`. `""`: disable. |
+| `command`         | string  | unset   | Command or path for Mago. Unset: auto-detect via `vendor/bin/mago` (only when `composer.json` requires `carthage-software/mago` directly) then `$PATH`. `""`: disable. |
+| `lint`            | bool    | unset   | Proxy `mago lint` diagnostics. Unset: only when `mago.toml` has a `[linter]` table. |
+| `analyze`         | bool    | unset   | Proxy `mago analyze` diagnostics. Unset: only when `mago.toml` has an `[analyzer]` table, and on Laravel only when it also wires up an extension. |
 | `lint-timeout`    | integer | `30000` | Max runtime in milliseconds before `mago lint` is killed. |
 | `analyze-timeout` | integer | `60000` | Max runtime in milliseconds before `mago analyze` is killed. |
+
+Which of Mago's two diagnostic commands run follows the workspace `mago.toml`, since a project that uses Mago for one thing rarely wants the others. A `mago.toml` holding a `[formatter]` table and nothing else belongs to a project that formats with Mago and checks its code with something else, so neither `mago lint` nor `mago analyze` is proxied for it.
+
+On a Laravel project, `mago analyze` additionally needs the `mago.toml` to wire up an extension, either an enabled `[extension-hosts.*]` entry or a namespaced plugin such as `plugins = ["acme/laravel"]`. Mago's analyser has no built-in Laravel support, so without one it cannot see through Eloquent or the facades and reports correct code in bulk. Mago's own plugins (`stdlib`, `psl`, `flow-php`, `psr-container`) do not count, since none of them supplies that knowledge. `mago lint` is unaffected, as its linter does have a Laravel integration.
+
+Set `lint` or `analyze` explicitly to override all of this in either direction.
 
 ### `[laravel]`
 

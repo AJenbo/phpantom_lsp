@@ -11,10 +11,16 @@
 //! without a configuration file.  The binary resolution chain is:
 //!
 //! 1. Explicit `.phpantom.toml` `command` value.
-//! 2. `vendor/bin/mago` under the workspace root.
+//! 2. `vendor/bin/mago` under the workspace root, when `composer.json`
+//!    depends on `carthage-software/mago` directly.
 //! 3. `mago` on `$PATH`.
 //!
 //! Set `command = ""` to explicitly disable Mago.
+//!
+//! Which of Mago's two diagnostic commands run is decided separately,
+//! from the tables the workspace `mago.toml` carries — see
+//! [`enabled_services`], and [`analyzer_understands_laravel`] for the
+//! extra condition `mago analyze` carries on a Laravel project.
 //!
 //! ## Configuration (`.phpantom.toml`)
 //!
@@ -24,6 +30,11 @@
 //! # vendor/bin/mago, then mago on $PATH.
 //! # Set to "" to disable.
 //! # command = "vendor/bin/mago"
+//!
+//! # Whether to proxy `mago lint` / `mago analyze` diagnostics. When
+//! # unset, each follows the matching table in mago.toml.
+//! # lint = true
+//! # analyze = false
 //!
 //! # Maximum runtime in milliseconds before `mago lint` is killed.
 //! # Defaults to 30 000 ms (30 seconds).
@@ -50,10 +61,15 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
+use serde::Deserialize;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range};
 
+use crate::composer::ComposerPackage;
 use crate::config::MagoConfig;
 use crate::process::paths_match;
+
+/// Composer package name Mago is distributed under.
+const MAGO_PACKAGE: &str = "carthage-software/mago";
 
 // ── Tool resolution ─────────────────────────────────────────────────
 
@@ -77,21 +93,196 @@ pub(crate) fn has_mago_config(workspace_root: &Path) -> bool {
 ///
 /// Resolution rules:
 /// - Config value `Some("")` (empty string) → disabled (`None`).
-/// - Config value `Some(cmd)` → use `cmd` as-is (user override).
-/// - Config value `None` → auto-detect: try `vendor/bin/mago` under
-///   the workspace root, then search `$PATH`.
+/// - Config value `Some(cmd)` → use `cmd` as-is (user override, and it
+///   bypasses the `composer.json` check below, which is how a manually
+///   installed Mago outside the Composer bin dir is wired up).
+/// - Config value `None` → auto-detect:
+///   - `<bin_dir>/mago` under the workspace root, but only when the
+///     project depends on `carthage-software/mago` directly (`require`
+///     or `require-dev`), so a binary pulled in as somebody else's
+///     transitive dependency is not proxied as though the project used
+///     it.
+///   - otherwise `$PATH`, unconditionally — installing Mago globally
+///     was a deliberate choice rather than leftover state.
 pub(crate) fn resolve_mago(
     workspace_root: Option<&Path>,
     config: &MagoConfig,
     bin_dir: Option<&str>,
+    composer_json: Option<&ComposerPackage>,
 ) -> Option<ResolvedMago> {
     match config.command.as_deref() {
         Some("") => None,
         Some(cmd) => Some(ResolvedMago {
             path: PathBuf::from(cmd),
         }),
-        None => crate::process::auto_detect_binary(workspace_root, bin_dir, "mago")
-            .map(|path| ResolvedMago { path }),
+        None => {
+            let depends_on_mago =
+                composer_json.is_some_and(|pkg| crate::composer::has_dependency(pkg, MAGO_PACKAGE));
+
+            if depends_on_mago && let Some(root) = workspace_root {
+                let bin = bin_dir.unwrap_or("vendor/bin");
+                let candidate = root.join(bin).join("mago");
+                if candidate.is_file() {
+                    return Some(ResolvedMago { path: candidate });
+                }
+            }
+
+            crate::process::which("mago")
+                .ok()
+                .map(|path| ResolvedMago { path })
+        }
+    }
+}
+
+// ── Service detection ───────────────────────────────────────────────
+
+/// Which of Mago's two diagnostic commands PHPantom should proxy.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct MagoServices {
+    /// Proxy `mago lint`.
+    pub lint: bool,
+    /// Proxy `mago analyze`.
+    pub analyze: bool,
+}
+
+impl MagoServices {
+    /// Whether neither command should run.
+    pub fn none_enabled(&self) -> bool {
+        !self.lint && !self.analyze
+    }
+}
+
+/// What a workspace `mago.toml` says about how the project uses Mago.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct MagoTomlProbe {
+    /// A `[linter]` table is present.
+    linter: bool,
+    /// An `[analyzer]` table is present.
+    analyzer: bool,
+    /// The file wires up at least one extension.
+    extension: bool,
+}
+
+/// The `mago.toml` tables PHPantom reads.
+///
+/// Every other key is ignored, so the probe stays valid as Mago's schema
+/// grows.  It deliberately does not mirror Mago's own schema, which
+/// rejects unknown fields: a key PHPantom has never heard of must not
+/// stop it reading the ones it has.
+#[derive(Deserialize)]
+struct MagoToml {
+    linter: Option<serde::de::IgnoredAny>,
+    analyzer: Option<MagoTomlAnalyzer>,
+    #[serde(rename = "extension-hosts", default)]
+    extension_hosts: std::collections::HashMap<String, MagoTomlExtensionHost>,
+}
+
+#[derive(Deserialize)]
+struct MagoTomlAnalyzer {
+    #[serde(default)]
+    plugins: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct MagoTomlExtensionHost {
+    /// Mago starts a host unless it is switched off, so an entry that
+    /// leaves this out counts as enabled.
+    #[serde(default = "host_enabled_by_default")]
+    enabled: bool,
+}
+
+fn host_enabled_by_default() -> bool {
+    true
+}
+
+/// Which Mago diagnostics to proxy for a workspace.
+///
+/// `lint` and `analyze` in `.phpantom.toml`'s `[mago]` section win
+/// outright.  Left unset, each follows the workspace `mago.toml`: a
+/// `[linter]` table enables `mago lint`, an `[analyzer]` table enables
+/// `mago analyze`.
+///
+/// Mago needs a `mago.toml` to run at all, so the tables that file
+/// carries are also the record of what a project uses Mago for.  A file
+/// holding a `[formatter]` table and nothing else belongs to a project
+/// that formats with Mago and checks its code with something else, and
+/// running `mago lint` and `mago analyze` at such a project reports code
+/// nobody asked Mago about.
+///
+/// On a Laravel project `analyze` carries the extra condition described
+/// in [`analyzer_understands_laravel`].
+pub(crate) fn enabled_services(
+    workspace_root: &Path,
+    config: &MagoConfig,
+    laravel: bool,
+) -> MagoServices {
+    if config.is_disabled() {
+        return MagoServices::default();
+    }
+
+    let probe = probe_mago_toml(workspace_root);
+
+    MagoServices {
+        lint: config.lint.unwrap_or(probe.linter),
+        analyze: config
+            .analyze
+            .unwrap_or(probe.analyzer && (!laravel || analyzer_understands_laravel(&probe))),
+    }
+}
+
+/// Whether something could be teaching `mago analyze` about Laravel.
+///
+/// Mago's analyser has no built-in Laravel support, so on a Laravel
+/// project it cannot see through Eloquent or the facades and reports
+/// correct code in bulk: a `Collection` returned from a query looks
+/// non-traversable to it, and every `foreach` over one is flagged.  The
+/// gap is meant to be closed by an extension, which is a mechanism Mago
+/// only grew in 1.47, and no Laravel extension exists yet.
+///
+/// A `mago.toml` that wires up no extension therefore has nothing that
+/// could be supplying that knowledge, and this doubles as the version
+/// check: Mago rejects a configuration file carrying keys it does not
+/// know, so an `[extension-hosts]` table cannot appear in a file an
+/// older Mago accepts.
+///
+/// An extension is counted as wired up when the file declares an enabled
+/// extension host, or names a namespaced plugin (`vendor/name`, as in
+/// `plugins = ["acme/laravel"]`).  Mago's own plugins are all bare names
+/// (`stdlib`, `psl`, `flow-php`, `psr-container`), so they do not count:
+/// none of them knows anything about Laravel.
+fn analyzer_understands_laravel(probe: &MagoTomlProbe) -> bool {
+    probe.extension
+}
+
+/// Read the workspace `mago.toml`.
+///
+/// A missing file means no services: Mago will not run without one.
+fn probe_mago_toml(workspace_root: &Path) -> MagoTomlProbe {
+    match std::fs::read_to_string(workspace_root.join("mago.toml")) {
+        Ok(source) => parse_mago_toml(&source),
+        Err(_) => MagoTomlProbe::default(),
+    }
+}
+
+/// Read `mago.toml` source text.
+///
+/// A file Mago itself would reject says nothing about intent, so a parse
+/// failure enables nothing.
+fn parse_mago_toml(source: &str) -> MagoTomlProbe {
+    let Ok(config) = toml::from_str::<MagoToml>(source) else {
+        return MagoTomlProbe::default();
+    };
+
+    let has_enabled_host = config.extension_hosts.values().any(|host| host.enabled);
+    let has_extension_plugin = config
+        .analyzer
+        .as_ref()
+        .is_some_and(|analyzer| analyzer.plugins.iter().any(|name| name.contains('/')));
+
+    MagoTomlProbe {
+        linter: config.linter.is_some(),
+        analyzer: config.analyzer.is_some(),
+        extension: has_enabled_host || has_extension_plugin,
     }
 }
 
@@ -909,14 +1100,32 @@ mod tests {
 
     // ── resolve_mago ────────────────────────────────────────────────
 
+    /// A `composer.json` declaring a direct dependency on Mago.
+    fn pkg_with_mago() -> ComposerPackage {
+        r#"{"require-dev": {"carthage-software/mago": "^1.15"}}"#
+            .parse()
+            .unwrap()
+    }
+
+    /// Write an executable stub at `path`.
+    fn write_stub_binary(path: &Path) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, "#!/bin/sh\n").unwrap();
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
+
     #[test]
     fn resolve_disabled_when_empty_string() {
         let config = MagoConfig {
             command: Some(String::new()),
-            lint_timeout: None,
-            analyze_timeout: None,
+            ..MagoConfig::default()
         };
-        let result = resolve_mago(None, &config, None);
+        let result = resolve_mago(None, &config, None, None);
         assert!(result.is_none());
     }
 
@@ -924,10 +1133,10 @@ mod tests {
     fn resolve_explicit_command() {
         let config = MagoConfig {
             command: Some("/usr/local/bin/mago".to_string()),
-            lint_timeout: None,
-            analyze_timeout: None,
+            ..MagoConfig::default()
         };
-        let result = resolve_mago(None, &config, None);
+        // An explicit command bypasses the composer.json check.
+        let result = resolve_mago(None, &config, None, None);
         assert!(result.is_some());
         assert_eq!(result.unwrap().path, PathBuf::from("/usr/local/bin/mago"));
     }
@@ -935,19 +1144,12 @@ mod tests {
     #[test]
     fn resolve_auto_detect_vendor_bin() {
         let dir = tempfile::tempdir().unwrap();
-        let bin_path = dir.path().join("vendor").join("bin");
-        std::fs::create_dir_all(&bin_path).unwrap();
-        let mago = bin_path.join("mago");
-        std::fs::write(&mago, "#!/bin/sh\n").unwrap();
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&mago, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
+        let mago = dir.path().join("vendor").join("bin").join("mago");
+        write_stub_binary(&mago);
 
         let config = MagoConfig::default();
-        let result = resolve_mago(Some(dir.path()), &config, None);
+        let package = pkg_with_mago();
+        let result = resolve_mago(Some(dir.path()), &config, None, Some(&package));
         assert!(result.is_some());
         assert_eq!(result.unwrap().path, mago);
     }
@@ -955,31 +1157,261 @@ mod tests {
     #[test]
     fn resolve_auto_detect_custom_bin_dir() {
         let dir = tempfile::tempdir().unwrap();
-        let bin_path = dir.path().join("tools");
-        std::fs::create_dir_all(&bin_path).unwrap();
-        let mago = bin_path.join("mago");
-        std::fs::write(&mago, "#!/bin/sh\n").unwrap();
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&mago, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
+        let mago = dir.path().join("tools").join("mago");
+        write_stub_binary(&mago);
 
         let config = MagoConfig::default();
-        let result = resolve_mago(Some(dir.path()), &config, Some("tools"));
+        let package = pkg_with_mago();
+        let result = resolve_mago(Some(dir.path()), &config, Some("tools"), Some(&package));
         assert!(result.is_some());
         assert_eq!(result.unwrap().path, mago);
+    }
+
+    #[test]
+    fn resolve_auto_detect_skipped_without_composer_dependency() {
+        let dir = tempfile::tempdir().unwrap();
+        let mago = dir.path().join("vendor").join("bin").join("mago");
+        write_stub_binary(&mago);
+
+        // A binary sits at vendor/bin/mago, but composer.json does not
+        // depend on carthage-software/mago, so it arrived as somebody
+        // else's transitive dependency (or was left behind). An
+        // unrelated `mago` may still be on $PATH in some environments,
+        // so only assert the vendor/bin one is excluded.
+        let config = MagoConfig::default();
+        let package: ComposerPackage = r#"{"require": {}}"#.parse().unwrap();
+        let result = resolve_mago(Some(dir.path()), &config, None, Some(&package));
+        assert_ne!(result.map(|r| r.path), Some(mago.clone()));
+
+        // No composer.json at all behaves the same way.
+        let result = resolve_mago(Some(dir.path()), &config, None, None);
+        assert_ne!(result.map(|r| r.path), Some(mago));
     }
 
     #[test]
     fn resolve_no_binary_found() {
         let dir = tempfile::tempdir().unwrap();
         let config = MagoConfig::default();
+        let package = pkg_with_mago();
         // No vendor/bin/mago, and PATH is unlikely to have it in test env.
         // This test may still find mago on PATH in some environments,
         // so we just verify it doesn't panic.
-        let _ = resolve_mago(Some(dir.path()), &config, None);
+        let _ = resolve_mago(Some(dir.path()), &config, None, Some(&package));
+    }
+
+    // ── parse_mago_toml ─────────────────────────────────────────────
+
+    #[test]
+    fn formatter_only_config_configures_nothing() {
+        let probe = parse_mago_toml("php-version = \"8.3\"\n\n[formatter]\nprint-width = 100\n");
+        assert_eq!(probe, MagoTomlProbe::default());
+    }
+
+    #[test]
+    fn linter_table_is_read() {
+        let probe = parse_mago_toml("[linter]\nintegrations = [\"laravel\"]\n");
+        assert!(probe.linter);
+        assert!(!probe.analyzer);
+    }
+
+    #[test]
+    fn linter_rules_subtable_counts_as_linter() {
+        // `[linter.rules]` creates the `linter` table implicitly.
+        let probe = parse_mago_toml("[linter.rules]\nhalstead = { enabled = false }\n");
+        assert!(probe.linter);
+        assert!(!probe.analyzer);
+    }
+
+    #[test]
+    fn analyzer_table_is_read() {
+        let probe = parse_mago_toml("[analyzer]\nanalyze-dead-code = true\n");
+        assert!(!probe.linter);
+        assert!(probe.analyzer);
+        assert!(!probe.extension);
+    }
+
+    #[test]
+    fn both_tables_are_read() {
+        let probe = parse_mago_toml("[linter]\n\n[analyzer]\n");
+        assert!(probe.linter);
+        assert!(probe.analyzer);
+    }
+
+    #[test]
+    fn malformed_config_configures_nothing() {
+        assert_eq!(
+            parse_mago_toml("[linter\nthis is not toml"),
+            MagoTomlProbe::default()
+        );
+    }
+
+    #[test]
+    fn unknown_keys_do_not_stop_the_probe() {
+        // Mago's own schema rejects unknown fields; PHPantom's must not,
+        // or a key from a newer Mago would hide the tables it does read.
+        let probe = parse_mago_toml("[analyzer]\nsome-future-key = 7\n\n[linter]\n");
+        assert!(probe.linter);
+        assert!(probe.analyzer);
+    }
+
+    // ── extension detection ─────────────────────────────────────────
+
+    #[test]
+    fn enabled_extension_host_counts_as_an_extension() {
+        let probe = parse_mago_toml(
+            "[analyzer]\n\n[extension-hosts.framework]\ncommand = [\"php\", \".mago/worker.php\"]\n",
+        );
+        assert!(probe.extension, "a host with no `enabled` key is enabled");
+    }
+
+    #[test]
+    fn disabled_extension_host_does_not_count() {
+        let probe = parse_mago_toml(
+            "[analyzer]\n\n[extension-hosts.framework]\nenabled = false\ncommand = [\"php\", \"w.php\"]\n",
+        );
+        assert!(!probe.extension);
+    }
+
+    #[test]
+    fn a_namespaced_plugin_counts_as_an_extension() {
+        let probe = parse_mago_toml("[analyzer]\nplugins = [\"acme/laravel\"]\n");
+        assert!(probe.extension);
+    }
+
+    #[test]
+    fn magos_own_plugins_do_not_count_as_extensions() {
+        // `stdlib`, `psl`, `flow-php` and `psr-container` ship with Mago
+        // and none of them knows anything about Laravel. They also
+        // predate extension support, so treating them as one would keep
+        // `mago analyze` running on every Laravel project that ran
+        // `mago init`.
+        let probe = parse_mago_toml(
+            "[analyzer]\nplugins = [\"stdlib\", \"psl\", \"flow-php\", \"psr-container\"]\n",
+        );
+        assert!(probe.analyzer);
+        assert!(!probe.extension);
+    }
+
+    #[test]
+    fn a_fully_specified_extension_host_is_read() {
+        // Mago's documented example, verbatim, so the probe is pinned to
+        // the real shape rather than the subset the tests above use.
+        let probe = parse_mago_toml(
+            r#"
+[analyzer]
+plugins = ["acme/laravel"]
+
+[extension-hosts.framework]
+enabled = true
+command = ["php", ".mago/framework-worker.php"]
+workers = 0
+working-directory = "."
+inherit-environment = true
+environment = { APP_ENV = "analysis" }
+maximum-payload-size = 67108864
+request-timeout-ms = 30000
+"#,
+        );
+        assert!(probe.analyzer);
+        assert!(probe.extension);
+    }
+
+    // ── enabled_services ────────────────────────────────────────────
+
+    /// Write `mago.toml` into a fresh temp workspace.
+    fn workspace_with(mago_toml: &str) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("mago.toml"), mago_toml).unwrap();
+        dir
+    }
+
+    #[test]
+    fn enabled_services_reads_workspace_config() {
+        let dir = workspace_with("[analyzer]\n");
+        let services = enabled_services(dir.path(), &MagoConfig::default(), false);
+        assert!(!services.lint);
+        assert!(services.analyze);
+    }
+
+    #[test]
+    fn enabled_services_none_without_mago_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(enabled_services(dir.path(), &MagoConfig::default(), false).none_enabled());
+    }
+
+    #[test]
+    fn analyze_is_off_on_laravel_without_an_extension() {
+        let dir = workspace_with("[linter]\n\n[analyzer]\n");
+        let services = enabled_services(dir.path(), &MagoConfig::default(), true);
+        assert!(
+            !services.analyze,
+            "no extension can be teaching the analyser about Laravel"
+        );
+        assert!(
+            services.lint,
+            "the linter has a Laravel integration, so it is unaffected"
+        );
+    }
+
+    #[test]
+    fn analyze_is_on_on_laravel_with_an_extension() {
+        let dir =
+            workspace_with("[analyzer]\n\n[extension-hosts.framework]\ncommand = [\"php\"]\n");
+        assert!(enabled_services(dir.path(), &MagoConfig::default(), true).analyze);
+    }
+
+    #[test]
+    fn analyze_is_on_off_laravel_without_an_extension() {
+        let dir = workspace_with("[analyzer]\n");
+        assert!(enabled_services(dir.path(), &MagoConfig::default(), false).analyze);
+    }
+
+    #[test]
+    fn explicit_analyze_overrides_the_laravel_condition() {
+        let dir = workspace_with("[analyzer]\n");
+        let on = MagoConfig {
+            analyze: Some(true),
+            ..MagoConfig::default()
+        };
+        assert!(enabled_services(dir.path(), &on, true).analyze);
+    }
+
+    #[test]
+    fn enabled_services_honours_explicit_overrides() {
+        let dir = workspace_with("[linter]\n\n[analyzer]\n");
+
+        // Both configured in mago.toml, but turned off in .phpantom.toml.
+        let off = MagoConfig {
+            lint: Some(false),
+            analyze: Some(false),
+            ..MagoConfig::default()
+        };
+        assert!(enabled_services(dir.path(), &off, false).none_enabled());
+
+        // And on for a formatter-only mago.toml.
+        std::fs::write(dir.path().join("mago.toml"), "[formatter]\n").unwrap();
+        let on = MagoConfig {
+            lint: Some(true),
+            analyze: Some(true),
+            ..MagoConfig::default()
+        };
+        let services = enabled_services(dir.path(), &on, false);
+        assert!(services.lint);
+        assert!(services.analyze);
+    }
+
+    #[test]
+    fn enabled_services_none_when_mago_disabled() {
+        let dir = workspace_with("[linter]\n\n[analyzer]\n");
+
+        // `command = ""` wins over both mago.toml and the toggles.
+        let config = MagoConfig {
+            command: Some(String::new()),
+            lint: Some(true),
+            analyze: Some(true),
+            ..MagoConfig::default()
+        };
+        assert!(enabled_services(dir.path(), &config, false).none_enabled());
     }
 
     // ── timeout defaults ────────────────────────────────────────────
@@ -993,9 +1425,8 @@ mod tests {
     #[test]
     fn lint_timeout_custom() {
         let config = MagoConfig {
-            command: None,
             lint_timeout: Some(15_000),
-            analyze_timeout: None,
+            ..MagoConfig::default()
         };
         assert_eq!(config.lint_timeout_ms(), 15_000);
     }
@@ -1009,9 +1440,8 @@ mod tests {
     #[test]
     fn analyze_timeout_custom() {
         let config = MagoConfig {
-            command: None,
-            lint_timeout: None,
             analyze_timeout: Some(120_000),
+            ..MagoConfig::default()
         };
         assert_eq!(config.analyze_timeout_ms(), 120_000);
     }

@@ -75,8 +75,14 @@ impl Backend {
                 None => continue,
             };
 
-            // Mago requires mago.toml to operate.
-            if !mago::has_mago_config(&workspace_root) {
+            let composer_pkg = crate::composer::read_composer_package(&workspace_root);
+            let laravel = composer_pkg
+                .as_ref()
+                .is_some_and(crate::composer::is_laravel_project);
+
+            // Mago requires mago.toml to operate, and its tables decide
+            // whether the project uses `mago lint` at all.
+            if !mago::enabled_services(&workspace_root, &config.mago, laravel).lint {
                 continue;
             }
 
@@ -85,14 +91,17 @@ impl Backend {
                 None => continue,
             };
 
-            let bin_dir: Option<String> = crate::composer::read_composer_package(&workspace_root)
-                .map(|pkg| crate::composer::get_bin_dir(&pkg));
+            let bin_dir: Option<String> = composer_pkg.as_ref().map(crate::composer::get_bin_dir);
 
-            let resolved =
-                match mago::resolve_mago(Some(&workspace_root), &config.mago, bin_dir.as_deref()) {
-                    Some(r) => r,
-                    None => continue,
-                };
+            let resolved = match mago::resolve_mago(
+                Some(&workspace_root),
+                &config.mago,
+                bin_dir.as_deref(),
+                composer_pkg.as_ref(),
+            ) {
+                Some(r) => r,
+                None => continue,
+            };
 
             // ── Step 4: run mago lint (the slow part) ───────────────
             let mago_config = config.mago.clone();
@@ -201,8 +210,14 @@ impl Backend {
                 None => continue,
             };
 
-            // Mago requires mago.toml to operate.
-            if !mago::has_mago_config(&workspace_root) {
+            let composer_pkg = crate::composer::read_composer_package(&workspace_root);
+            let laravel = composer_pkg
+                .as_ref()
+                .is_some_and(crate::composer::is_laravel_project);
+
+            // Mago requires mago.toml to operate, and its tables decide
+            // whether the project uses `mago analyze` at all.
+            if !mago::enabled_services(&workspace_root, &config.mago, laravel).analyze {
                 continue;
             }
 
@@ -211,14 +226,17 @@ impl Backend {
                 None => continue,
             };
 
-            let bin_dir: Option<String> = crate::composer::read_composer_package(&workspace_root)
-                .map(|pkg| crate::composer::get_bin_dir(&pkg));
+            let bin_dir: Option<String> = composer_pkg.as_ref().map(crate::composer::get_bin_dir);
 
-            let resolved =
-                match mago::resolve_mago(Some(&workspace_root), &config.mago, bin_dir.as_deref()) {
-                    Some(r) => r,
-                    None => continue,
-                };
+            let resolved = match mago::resolve_mago(
+                Some(&workspace_root),
+                &config.mago,
+                bin_dir.as_deref(),
+                composer_pkg.as_ref(),
+            ) {
+                Some(r) => r,
+                None => continue,
+            };
 
             // ── Step 4: run mago analyze (the slow part) ────────────
             let mago_config = config.mago.clone();

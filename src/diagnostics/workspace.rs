@@ -665,50 +665,61 @@ impl Backend {
         }
 
         // ── Mago lint + analyze ─────────────────────────────────────
-        if !config.mago.is_disabled()
-            && crate::mago::has_mago_config(&root)
-            && let Some(resolved) =
-                crate::mago::resolve_mago(Some(&root), &config.mago, bin_dir.as_deref())
+        let laravel = composer_pkg
+            .as_ref()
+            .is_some_and(crate::composer::is_laravel_project);
+        let mago_services = crate::mago::enabled_services(&root, &config.mago, laravel);
+        if !mago_services.none_enabled()
+            && let Some(resolved) = crate::mago::resolve_mago(
+                Some(&root),
+                &config.mago,
+                bin_dir.as_deref(),
+                composer_pkg.as_ref(),
+            )
         {
-            progress.set_percentage(90, "Running Mago lint (project-wide)");
-            let mago_config = config.mago.clone();
-            let shutdown = Arc::clone(&self.shutdown_flag);
-            let root_clone = root.clone();
-            let resolved_clone = resolved.clone();
-            let result = crate::server::run_blocking_cancel_safe(move || {
-                crate::mago::run_mago_lint_workspace(
-                    &resolved_clone,
-                    &root_clone,
-                    &mago_config,
-                    &shutdown,
-                )
-            })
-            .await;
-            if let Some(Ok(map)) = result {
-                self.store_workspace_external_results("mago-lint", map)
-                    .await;
+            if mago_services.lint {
+                progress.set_percentage(90, "Running Mago lint (project-wide)");
+                let mago_config = config.mago.clone();
+                let shutdown = Arc::clone(&self.shutdown_flag);
+                let root_clone = root.clone();
+                let resolved_clone = resolved.clone();
+                let result = crate::server::run_blocking_cancel_safe(move || {
+                    crate::mago::run_mago_lint_workspace(
+                        &resolved_clone,
+                        &root_clone,
+                        &mago_config,
+                        &shutdown,
+                    )
+                })
+                .await;
+                if let Some(Ok(map)) = result {
+                    self.store_workspace_external_results("mago-lint", map)
+                        .await;
+                }
+
+                if self.shutdown_flag.load(Ordering::Acquire) {
+                    return;
+                }
             }
 
-            if self.shutdown_flag.load(Ordering::Acquire) {
-                return;
-            }
-
-            progress.set_percentage(95, "Running Mago analyze (project-wide)");
-            let mago_config = config.mago.clone();
-            let shutdown = Arc::clone(&self.shutdown_flag);
-            let root_clone = root.clone();
-            let result = crate::server::run_blocking_cancel_safe(move || {
-                crate::mago::run_mago_analyze_workspace(
-                    &resolved,
-                    &root_clone,
-                    &mago_config,
-                    &shutdown,
-                )
-            })
-            .await;
-            if let Some(Ok(map)) = result {
-                self.store_workspace_external_results("mago-analyze", map)
-                    .await;
+            if mago_services.analyze {
+                progress.set_percentage(95, "Running Mago analyze (project-wide)");
+                let mago_config = config.mago.clone();
+                let shutdown = Arc::clone(&self.shutdown_flag);
+                let root_clone = root.clone();
+                let result = crate::server::run_blocking_cancel_safe(move || {
+                    crate::mago::run_mago_analyze_workspace(
+                        &resolved,
+                        &root_clone,
+                        &mago_config,
+                        &shutdown,
+                    )
+                })
+                .await;
+                if let Some(Ok(map)) = result {
+                    self.store_workspace_external_results("mago-analyze", map)
+                        .await;
+                }
             }
         }
     }
