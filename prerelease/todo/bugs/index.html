@@ -869,23 +869,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Narrowing">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b187-unsetting-an-array-element-is-not-modeled-so-a-loop-can-be-assumed-to-run" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B187. Unsetting an array element is not modeled, so a loop can be assumed to run
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1541,23 +1524,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Narrowing">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b187-unsetting-an-array-element-is-not-modeled-so-a-loop-can-be-assumed-to-run" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B187. Unsetting an array element is not modeled, so a loop can be assumed to run
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1744,16 +1710,7 @@ each bug's row lives in the current sprint/backlog.</p>
 <h2 id="standard-library-return-types">Standard-library return types<a class="headerlink" href="#standard-library-return-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
-<h3 id="b187-unsetting-an-array-element-is-not-modeled-so-a-loop-can-be-assumed-to-run">B187. Unsetting an array element is not modeled, so a loop can be assumed to run<a class="headerlink" href="#b187-unsetting-an-array-element-is-not-modeled-so-a-loop-can-be-assumed-to-run" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<p><code>unset()</code> handling in
-<code>type_engine/variable/forward_walk/assignment.rs</code> only clears a direct
-variable, not an element unset (<code>unset($arr['k'])</code>). A <code>non-empty-array</code>
-or shape type therefore survives being emptied out element by element,
-so <code>process_foreach</code> still treats the loop body as guaranteed to run and
-drops the pre-loop sentinel value, producing a wrong post-loop type (a
-variable assigned only inside the loop is typed as if the loop always
-executed, when the array it iterates was actually emptied first).</p>
+<p>No outstanding items.</p>
 <h2 id="arithmetic">Arithmetic<a class="headerlink" href="#arithmetic" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
