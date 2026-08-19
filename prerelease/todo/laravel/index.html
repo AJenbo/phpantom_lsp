@@ -1268,17 +1268,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l22-broaden-recognized-call-sites-for-laravel-string-keys" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L22. Broaden recognized call sites for Laravel string keys
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l24-translation-depth-json-lang-files-locales-placeholders" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1954,17 +1943,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         L17. Additional string contexts without booting
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#l22-broaden-recognized-call-sites-for-laravel-string-keys" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L22. Broaden recognized call sites for Laravel string keys
       </span>
     </span>
   </a>
@@ -2716,34 +2694,6 @@ binding names (<code>app('...')</code>), facade string aliases, and anything els
 requires the live container. These genuinely cannot be resolved without
 booting, and a snapshot of them is the "true for one boot" half-truth we are
 choosing not to ship.</p>
-<h4 id="l22-broaden-recognized-call-sites-for-laravel-string-keys">L22. Broaden recognized call sites for Laravel string keys<a class="headerlink" href="#l22-broaden-recognized-call-sites-for-laravel-string-keys" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: High · Complexity: Medium</strong></p>
-<p>Detection breadth multiplies everything else in this section: the
-symbol-map spans already feed go-to-definition, references, hover, and
-diagnostics for every call site we recognize. <code>to_route()</code> (as a route
-name), <code>Lang::has()</code>, and the typed config accessors (<code>Config::string()</code>,
-<code>integer()</code>, <code>boolean()</code>, <code>float()</code>, <code>array()</code>, <code>collection()</code>, <code>set()</code>,
-<code>prepend()</code>, <code>push()</code>, and the <code>#[Config]</code> attribute) are recognized via
-<code>is_config_repository_method</code>. Remaining gaps by kind:</p>
-<ul>
-<li><strong>Route names</strong> — <code>signedRoute()</code>, <code>temporarySignedRoute()</code>,
-  <code>redirectToRoute()</code>; the same methods on the <code>Redirect</code>, <code>URL</code>, and
-  <code>Response</code> facades and on <code>redirect()</code>/<code>url()</code> helper chains
-  (<code>redirect()-&gt;route('x')</code>); <code>Route::is()</code> and <code>$request-&gt;routeIs()</code>
-  (glob-aware); and the <code>#[RedirectToRoute]</code> attribute.</li>
-<li><strong>View names</strong> — add <code>MailMessage::view()</code>/<code>markdown()</code>, which is a
-  notification's mail message rather than a mailable or the view
-  factory, and the mailable <code>#[Content]</code> attribute (<code>view</code>/<code>markdown</code>
-  arguments, named or positional).</li>
-<li><strong>Translation keys</strong> — add <code>Lang::hasForLocale()</code>. (<code>@lang</code>
-  and other Blade directives arrive via the Blade preprocessor;
-  see <code>blade.md</code>.)</li>
-<li><strong>Config keys</strong> — add <code>getMany()</code> (array argument).</li>
-<li><strong>Env vars</strong> — add <code>Env::get()</code>, and index env keys as proper
-  <code>LaravelStringKey</code> spans instead of the current definition-only
-  ad-hoc fallback, so references (and completion/diagnostics)
-  work uniformly.</li>
-</ul>
 <h4 id="l24-translation-depth-json-lang-files-locales-placeholders">L24. Translation depth: JSON lang files, locales, placeholders<a class="headerlink" href="#l24-translation-depth-json-lang-files-locales-placeholders" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Medium-High · Complexity: Medium-High</strong></p>
 <p>Statically recoverable translation features the Laravel LSP has and we
