@@ -577,30 +577,70 @@ pub(crate) fn is_extends_only_generic_rebindable(
     rebindable_parent(class, new_arg_count, class_loader).is_some()
 }
 
-/// The parent whose `@extends` binding [`rebind_extends_only_generics`]
+/// The ancestor whose `@extends` binding [`rebind_extends_only_generics`]
+/// would override, together with the classes between it and the class
+/// being rebound.
+struct RebindTarget {
+    /// The generic ancestor whose template parameters the rebind fills.
+    ancestor: Atom,
+    /// The ancestors between the class and `ancestor`, nearest first.
+    /// Empty when `ancestor` is the direct parent.
+    intermediates: Vec<Atom>,
+}
+
+/// The ancestor whose `@extends` binding [`rebind_extends_only_generics`]
 /// would override, for a class that declares no `@template` of its own.
 ///
 /// Two shapes qualify: the class fixes exactly one ancestor's generics
 /// via `@extends`, or it names no generics at all and simply extends a
-/// generic parent. The latter is how nearly every custom Eloquent
+/// generic ancestor. The latter is how nearly every custom Eloquent
 /// builder is written (`class UserBuilder extends Builder {}`): PHP has
 /// no generics, so the subclass silently stands in for `Builder<TModel>`
 /// and a caller that knows the model (`UserBuilder<User>`) has to be
 /// able to bind it.
+///
+/// The generic ancestor need not be the direct parent: a project that
+/// gives its builders a shared base (`class AdminUserBuilder extends
+/// UserBuilder`, `class UserBuilder extends Builder`) stands in for
+/// `Builder<TModel>` just as much, so the walk carries on up through
+/// ancestors that declare neither templates nor a binding of their own.
+/// One that does declare a binding has already fixed the generics, and
+/// overriding it is not this function's business.
 fn rebindable_parent(
     class: &ClassInfo,
     new_arg_count: usize,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> Option<Atom> {
+) -> Option<RebindTarget> {
     if !class.template_params.is_empty() {
         return None;
     }
     match class.extends_generics.as_slice() {
-        [(parent, args)] if args.len() == new_arg_count => Some(*parent),
+        [(parent, args)] if args.len() == new_arg_count => Some(RebindTarget {
+            ancestor: *parent,
+            intermediates: Vec::new(),
+        }),
         [] => {
-            let parent_name = class.parent_class.as_deref()?;
-            let parent = class_loader(parent_name)?;
-            (parent.template_params.len() == new_arg_count).then(|| atom(parent_name))
+            let mut intermediates: Vec<Atom> = Vec::new();
+            let mut ancestor = atom(class.parent_class.as_deref()?);
+            loop {
+                let parent = class_loader(&ancestor)?;
+                if parent.template_params.len() == new_arg_count {
+                    return Some(RebindTarget {
+                        ancestor,
+                        intermediates,
+                    });
+                }
+                if !parent.template_params.is_empty() || !parent.extends_generics.is_empty() {
+                    return None;
+                }
+                // A parent chain that loops back on itself is not valid PHP,
+                // but an editor sees it while it is being written.
+                if intermediates.contains(&ancestor) {
+                    return None;
+                }
+                intermediates.push(ancestor);
+                ancestor = atom(parent.parent_class.as_deref()?);
+            }
         }
         _ => None,
     }
@@ -641,12 +681,37 @@ pub(crate) fn rebind_extends_only_generics(
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     new_args: &[PhpType],
 ) -> Option<(ClassInfo, ClassInfo)> {
-    let parent_name = rebindable_parent(class, new_args.len(), class_loader)?;
+    let RebindTarget {
+        ancestor,
+        intermediates,
+    } = rebindable_parent(class, new_args.len(), class_loader)?;
     let fqn = class.fqn();
     let raw = class_loader(fqn.as_str()).filter(|raw| raw.fqn().eq_ignore_ascii_case(fqn.as_str()));
     let mut overridden = raw.as_deref().unwrap_or(class).clone();
-    overridden.extends_generics = vec![(parent_name, new_args.to_vec())];
-    let merged = resolve_class_with_inheritance(&overridden, class_loader);
+    overridden.extends_generics = vec![(ancestor, new_args.to_vec())];
+
+    let merged = if intermediates.is_empty() {
+        resolve_class_with_inheritance(&overridden, class_loader)
+    } else {
+        // The chain merge only reads the `@extends` binding of the class
+        // whose own parent it is loading, so a binding that names an
+        // ancestor further up is never seen at the level it belongs to.
+        // Each intermediate is loaded carrying the same binding, which is
+        // what the generic-free stand-in it is means anyway.
+        let carry_binding = |name: &str| -> Option<Arc<ClassInfo>> {
+            let loaded = class_loader(name)?;
+            if !intermediates
+                .iter()
+                .any(|between| between.eq_ignore_ascii_case(name))
+            {
+                return Some(loaded);
+            }
+            let mut carrying = (*loaded).clone();
+            carrying.extends_generics = vec![(ancestor, new_args.to_vec())];
+            Some(Arc::new(carrying))
+        };
+        resolve_class_with_inheritance(&overridden, &carry_binding)
+    };
     Some((overridden, merged))
 }
 

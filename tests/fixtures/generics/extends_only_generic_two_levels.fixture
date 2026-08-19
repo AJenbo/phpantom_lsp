@@ -1,0 +1,33 @@
+// test: a two-level generic-free stand-in still binds the ancestor's template
+// feature: completion
+// A project that gives its query builders a shared base leaves neither level
+// declaring generics, so the binding has to reach the ancestor that does.
+// Without it `first()` returns the `TModel of Model` bound, which has no
+// `adminOnly()`.
+// expect: adminOnly(
+---
+<?php
+
+abstract class Model {
+    public function modelOnly(): void {}
+}
+
+/**
+ * @template TModel of Model
+ */
+class Builder {
+    /** @return TModel */
+    public function first(): object {}
+}
+
+class UserBuilder extends Builder {}
+
+class AdminUserBuilder extends UserBuilder {}
+
+class AdminUser extends Model {
+    public function adminOnly(): void {}
+}
+
+/** @var AdminUserBuilder<AdminUser> $builder */
+$builder = null;
+$builder->first()-><>

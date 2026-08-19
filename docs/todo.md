@@ -107,6 +107,7 @@ unlikely to move the needle for most users.
 | B224 | [A stored `preg_match` result loses the groups it matched](todo/bugs.md#b224-a-stored-preg_match-result-loses-the-groups-it-matched)                                          | Medium      | Medium      |
 | B218 | [`new ReflectionProperty(Foo::class, 'bar')` forgets what it reflects](todo/bugs.md#b218-new-reflectionpropertyfooclass-bar-forgets-what-it-reflects)                        | Low         | Medium      |
 | B188 | [A concrete `ArrayAccess::offsetGet()` override is ignored on subscript read](todo/bugs.md#b188-a-concrete-arrayaccessoffsetget-override-is-ignored-on-subscript-read)       | Low-Medium  | Medium      |
+| B224 | [A route group whose name spells out nothing still flags its routes](todo/bugs.md#b224-a-route-group-whose-name-spells-out-nothing-still-flags-its-routes)                   | Low         | Medium      |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |

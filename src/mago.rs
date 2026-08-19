@@ -159,6 +159,8 @@ struct MagoTomlProbe {
     linter: bool,
     /// An `[analyzer]` table is present.
     analyzer: bool,
+    /// A `[formatter]` table is present.
+    formatter: bool,
     /// The file wires up at least one extension.
     extension: bool,
 }
@@ -173,6 +175,7 @@ struct MagoTomlProbe {
 struct MagoToml {
     linter: Option<serde::de::IgnoredAny>,
     analyzer: Option<MagoTomlAnalyzer>,
+    formatter: Option<serde::de::IgnoredAny>,
     #[serde(rename = "extension-hosts", default)]
     extension_hosts: std::collections::HashMap<String, MagoTomlExtensionHost>,
 }
@@ -282,8 +285,21 @@ fn parse_mago_toml(source: &str) -> MagoTomlProbe {
     MagoTomlProbe {
         linter: config.linter.is_some(),
         analyzer: config.analyzer.is_some(),
+        formatter: config.formatter.is_some(),
         extension: has_enabled_host || has_extension_plugin,
     }
+}
+
+/// Whether the workspace `mago.toml` records Mago as the project's
+/// formatter.
+///
+/// The same reading of that file as [`enabled_services`]: a `[formatter]`
+/// table is what a project writes when it formats with Mago, and it is
+/// deliberate in a way that a fixer shipped alongside a linter's ruleset is
+/// not.  [`crate::formatting::resolve_strategy`] uses it to keep phpcbf from
+/// taking over such a project.
+pub(crate) fn formats_with_mago(workspace_root: &Path) -> bool {
+    probe_mago_toml(workspace_root).formatter
 }
 
 // ── Mago execution ─────────────────────────────────────────────────
@@ -1202,9 +1218,12 @@ mod tests {
     // ── parse_mago_toml ─────────────────────────────────────────────
 
     #[test]
-    fn formatter_only_config_configures_nothing() {
+    fn formatter_only_config_enables_no_diagnostics() {
         let probe = parse_mago_toml("php-version = \"8.3\"\n\n[formatter]\nprint-width = 100\n");
-        assert_eq!(probe, MagoTomlProbe::default());
+        assert!(probe.formatter);
+        assert!(!probe.linter);
+        assert!(!probe.analyzer);
+        assert!(!probe.extension);
     }
 
     #[test]

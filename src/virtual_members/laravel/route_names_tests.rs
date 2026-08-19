@@ -950,6 +950,69 @@ Route::name('filament.')
 }
 
 #[test]
+fn top_level_dynamic_name_group_records_the_literal_head_of_its_name() {
+    let content = "\
+<?php
+Route::name('filament.' . $panelId . '.')
+    ->group(function () {
+        Route::get('/dashboard', fn() => 'hi')->name('pages.dashboard');
+    });
+";
+    let (_, prefixes) = routes_and_prefixes(content);
+    assert!(
+        prefixes.contains(&"filament.".to_string()),
+        "a group with no enclosing literal group should still record what its own name spells out, got: {prefixes:?}"
+    );
+}
+
+#[test]
+fn interpolated_group_name_records_the_literal_head() {
+    let content = "\
+<?php
+Route::name(\"filament.{$panelId}.\")->group(function () {
+    Route::get('/dashboard', fn() => 'hi')->name('pages.dashboard');
+});
+";
+    let (_, prefixes) = routes_and_prefixes(content);
+    assert!(
+        prefixes.contains(&"filament.".to_string()),
+        "an interpolated name should record the text ahead of the first hole, got: {prefixes:?}"
+    );
+}
+
+#[test]
+fn legacy_array_group_with_a_dynamic_name_records_an_open_prefix() {
+    let content = "\
+<?php
+Route::group(['as' => 'filament.' . $panelId . '.'], function () {
+    Route::get('/dashboard', fn() => 'hi')->name('pages.dashboard');
+});
+";
+    let (_, prefixes) = routes_and_prefixes(content);
+    assert!(
+        prefixes.contains(&"filament.".to_string()),
+        "the array form of a dynamic group name should record an open prefix too, got: {prefixes:?}"
+    );
+}
+
+#[test]
+fn a_wholly_unknown_group_name_records_no_prefix() {
+    let content = "\
+<?php
+Route::name($panelId)->group(function () {
+    Route::get('/dashboard', fn() => 'hi')->name('pages.dashboard');
+});
+";
+    let (_, prefixes) = routes_and_prefixes(content);
+    // The empty prefix would match every route name in the project, so a
+    // group that spells out nothing at all is left unrecorded.
+    assert!(
+        prefixes.is_empty(),
+        "an entirely unknown group name should not open every route name, got: {prefixes:?}"
+    );
+}
+
+#[test]
 fn fully_static_group_does_not_record_an_open_prefix() {
     let content = "\
 <?php

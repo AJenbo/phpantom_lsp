@@ -735,6 +735,114 @@ class User extends Model {}
 }
 
 #[tokio::test]
+async fn test_custom_builder_two_levels_below_builder_binds_its_model() {
+    let (backend, dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/", "Illuminate\\": "vendor/illuminate/" } } }"#,
+        &[
+            (
+                "vendor/illuminate/Model.php",
+                "<?php namespace Illuminate\\Database\\Eloquent; abstract class Model {
+                public static function query() {}
+            }",
+            ),
+            (
+                "vendor/illuminate/Builder.php",
+                "<?php namespace Illuminate\\Database\\Eloquent;
+            /** @template TModel of Model */
+            class Builder {
+                /** @return TModel|null */
+                public function first() {}
+            }",
+            ),
+            (
+                "src/Models/BaseBuilder.php",
+                r#"<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Builder;
+class BaseBuilder extends Builder {}
+"#,
+            ),
+            (
+                "src/Models/UserBuilder.php",
+                r#"<?php
+namespace App\Models;
+class UserBuilder extends BaseBuilder {}
+"#,
+            ),
+            (
+                "src/Models/User.php",
+                r#"<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Attributes\UseEloquentBuilder;
+#[UseEloquentBuilder(UserBuilder::class)]
+class User extends Model {
+    public function fullName(): string { return ''; }
+}
+"#,
+            ),
+        ],
+    );
+
+    for path in [
+        "vendor/illuminate/Builder.php",
+        "vendor/illuminate/Model.php",
+        "src/Models/BaseBuilder.php",
+        "src/Models/UserBuilder.php",
+        "src/Models/User.php",
+    ] {
+        let uri = Url::from_file_path(dir.path().join(path)).unwrap();
+        backend
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri,
+                    language_id: "php".to_string(),
+                    version: 1,
+                    text: std::fs::read_to_string(dir.path().join(path)).unwrap(),
+                },
+            })
+            .await;
+    }
+
+    let uri = Url::from_file_path(dir.path().join("test.php")).unwrap();
+    let content = "<?php\nuse App\\Models\\User;\nUser::query()->first()->full";
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: content.to_string(),
+            },
+        })
+        .await;
+
+    let items = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier::new(uri),
+                position: Position::new(2, 27),
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+            context: None,
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    let labels: Vec<_> = match items {
+        CompletionResponse::Array(arr) => arr.into_iter().map(|i| i.label).collect(),
+        _ => panic!("Expected array"),
+    };
+    assert!(
+        labels.iter().any(|l| l.starts_with("fullName")),
+        "a builder two levels below Builder should still bind TModel to the model, \
+         not degrade to the `TModel of Model` bound. Labels: {:?}",
+        labels
+    );
+}
+
+#[tokio::test]
 async fn test_missing_custom_builder_falls_back_to_eloquent_builder_type() {
     let (backend, dir) = create_psr4_workspace(
         r#"{ "autoload": { "psr-4": { "App\\": "src/", "Illuminate\\": "vendor/illuminate/" } } }"#,

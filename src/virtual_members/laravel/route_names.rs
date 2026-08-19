@@ -14,8 +14,8 @@ use crate::text_position::offset_to_position;
 
 use super::const_eval::{Scope, bind_assignment, const_string, for_each_iteration};
 use super::helpers::{
-    chain_as_prefix, chain_has_dynamic_name, extract_string_literal, first_string_arg,
-    singularize_english_word,
+    chain_as_prefix, chain_dynamic_name_prefix, dynamic_as_prefix_from_args,
+    extract_string_literal, first_string_arg, singularize_english_word,
 };
 use super::provider_resources::resolve_path_arg;
 
@@ -1503,8 +1503,8 @@ fn collect_names_from_expr(
                 // When the chain includes a `->name()` whose argument is not
                 // a string literal, the accumulated prefix is incomplete and
                 // routes under it cannot be judged.
-                if chain_has_dynamic_name(mc.object, content) && !group.name.is_empty() {
-                    open_prefixes.push(group.name.to_string());
+                if let Some(head) = chain_dynamic_name_prefix(mc.object, content, scope) {
+                    record_open_prefix(group.name, &head, open_prefixes);
                 }
                 let name_prefix =
                     format!("{}{}", group.name, chain_name_prefix(mc.object, content));
@@ -1584,6 +1584,12 @@ fn collect_names_from_expr(
 
             if method_lower == b"group" {
                 let args = || sc.argument_list.arguments.iter().map(|a| a.value());
+                // `['as' => $dynamic]` is the legacy spelling of the fluent
+                // `->name($dynamic)` group above and leaves the same names
+                // unknowable.
+                if let Some(head) = dynamic_as_prefix_from_args(args(), content, scope) {
+                    record_open_prefix(group.name, &head, open_prefixes);
+                }
                 let name_prefix = format!(
                     "{}{}",
                     group.name,
@@ -1657,6 +1663,21 @@ fn collect_names_from_expr(
             }
         }
         _ => {}
+    }
+}
+
+/// Record the prefix a group whose own name is not statically known leaves
+/// open: what its enclosing groups contribute, plus however much of its own
+/// name was written out.
+///
+/// A group that leaves nothing at all known (`Route::name($prefix)` at the top
+/// of a routes file) is not recorded: the empty prefix is a prefix of every
+/// route name there is, so it would stop route names being judged anywhere in
+/// the project rather than under the one group.
+fn record_open_prefix(group_name: &str, head: &str, open_prefixes: &mut Vec<String>) {
+    let prefix = format!("{group_name}{head}");
+    if !prefix.is_empty() {
+        open_prefixes.push(prefix);
     }
 }
 

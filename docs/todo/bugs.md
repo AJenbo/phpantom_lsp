@@ -199,6 +199,26 @@ Reproduced against a Folio-based Laravel application; `route('home')`
 from `routes/web.php` in the same file resolves correctly, so the gap is
 specific to filesystem-derived routes.
 
+### B224. A route group whose name spells out nothing still flags its routes
+
+**Impact: Low · Complexity: Medium**
+
+A group whose name is entirely a variable and which sits under no
+enclosing literal group (`Route::name($panelId)->group(...)` at the top
+of a routes file) records no open prefix, so every `route()` call naming
+one of its routes is still reported as unknown.
+
+The obvious fix is the wrong one: an open prefix of `""` is a prefix of
+every route name there is, so the diagnostic
+(`route_open_prefixes.iter().any(|prefix| key.starts_with(prefix))` in
+`diagnostics/mod.rs`) would stand down for the whole project rather than
+for the one group. What is needed instead is for the collector
+(`virtual_members/laravel/route_names.rs`) to record which *names* fall
+under an unknowable group rather than which prefixes, so an unnamed
+group opens only the suffixes it registers (`pages.dashboard` under an
+unknown prefix means any name *ending* in it is unjudgeable) and every
+other name in the project stays checked.
+
 ## Array types
 
 ### B188. A concrete `ArrayAccess::offsetGet()` override is ignored on subscript read
@@ -248,48 +268,6 @@ override it.
 No outstanding items.
 
 ## Miscellaneous
-
-### B204. A custom Eloquent builder two levels below `Builder` fails to rebind its model
-
-**Impact: Low-Medium · Complexity: Medium**
-
-`rebindable_parent` (`inheritance/mod.rs`) only handles a direct parent
-that itself carries the template parameters
-(`parent.template_params.len() == new_arg_count`). A two-level chain —
-`class AdminUserBuilder extends UserBuilder`, where `UserBuilder extends
-Builder` and neither declares its own `@template` — fails the arity
-check at the first level (`UserBuilder` has zero params) and silently
-degrades to the `TModel of Model` bound, reproducing the exact symptom a
-recent fix addressed, one inheritance level deeper.
-
-### B207. A `phpcs.xml` silently switches a Mago-formatted project's formatter to phpcbf
-
-**Impact: Low-Medium · Complexity: Medium**
-
-A recent commit made a `phpcs.xml` (or `phpcs.xml.dist`) certify phpcbf
-as the project's formatter, and `External` formatter resolution
-(`formatting.rs`) takes precedence over `BuiltIn(mago.toml)`. A project
-that lints with PHPCS but formats with Mago (an explicit `[formatter]`
-table in `mago.toml`) has its configured formatter silently overridden
-by phpcbf, contradicting the "a config file records what a project uses
-a tool for" principle applied to Mago in the same release. Needs a
-decision on precedence when both an explicit Mago formatter config and a
-phpcs ruleset are present.
-
-### B208. A dynamic route-name group is still flagged unknown outside the one shape the fix covers
-
-**Impact: Low-Medium · Complexity: Medium**
-
-The dynamic-group-prefix fix only records an "open prefix" when the
-dynamic `Route::name(...)` call is nested inside an *enclosing literal*
-group (`virtual_members/laravel/route_names.rs`, guarded by
-`!group.name.is_empty()`). Two related shapes still produce the false
-positive the fix set out to remove: a top-level dynamic name group with
-no enclosing literal group (`Route::name('filament.' . $panelId . '.')
-->group(...)` at the top of a routes file), and the legacy array form
-(`Route::group(['as' => $dynamic], ...)`, whose value extraction silently
-returns `""` for a non-literal name and records nothing open). Both leave
-`route('filament.admin.pages.dashboard')`-style calls flagged unknown.
 
 ### B223. Switching workspace diagnostics off mid-session leaves its results in place
 
