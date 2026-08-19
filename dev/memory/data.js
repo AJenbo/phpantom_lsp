@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787096893150,
+  "lastUpdate": 1787102390199,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -23425,6 +23425,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 74.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "bb55323252aae20649514d8c916abe5cbb36bedb",
+          "message": "A `@phpstan-assert` tag whose asserted type is a union now narrows each\nmember",
+          "timestamp": "2026-08-19T03:02:26+02:00",
+          "tree_id": "6de22caf4ddf5fea31769ffab197c2b8c65a53d1",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/bb55323252aae20649514d8c916abe5cbb36bedb"
+        },
+        "date": 1787102382634,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 83.9,
             "unit": "MiB"
           }
         ]
