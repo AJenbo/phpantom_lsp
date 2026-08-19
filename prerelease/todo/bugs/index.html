@@ -847,6 +847,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Type comparison">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b182-non-falsy-string-still-accepts-a-literal-string-that-can-be-0" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B182. <code>non-falsy-string</code> still accepts a literal string that can be <code>0</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -869,6 +886,67 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Narrowing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b183-is_a-narrows-away-the-string-half-of-an-objectstring-parameter" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B183. <code>is_a()</code> narrows away the string half of an <code>object|string</code> parameter
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b184-a-negated-get_class-check-over-narrows-and-drops-valid-subclasses" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B184. A negated <code>get_class()</code> check over-narrows and drops valid subclasses
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b185-a-union-members-generic-arguments-are-lost-when-narrowed-by-instanceof" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B185. A union member's generic arguments are lost when narrowed by <code>instanceof</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b186-a-negated-loose-null-comparison-is-narrowed-as-if-it-were-strict" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B186. A negated loose null comparison is narrowed as if it were strict
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b187-unsetting-an-array-element-is-not-modeled-so-a-loop-can-be-assumed-to-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B187. Unsetting an array element is not modeled, so a loop can be assumed to run
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -890,6 +968,111 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Symbol resolution">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b188-renaming-a-namespaced-constant-or-function-renames-unrelated-symbols-of-the-same-short-name" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B188. Renaming a namespaced constant or function renames unrelated symbols of the same short name
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b189-renaming-a-define-declared-constant-leaves-the-define-call-unrenamed" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B189. Renaming a <code>define()</code>-declared constant leaves the <code>define()</code> call unrenamed
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b190-reference-count-hints-read-zero-for-a-global-function-called-from-namespaced-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B190. Reference-count hints read zero for a global function called from namespaced code
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b191-the-property-hook-call-rewrite-matches-any-class-not-just-parent" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B191. The property hook call rewrite matches any class, not just <code>parent</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b192-rename-started-from-a-use-function-or-aliased-call-site-misses-fallback-call-sites" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B192. Rename started from a <code>use function</code> or aliased call site misses fallback call sites
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b193-function-reference-matching-is-case-sensitive" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B193. Function reference matching is case-sensitive
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b194-rename-cannot-be-started-from-a-fully-qualified-call-site" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B194. Rename cannot be started from a fully-qualified call site
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b195-a-constants-own-declaration-is-not-recognized-as-a-declaration-by-the-reference-index" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B195. A constant's own declaration is not recognized as a declaration by the reference index
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b196-the-chain-resolution-cache-key-omits-file-identity" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B196. The chain resolution cache key omits file identity
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -923,6 +1106,210 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Miscellaneous">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b198-a-project-wide-external-tool-run-can-resurrect-diagnostics-on-a-closed-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B198. A project-wide external tool run can resurrect diagnostics on a closed file
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b199-a-workspace-diagnostics-scan-never-replaces-a-worker-retired-by-the-give-up-timeout" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B199. A workspace diagnostics scan never replaces a worker retired by the give-up timeout
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b200-the-laravel-without-required-analyzer-gate-is-defeated-by-its-own-path-fallback" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B200. The Laravel-without-required-analyzer gate is defeated by its own PATH fallback
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b201-phpstandistneon-is-accepted-as-project-config-but-does-not-certify-the-vendored-binary" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B201. <code>phpstan.dist.neon</code> is accepted as project config but does not certify the vendored binary
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b202-any-illuminate-dependency-is-treated-as-a-full-laravel-app" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B202. Any <code>illuminate/*</code> dependency is treated as a full Laravel app
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b203-a-custom-eloquent-builder-rebind-can-cache-a-degraded-result-on-cache-re-entry" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B203. A custom Eloquent builder rebind can cache a degraded result on cache re-entry
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b204-a-custom-eloquent-builder-two-levels-below-builder-fails-to-rebind-its-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B204. A custom Eloquent builder two levels below <code>Builder</code> fails to rebind its model
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b205-the-documented-macos-global-config-path-does-not-match-where-it-is-read-from" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B205. The documented macOS global config path does not match where it is read from
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b206-config-schemajson-is-missing-the-new-mago-lintanalyze-keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B206. <code>config-schema.json</code> is missing the new Mago lint/analyze keys
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b207-a-phpcsxml-silently-switches-a-mago-formatted-projects-formatter-to-phpcbf" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B207. A <code>phpcs.xml</code> silently switches a Mago-formatted project's formatter to phpcbf
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b208-a-dynamic-route-name-group-is-still-flagged-unknown-outside-the-one-shape-the-fix-covers" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B208. A dynamic route-name group is still flagged unknown outside the one shape the fix covers
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b209-a-nullsafe-first-hop-breaks-the-deprecated-diagnostic-subject-cache-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B209. A nullsafe first hop breaks the deprecated-diagnostic subject cache key
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b210-undefined-variable-diagnostics-never-check-property-hook-bodies" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B210. Undefined-variable diagnostics never check property hook bodies
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b211-enabling-workspace-diagnostics-through-a-live-config-reload-has-no-effect-until-restart" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B211. Enabling workspace diagnostics through a live config reload has no effect until restart
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b212-the-workspace-scan-watchdog-can-mislabel-a-file-that-just-finished-as-timed-out" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B212. The workspace scan watchdog can mislabel a file that just finished as timed out
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b213-two-diagnostic-refresh-requests-await-the-client-with-no-timeout" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B213. Two diagnostic refresh requests await the client with no timeout
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b214-a-closure-inside-an-arrow-bodied-property-hook-gets-no-variable-snapshot" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B214. A closure inside an arrow-bodied property hook gets no variable snapshot
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b215-a-file-closed-mid-computation-can-have-stale-diagnostics-reinserted-after-the-close-purge" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B215. A file closed mid-computation can have stale diagnostics reinserted after the close purge
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1413,6 +1800,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Type comparison">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b182-non-falsy-string-still-accepts-a-literal-string-that-can-be-0" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B182. <code>non-falsy-string</code> still accepts a literal string that can be <code>0</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1435,6 +1839,67 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Narrowing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b183-is_a-narrows-away-the-string-half-of-an-objectstring-parameter" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B183. <code>is_a()</code> narrows away the string half of an <code>object|string</code> parameter
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b184-a-negated-get_class-check-over-narrows-and-drops-valid-subclasses" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B184. A negated <code>get_class()</code> check over-narrows and drops valid subclasses
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b185-a-union-members-generic-arguments-are-lost-when-narrowed-by-instanceof" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B185. A union member's generic arguments are lost when narrowed by <code>instanceof</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b186-a-negated-loose-null-comparison-is-narrowed-as-if-it-were-strict" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B186. A negated loose null comparison is narrowed as if it were strict
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b187-unsetting-an-array-element-is-not-modeled-so-a-loop-can-be-assumed-to-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B187. Unsetting an array element is not modeled, so a loop can be assumed to run
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1456,6 +1921,111 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Symbol resolution">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b188-renaming-a-namespaced-constant-or-function-renames-unrelated-symbols-of-the-same-short-name" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B188. Renaming a namespaced constant or function renames unrelated symbols of the same short name
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b189-renaming-a-define-declared-constant-leaves-the-define-call-unrenamed" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B189. Renaming a <code>define()</code>-declared constant leaves the <code>define()</code> call unrenamed
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b190-reference-count-hints-read-zero-for-a-global-function-called-from-namespaced-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B190. Reference-count hints read zero for a global function called from namespaced code
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b191-the-property-hook-call-rewrite-matches-any-class-not-just-parent" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B191. The property hook call rewrite matches any class, not just <code>parent</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b192-rename-started-from-a-use-function-or-aliased-call-site-misses-fallback-call-sites" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B192. Rename started from a <code>use function</code> or aliased call site misses fallback call sites
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b193-function-reference-matching-is-case-sensitive" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B193. Function reference matching is case-sensitive
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b194-rename-cannot-be-started-from-a-fully-qualified-call-site" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B194. Rename cannot be started from a fully-qualified call site
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b195-a-constants-own-declaration-is-not-recognized-as-a-declaration-by-the-reference-index" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B195. A constant's own declaration is not recognized as a declaration by the reference index
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b196-the-chain-resolution-cache-key-omits-file-identity" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B196. The chain resolution cache key omits file identity
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1489,6 +2059,210 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Miscellaneous">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b198-a-project-wide-external-tool-run-can-resurrect-diagnostics-on-a-closed-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B198. A project-wide external tool run can resurrect diagnostics on a closed file
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b199-a-workspace-diagnostics-scan-never-replaces-a-worker-retired-by-the-give-up-timeout" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B199. A workspace diagnostics scan never replaces a worker retired by the give-up timeout
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b200-the-laravel-without-required-analyzer-gate-is-defeated-by-its-own-path-fallback" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B200. The Laravel-without-required-analyzer gate is defeated by its own PATH fallback
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b201-phpstandistneon-is-accepted-as-project-config-but-does-not-certify-the-vendored-binary" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B201. <code>phpstan.dist.neon</code> is accepted as project config but does not certify the vendored binary
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b202-any-illuminate-dependency-is-treated-as-a-full-laravel-app" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B202. Any <code>illuminate/*</code> dependency is treated as a full Laravel app
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b203-a-custom-eloquent-builder-rebind-can-cache-a-degraded-result-on-cache-re-entry" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B203. A custom Eloquent builder rebind can cache a degraded result on cache re-entry
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b204-a-custom-eloquent-builder-two-levels-below-builder-fails-to-rebind-its-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B204. A custom Eloquent builder two levels below <code>Builder</code> fails to rebind its model
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b205-the-documented-macos-global-config-path-does-not-match-where-it-is-read-from" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B205. The documented macOS global config path does not match where it is read from
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b206-config-schemajson-is-missing-the-new-mago-lintanalyze-keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B206. <code>config-schema.json</code> is missing the new Mago lint/analyze keys
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b207-a-phpcsxml-silently-switches-a-mago-formatted-projects-formatter-to-phpcbf" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B207. A <code>phpcs.xml</code> silently switches a Mago-formatted project's formatter to phpcbf
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b208-a-dynamic-route-name-group-is-still-flagged-unknown-outside-the-one-shape-the-fix-covers" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B208. A dynamic route-name group is still flagged unknown outside the one shape the fix covers
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b209-a-nullsafe-first-hop-breaks-the-deprecated-diagnostic-subject-cache-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B209. A nullsafe first hop breaks the deprecated-diagnostic subject cache key
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b210-undefined-variable-diagnostics-never-check-property-hook-bodies" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B210. Undefined-variable diagnostics never check property hook bodies
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b211-enabling-workspace-diagnostics-through-a-live-config-reload-has-no-effect-until-restart" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B211. Enabling workspace diagnostics through a live config reload has no effect until restart
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b212-the-workspace-scan-watchdog-can-mislabel-a-file-that-just-finished-as-timed-out" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B212. The workspace scan watchdog can mislabel a file that just finished as timed out
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b213-two-diagnostic-refresh-requests-await-the-client-with-no-timeout" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B213. Two diagnostic refresh requests await the client with no timeout
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b214-a-closure-inside-an-arrow-bodied-property-hook-gets-no-variable-snapshot" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B214. A closure inside an arrow-bodied property hook gets no variable snapshot
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b215-a-file-closed-mid-computation-can-have-stale-diagnostics-reinserted-after-the-close-purge" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B215. A file closed mid-computation can have stale diagnostics reinserted after the close purge
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1528,21 +2302,427 @@ each bug's row lives in the current sprint/backlog.</p>
 <h2 id="crashes">Crashes<a class="headerlink" href="#crashes" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="type-comparison">Type comparison<a class="headerlink" href="#type-comparison" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b182-non-falsy-string-still-accepts-a-literal-string-that-can-be-0">B182. <code>non-falsy-string</code> still accepts a literal string that can be <code>0</code><a class="headerlink" href="#b182-non-falsy-string-still-accepts-a-literal-string-that-can-be-0" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<p>The <code>non-falsy-string</code> supertype arm in <code>php_type/subtype.rs</code> accepts
+<code>non-empty-literal-string</code>, <code>non-empty-lowercase-string</code>, and
+<code>non-empty-uppercase-string</code> as subtypes, carried over unpruned from the
+<code>non-empty-string</code> arm. All three are inhabited by the literal <code>"0"</code>,
+which is falsy, so a <code>non-empty-literal-string</code>-typed value passed where
+<code>non-falsy-string</code> is required produces no diagnostic even though <code>"0"</code>
+would violate it. False negative only; pre-existing in the shared arm
+before it was split, and still present in the split-off strict arm.</p>
 <h2 id="standard-library-return-types">Standard-library return types<a class="headerlink" href="#standard-library-return-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b183-is_a-narrows-away-the-string-half-of-an-objectstring-parameter">B183. <code>is_a()</code> narrows away the string half of an <code>object|string</code> parameter<a class="headerlink" href="#b183-is_a-narrows-away-the-string-half-of-an-objectstring-parameter" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium-High · Complexity: Medium</strong></p>
+<p><code>try_extract_instanceof_with_negation</code> folds <code>is_a($x, C::class, true)</code>
+into the same narrowing path as a real <code>instanceof</code>, without recording
+that the third argument (<code>$allow_string</code>) keeps the class-string
+alternative alive. <code>commit_instanceof_narrowing</code> then replaces the whole
+subject type with the checked class whenever no union member already
+names a class, so on <code>object|string</code> the true branch drops <code>string</code>
+entirely instead of narrowing to <code>Foo|class-string&lt;Foo&gt;</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">function f(object|string $x): void {</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    if (is_a($x, Foo::class, true)) {</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">        // $x is reported as Foo; it can still be a class-string&lt;Foo&gt;</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">        if (is_string($x)) {</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">            new $x();</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">        }</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">    }</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">}</span>
+</code></pre></div>
+<p>Before the commit that introduced this path the case was simply left
+un-narrowed; now it is actively wrong, producing false-positive type
+errors when the narrowed <code>$x</code> is later passed to a <code>string</code>/<code>class-string</code>
+parameter. Fix in <code>type_engine/variable/forward_walk/cond_narrowing.rs</code>
+and <code>type_engine/types/narrowing/instanceof.rs</code>, threading
+<code>allow_string</code> through so the true branch keeps the string alternative
+and <code>apply_class_string_guard_narrowing</code> still runs.</p>
+<h3 id="b184-a-negated-get_class-check-over-narrows-and-drops-valid-subclasses">B184. A negated <code>get_class()</code> check over-narrows and drops valid subclasses<a class="headerlink" href="#b184-a-negated-get_class-check-over-narrows-and-drops-valid-subclasses" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
+<p><code>narrow_type_by_instanceof</code>'s negated branch
+(<code>type_engine/types/narrowing/instanceof.rs</code>) ignores
+<code>extraction.exact</code>, so a negated exact-class check is treated the same
+as <code>!instanceof</code>, which wrongly excludes subclasses that would in fact
+pass the exact check:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">/** @var list&lt;Dog|Puppy|Cat&gt; $a  (Puppy extends Dog) */</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">$b = array_filter($a, fn ($v) =&gt; get_class($v) !== Dog::class);</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">// reports array&lt;int, Cat&gt;; Puppy&#39;s get_class() is &quot;Puppy&quot;, so it should survive too</span>
+</code></pre></div>
+<p>The positive branch already handles <code>exact</code> correctly; only the negated
+branch needs the same check.</p>
+<h3 id="b185-a-union-members-generic-arguments-are-lost-when-narrowed-by-instanceof">B185. A union member's generic arguments are lost when narrowed by <code>instanceof</code><a class="headerlink" href="#b185-a-union-members-generic-arguments-are-lost-when-narrowed-by-instanceof" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p><code>instanceof_member</code> (<code>type_engine/types/narrowing/instanceof.rs</code>) calls
+<code>member.class_name()</code>, which only matches <code>TypeKind::Named</code>. A <code>Generic</code>
+union member such as <code>Collection&lt;User&gt;</code> falls into the <code>else</code> arm and is
+replaced by the bare checked class (<code>Collection</code>) instead of reaching the
+<code>is_subtype_of_named</code> path that would preserve its type arguments:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">/** @var list&lt;Collection&lt;User&gt;|string&gt; $a */</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">$b = array_filter($a, fn ($v) =&gt; $v instanceof Collection);</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">// $b is array&lt;int, Collection&gt;; should be array&lt;int, Collection&lt;User&gt;&gt;</span>
+</code></pre></div>
+<p><code>$b[0]-&gt;first()</code> then loses the <code>User</code> type. A non-generic member
+escapes this path via an early subtype check elsewhere; only the
+union-narrowing path is affected.</p>
+<h3 id="b186-a-negated-loose-null-comparison-is-narrowed-as-if-it-were-strict">B186. A negated loose null comparison is narrowed as if it were strict<a class="headerlink" href="#b186-a-negated-loose-null-comparison-is-narrowed-as-if-it-were-strict" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<p><code>try_extract_null_comparison</code> (<code>type_engine/types/narrowing/guards.rs</code>)
+collapses <code>!==</code> and <code>!=</code> to the same <code>Some(false)</code> result in its negation
+arm, so <code>!($v != null)</code> (equivalent to the loose <code>$v == null</code>) is treated
+as proving <code>null</code>, even though the function's own direct-comparison arm
+correctly refuses to narrow <code>$v == null</code> (loose equality also matches
+<code>''</code>, <code>0</code>, <code>[]</code>). Only the negated spelling slips through:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">/** @var list</span><span class="cp">&lt;?</span><span class="nx">string</span><span class="o">&gt;</span> <span class="nv">$xs</span> <span class="o">*/</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nv">$kept</span> <span class="o">=</span> <span class="nb">array_filter</span><span class="p">(</span><span class="nv">$xs</span><span class="p">,</span> <span class="nx">fn</span> <span class="p">(</span><span class="nv">$v</span><span class="p">)</span> <span class="o">=&gt;</span> <span class="o">!</span><span class="p">(</span><span class="nv">$v</span> <span class="o">!=</span> <span class="k">null</span><span class="p">));</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="c1">// reports array&lt;int, null&gt;; kept entries also include &#39;&#39;</span>
+</code></pre></div>
+<p>Contrived spelling, so low real-world reach, but the negation arm should
+distinguish <code>NotIdentical</code> from <code>NotEqual</code> the same way the direct arm
+distinguishes <code>Identical</code> from <code>Equal</code>.</p>
+<h3 id="b187-unsetting-an-array-element-is-not-modeled-so-a-loop-can-be-assumed-to-run">B187. Unsetting an array element is not modeled, so a loop can be assumed to run<a class="headerlink" href="#b187-unsetting-an-array-element-is-not-modeled-so-a-loop-can-be-assumed-to-run" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<p><code>unset()</code> handling in
+<code>type_engine/variable/forward_walk/assignment.rs</code> only clears a direct
+variable, not an element unset (<code>unset($arr['k'])</code>). A <code>non-empty-array</code>
+or shape type therefore survives being emptied out element by element,
+so <code>process_foreach</code> still treats the loop body as guaranteed to run and
+drops the pre-loop sentinel value, producing a wrong post-loop type (a
+variable assigned only inside the loop is typed as if the loop always
+executed, when the array it iterates was actually emptied first).</p>
 <h2 id="arithmetic">Arithmetic<a class="headerlink" href="#arithmetic" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b188-renaming-a-namespaced-constant-or-function-renames-unrelated-symbols-of-the-same-short-name">B188. Renaming a namespaced constant or function renames unrelated symbols of the same short name<a class="headerlink" href="#b188-renaming-a-namespaced-constant-or-function-renames-unrelated-symbols-of-the-same-short-name" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: High · Complexity: Medium</strong></p>
+<p><code>constant_matches</code> in <code>references/functions.rs</code> accepts a span as a
+match whenever its <em>resolved</em> FQN merely shares the target's short name
+(<code>crate::util::short_name(resolved) == target_short</code>), not only when it
+is the exact same declaration. The identical disjunct exists for
+functions:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">namespace A;</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">const VERSION = &#39;1&#39;;</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">namespace B;</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">const VERSION = &#39;2&#39;; // renaming A\VERSION silently renames this too</span>
+</code></pre></div>
+<p>The short-name fallback exists to catch PHP's runtime namespace-fallback
+resolution for genuinely unqualified references, but it fires even when
+the sibling-namespace constant/function is a real, unambiguous
+declaration of its own. This is the same bug class fixed for class
+constants vs. global constants in a recent commit; it is still open
+across namespaces for constants and functions. Rename silently rewriting
+declarations and uses in an unrelated namespace is a correctness
+regression risk on any release with namespaced code.</p>
+<h3 id="b189-renaming-a-define-declared-constant-leaves-the-define-call-unrenamed">B189. Renaming a <code>define()</code>-declared constant leaves the <code>define()</code> call unrenamed<a class="headerlink" href="#b189-renaming-a-define-declared-constant-leaves-the-define-call-unrenamed" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: High · Complexity: Medium-High</strong></p>
+<p><code>ConstantReference</code> spans are only emitted for top-level <code>const</code>
+declarations, <code>use const</code> imports, and <code>ConstantAccess</code> sites
+(<code>symbol_map/extraction/statements.rs</code> and related). A constant
+registered via <code>define('FOO', ...)</code> produces no span for the string
+argument, even though <code>constant('FOO')</code>, <code>FOO</code>, and <code>function_exists</code>
+style lookups resolve it via the parser's symbol table. Renaming started
+from any use site of a <code>define()</code>-declared constant therefore rewrites
+every use but leaves the <code>define()</code> call itself untouched, producing
+code that no longer defines the constant it now reads:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">define(&#39;FOO&#39;, 1);</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">echo FOO; // rename FOO -&gt; BAR rewrites this to BAR...</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">// ...but define(&#39;FOO&#39;, 1) above is left as-is: BAR is now undefined at runtime</span>
+</code></pre></div>
+<p>The docblock on <code>SymbolKind::ConstantReference</code> already claims <code>define()</code>
+names are covered; they are not. Fix belongs in symbol-map extraction of
+<code>define()</code> call arguments.</p>
+<h3 id="b190-reference-count-hints-read-zero-for-a-global-function-called-from-namespaced-code">B190. Reference-count hints read zero for a global function called from namespaced code<a class="headerlink" href="#b190-reference-count-hints-read-zero-for-a-global-function-called-from-namespaced-code" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p><code>symbol_name_keys</code> (<code>reference_index.rs</code>) credits a call's reference
+count to its <em>resolved</em> FQN only. Because <code>mago-names</code> unconditionally
+qualifies an unqualified call with the current namespace (PHP's runtime
+fallback semantics), a call to a global <code>function helper() {}</code> written
+as <code>helper()</code> inside <code>namespace App;</code> is credited to <code>Function("App\helper")</code>,
+a function that doesn't exist, while the declaration's own key is
+<code>Function("helper")</code>. The reference-count inlay hint above the
+declaration therefore reads "0 references" in any PSR-4-style project
+that calls the global function from inside a namespace, even though Find
+References (which separately falls back to short-name matching) lists
+every call correctly.</p>
+<h3 id="b191-the-property-hook-call-rewrite-matches-any-class-not-just-parent">B191. The property hook call rewrite matches any class, not just <code>parent</code><a class="headerlink" href="#b191-the-property-hook-call-rewrite-matches-any-class-not-just-parent" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Low</strong></p>
+<p><code>extract_property_hook_call</code> (<code>symbol_map/extraction/expressions/calls.rs</code>)
+rewrites any <code>X::$y::get()</code> / <code>X::$y::set(...)</code> static call into a
+property-hook invocation, but PHP 8.4 only defines this syntax for
+<code>parent::</code>. The extraction never checks <code>property_access.class</code>, so
+legitimate code using the same token shape for an unrelated purpose is
+hijacked:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">Registry::$instance::get(&#39;service&#39;); // a real static property + static call</span>
+</code></pre></div>
+<p>Here the <code>get</code> call's <code>MemberAccess</code> span is dropped entirely (hover and
+go-to-definition on <code>get</code> answer nothing, and its unknown-method/
+argument-count checks are skipped), and <code>$instance</code> is emitted as
+<code>is_static: false</code>, so hover shows a static property as an instance one.
+Restrict the match to a <code>parent</code> class reference.</p>
+<h3 id="b192-rename-started-from-a-use-function-or-aliased-call-site-misses-fallback-call-sites">B192. Rename started from a <code>use function</code> or aliased call site misses fallback call sites<a class="headerlink" href="#b192-rename-started-from-a-use-function-or-aliased-call-site-misses-fallback-call-sites" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
+<p><code>references/dispatch.rs</code>'s <code>FunctionCall</code> arm passes the raw import span
+text (e.g. <code>Foo\bar</code>) as the short-name fallback target instead of
+shortening it with <code>short_name()</code> first, the way the constant arm right
+below it does. Starting Find References/rename from a <code>use function
+Foo\bar;</code> import, or from an aliased call site, therefore only matches
+the fully-qualified key and never reaches unqualified call sites in
+other namespaces that resolve to the same function — sites that <em>are</em>
+found when the search starts from the declaration instead.</p>
+<h3 id="b193-function-reference-matching-is-case-sensitive">B193. Function reference matching is case-sensitive<a class="headerlink" href="#b193-function-reference-matching-is-case-sensitive" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
+<p>PHP resolves function names case-insensitively, but the string-keyed
+reference index and <code>find_function_references</code>
+(<code>references/functions.rs</code>) match case-sensitively. A call spelled
+<code>HELPER()</code> resolves to <code>App\HELPER</code>, whose key never intersects the
+<code>helper</code> candidate keys, so the file containing that call is filtered
+out before scanning and a rename of <code>helper</code> leaves <code>HELPER()</code> calling
+the old (now renamed-away) name. <code>import_aware_edit_text</code> already passes
+<code>case_insensitive: true</code> for functions, but only for edit text of
+locations already found by the case-sensitive search; constants are
+correctly case-sensitive throughout and are not affected.</p>
+<h3 id="b194-rename-cannot-be-started-from-a-fully-qualified-call-site">B194. Rename cannot be started from a fully-qualified call site<a class="headerlink" href="#b194-rename-cannot-be-started-from-a-fully-qualified-call-site" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<p><code>span_spells_its_name</code> (<code>rename/validate.rs</code>) compares the recorded name
+(without its leading <code>\</code>) against the span text (with it) for a
+fully-qualified reference such as <code>\Foo\bar()</code>, so the comparison fails
+and prepare-rename returns nothing when started from that site. Rename
+started from any other, non-fully-qualified site still edits
+fully-qualified sites correctly, so this only blocks initiating the
+rename from an FQN spelling.</p>
+<h3 id="b195-a-constants-own-declaration-is-not-recognized-as-a-declaration-by-the-reference-index">B195. A constant's own declaration is not recognized as a declaration by the reference index<a class="headerlink" href="#b195-a-constants-own-declaration-is-not-recognized-as-a-declaration-by-the-reference-index" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<p>The <code>is_declaration</code> match in <code>reference_index.rs</code> covers
+<code>ClassDeclaration</code>, <code>FunctionCall { is_definition: true }</code>, and
+<code>MemberDeclaration</code>, but not <code>ConstantReference { is_definition: true }</code>
+— the flag was added for constants without updating this match. No
+consumer currently displays constant reference counts, so this is
+latent, but a future count/hint feature for constants would count the
+declaration itself as one of its own references.</p>
+<h3 id="b196-the-chain-resolution-cache-key-omits-file-identity">B196. The chain resolution cache key omits file identity<a class="headerlink" href="#b196-the-chain-resolution-cache-key-omits-file-identity" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>The chain cache in <code>type_engine/resolver/mod.rs</code> keys a variable-free
+subject chain by its bare text (<code>expr.to_subject_text()</code>), with no file
+identity in the key, while some cache activations span multiple files
+(e.g. the reference-counts pending-item loop, and the request-level
+guard used by find-references/rename while walking other files). Two
+files that each <code>use</code> a different class under the same alias and spell
+the same method-chain text can have the second file's resolution
+poisoned by the first file's cached entry:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">// file A: use A\Pen;           file B: use B\Pen;</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">Pen::make()-&gt;write();           Pen::make()-&gt;write();  // may resolve against A\Pen</span>
+</code></pre></div>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b198-a-project-wide-external-tool-run-can-resurrect-diagnostics-on-a-closed-file">B198. A project-wide external tool run can resurrect diagnostics on a closed file<a class="headerlink" href="#b198-a-project-wide-external-tool-run-can-resurrect-diagnostics-on-a-closed-file" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium-High · Complexity: Low-Medium</strong></p>
+<p><code>store_workspace_external_results</code> (<code>diagnostics/workspace.rs</code>)
+partitions results by <code>open_files</code>, then awaits
+<code>flush_workspace_diag_updates</code> (which can block up to the 10s
+<code>REFRESH_TIMEOUT</code>), and only afterwards inserts into the per-file tool
+caches — with no re-check of <code>open_files</code> at insert time, unlike the
+per-file external-tool workers, which do re-check immediately before
+writing. If the file is closed during that await, <code>clear_diagnostics_for_file</code>
+has already purged its caches, and this loop re-inserts the scan-time
+diagnostics right back in — the exact bug a recent commit fixed for the
+regular close path. The same insert is also unconditional for files that
+stay open: it can overwrite a fresher (already-fixed) per-file result
+with a stale scan-time one, and it never clears an open file's cache
+entry when the tool no longer reports anything for it. Fix by re-checking
+<code>open_files</code> immediately before each insert, matching the per-file
+workers.</p>
+<h3 id="b199-a-workspace-diagnostics-scan-never-replaces-a-worker-retired-by-the-give-up-timeout">B199. A workspace diagnostics scan never replaces a worker retired by the give-up timeout<a class="headerlink" href="#b199-a-workspace-diagnostics-scan-never-replaces-a-worker-retired-by-the-give-up-timeout" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium-High · Complexity: Medium</strong></p>
+<p>The native diagnostics scan spawns a fixed worker pool once per pass
+(<code>(cores/2).max(2)</code>, <code>diagnostics/workspace.rs</code>) and, when a worker is
+retired after exceeding the 10s per-file give-up, never spawns a
+replacement. On a small machine (2 workers on a 4-core box), and because
+the file list is sorted (clustering files from the same directory), two
+pathological files can wedge both workers in quick succession; once both
+are retired, every remaining file in the queue is permanently unchecked
+for the rest of the session, since the pass is single-shot per session.
+A warning is logged, but the degradation is total for the remainder of
+the project rather than limited to the slow files themselves. Fix by
+spawning a replacement worker on retire (or budgeting a small number of
+retries) rather than shrinking the pool permanently.</p>
+<h3 id="b200-the-laravel-without-required-analyzer-gate-is-defeated-by-its-own-path-fallback">B200. The Laravel-without-required-analyzer gate is defeated by its own PATH fallback<a class="headerlink" href="#b200-the-laravel-without-required-analyzer-gate-is-defeated-by-its-own-path-fallback" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
+<p><code>resolve_phpstan</code> (<code>phpstan.rs</code>) deliberately refuses to certify
+<code>vendor/bin/phpstan</code> on a Laravel project that lacks Larastan, "rather
+than run through an analyser that would misread its own framework" — but
+then falls through to <code>which("phpstan")</code> on <code>$PATH</code> unconditionally. A
+user with a global PHPStan install gets exactly the misreading the gate
+was written to prevent, on every save, using a binary that additionally
+lacks the project's own vendored extensions. <code>resolve_mago</code> (<code>mago.rs</code>)
+has the same shape (additionally gated by <code>enabled_services</code>, but with
+the same fallback once past that gate).</p>
+<h3 id="b201-phpstandistneon-is-accepted-as-project-config-but-does-not-certify-the-vendored-binary">B201. <code>phpstan.dist.neon</code> is accepted as project config but does not certify the vendored binary<a class="headerlink" href="#b201-phpstandistneon-is-accepted-as-project-config-but-does-not-certify-the-vendored-binary" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
+<p><code>has_project_config</code> (<code>phpstan.rs</code>) accepts <code>phpstan.neon</code>,
+<code>phpstan.neon.dist</code>, and <code>phpstan.dist.neon</code> as valid project config
+files, but <code>has_phpstan_neon_config</code>, used by <code>resolve_phpstan</code> to decide
+whether <code>vendor/bin/phpstan</code> may be used, only checks the first two. A
+project using the <code>phpstan.dist.neon</code> spelling with PHPStan only as a
+transitive dependency passes the workspace-run gate but is then refused
+the vendored binary, and (per B200) falls back to a PATH binary or
+nothing despite having valid config. The two file lists should be a
+single shared function.</p>
+<h3 id="b202-any-illuminate-dependency-is-treated-as-a-full-laravel-app">B202. Any <code>illuminate/*</code> dependency is treated as a full Laravel app<a class="headerlink" href="#b202-any-illuminate-dependency-is-treated-as-a-full-laravel-app" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<p><code>is_laravel_project</code> (<code>composer.rs</code>) matches any <code>illuminate/*</code> package,
+so a plain library that requires e.g. <code>illuminate/support</code> plus
+<code>phpstan/phpstan</code> directly (with no root neon file) is denied
+<code>vendor/bin/phpstan</code> for lacking <code>*/larastan</code>, even though it isn't a
+Laravel application and doesn't need Larastan. Narrow in practice (such
+libraries usually ship their own <code>phpstan.neon.dist</code>, which triggers a
+separate acceptance path), but the heuristic conflates "uses an
+Illuminate component" with "is a Laravel app needing Larastan".</p>
+<h3 id="b203-a-custom-eloquent-builder-rebind-can-cache-a-degraded-result-on-cache-re-entry">B203. A custom Eloquent builder rebind can cache a degraded result on cache re-entry<a class="headerlink" href="#b203-a-custom-eloquent-builder-rebind-can-cache-a-degraded-result-on-cache-re-entry" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
+<p>When <code>mark_in_flight(fqn)</code> reports same-thread re-entry on a custom
+builder's FQN, <code>apply_post_merge_stages</code> (<code>virtual_members/resolve.rs</code>)
+is skipped, but the base-inheritance-only rebound class is still
+inserted into the persistent resolved-class cache under
+<code>(fqn, generic_args)</code>. Nothing overwrites it afterwards unless the exact
+same specialization is re-requested outside an in-flight guard, so a
+later hover/completion/diagnostic on that builder specialization gets a
+result missing its virtual members, <code>@mixin</code> methods, and Laravel
+patches, until the entry is evicted by a file edit. Fix by skipping the
+cache insert whenever <code>apply_post_merge_stages</code> was skipped.</p>
+<h3 id="b204-a-custom-eloquent-builder-two-levels-below-builder-fails-to-rebind-its-model">B204. A custom Eloquent builder two levels below <code>Builder</code> fails to rebind its model<a class="headerlink" href="#b204-a-custom-eloquent-builder-two-levels-below-builder-fails-to-rebind-its-model" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p><code>rebindable_parent</code> (<code>inheritance/mod.rs</code>) only handles a direct parent
+that itself carries the template parameters
+(<code>parent.template_params.len() == new_arg_count</code>). A two-level chain —
+<code>class AdminUserBuilder extends UserBuilder</code>, where <code>UserBuilder extends
+Builder</code> and neither declares its own <code>@template</code> — fails the arity
+check at the first level (<code>UserBuilder</code> has zero params) and silently
+degrades to the <code>TModel of Model</code> bound, reproducing the exact symptom a
+recent fix addressed, one inheritance level deeper.</p>
+<h3 id="b205-the-documented-macos-global-config-path-does-not-match-where-it-is-read-from">B205. The documented macOS global config path does not match where it is read from<a class="headerlink" href="#b205-the-documented-macos-global-config-path-does-not-match-where-it-is-read-from" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
+<p><code>global_config_path()</code> (<code>config.rs</code>) uses <code>etcetera::choose_base_strategy()</code>,
+which resolves to the XDG path (<code>~/.config/phpantom_lsp/.phpantom.toml</code>)
+on macOS as well as Linux. <code>docs/configuration.md</code> documents
+<code>~/Library/Application Support/phpantom_lsp/.phpantom.toml</code> for macOS. A
+macOS user who hand-creates the documented path gets a config file that
+is never read. Decide which path is intended (switching to
+<code>choose_app_strategy</code> migrates existing users' config location, so this
+is worth doing before or clearly noted at release) and align the other
+side.</p>
+<h3 id="b206-config-schemajson-is-missing-the-new-mago-lintanalyze-keys">B206. <code>config-schema.json</code> is missing the new Mago lint/analyze keys<a class="headerlink" href="#b206-config-schemajson-is-missing-the-new-mago-lintanalyze-keys" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<p>The <code>mago.lint</code> and <code>mago.analyze</code> config keys were added to <code>Config</code>
+and documented in <code>docs/configuration.md</code>, but <code>config-schema.json</code>'s
+<code>mago</code> section still only lists <code>command</code> and the timeouts. Editors that
+use the schema for <code>.phpantom.toml</code> autocomplete/validation offer no
+completion for the new keys and may flag them as unknown.</p>
+<h3 id="b207-a-phpcsxml-silently-switches-a-mago-formatted-projects-formatter-to-phpcbf">B207. A <code>phpcs.xml</code> silently switches a Mago-formatted project's formatter to phpcbf<a class="headerlink" href="#b207-a-phpcsxml-silently-switches-a-mago-formatted-projects-formatter-to-phpcbf" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>A recent commit made a <code>phpcs.xml</code> (or <code>phpcs.xml.dist</code>) certify phpcbf
+as the project's formatter, and <code>External</code> formatter resolution
+(<code>formatting.rs</code>) takes precedence over <code>BuiltIn(mago.toml)</code>. A project
+that lints with PHPCS but formats with Mago (an explicit <code>[formatter]</code>
+table in <code>mago.toml</code>) has its configured formatter silently overridden
+by phpcbf, contradicting the "a config file records what a project uses
+a tool for" principle applied to Mago in the same release. Needs a
+decision on precedence when both an explicit Mago formatter config and a
+phpcs ruleset are present.</p>
+<h3 id="b208-a-dynamic-route-name-group-is-still-flagged-unknown-outside-the-one-shape-the-fix-covers">B208. A dynamic route-name group is still flagged unknown outside the one shape the fix covers<a class="headerlink" href="#b208-a-dynamic-route-name-group-is-still-flagged-unknown-outside-the-one-shape-the-fix-covers" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>The dynamic-group-prefix fix only records an "open prefix" when the
+dynamic <code>Route::name(...)</code> call is nested inside an <em>enclosing literal</em>
+group (<code>virtual_members/laravel/route_names.rs</code>, guarded by
+<code>!group.name.is_empty()</code>). Two related shapes still produce the false
+positive the fix set out to remove: a top-level dynamic name group with
+no enclosing literal group (<code>Route::name('filament.' . $panelId . '.')
+-&gt;group(...)</code> at the top of a routes file), and the legacy array form
+(<code>Route::group(['as' =&gt; $dynamic], ...)</code>, whose value extraction silently
+returns <code>""</code> for a non-literal name and records nothing open). Both leave
+<code>route('filament.admin.pages.dashboard')</code>-style calls flagged unknown.</p>
+<h3 id="b209-a-nullsafe-first-hop-breaks-the-deprecated-diagnostic-subject-cache-key">B209. A nullsafe first hop breaks the deprecated-diagnostic subject cache key<a class="headerlink" href="#b209-a-nullsafe-first-hop-breaks-the-deprecated-diagnostic-subject-cache-key" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
+<p><code>SubjectCacheKey::build</code> (<code>diagnostics/subject_cache.rs</code>) extracts a
+chain's variable name with <code>find("-&gt;")</code>, so a nullsafe first hop such as
+<code>$a?-&gt;b-&gt;deprecated()</code> yields the variable name <code>"$a?"</code> instead of <code>"$a"</code>.
+The def-offset lookup for that malformed name fails, so accesses before
+and after a reassignment of <code>$a</code> can share one cache entry, risking a
+stale type for the deprecation check.</p>
+<h3 id="b210-undefined-variable-diagnostics-never-check-property-hook-bodies">B210. Undefined-variable diagnostics never check property hook bodies<a class="headerlink" href="#b210-undefined-variable-diagnostics-never-check-property-hook-bodies" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
+<p>The undefined-variable walker (<code>diagnostics/undefined_variables/mod.rs</code>)
+and <code>scope_collector/build.rs</code> both only enumerate <code>ClassLikeMember::Method</code>
+bodies. Property hook bodies were taught to the symbol map, the forward
+walker, and unknown-member diagnostics, but this separate walker still
+skips them, so a typo such as <code>return $vlaue;</code> inside a <code>set</code> hook is
+never flagged. No false positives result — the bodies are simply
+unchecked — but the coverage gap is now user-visible since hooks are a
+supported, documented feature.</p>
+<h3 id="b211-enabling-workspace-diagnostics-through-a-live-config-reload-has-no-effect-until-restart">B211. Enabling workspace diagnostics through a live config reload has no effect until restart<a class="headerlink" href="#b211-enabling-workspace-diagnostics-through-a-live-config-reload-has-no-effect-until-restart" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<p><code>run_workspace_diagnostics</code> has exactly one caller: the startup task,
+which already returns early if <code>[diagnostics] workspace</code> was off at
+startup. <code>reload_config</code> (<code>indexing/watch.rs</code>) never re-triggers it, so
+flipping the setting on via a live-reloaded project or global config (a
+feature this release adds) does nothing until the editor is restarted,
+contradicting <code>docs/configuration.md</code>'s claim that only the PHP version
+and indexing strategy require a restart.</p>
+<h3 id="b212-the-workspace-scan-watchdog-can-mislabel-a-file-that-just-finished-as-timed-out">B212. The workspace scan watchdog can mislabel a file that just finished as timed out<a class="headerlink" href="#b212-the-workspace-scan-watchdog-can-mislabel-a-file-that-just-finished-as-timed-out" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<p>Between the workspace-scan watchdog's <code>slot.in_flight()</code> read and its
+<code>slot.retire()</code> call (<code>diagnostics/workspace.rs</code>), the worker can finish
+the timed-out file and move on to the next one. The retire then logs the
+just-finished file as abandoned ("gave up on X after 10s... please
+report it") even though it completed and its diagnostics were published,
+and retires the worker while it is genuinely mid-flight on the file it
+just claimed — if the pass then reaches <code>all_stopped</code> before that new
+file finishes, its result is never harvested and it is reported as not
+checked. Roughly a 100ms window (the watchdog poll interval); no state
+corruption, just an incorrect log message and an occasional dropped file.</p>
+<h3 id="b213-two-diagnostic-refresh-requests-await-the-client-with-no-timeout">B213. Two diagnostic refresh requests await the client with no timeout<a class="headerlink" href="#b213-two-diagnostic-refresh-requests-await-the-client-with-no-timeout" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
+<p><code>request_diagnostic_refresh</code> was given a 10s cap in a recent commit
+specifically because "a client that is busy (or never answers) would
+otherwise park this task indefinitely." <code>did_change_watched_files</code>
+(<code>server.rs</code>) and the background index-completion task each still await
+<code>client.workspace_diagnostic_refresh()</code> directly, with no timeout, and
+both fire in the same bursty scenarios (branch switches, initial index
+completion) that motivated the timeout elsewhere. Convert both call
+sites to <code>request_diagnostic_refresh()</code>.</p>
+<h3 id="b214-a-closure-inside-an-arrow-bodied-property-hook-gets-no-variable-snapshot">B214. A closure inside an arrow-bodied property hook gets no variable snapshot<a class="headerlink" href="#b214-a-closure-inside-an-arrow-bodied-property-hook-gets-no-variable-snapshot" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<p><code>walk_property_hook_bodies</code> (<code>type_engine/variable/forward_walk/diagnostic_walk.rs</code>)
+assumes an arrow-form hook body is "a single expression with nothing to
+assign," but a closure embedded in that expression has its own
+parameters that never get a snapshot:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">public array $items {</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">    get =&gt; array_map(fn ($p) =&gt; $p-&gt;format(), $this-&gt;items);</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="x">}</span>
+</code></pre></div>
+<p>Lookups on <code>$p</code> inside the closure return empty, so member diagnostics
+inside closures embedded in arrow-bodied hooks are silently skipped
+(fail-open) rather than checked.</p>
+<h3 id="b215-a-file-closed-mid-computation-can-have-stale-diagnostics-reinserted-after-the-close-purge">B215. A file closed mid-computation can have stale diagnostics reinserted after the close purge<a class="headerlink" href="#b215-a-file-closed-mid-computation-can-have-stale-diagnostics-reinserted-after-the-close-purge" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<p>Several diagnostic write-back paths check <code>open_files</code> once before
+starting a multi-step computation and never re-check before the final
+write. <code>assemble_and_push</code>'s read-merge-write across the six per-source
+diagnostic caches is not atomic, so two concurrent completions (e.g. a
+fast-phase worker and an external tool) can interleave such that the
+stale merge's write lands last. Separately, the main diagnostic worker
+(<code>diagnostics/mod.rs</code>) checks <code>open_files</code> only before starting
+<code>publish_diagnostics_for_file</code>; a close landing mid-compute (the fast/slow
+phases can take seconds) lets the tail of that computation re-insert
+<code>last_fast</code>/<code>last_full</code>/<code>result_ids</code> after <code>clear_diagnostics_for_file</code>
+has purged them. Both self-heal on the file's next open/edit, but until
+then a closed file's cache holds diagnostics that should have been
+cleared.</p>
 
 
 
