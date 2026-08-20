@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+### Changed
+
+### Fixed
+
+## [0.10.0] - 2026-08-20
+
+### Added
+
 #### Whole-project analysis
 
 - **Full workspace indexing.** PHPantom now parses every PHP file in your project in the background after startup by default, building complete symbol data and a cross-file reference index. Find References, Rename, Go to Implementation, and Type Hierarchy resolve against the whole project instead of only the files you have opened, and scan only the files known to reference the symbol. Lighter modes remain available for projects that prefer a smaller footprint. Contributed by @sidux in https://github.com/PHPantom-dev/phpantom_lsp/pull/186.
