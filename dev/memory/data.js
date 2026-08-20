@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787184322236,
+  "lastUpdate": 1787184884308,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -24207,6 +24207,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 67.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "60ae628657c1ede8b89ddfbf82e5054247e186cb",
+          "message": "A Laravel Folio page's route name is recognised",
+          "timestamp": "2026-08-20T01:57:29+02:00",
+          "tree_id": "3b84fb1789fd56778d94428ef52a34139125a185",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/60ae628657c1ede8b89ddfbf82e5054247e186cb"
+        },
+        "date": 1787184877261,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 66.8,
             "unit": "MiB"
           }
         ]
