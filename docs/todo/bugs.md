@@ -126,26 +126,6 @@ anywhere in the enclosing function body (not only the ones preceding the
 read in this pass), since the assignment that matters can sit in a
 branch this call never takes.
 
-### B225. A route group whose name spells out nothing still flags its routes
-
-**Impact: Low · Complexity: Medium**
-
-A group whose name is entirely a variable and which sits under no
-enclosing literal group (`Route::name($panelId)->group(...)` at the top
-of a routes file) records no open prefix, so every `route()` call naming
-one of its routes is still reported as unknown.
-
-The obvious fix is the wrong one: an open prefix of `""` is a prefix of
-every route name there is, so the diagnostic
-(`route_open_prefixes.iter().any(|prefix| key.starts_with(prefix))` in
-`diagnostics/mod.rs`) would stand down for the whole project rather than
-for the one group. What is needed instead is for the collector
-(`virtual_members/laravel/route_names.rs`) to record which *names* fall
-under an unknowable group rather than which prefixes, so an unnamed
-group opens only the suffixes it registers (`pages.dashboard` under an
-unknown prefix means any name *ending* in it is unjudgeable) and every
-other name in the project stays checked.
-
 ## Array types
 
 No outstanding items.
