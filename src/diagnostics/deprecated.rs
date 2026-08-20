@@ -59,6 +59,16 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
+        // ── Parse cache for this diagnostic pass ────────────────────────
+        // Each subject resolution below re-parses the file via
+        // `with_parsed_program` unless a parse cache is active; one pass
+        // over a file with many distinct subjects must parse it once,
+        // not once per subject.
+        let _parse_guard = crate::parser::with_parse_cache(content);
+
+        // ── Chain resolution cache for this diagnostic pass ─────────────
+        let _chain_guard = crate::type_engine::resolver::with_chain_resolution_cache();
+
         // Cache of resolved variable types, keyed the same way as the
         // unknown-member pass so that all member accesses guaranteed to
         // see the same type share a single resolution pass.  This turns
