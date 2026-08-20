@@ -1,0 +1,2215 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://phpantom-dev.github.io/phpantom_lsp/0.10.0/todo/blade/">
+      
+      
+        <link rel="prev" href="../actions/">
+      
+      
+        <link rel="next" href="../bugs/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/spookaphant.svg">
+      <meta name="generator" content="zensical-0.0.51">
+    
+    
+      
+        <title>PHPantom — Blade - PHPantom Docs</title>
+      
+    
+    
+      
+        
+      
+      <link rel="stylesheet" href="../../assets/stylesheets/modern/main.62c9b9cc.min.css">
+      
+        
+          
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/modern/palette.dfe2e883.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,500,500i,700,700i%7CJetBrains+Mono:400,400i,700,700i&amp;display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_scope.pathname.endsWith("/")||(__md_scope=new URL(__md_scope.pathname+"/",location)),__md_hash=e=>[...e].reduce(((e,t)=>(e<<5)-e+t.charCodeAt(0)),0),__md_get=(e,t=localStorage,_=__md_scope)=>JSON.parse(t.getItem(_.pathname+"."+e)),__md_set=(e,t,_=localStorage,a=__md_scope)=>{try{_.setItem(a.pathname+"."+e,JSON.stringify(t))}catch(e){}},document.documentElement.setAttribute("data-platform",navigator.platform)</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer" aria-label="Navigation"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#phpantom-blade" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="PHPantom Docs" class="md-header__button md-logo" aria-label="PHPantom Docs" data-md-component="logo">
+      
+  <img src="../../assets/spookaphant.svg" alt="PHPantom Docs">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer" aria-label="Navigation">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-menu" viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            PHPantom Docs
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              PHPantom — Blade
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="deep-purple"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="deep-purple"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search" aria-label="Search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog" aria-label="Search">
+  <button type="button" class="md-search__button">
+    Search
+  </button>
+</div>
+      
+    
+    <div class="md-header__source">
+      
+        <a href="https://github.com/PHPantom-dev/phpantom_lsp" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    PHPantom-dev/phpantom_lsp
+  </div>
+</a>
+      
+    </div>
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="PHPantom Docs" class="md-nav__button md-logo" aria-label="PHPantom Docs" data-md-component="logo">
+      
+  <img src="../../assets/spookaphant.svg" alt="PHPantom Docs">
+
+    </a>
+    PHPantom Docs
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/PHPantom-dev/phpantom_lsp" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    PHPantom-dev/phpantom_lsp
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Home
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Getting Started
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Getting Started
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../editor-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Editor Setup
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../agent-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Agent Setup
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Manual Installation
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Reference
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Reference
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Configuration
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  CLI
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Development
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Development
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../BUILDING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Building from Source
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Architecture
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Contributing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4_4" id="__nav_4_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Roadmap
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Roadmap
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Overview
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Actions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Blade
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="././" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Blade
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#out-of-scope-and-why" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Out of scope (and why)
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#philosophy" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Philosophy
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bl11-custom-directive-discovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        BL11. Custom directive discovery
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bl1-blade-aware-code-actions" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        BL1. Blade-aware code actions
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bl23-unbalanced-component-tag-diagnostics" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        BL23. Unbalanced component tag diagnostics
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="BL23. Unbalanced component tag diagnostics">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Tests
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bl14-folding-ranges-for-blade-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        BL14. Folding ranges for Blade files
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="BL14. Folding ranges for Blade files">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tests_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Tests
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bl15-document-outline-symbols-for-blade-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        BL15. Document outline (symbols) for Blade files
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="BL15. Document outline (symbols) for Blade files">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tests_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Tests
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bl24-named-slot-variables-scoped-to-the-component-that-receives-them" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        BL24. Named slot variables scoped to the component that receives them
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="BL24. Named slot variables scoped to the component that receives them">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tests_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Tests
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bl16-blade-aware-formatting" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        BL16. Blade-aware formatting
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="BL16. Blade-aware formatting">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#feasibility-research-proxying-blade-formatter-vs-a-native-basic-formatter" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Feasibility research: proxying <code>blade-formatter</code> vs. a native basic formatter
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tests_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Tests
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bl17-format-check-cli-subcommand-for-ci" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        BL17. <code>format --check</code> CLI subcommand for CI
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="BL17. format --check CLI subcommand for CI">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tests_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Tests
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../bugs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Bugs
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../completion/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Completion
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../diagnostics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Diagnostics
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../external-stubs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  External Stubs
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fix-cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Fix CLI
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../indexing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Indexing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../inline-completion/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Inline Completion
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../laravel/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Laravel
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../lsp-features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  LSP Features
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../performance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Performance
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../phpstan-actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  PHPStan Actions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../refactor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Refactoring
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../signature-help/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Signature Help
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../type-inference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Type Inference
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../benchmarks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Benchmarks
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CHANGELOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Changelog
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  
+                    
+                    
+                    
+                      
+                    
+                    
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
+                  
+                  <div class="md-sidebar__inner">
+                    
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#out-of-scope-and-why" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Out of scope (and why)
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#philosophy" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Philosophy
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bl11-custom-directive-discovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        BL11. Custom directive discovery
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bl1-blade-aware-code-actions" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        BL1. Blade-aware code actions
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bl23-unbalanced-component-tag-diagnostics" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        BL23. Unbalanced component tag diagnostics
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="BL23. Unbalanced component tag diagnostics">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Tests
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bl14-folding-ranges-for-blade-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        BL14. Folding ranges for Blade files
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="BL14. Folding ranges for Blade files">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tests_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Tests
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bl15-document-outline-symbols-for-blade-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        BL15. Document outline (symbols) for Blade files
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="BL15. Document outline (symbols) for Blade files">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tests_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Tests
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bl24-named-slot-variables-scoped-to-the-component-that-receives-them" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        BL24. Named slot variables scoped to the component that receives them
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="BL24. Named slot variables scoped to the component that receives them">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tests_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Tests
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bl16-blade-aware-formatting" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        BL16. Blade-aware formatting
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="BL16. Blade-aware formatting">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#feasibility-research-proxying-blade-formatter-vs-a-native-basic-formatter" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Feasibility research: proxying <code>blade-formatter</code> vs. a native basic formatter
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tests_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Tests
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bl17-format-check-cli-subcommand-for-ci" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        BL17. <code>format --check</code> CLI subcommand for CI
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="BL17. format --check CLI subcommand for CI">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tests_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Tests
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+  
+    <a href="https://github.com/PHPantom-dev/phpantom_lsp/edit/main/docs/todo/blade.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-file-pen" viewBox="0 0 24 24"><path d="M12.659 22H18a2 2 0 0 0 2-2V8a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 14 2H6a2 2 0 0 0-2 2v9.34"/><path d="M14 2v5a1 1 0 0 0 1 1h5M10.378 12.622a1 1 0 0 1 3 3.003L8.36 20.637a2 2 0 0 1-.854.506l-2.867.837a.5.5 0 0 1-.62-.62l.836-2.869a2 2 0 0 1 .506-.853z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="phpantom-blade">PHPantom — Blade<a class="headerlink" href="#phpantom-blade" title="Permanent link">&para;</a></h1>
+<p>Known gaps and planned features in PHPantom's Laravel Blade template
+support. For Eloquent model support see <code>laravel.md</code>. For the shipped
+preprocessor pipeline and module layout see <code>ARCHITECTURE.md</code>.</p>
+<p>The strategy, implemented in <code>src/blade/</code>: preprocess <code>.blade.php</code>
+files (recognised by URI suffix, or by a <code>did_open</code> <code>languageId</code> of
+<code>"blade"</code>) into valid virtual PHP, feed the virtual PHP through the
+existing pipeline (parser, resolver, completion, definition), and map
+response positions back to the original Blade file through a source
+map. Every item below builds on that pipeline.</p>
+<p>Items are ordered by <strong>impact</strong> (descending), then <strong>complexity</strong> (ascending)
+within the same impact tier, with a dependent item placed after its
+dependency.</p>
+<table>
+<thead>
+<tr>
+<th>Label</th>
+<th>Scale</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Impact</strong></td>
+<td><strong>Critical</strong>, <strong>High</strong>, <strong>Medium-High</strong>, <strong>Medium</strong>, <strong>Low-Medium</strong>, <strong>Low</strong></td>
+</tr>
+<tr>
+<td><strong>Complexity</strong></td>
+<td><strong>Low</strong> (mechanical/boilerplate, no design decisions), <strong>Medium</strong> (self-contained, follows an existing pattern), <strong>Medium-High</strong> (spans modules, some new design), <strong>High</strong> (shared/core subsystem, correctness or performance tradeoffs), <strong>Very High</strong> (cross-cutting architecture, wide blast radius)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="out-of-scope-and-why">Out of scope (and why)<a class="headerlink" href="#out-of-scope-and-why" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Editor-side Blade language registration</td>
+<td>The tree-sitter grammar, <code>.blade.php</code> file association, and <code>languageId: "blade"</code> wiring belong to editor extensions, not the server. Zed's official PHP extension (which absorbed PHPantom's plain-PHP wiring; this repo no longer bundles <code>zed-extension/</code>) will not grow Blade support — that registration belongs to the planned <code>zed-laravel</code> extension. On VS Code, Blade extensions already set <code>languageId</code> to <code>"blade"</code>, so PHPantom's integration needs to register for both <code>"php"</code> and <code>"blade"</code>. Neovim's <code>lspconfig</code> can be configured to send <code>.blade.php</code> files with the correct <code>languageId</code>.</td>
+</tr>
+<tr>
+<td>Rendering or booting to resolve templates</td>
+<td>Consistent with <code>laravel.md</code>: we never run PHP or boot a Laravel application.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="philosophy">Philosophy<a class="headerlink" href="#philosophy" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>No application booting.</strong> Consistent with <code>laravel.md</code>. We
+  never run PHP or boot a Laravel application.</li>
+<li><strong>Signatures over call-site scanning.</strong> A template's variable types
+  come from its declared contract: the Bladestan-compatible chain in
+  <code>src/blade/signature.rs</code> — <code>@bladestan-signature</code> docblock, first
+  docblock before template code, <code>@props</code>/<code>@aware</code>, Blade's own
+  component scope, the backing component class, and the layouts the
+  template <code>@extends</code>. The template declares what it expects; call
+  sites are then <em>validated</em> against that contract
+  (<code>src/blade/contract.rs</code> and <code>src/diagnostics/blade_call_site.rs</code>),
+  exactly as a function signature works. Inferring types <em>from</em> call
+  sites inverts the contract and produces "true for one caller" types,
+  so it is not the foundation — the shipped call-site inference
+  fallback for unannotated projects is layered strictly below every
+  declared source. Projects running Bladestan (a PHPStan extension for
+  Blade template analysis) get the full contract model in both the
+  editor and CI from the same annotations.</li>
+<li><strong>Discovery is just directory walks.</strong> Walking the configured view
+  roots and the directories the component namespaces live in
+  (<code>src/blade/discovery.rs</code>) is the full extent of external Blade file
+  discovery. Paths are converted to view names and component names via
+  string transforms. A namespace no PSR-4 mapping of the project's own
+  <code>composer.json</code> covers (a vendor package that registered a component
+  namespace) is read off the class index instead, since there is no
+  directory to walk for it.</li>
+<li><strong>PSR-4 says where a namespace lives, not what a component is
+  called.</strong> A mapping resolves <code>App\View\Components</code> to the directory
+  to walk, and once we know an FQN (e.g. <code>App\View\Components\Alert</code>)
+  the existing <code>find_or_load_class</code> pipeline reads its source. The
+  names themselves always come from the file paths.</li>
+<li><strong>Graceful degradation.</strong> Unknown directives become comments. Failed
+  component resolution produces comments. The user always gets partial
+  completions rather than a broken file. The preprocessor must never
+  produce invalid PHP.</li>
+</ul>
+<hr />
+<h2 id="bl11-custom-directive-discovery">BL11. Custom directive discovery<a class="headerlink" href="#bl11-custom-directive-discovery" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p><code>Blade::directive('datetime', …)</code> and <code>Blade::if('env', …)</code>
+registrations in app and package service providers declare
+project-specific directives. (Component namespace/path registrations —
+<code>Blade::componentNamespace()</code>, <code>Blade::anonymousComponentPath()</code>,
+<code>Blade::anonymousComponentNamespace()</code> — are already scanned into
+<code>ProviderResources</code> and extend the discovery index; see
+<code>src/virtual_members/laravel/provider_resources.rs</code>. What remains is the
+directive-registration half.) Scan literal directive registrations too
+— the same provider-scanning shape as the macro scanner — so that:</p>
+<ul>
+<li>known custom directives stop degrading to comments in the
+  preprocessor and instead map to expression-preserving PHP (their
+  argument is still type-checked);</li>
+<li><code>Blade::if('admin')</code> synthesizes the full family (<code>@admin</code>,
+  <code>@elseadmin</code>, <code>@endadmin</code>, <code>@unlessadmin</code>);</li>
+<li>directive name completion (<code>DIRECTIVE_COMPLETIONS</code> in
+  <code>src/blade/directives.rs</code>) includes them.</li>
+</ul>
+<hr />
+<h2 id="bl1-blade-aware-code-actions">BL1. Blade-aware code actions<a class="headerlink" href="#bl1-blade-aware-code-actions" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
+<p>Code actions are currently disabled for <code>.blade.php</code> files because
+text edits target virtual PHP coordinates and actions like "Import
+class" insert <code>use</code> statements at the top of the file rather than
+inside a <code>@php</code> / <code>&lt;?php</code> block. Re-enable code actions with:</p>
+<ul>
+<li>Range translation (virtual PHP → Blade) for all text edits.</li>
+<li>Blade-aware code generation (e.g. insert <code>use</code> inside <code>@php</code>).</li>
+<li>Filtering out actions that don't make sense in Blade context.</li>
+</ul>
+<p><strong>Deliverable:</strong> Code actions are re-enabled for <code>.blade.php</code> files.</p>
+<hr />
+<h2 id="bl23-unbalanced-component-tag-diagnostics">BL23. Unbalanced component tag diagnostics<a class="headerlink" href="#bl23-unbalanced-component-tag-diagnostics" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p><code>src/blade/balance.rs</code> pairs up block <em>directives</em>, but a component tag
+body is a block too: <code>&lt;x-alert&gt;</code> … <code>&lt;/x-alert&gt;</code>, <code>&lt;x-slot:title&gt;</code> …
+<code>&lt;/x-slot&gt;</code>. A tag nobody closes renders the rest of the template inside
+it, and a stray closing tag renders nothing at all, neither of which is
+reported today.</p>
+<ul>
+<li>Extend the block stack with component tags, reusing the raw-text tag
+  scan in <code>src/blade/component_tags.rs</code> rather than a second parser.</li>
+<li>A self-closing <code>&lt;x-alert /&gt;</code> opens nothing, and an attribute value may
+  hold a <code>&gt;</code> (<code>&lt;x-alert :items="$a &gt; $b"&gt;</code>), so the scan has to read the
+  whole tag rather than stop at the first <code>&gt;</code>.</li>
+<li>Report against the tag, in the same three shapes the directive check
+  uses: a closing tag for another component, a closing tag with nothing
+  open, and a tag the template never closes.</li>
+</ul>
+<h3 id="tests">Tests<a class="headerlink" href="#tests" title="Permanent link">&para;</a></h3>
+<p>In <code>tests/integration/diagnostics_blade.rs</code>:</p>
+<ul>
+<li><code>&lt;x-alert&gt;</code> closed by <code>&lt;/x-card&gt;</code> → mismatched-tag diagnostic</li>
+<li><code>&lt;x-alert&gt;</code> with no closing tag → unclosed-tag diagnostic</li>
+<li>self-closing tags, and tags whose attributes contain <code>&gt;</code>, report
+  nothing</li>
+</ul>
+<hr />
+<h2 id="bl14-folding-ranges-for-blade-files">BL14. Folding ranges for Blade files<a class="headerlink" href="#bl14-folding-ranges-for-blade-files" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p><code>textDocument/foldingRange</code> on a <code>.blade.php</code> file currently returns
+ranges in virtual-PHP coordinates, which don't line up with the
+original template, because <code>folding.rs</code> never translates through the
+source map.</p>
+<ul>
+<li>Translate each <code>FoldingRange</code> through <code>source_map.php_to_blade</code>
+  before returning, matching the pattern in <code>inlay_hints.rs</code>.</li>
+<li>Add Blade-native fold regions the underlying PHP has no concept of:
+  <code>@if</code>/<code>@endif</code> and friends (the block stack <code>src/blade/balance.rs</code>
+  already walks),
+  <code>&lt;x-component&gt;</code>...<code>&lt;/x-component&gt;</code> tag bodies, <code>@section</code>/
+  <code>@endsection</code>, <code>@push</code>/<code>@endpush</code>.</li>
+<li>Matches the folding behaviour other Blade-aware editors already
+  provide.</li>
+</ul>
+<h3 id="tests_1">Tests<a class="headerlink" href="#tests_1" title="Permanent link">&para;</a></h3>
+<p>New file <code>tests/integration/folding_blade.rs</code>:</p>
+<ul>
+<li><code>@foreach</code>/<code>@endforeach</code> folds</li>
+<li><code>&lt;x-alert&gt;</code>...<code>&lt;/x-alert&gt;</code> folds</li>
+<li>fold ranges land on the correct Blade lines, not virtual-PHP lines</li>
+</ul>
+<hr />
+<h2 id="bl15-document-outline-symbols-for-blade-files">BL15. Document outline (symbols) for Blade files<a class="headerlink" href="#bl15-document-outline-symbols-for-blade-files" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
+<p>A <code>.blade.php</code> file today reports no outline, or an outline positioned
+in virtual-PHP coordinates, because <code>document_symbols.rs</code> never
+translates through the source map.</p>
+<ul>
+<li>Translate symbol ranges/selection ranges through
+  <code>source_map.php_to_blade</code>.</li>
+<li>Build a Blade-native symbol tree on top of the translated PHP
+  symbols: <code>@section</code>s and <code>@push</code>/<code>@stack</code> blocks as top-level
+  symbols, <code>&lt;x-component&gt;</code> tags as child symbols showing the resolved
+  component FQN — degrade to the bare tag name if the component
+  doesn't resolve.</li>
+<li>Matches the structure-view behaviour other Blade-aware editors
+  already provide.</li>
+</ul>
+<h3 id="tests_2">Tests<a class="headerlink" href="#tests_2" title="Permanent link">&para;</a></h3>
+<p>New file <code>tests/integration/document_symbols_blade.rs</code>:</p>
+<ul>
+<li><code>@section('content')</code> appears as an outline entry</li>
+<li><code>&lt;x-alert&gt;</code> appears as an outline entry with the resolved FQN</li>
+</ul>
+<hr />
+<h2 id="bl24-named-slot-variables-scoped-to-the-component-that-receives-them">BL24. Named slot variables scoped to the component that receives them<a class="headerlink" href="#bl24-named-slot-variables-scoped-to-the-component-that-receives-them" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>Deferred from the component-tag work: <code>&lt;x-slot:title&gt;</code> and its legacy
+<code>&lt;x-slot name="title"&gt;</code> form become a comment in the virtual PHP, so
+nothing declares <code>$title</code>.</p>
+<p>Declaring it where the tag is written would be wrong. A named slot is a
+variable of the <em>component's</em> template, not of the template that fills
+it, and the filling template is where the tag sits. Emitting <code>$title =
+new \Illuminate\View\ComponentSlot();</code> there would put a name in the
+caller's scope that Blade never binds, and a slot named after a variable
+the caller already holds (<code>&lt;x-slot:item&gt;</code> inside <code>@foreach ($items as
+$item)</code>) would silently retype it for the rest of the block.</p>
+<p>The right shape is the one the backing class already uses: the slot
+names a template's tags fill are part of what the <em>component's</em> template
+receives, alongside <code>$slot</code> and <code>$attributes</code> (<code>COMPONENT_VARS</code> in
+<code>src/blade/preprocessor.rs</code>, fed from <code>super::backing_class</code>). That
+means scanning the tags that render a component for their <code>&lt;x-slot:…&gt;</code>
+children and declaring those names in the component template's prologue
+as <code>\Illuminate\View\ComponentSlot</code>, the same way
+<code>scan_component_tag_calls</code> already turns a tag's attributes into that
+template's variables.</p>
+<h3 id="tests_3">Tests<a class="headerlink" href="#tests_3" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>&lt;x-slot:title&gt;</code> in a caller declares <code>$title</code> in the component's
+  template, not in the caller's.</li>
+<li><code>&lt;x-slot name="title"&gt;</code> (the legacy form) does the same.</li>
+<li>A slot name that collides with a caller variable leaves the caller's
+  variable alone.</li>
+</ul>
+<hr />
+<h2 id="bl16-blade-aware-formatting">BL16. Blade-aware formatting<a class="headerlink" href="#bl16-blade-aware-formatting" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: High</strong></p>
+<p><code>formatting.rs</code> has no Blade awareness. <code>mago</code>'s formatter runs against
+the virtual PHP buffer generated for <code>.blade.php</code> files, and its output
+has no fixed relationship to the original directive/HTML structure —
+there is no path today that safely reformats the original Blade
+markup.</p>
+<ul>
+<li>Medium term: extend <code>formatting.rs</code>'s existing external-tool
+  resolution (currently php-cs-fixer/Pint/phpcbf via Composer
+  <code>require-dev</code>) to also detect a project-installed <code>blade-formatter</code>
+  (npm, via <code>package.json</code>/<code>node_modules/.bin</code>) and proxy it over
+  <code>--stdin</code>, matching how Pint is already invoked. See the feasibility
+  research below for why this is a good fit despite <code>blade-formatter</code>
+  not being a Composer tool.</li>
+<li>Long term: a Blade-native indentation model (directive nesting depth</li>
+<li>HTML tag depth + embedded <code>@php</code>/<code>{{ }}</code> PHP formatting via
+  <code>mago</code>) as the built-in fallback for projects without
+  <code>blade-formatter</code> installed. This is the highest-effort item in the
+  Blade backlog; most Blade projects already reach for a dedicated
+  Blade formatter, which is why the external-tool path above should
+  land first.</li>
+</ul>
+<h3 id="feasibility-research-proxying-blade-formatter-vs-a-native-basic-formatter">Feasibility research: proxying <code>blade-formatter</code> vs. a native basic formatter<a class="headerlink" href="#feasibility-research-proxying-blade-formatter-vs-a-native-basic-formatter" title="Permanent link">&para;</a></h3>
+<p>Investigated <code>blade-formatter</code> (the <code>shufo/blade-formatter</code> npm
+package) as a possible thing to shell out to.</p>
+<p><strong>Proxying it fits the existing external-tool pattern.</strong>
+<code>formatting.rs</code> already resolves php-cs-fixer/Pint/phpcbf by detecting
+them in the project (<code>composer.json</code> <code>require-dev</code>, resolved via
+Composer's bin-dir) and falls back to the built-in mago-formatter when
+absent — the same "use the project's own tool if it's there, otherwise
+built-in" shape the user wants here. <code>blade-formatter</code> is a reasonable
+addition to that resolution chain, not something to reject outright.
+The one wrinkle: it is an npm package, not a Composer one, so detection
+needs its own path parallel to (not reusing) the <code>vendor/bin</code> resolver
+— check <code>package.json</code> <code>devDependencies</code>/<code>dependencies</code> for
+<code>blade-formatter</code> and resolve the binary via <code>node_modules/.bin/
+blade-formatter</code>, with the same <code>.phpantom.toml</code> override/disable
+shape (<code>blade-formatter = "..."</code> / <code>blade-formatter = ""</code>) as the
+existing PHP tools. This also means Node must be present on the
+machine for the external path to trigger at all; when it isn't, or the
+package isn't installed, fall back to the built-in formatter exactly
+like the PHP tools do today.</p>
+<p>The two operational concerns from the initial pass (no result cache;
+<code>--write</code> deletes-then-rewrites the target file) turn out not to be
+blockers once invoked the way we already invoke Pint: it supports
+<code>--stdin</code> (format code from stdin, formatted result on stdout), so we
+would never let <code>blade-formatter</code> touch the file directly — we own the
+write, the same way we already do for Pint via <code>--stdin-filename</code>. And
+since we'd invoke it once per format request (never in a long-lived
+watch mode), the lack of an internal cache is no different from how
+php-cs-fixer/phpcs are already invoked fresh per request; there is no
+extra cost specific to this tool. Net: prefer the project's own
+<code>blade-formatter</code> install when present (best fidelity with what the
+team already uses and reviews), built-in native formatter as the
+fallback and long-term goal — matching the existing PHP formatter
+precedent.</p>
+<p><strong>How it actually formats, and what that implies for a native
+implementation.</strong> It is not AST-based. The pipeline
+(<code>formatContentPipeline.ts</code>) runs ~30 regex-based string processors in
+a pre-process/post-process sandwich around two off-the-shelf
+formatters: <code>js-beautify</code> for the HTML "shell" and
+<code>@prettier/plugin-php</code> for isolated PHP/Blade-brace expressions. Content
+that would confuse those formatters (raw <code>@php</code> blocks, <code>&lt;script&gt;</code>,
+<code>&lt;style&gt;</code>, comments, Alpine.js <code>x-data</code>/<code>x-init</code> attributes, component
+props) is regex-extracted to placeholder tokens before beautifying and
+spliced back in afterward. Directive-nesting indent is a <em>separate</em>
+pass (<code>formatter.ts</code>'s <code>processTokenizeResult</code>/<code>processKeyword</code>):
+it tokenizes each line with a bundled Blade TextMate grammar
+(<code>syntaxes/blade.tmLanguage.json</code>, run through <code>vscode-textmate</code> +
+<code>vscode-oniguruma</code>/WASM) purely to classify which tokens are Blade
+keywords, then walks a hardcoded stack of directive-start/-end/-else
+token lists (<code>indent.ts</code>) to raise/lower indent level per line, with
+special-cased exceptions (<code>@case</code> inside <code>@switch</code> dedents one extra
+level, <code>@break</code> inside <code>@if</code> doesn't indent, <code>@section</code>/<code>@push</code>/<code>@slot</code>
+are self-closing when given a second argument, <code>@hasSection</code> is
+"unbalanced" and never closes). It is a large surface of hand-tuned
+edge cases, not a formal grammar.</p>
+<p>The directive-nesting indent pass is the one part of this design that
+translates cleanly to PHPantom, and we are better positioned to do it
+than blade-formatter was: <code>src/blade/directives.rs</code> already has the
+full directive table blade-formatter hardcodes in <code>indent.ts</code>, and
+unlike blade-formatter (which had to pull in a TextMate grammar +
+oniguruma WASM just to find directive tokens on a line), our
+preprocessor already tokenizes Blade source precisely. What's missing
+is (a) classifying each directive as indent-start / indent-end / else
+(mechanical, from the existing table) and (b) an HTML tag-depth
+counter interleaved with directive depth on the same line (open/close/
+void/self-closing elements) — new code, but a single self-contained
+pass, not a full HTML parser. Embedded <code>@php</code>/<code>{{ }}</code> expression
+formatting can reuse <code>mago</code>'s formatter on isolated snippets the same
+way diagnostics already isolate virtual-PHP buffers, rather than
+needing a second PHP formatter dependency like blade-formatter does.</p>
+<p><strong>Recommended scope for the native fallback formatter:</strong> directive-
+nesting indent + HTML tag indent only, reindenting existing lines
+without rewriting their content (no attribute sorting, no line-wrap/
+wrapping of long tags, no quote-style normalization, no Tailwind class
+sorting). That covers the visible majority of blade-formatter's example
+output (consistent indentation) while skipping almost all of its
+~30-processor edge-case surface, which exists to handle content
+rewriting we are choosing not to do. This is still a real chunk of work
+(a new directive-classification table + an HTML depth scanner + the
+<code>mago</code>-snippet-reformat glue), but is meaningfully smaller than full
+parity with <code>blade-formatter</code>, does not require adding a
+TextMate/oniguruma dependency the way blade-formatter's own approach
+does, and is worth having on its own merits: it is the only
+option for projects that don't have <code>blade-formatter</code> installed, and
+if it ends up faster and at least as correct as <code>blade-formatter</code> (a
+real possibility, given we skip the regex/placeholder round-tripping
+entirely), it can become the default rather than staying a fallback.
+See BL17 below for exposing it as a standalone CI check once it
+reaches that bar.</p>
+<h3 id="tests_4">Tests<a class="headerlink" href="#tests_4" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>formatting</code> on a <code>.blade.php</code> file returns no edits (short-term
+  behaviour) rather than corrupting the file, until the long-term
+  model lands.</li>
+</ul>
+<hr />
+<h2 id="bl17-format-check-cli-subcommand-for-ci">BL17. <code>format --check</code> CLI subcommand for CI<a class="headerlink" href="#bl17-format-check-cli-subcommand-for-ci" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong> (depends on BL16)</p>
+<p>Filed while researching BL16: once the native Blade formatter (and,
+more generally, PHPantom's resolved formatting strategy — external
+tool or built-in) is trustworthy enough to enforce, projects want a
+non-editor way to verify a PR ran it, the same role <code>blade-formatter
+-c</code>/<code>--check-formatted</code> plays today. <code>main.rs</code> currently only exposes
+<code>analyse</code> and <code>fix</code> as CLI subcommands; there is no way to invoke
+<code>textDocument/formatting</code>'s resolution logic (<code>formatting.rs</code>) outside
+the LSP connection at all.</p>
+<ul>
+<li>Add a <code>format</code> subcommand (<code>phpantom_lsp format --project-root
+  &lt;DIR&gt; [--check]</code>) that walks project PHP/Blade files, runs the same
+  <code>resolve_strategy</code> external-tool-or-built-in logic <code>formatting.rs</code>
+  already uses, and either writes the formatted result back or (with
+  <code>--check</code>) exits non-zero and lists files that would change, without
+  writing them — mirroring <code>blade-formatter -c -d</code> and <code>phpcs
+  --dry-run</code>/<code>php-cs-fixer --dry-run</code> conventions projects already use
+  in CI.</li>
+<li>This depends on the native Blade formatter model (BL16 long term)
+  existing and being fast/correct enough that a maintainer would want
+  it enforced in CI; do not build the CLI surface before that bar is
+  met, since the CLI is only useful once there's a trustworthy
+  formatter behind it (or a detected <code>blade-formatter</code>/<code>php-cs-fixer</code>
+  external tool, which <code>--check</code> should honour identically to
+  <code>format</code> without <code>--check</code>).</li>
+</ul>
+<h3 id="tests_5">Tests<a class="headerlink" href="#tests_5" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>format --check</code> on an already-formatted project exits 0 with no
+  output.</li>
+<li><code>format --check</code> on a project with an unformatted <code>.blade.php</code> file
+  exits non-zero and names the file.</li>
+<li><code>format</code> (no <code>--check</code>) rewrites the file in place and a second run
+  is a no-op.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-circle-arrow-up" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4M12 16V8"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://zensical.org/" target="_blank" rel="noopener">
+      Zensical
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate":null,"base":"../..","features":["content.action.edit","content.code.copy","content.tabs.link","navigation.instant","navigation.top","search.highlight","search.suggest","toc.follow"],"search":"../../assets/javascripts/workers/search.b6b7e04f.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"alias":true,"provider":"mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7f30b55.min.js"></script>
+      
+    
+  </body>
+</html>
