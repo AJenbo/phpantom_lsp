@@ -103,12 +103,23 @@ class Demo
 
         // Pivot accessors are attached to models that are the *target* of a
         // many-to-many relationship (belongsToMany/morphToMany). BakeryRecipe
-        // is the target of Bakery::masterRecipe(), which renames the accessor
-        // to $ingredient via ->as('ingredient') and selects its type via
-        // ->using(RecipeIngredient::class). Without ->as(), the name is $pivot.
-        $bakery->masterRecipe->first()->ingredient;                      // custom pivot → RecipeIngredient
-        $bakery->masterRecipe->first()->ingredient->getQuantityLabel(); // pivot method → string
-        // Hover over masterRecipe() also lists the custom accessor and columns.
+        // is the target of Bakery::masterRecipe(), which declares a custom
+        // pivot via ->using(RecipeIngredient::class), so its $pivot is typed as
+        // that class. When the relationship annotation carries a third generic
+        // (BelongsToMany<Related, $this, Pivot>), that type is used instead.
+        $bakery->masterRecipe->first()->pivot;                      // custom pivot → RecipeIngredient
+        $bakery->masterRecipe->first()->pivot->getQuantityLabel(); // pivot method → string
+        // Hover over masterRecipe() also lists the ->withPivot() columns.
+
+        // ->as('ingredient') renames the accessor, so the same pivot arrives as
+        // $ingredient rather than $pivot. Bakery::seasonalRecipes() configures
+        // it in the body and repeats it in the annotation's fourth generic
+        // (BelongsToMany<Related, $this, Pivot, 'accessor'>); either alone is
+        // enough. BakeryRecipe is the target of both relationships, so it
+        // carries both accessors.
+        $bakery->seasonalRecipes->first()->ingredient;                      // renamed pivot → RecipeIngredient
+        $bakery->seasonalRecipes->first()->ingredient->getQuantityLabel(); // pivot method  → string
+        // Hover over seasonalRecipes() also names the accessor it configures.
 
         // BelongsTo relationship property + method call with covariant $this
         $post = new BlogPost();
