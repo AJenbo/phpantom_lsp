@@ -927,17 +927,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b225-a-route-group-whose-name-spells-out-nothing-still-flags-its-routes" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B225. A route group whose name spells out nothing still flags its routes
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1543,17 +1532,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b225-a-route-group-whose-name-spells-out-nothing-still-flags-its-routes" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B225. A route group whose name spells out nothing still flags its routes
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1712,22 +1690,6 @@ find-references. A correct fix needs to seed a
 anywhere in the enclosing function body (not only the ones preceding the
 read in this pass), since the assignment that matters can sit in a
 branch this call never takes.</p>
-<h3 id="b225-a-route-group-whose-name-spells-out-nothing-still-flags-its-routes">B225. A route group whose name spells out nothing still flags its routes<a class="headerlink" href="#b225-a-route-group-whose-name-spells-out-nothing-still-flags-its-routes" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<p>A group whose name is entirely a variable and which sits under no
-enclosing literal group (<code>Route::name($panelId)-&gt;group(...)</code> at the top
-of a routes file) records no open prefix, so every <code>route()</code> call naming
-one of its routes is still reported as unknown.</p>
-<p>The obvious fix is the wrong one: an open prefix of <code>""</code> is a prefix of
-every route name there is, so the diagnostic
-(<code>route_open_prefixes.iter().any(|prefix| key.starts_with(prefix))</code> in
-<code>diagnostics/mod.rs</code>) would stand down for the whole project rather than
-for the one group. What is needed instead is for the collector
-(<code>virtual_members/laravel/route_names.rs</code>) to record which <em>names</em> fall
-under an unknowable group rather than which prefixes, so an unnamed
-group opens only the suffixes it registers (<code>pages.dashboard</code> under an
-unknown prefix means any name <em>ending</em> in it is unjudgeable) and every
-other name in the project stays checked.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
