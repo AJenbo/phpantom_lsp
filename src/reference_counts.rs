@@ -339,18 +339,22 @@ mod tests {
 
     const URI: &str = "file:///test.php";
 
-    fn parse(backend: &Backend, content: &str) {
+    fn parse_extra(backend: &Backend, uri: &str, content: &str) {
         backend
             .open_files
             .write()
-            .insert(URI.to_string(), Arc::new(content.to_string()));
-        backend.update_ast(URI, content);
+            .insert(uri.to_string(), Arc::new(content.to_string()));
+        backend.update_ast(uri, content);
         backend
             .workspace_indexed
             .store(true, std::sync::atomic::Ordering::Release);
     }
 
-    fn hints(backend: &Backend, content: &str) -> Vec<InlayHint> {
+    fn parse(backend: &Backend, content: &str) {
+        parse_extra(backend, URI, content);
+    }
+
+    fn hints_for(backend: &Backend, uri: &str, content: &str) -> Vec<InlayHint> {
         let range = Range {
             start: Position {
                 line: 0,
@@ -362,8 +366,12 @@ mod tests {
             },
         };
         backend
-            .handle_inlay_hints(URI, content, range)
+            .handle_inlay_hints(uri, content, range)
             .unwrap_or_default()
+    }
+
+    fn hints(backend: &Backend, content: &str) -> Vec<InlayHint> {
+        hints_for(backend, URI, content)
     }
 
     fn count_on_line(hints: &[InlayHint], line: u32) -> Option<String> {
@@ -520,6 +528,71 @@ function persist(Order $order): void {
         assert_eq!(
             count_on_line(&hints(&backend, &inherited), 2).as_deref(),
             Some(" 1 reference")
+        );
+    }
+
+    #[test]
+    fn chain_cache_does_not_leak_a_resolution_across_files() {
+        let backend = Backend::new_test();
+
+        const URI_A: &str = "file:///PenA.php";
+        const URI_B: &str = "file:///PenB.php";
+        const URI_CONSUMER_A: &str = "file:///ConsumerA.php";
+        const URI_CONSUMER_B: &str = "file:///ConsumerB.php";
+
+        // Two unrelated classes that happen to share a bare name and an
+        // identically-shaped `make()->write()` chain, each imported under
+        // that bare name by its own consumer file.
+        let pen_a = r#"<?php
+namespace App\A;
+
+class Pen {
+    public static function make(): self {
+        return new self();
+    }
+
+    public function write(): void {}
+}
+"#;
+        let pen_b = pen_a.replace("App\\A", "App\\B");
+
+        let consumer_a = r#"<?php
+namespace App;
+
+use App\A\Pen;
+
+function useA(): void {
+    Pen::make()->write();
+}
+"#;
+        let consumer_b = consumer_a
+            .replace("App\\A", "App\\B")
+            .replace("useA", "useB");
+
+        parse_extra(&backend, URI_A, pen_a);
+        parse_extra(&backend, URI_B, &pen_b);
+        parse_extra(&backend, URI_CONSUMER_A, consumer_a);
+        parse_extra(&backend, URI_CONSUMER_B, &consumer_b);
+
+        // Queue both `write()` declarations for a count, then resolve them
+        // in the same `compute_pending_member_ref_counts` pass so both
+        // consumer files are scanned under one chain-cache activation —
+        // the scenario where a text-only cache key leaks a resolution from
+        // one file's `use` scope into the other's.
+        hints_for(&backend, URI_A, pen_a);
+        hints_for(&backend, URI_B, &pen_b);
+        backend.compute_pending_member_ref_counts();
+
+        assert_eq!(
+            count_on_line(&hints_for(&backend, URI_A, pen_a), 8).as_deref(),
+            Some(" 1 reference"),
+            "App\\A\\Pen::write must only count ConsumerA's call, not ConsumerB's \
+             identically-spelled `Pen::make()->write()` against `App\\B\\Pen`"
+        );
+        assert_eq!(
+            count_on_line(&hints_for(&backend, URI_B, &pen_b), 8).as_deref(),
+            Some(" 1 reference"),
+            "App\\B\\Pen::write must only count ConsumerB's call"
         );
     }
 }

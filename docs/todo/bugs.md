@@ -33,24 +33,6 @@ No outstanding items.
 
 ## Symbol resolution
 
-### B196. The chain resolution cache key omits file identity
-
-**Impact: Low-Medium · Complexity: Medium**
-
-The chain cache in `type_engine/resolver/mod.rs` keys a variable-free
-subject chain by its bare text (`expr.to_subject_text()`), with no file
-identity in the key, while some cache activations span multiple files
-(e.g. the reference-counts pending-item loop, and the request-level
-guard used by find-references/rename while walking other files). Two
-files that each `use` a different class under the same alias and spell
-the same method-chain text can have the second file's resolution
-poisoned by the first file's cached entry:
-
-```php
-// file A: use A\Pen;           file B: use B\Pen;
-Pen::make()->write();           Pen::make()->write();  // may resolve against A\Pen
-```
-
 ### B218. `new ReflectionProperty(Foo::class, 'bar')` forgets what it reflects
 
 **Impact: Low · Complexity: Medium**

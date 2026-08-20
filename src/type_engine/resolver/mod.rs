@@ -244,6 +244,19 @@ fn chain_cache_key(expr: &SubjectExpr, ctx: &ResolutionCtx<'_>) -> Option<String
         return None;
     }
 
+    // The same subject text can mean different classes in different files
+    // (`use A\Pen;` in one, `use B\Pen;` in another, both spelling
+    // `Pen::make()`), and some activations of the chain cache — the
+    // reference-count pending-item loop, find-references/rename — span
+    // every file the request walks, not just one.  `ctx.content` is
+    // borrowed once per file for as long as any chain from that file is
+    // being resolved, so its pointer is a cheap per-file discriminator:
+    // the same technique `resolve_variable_types`'s re-entry guards use
+    // for the same reason (see `variable/resolution.rs`).  Two ResolutionCtx
+    // built from the same file share `content` and thus the pointer, so
+    // within-file sharing (the cache's actual purpose) is unaffected.
+    let file_id = ctx.content.as_ptr() as usize;
+
     // A chain that references a local variable (as receiver or as a call
     // argument) can resolve to different types at call sites where the
     // variable holds a different type — e.g. `$this->parse($stmt)` where
@@ -259,11 +272,15 @@ fn chain_cache_key(expr: &SubjectExpr, ctx: &ResolutionCtx<'_>) -> Option<String
     let mut vars = Vec::new();
     expr.collect_local_variables(&mut vars);
     Some(if vars.is_empty() {
-        expr.to_subject_text()
+        format!("{file_id:x}:{}", expr.to_subject_text())
     } else if let Some(disc) = scope_type_discriminator(&vars, ctx) {
-        format!("{}{}", expr.to_subject_text(), disc)
+        format!("{file_id:x}:{}{}", expr.to_subject_text(), disc)
     } else {
-        format!("{}@{}", expr.to_subject_text(), ctx.cursor_offset)
+        format!(
+            "{file_id:x}:{}@{}",
+            expr.to_subject_text(),
+            ctx.cursor_offset
+        )
     })
 }
 

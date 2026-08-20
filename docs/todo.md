@@ -102,7 +102,6 @@ unlikely to move the needle for most users.
 | T10 | [Ternary expression as RHS of list destructuring](todo/type-inference.md#t10-ternary-expression-as-rhs-of-list-destructuring)                                               | Low         | Medium      |
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Medium      |
 |     | **[Bugs](todo/bugs.md)**                                                                                                                                                    |             |             |
-| B196 | [The chain resolution cache key omits file identity](todo/bugs.md#b196-the-chain-resolution-cache-key-omits-file-identity)                                                  | Low-Medium  | Medium      |
 | B218 | [`new ReflectionProperty(Foo::class, 'bar')` forgets what it reflects](todo/bugs.md#b218-new-reflectionpropertyfooclass-bar-forgets-what-it-reflects)                        | Low         | Medium      |
 | B226 | [A function-`static` variable's type is not tracked across its own reads](todo/bugs.md#b226-a-function-static-variables-type-is-not-tracked-across-its-own-reads)            | Low-Medium  | Medium-High |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
