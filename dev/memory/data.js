@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787180788154,
+  "lastUpdate": 1787184322236,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -24173,6 +24173,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 68.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "77525f55d4d5907b5e699b03a5aecdba0cd6e5f4",
+          "message": "A route group whose name is entirely a variable no longer flags its own\nroutes as unknown",
+          "timestamp": "2026-08-20T01:48:37+02:00",
+          "tree_id": "301fb9b569edf89895385620285a6fdd08dc1e11",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/77525f55d4d5907b5e699b03a5aecdba0cd6e5f4"
+        },
+        "date": 1787184317017,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 67.9,
             "unit": "MiB"
           }
         ]
