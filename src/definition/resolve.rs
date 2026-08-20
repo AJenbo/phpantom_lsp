@@ -926,7 +926,7 @@ impl Backend {
     /// declaration line.  Stub functions (with `phpantom-stub-fn://` URIs)
     /// are not navigable so they are skipped for go-to-definition but
     /// still loaded into the cache for return-type resolution.
-    fn resolve_function_definition(&self, candidates: &[String]) -> Option<Location> {
+    pub(crate) fn resolve_function_definition(&self, candidates: &[String]) -> Option<Location> {
         // ── Step 1: Check global_functions (user code + cached stubs) ──
         let found = {
             let fmap = self.symbols.global_functions.read();

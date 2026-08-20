@@ -196,4 +196,61 @@ mod tests {
 
         assert_eq!(definition(&backend, &dir, &uri, 0, 11).await, None);
     }
+
+    /// A `{{ }}` echo delimiter has no position in the underlying PHP
+    /// expression it wraps, since it's stripped away when Blade compiles
+    /// the template down to an `e(...)` call. Go-to-definition on the
+    /// delimiter itself must agree with what hovering it reports (`e()`),
+    /// not fall through to the offset mapping and land on whatever
+    /// expression happens to start where the delimiter was.
+    #[tokio::test]
+    async fn an_echo_delimiter_leads_to_e_not_to_the_wrapped_call() {
+        let composer = r#"{"autoload": {"psr-4": {"App\\": "app/"}}}"#;
+        let e_helper = "<?php\n\
+             function e(mixed $value, bool $doubleEncode = true): string {\n\
+                 return htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8', $doubleEncode);\n\
+             }\n";
+        let route_helper = "<?php\nfunction route(string $name): string {\n    return $name;\n}\n";
+        let template = "{{ route('pages.index') }}\n";
+        let (backend, dir) = create_psr4_workspace(
+            composer,
+            &[
+                ("app/echo_helper.php", e_helper),
+                ("app/route_helper.php", route_helper),
+                ("resources/views/page.blade.php", template),
+            ],
+        );
+        let root = backend.workspace_root().read().clone().unwrap();
+
+        for (rel_path, content) in [
+            ("app/echo_helper.php", e_helper),
+            ("app/route_helper.php", route_helper),
+        ] {
+            let uri = Url::from_file_path(root.join(rel_path)).unwrap();
+            backend
+                .did_open(DidOpenTextDocumentParams {
+                    text_document: TextDocumentItem {
+                        uri,
+                        language_id: "php".to_string(),
+                        version: 1,
+                        text: content.to_string(),
+                    },
+                })
+                .await;
+        }
+
+        let uri = Url::from_file_path(root.join("resources/views/page.blade.php")).unwrap();
+        open(&backend, &uri, template).await;
+
+        // On the first `{` of the `{{` opening the echo.
+        assert_eq!(
+            definition(&backend, &dir, &uri, 0, 0).await.as_deref(),
+            Some("app/echo_helper.php")
+        );
+        // On the `}}` closing it.
+        assert_eq!(
+            definition(&backend, &dir, &uri, 0, 24).await.as_deref(),
+            Some("app/echo_helper.php")
+        );
+    }
 }

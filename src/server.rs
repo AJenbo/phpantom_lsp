@@ -959,6 +959,17 @@ impl LanguageServer for Backend {
             {
                 return Ok(Some(GotoDefinitionResponse::Scalar(location)));
             }
+            // For Blade files, check if the cursor is on a `{{`/`}}` echo
+            // delimiter first, so go-to-definition agrees with hover on the
+            // same position (the implicit `e()` call) instead of falling
+            // through to the virtual PHP content, where the position maps
+            // to whichever expression happens to start at that offset.
+            if backend.is_blade_file(&uri_clone)
+                && let Some(delimiter_result) =
+                    backend.blade_echo_delimiter_definition(&uri_clone, position)
+            {
+                return Ok(delimiter_result.map(GotoDefinitionResponse::Scalar));
+            }
             backend.handle_with_position("goto_definition", &uri_clone, position, |content, pos| {
                 let locs = backend.resolve_definition(&uri_clone, content, pos);
                 if locs.is_empty() {
