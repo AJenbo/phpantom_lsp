@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A file that mixes property guards with chained calls analyses quickly again.** Where a function interleaved a guard on a property (`if ($o->a)`) with a chained call (`$h->getWork()->run()`), each additional pair multiplied the time it took by roughly ten: six pairs took under half a second, seven took three and a half, and eight took over fifty. A file with more than that never finished. Working out the guarded property's type re-examined the chained calls, which started the same work over again for each of them. The repeated work is now recognised and skipped, so these files are back to analysing in the time their size suggests.
 - **The editor stays responsive while a request is being answered.** A handful of requests still did their work on the connection's own task, so while one was running the server could not read the next message: pressing Enter (which generates a PHPDoc block), opening the symbol picker, expanding a selection, resolving a quick fix, drawing inlay hints, and walking a type hierarchy each held everything else up for as long as they took. Laravel's startup indexing did the same, which is what made a large project feel unreachable for its first seconds. All of it now runs off the connection, so typing, completion, and cancellation keep flowing while a slower request finishes. A crash inside one of these is also reported in the log now instead of coming back as an empty answer.
 
 ## [0.10.0] - 2026-08-20

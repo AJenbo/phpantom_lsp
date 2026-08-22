@@ -1044,3 +1044,35 @@ already have one, deref coercion covers the read sites, and the
 **Where to look:** `collect_deprecated_diagnostics` and
 `resolve_variable_subject` in `diagnostics/deprecated.rs`, plus the
 `var_type_cache` declaration at the top of the collector.
+
+## P54. Property narrowing re-walks the whole body once per subject
+
+**Impact: Low · Complexity: Medium**
+
+Every `$this->prop` or `$h->getCall()` whose type the engine needs sends
+`apply_property_narrowing` back over the enclosing body from its first
+statement, looking for a check that refines that subject. Nothing
+remembers the answer, so a body holding n such subjects walks itself n
+times, and each walk resolves the expressions it passes, which resolves
+subjects of their own.
+
+The re-entry guard on `NARROWING_IN_PROGRESS` stops that from
+compounding without bound (it was exponential before, #385), but the
+remaining growth is still steep: on the reproducer from that issue a
+release build measures 0.13 s at 20 guard/chain pairs, 0.36 s at 30, and
+2.79 s at 60, so roughly cubic in the number of narrowed subjects. Real
+code stays well under those sizes, which is why this is Low rather than a
+bug, but a generated file or a long legacy method can reach them.
+
+Memoising the walk would collapse it. The result depends on the source,
+the subject key, the cursor offset, and the classes handed in, so a
+per-request map keyed by those four and cleared with the rest of the
+request caches would turn the n walks into n lookups. The awkward part is
+that the walk mutates `results` in place and reports intersections
+through a separate flag, so the cached value has to carry both.
+
+**Where to look:** `apply_property_narrowing` in
+`type_engine/resolver/property_narrowing.rs`, and its three callers in
+`type_engine/resolver/mod.rs` (`SubjectExpr::CallExpr` and the property
+path) and `narrowed_by_rewalk` in
+`type_engine/variable/rhs_resolution/mod.rs`.

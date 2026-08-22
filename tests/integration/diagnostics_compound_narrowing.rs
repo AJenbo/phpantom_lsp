@@ -1472,3 +1472,28 @@ class Controller {{
     let messages = type_error_messages(&backend, uri, &text);
     assert!(messages.is_empty(), "got {messages:?}");
 }
+
+/// A property guard interleaved with a chained call still narrows, and
+/// the interleaving does not invent diagnostics.  The time this takes is
+/// guarded separately by
+/// `diag_timing::property_narrowing_beside_a_chained_call_stays_bounded`.
+#[test]
+fn a_property_guard_beside_a_chained_call_narrows() {
+    let backend = create_test_backend();
+    let uri = "file:///repro_probe.php";
+    let text = r#"<?php
+class Work   { public function changed(string $k): bool { return true; } public function run(): void {} }
+class Holder { public function getWork(): Work { return new Work(); } }
+class Ops    { public bool $a = false; }
+
+function probe(Holder $h): void {
+  $o = new Ops();
+  if ($h->getWork()->changed("k")) { $o->a = true; }
+  if ($o->a) { $h->getWork()->run(); }
+}
+"#;
+    let mut diags = Vec::new();
+    backend.update_ast(uri, text);
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    assert!(diags.is_empty(), "expected no diagnostics, got {diags:?}");
+}

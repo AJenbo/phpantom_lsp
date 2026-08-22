@@ -1,12 +1,64 @@
 /// Property-path narrowing: applies instanceof / assert / guard-clause
 /// narrowing to a `$this->prop` (or `$obj->prop`) resolution result by
 /// walking the enclosing method body from its start down to the cursor.
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::types::ClassInfo;
 
 use super::{Loaders, ResolutionCtx, VarResolutionCtx};
+
+thread_local! {
+    /// The narrowing walks currently in progress on this thread, as
+    /// `(source identity, subject key)` pairs.
+    ///
+    /// Guard-clause narrowing resolves method-call receivers to decide
+    /// whether a branch unconditionally exits.  Resolving a chained
+    /// call like `$h->getWork()` enters the call-key narrowing path
+    /// (`SubjectExpr::CallExpr` in `resolver/mod.rs`), which calls back
+    /// into [`apply_property_narrowing`] for the call key.  That nested
+    /// walk re-encounters the same guard clauses, resolves the same
+    /// receivers, and re-enters, so a body holding n such guards fans
+    /// out exponentially in n.
+    ///
+    /// Re-entry on the *same* subject in the *same* source is a cycle:
+    /// the walk already in progress covers the whole body, so the
+    /// nested one would only rediscover what its caller is mid-way
+    /// through computing.  Blocking it leaves the declared type
+    /// standing for that one receiver, which costs a `never`-returning
+    /// call inside a guard body going unrecognised when recognising it
+    /// depended on narrowing the receiver that is already being
+    /// narrowed.
+    ///
+    /// The source is part of the key because the same subject text
+    /// (`$this->conn`) routinely names unrelated properties in
+    /// different files; without it, a nested walk over another file
+    /// would be blocked by an outer walk it has nothing to do with.
+    /// The cursor offset deliberately is *not* part of the key: the
+    /// fan-out comes from re-entering on the same subject at the many
+    /// offsets where it appears, so keying by offset would let every
+    /// occurrence start its own walk and the blowup would survive.
+    ///
+    /// Entries are pushed and popped in call order, so this is a stack
+    /// rather than a set: at realistic nesting depths a linear scan
+    /// beats hashing, and it keeps the walk down to one allocation.
+    static NARROWING_IN_PROGRESS: RefCell<Vec<(usize, String)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// RAII guard that pops the entry [`apply_property_narrowing`] pushed
+/// onto [`NARROWING_IN_PROGRESS`], including on panic.  A leaked entry
+/// would silently disable narrowing for that subject for the rest of
+/// the thread's life.
+struct NarrowingGuard;
+
+impl Drop for NarrowingGuard {
+    fn drop(&mut self) {
+        NARROWING_IN_PROGRESS.with(|stack| {
+            stack.borrow_mut().pop();
+        });
+    }
+}
 
 /// Apply instanceof / assert narrowing for a property-access path.
 ///
@@ -26,6 +78,26 @@ pub(crate) fn apply_property_narrowing(
     results: &mut Vec<Arc<ClassInfo>>, // still operates on Arc<ClassInfo> — called from property chain
 ) -> bool {
     use crate::parser::with_parsed_program;
+
+    // Break the re-entry cycle described on `NARROWING_IN_PROGRESS`,
+    // leaving `results` as the caller passed them so the declared type
+    // stands.
+    let source = rctx.content.as_ptr() as usize;
+    let entered = NARROWING_IN_PROGRESS.with(|stack| {
+        let mut stack = stack.borrow_mut();
+        if stack
+            .iter()
+            .any(|(src, key)| *src == source && key == property_path)
+        {
+            return false;
+        }
+        stack.push((source, property_path.to_string()));
+        true
+    });
+    if !entered {
+        return false;
+    }
+    let _guard = NarrowingGuard;
 
     // The narrowing walk functions operate on Vec<ClassInfo>, so unwrap
     // the Arcs, run narrowing, then re-wrap.
