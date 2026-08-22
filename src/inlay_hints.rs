@@ -34,9 +34,17 @@ impl Backend {
     ) -> jsonrpc::Result<Option<Vec<InlayHint>>> {
         let uri = params.text_document.uri.to_string();
         let range = params.range;
-        let result = self.with_file_content("textDocument/inlayHint", &uri, None, |content, _| {
-            self.handle_inlay_hints(&uri, content, range)
-        });
+        // Building the hints resolves every callable called in the viewport,
+        // and the editor re-requests them on each scroll and each refresh a
+        // keystroke triggers, so the work runs off the request task.
+        let backend = self.clone_for_blocking();
+        let result = crate::server::run_blocking_cancel_safe("inlay_hint", move || {
+            backend.with_file_content("textDocument/inlayHint", &uri, None, |content, _| {
+                backend.handle_inlay_hints(&uri, content, range)
+            })
+        })
+        .await
+        .flatten();
 
         // Declarations whose reference count is missing or stale were
         // queued while the hints were built; they are counted off the

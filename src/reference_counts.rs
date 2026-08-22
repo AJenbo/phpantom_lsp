@@ -294,7 +294,7 @@ impl Backend {
         let backend = self.clone_for_blocking();
         tokio::spawn(async move {
             let worker = backend.clone_for_blocking();
-            let changed = tokio::task::spawn_blocking(move || {
+            let changed = crate::server::run_blocking_cancel_safe("member ref counts", move || {
                 let changed = worker.compute_pending_member_ref_counts();
                 worker
                     .member_ref_counts
@@ -305,22 +305,20 @@ impl Backend {
             .await;
 
             match changed {
-                Ok(true) => {
+                Some(true) => {
                     if backend.supports_inlay_hint_refresh.load(Ordering::Acquire)
                         && let Some(ref client) = backend.client
                     {
                         let _ = client.inlay_hint_refresh().await;
                     }
                 }
-                Ok(false) => {}
-                Err(err) => {
-                    // The panicking task never cleared the flag.
-                    backend
-                        .member_ref_counts
-                        .computing
-                        .store(false, Ordering::Release);
-                    tracing::error!("PHPantom: reference count task failed: {}", err);
-                }
+                Some(false) => {}
+                // A panicking task never cleared the flag; without this the
+                // counts would never be computed again this session.
+                None => backend
+                    .member_ref_counts
+                    .computing
+                    .store(false, Ordering::Release),
             }
         });
     }

@@ -1088,7 +1088,7 @@ impl Backend {
             let backend = self.clone_for_blocking();
             let uri = uri_str.to_string();
             let content = content.to_string();
-            crate::server::run_blocking_cancel_safe(move || {
+            crate::server::run_blocking_cancel_safe("fast diagnostics", move || {
                 let mut out = Vec::new();
                 let effective_owned = backend.blade_virtual_content.read().get(&uri).cloned();
                 let effective = effective_owned.as_deref().unwrap_or(&content);
@@ -1121,7 +1121,7 @@ impl Backend {
             let backend = self.clone_for_blocking();
             let uri = uri_str.to_string();
             let content = content.to_string();
-            crate::server::run_blocking_cancel_safe(move || {
+            crate::server::run_blocking_cancel_safe("slow diagnostics", move || {
                 // The resolved-class cache guard contains a thread-local raw
                 // pointer; activate it on this blocking thread for the
                 // duration of the synchronous collection only.

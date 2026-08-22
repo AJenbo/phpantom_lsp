@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The editor stays responsive while a request is being answered.** A handful of requests still did their work on the connection's own task, so while one was running the server could not read the next message: pressing Enter (which generates a PHPDoc block), opening the symbol picker, expanding a selection, resolving a quick fix, drawing inlay hints, and walking a type hierarchy each held everything else up for as long as they took. Laravel's startup indexing did the same, which is what made a large project feel unreachable for its first seconds. All of it now runs off the connection, so typing, completion, and cancellation keep flowing while a slower request finishes. A crash inside one of these is also reported in the log now instead of coming back as an empty answer.
+
 ## [0.10.0] - 2026-08-20
 
 ### Added

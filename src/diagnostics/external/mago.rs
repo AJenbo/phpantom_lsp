@@ -107,7 +107,7 @@ impl Backend {
             let mago_config = config.mago.clone();
             let shutdown_flag = Arc::clone(&self.shutdown_flag);
             let mago_diags = {
-                let result = tokio::task::spawn_blocking(move || {
+                let result = crate::server::run_blocking_cancel_safe("mago lint", move || {
                     mago::run_mago_lint(
                         &resolved,
                         &content,
@@ -120,9 +120,8 @@ impl Backend {
                 .await;
 
                 match result {
-                    Ok(Ok(diags)) => diags,
-                    Ok(Err(_e)) => continue,
-                    Err(_join_err) => continue,
+                    Some(Ok(diags)) => diags,
+                    _ => continue,
                 }
             };
 
@@ -239,7 +238,7 @@ impl Backend {
             let mago_config = config.mago.clone();
             let shutdown_flag = Arc::clone(&self.shutdown_flag);
             let mago_diags = {
-                let result = tokio::task::spawn_blocking(move || {
+                let result = crate::server::run_blocking_cancel_safe("mago analyze", move || {
                     mago::run_mago_analyze(
                         &resolved,
                         &content,
@@ -252,9 +251,8 @@ impl Backend {
                 .await;
 
                 match result {
-                    Ok(Ok(diags)) => diags,
-                    Ok(Err(_e)) => continue,
-                    Err(_join_err) => continue,
+                    Some(Ok(diags)) => diags,
+                    _ => continue,
                 }
             };
 

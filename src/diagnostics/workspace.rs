@@ -1154,13 +1154,15 @@ impl Backend {
 
         let backend = self.clone_for_blocking();
         let uri_owned = uri.to_string();
-        let diags = crate::server::run_blocking_cancel_safe(move || {
-            let rules = ignore_rules::compile_ignore_rules(&backend.config().diagnostics.ignore);
-            backend.collect_workspace_file_diagnostics(&uri_owned, &rules)
-        })
-        .await
-        .flatten()
-        .unwrap_or_default();
+        let diags =
+            crate::server::run_blocking_cancel_safe("workspace file diagnostics", move || {
+                let rules =
+                    ignore_rules::compile_ignore_rules(&backend.config().diagnostics.ignore);
+                backend.collect_workspace_file_diagnostics(&uri_owned, &rules)
+            })
+            .await
+            .flatten()
+            .unwrap_or_default();
 
         // The file may have been reopened while we were computing; the
         // live pipeline owns it again in that case.
@@ -1202,7 +1204,7 @@ impl Backend {
             let shutdown = Arc::clone(&self.shutdown_flag);
             let root_clone = root.clone();
             let generations = self.phpstan_tool.generation_snapshot();
-            let result = crate::server::run_blocking_cancel_safe(move || {
+            let result = crate::server::run_blocking_cancel_safe("workspace phpstan", move || {
                 crate::phpstan::run_phpstan_workspace(
                     &resolved,
                     &root_clone,
@@ -1232,7 +1234,7 @@ impl Backend {
             let shutdown = Arc::clone(&self.shutdown_flag);
             let root_clone = root.clone();
             let generations = self.phpcs_tool.generation_snapshot();
-            let result = crate::server::run_blocking_cancel_safe(move || {
+            let result = crate::server::run_blocking_cancel_safe("workspace phpcs", move || {
                 crate::phpcs::run_phpcs_workspace(&resolved, &root_clone, &phpcs_config, &shutdown)
             })
             .await;
@@ -1266,15 +1268,16 @@ impl Backend {
                 let root_clone = root.clone();
                 let resolved_clone = resolved.clone();
                 let generations = self.mago_lint_tool.generation_snapshot();
-                let result = crate::server::run_blocking_cancel_safe(move || {
-                    crate::mago::run_mago_lint_workspace(
-                        &resolved_clone,
-                        &root_clone,
-                        &mago_config,
-                        &shutdown,
-                    )
-                })
-                .await;
+                let result =
+                    crate::server::run_blocking_cancel_safe("workspace mago lint", move || {
+                        crate::mago::run_mago_lint_workspace(
+                            &resolved_clone,
+                            &root_clone,
+                            &mago_config,
+                            &shutdown,
+                        )
+                    })
+                    .await;
                 if let Some(Ok(map)) = result {
                     self.store_workspace_external_results("mago-lint", map, generations)
                         .await;
@@ -1291,15 +1294,16 @@ impl Backend {
                 let shutdown = Arc::clone(&self.shutdown_flag);
                 let root_clone = root.clone();
                 let generations = self.mago_analyze_tool.generation_snapshot();
-                let result = crate::server::run_blocking_cancel_safe(move || {
-                    crate::mago::run_mago_analyze_workspace(
-                        &resolved,
-                        &root_clone,
-                        &mago_config,
-                        &shutdown,
-                    )
-                })
-                .await;
+                let result =
+                    crate::server::run_blocking_cancel_safe("workspace mago analyze", move || {
+                        crate::mago::run_mago_analyze_workspace(
+                            &resolved,
+                            &root_clone,
+                            &mago_config,
+                            &shutdown,
+                        )
+                    })
+                    .await;
                 if let Some(Ok(map)) = result {
                     self.store_workspace_external_results("mago-analyze", map, generations)
                         .await;

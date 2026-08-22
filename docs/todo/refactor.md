@@ -214,33 +214,4 @@ Each item must include:
 
 # Outstanding items
 
-## Off-request-loop audit for LSP handlers
-
-**What to do:** Audit every `tower-lsp` handler in `src/lsp_dispatch.rs`
-(and the feature modules it calls into) for CPU-bound work executed
-directly on the async request-handling task rather than offloaded to a
-blocking thread pool. For each handler that does non-trivial parsing,
-whole-file/whole-document scanning, or workspace-wide walking inline,
-move that work behind a single shared blocking-execution helper (one
-call site pattern, not one ad-hoc `spawn_blocking` per handler) so a
-panic inside offloaded work is logged rather than silently discarded.
-Pay particular attention to high-frequency handlers that fire on
-nearly every keystroke (on-type formatting, completion resolve, inlay
-hint resolve) and to handlers that block the editor's UI while waiting
-on a response (rename, code action resolve, will-rename/will-delete
-file operations).
-
-**Which files to change:** `src/lsp_dispatch.rs` for the shared
-blocking-boundary helper; the individual handler modules it dispatches
-into (`src/formatting.rs`, `src/completion/`, `src/inlay_hints.rs`,
-`src/rename/`, `src/code_actions/`, `src/document_symbols.rs`,
-`src/folding.rs`, `src/document_links.rs`) wherever the audit finds
-inline blocking work.
-
-**Why it matters for the sprint:** Keystroke-latency regressions in
-these handlers are invisible to the test suite (correctness tests don't
-measure request-loop responsiveness) and tend to accumulate silently as
-features are added inline to existing handlers. Sweeping this now,
-under the refactoring gate rather than as a side effect of a feature
-PR, keeps the audit's scope from creeping into whichever feature the
-sprint is actually about.
+No outstanding items.
