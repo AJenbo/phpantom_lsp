@@ -1469,6 +1469,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#p54-property-narrowing-re-walks-the-whole-body-once-per-subject" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P54. Property narrowing re-walks the whole body once per subject
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2086,6 +2097,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         P53. The deprecated collector deep-copies a class per member access
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p54-property-narrowing-re-walks-the-whole-body-once-per-subject" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P54. Property narrowing re-walks the whole body once per subject
       </span>
     </span>
   </a>
@@ -3079,6 +3101,32 @@ already have one, deref coercion covers the read sites, and the
 <p><strong>Where to look:</strong> <code>collect_deprecated_diagnostics</code> and
 <code>resolve_variable_subject</code> in <code>diagnostics/deprecated.rs</code>, plus the
 <code>var_type_cache</code> declaration at the top of the collector.</p>
+<h2 id="p54-property-narrowing-re-walks-the-whole-body-once-per-subject">P54. Property narrowing re-walks the whole body once per subject<a class="headerlink" href="#p54-property-narrowing-re-walks-the-whole-body-once-per-subject" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<p>Every <code>$this-&gt;prop</code> or <code>$h-&gt;getCall()</code> whose type the engine needs sends
+<code>apply_property_narrowing</code> back over the enclosing body from its first
+statement, looking for a check that refines that subject. Nothing
+remembers the answer, so a body holding n such subjects walks itself n
+times, and each walk resolves the expressions it passes, which resolves
+subjects of their own.</p>
+<p>The re-entry guard on <code>NARROWING_IN_PROGRESS</code> stops that from
+compounding without bound (it was exponential before, #385), but the
+remaining growth is still steep: on the reproducer from that issue a
+release build measures 0.13 s at 20 guard/chain pairs, 0.36 s at 30, and
+2.79 s at 60, so roughly cubic in the number of narrowed subjects. Real
+code stays well under those sizes, which is why this is Low rather than a
+bug, but a generated file or a long legacy method can reach them.</p>
+<p>Memoising the walk would collapse it. The result depends on the source,
+the subject key, the cursor offset, and the classes handed in, so a
+per-request map keyed by those four and cleared with the rest of the
+request caches would turn the n walks into n lookups. The awkward part is
+that the walk mutates <code>results</code> in place and reports intersections
+through a separate flag, so the cached value has to carry both.</p>
+<p><strong>Where to look:</strong> <code>apply_property_narrowing</code> in
+<code>type_engine/resolver/property_narrowing.rs</code>, and its three callers in
+<code>type_engine/resolver/mod.rs</code> (<code>SubjectExpr::CallExpr</code> and the property
+path) and <code>narrowed_by_rewalk</code> in
+<code>type_engine/variable/rhs_resolution/mod.rs</code>.</p>
 
 
 
