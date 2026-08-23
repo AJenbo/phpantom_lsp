@@ -420,13 +420,15 @@ fn infer_body_return_type(
 
 /// The request-scoped memos the type engine keeps, activated as a unit.
 ///
-/// Both are pure memos: without them the type engine reaches the same
-/// answers, just by re-doing work it has already done for this file.
+/// All three are pure memos: without them the type engine reaches the
+/// same answers, just by re-doing work it has already done for this
+/// file.
 /// They are activated at the chokepoints every request passes through so
 /// no feature pays for a cold cache the one next to it already warmed.
 pub(crate) struct TypeEngineCaches {
     _callable_target: CallableTargetCacheGuard,
     _body_infer: BodyInferMemoGuard,
+    _var_type: crate::type_engine::variable::resolution::VarTypeMemoGuard,
 }
 
 /// Activate every request-scoped type-engine memo for the current
@@ -443,6 +445,7 @@ pub(crate) fn activate_type_engine_caches() -> TypeEngineCaches {
     TypeEngineCaches {
         _callable_target: with_callable_target_cache(),
         _body_infer: with_body_infer_memo(),
+        _var_type: crate::type_engine::variable::resolution::with_var_type_memo(),
     }
 }
 

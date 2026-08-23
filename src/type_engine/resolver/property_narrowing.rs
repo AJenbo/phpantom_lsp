@@ -10,40 +10,38 @@ use crate::types::ClassInfo;
 use super::{Loaders, ResolutionCtx, VarResolutionCtx};
 
 thread_local! {
-    /// The narrowing walks currently in progress on this thread, as
-    /// `(source identity, subject key)` pairs.
+    /// The narrowing walks currently in progress on this thread, each
+    /// entry the identity of the source that walk covers.
     ///
     /// Guard-clause narrowing resolves method-call receivers to decide
     /// whether a branch unconditionally exits.  Resolving a chained
     /// call like `$h->getWork()` enters the call-key narrowing path
-    /// (`SubjectExpr::CallExpr` in `resolver/mod.rs`), which calls back
-    /// into [`apply_property_narrowing`] for the call key.  That nested
-    /// walk re-encounters the same guard clauses, resolves the same
-    /// receivers, and re-enters, so a body holding n such guards fans
-    /// out exponentially in n.
+    /// (`narrowed_call` in `variable/rhs_resolution/mod.rs`), which
+    /// calls back into [`apply_property_narrowing`] for the call key.
+    /// That nested walk covers the same body, re-encounters the other
+    /// guards in it, resolves *their* receivers, and re-enters again
+    /// under a different key each time, so a body holding n chained
+    /// calls fans out factorially in n.  Six of them measured 1.5 s and
+    /// eight never finished.
     ///
-    /// Re-entry on the *same* subject in the *same* source is a cycle:
-    /// the walk already in progress covers the whole body, so the
-    /// nested one would only rediscover what its caller is mid-way
-    /// through computing.  Blocking it leaves the declared type
-    /// standing for that one receiver, which costs a `never`-returning
-    /// call inside a guard body going unrecognised when recognising it
-    /// depended on narrowing the receiver that is already being
-    /// narrowed.
+    /// A walk is therefore only started when no other walk is running
+    /// over the same source: the one already in progress covers the
+    /// whole body, and a nested one exists only to sharpen a receiver
+    /// type that is being read to answer "does this branch exit".
+    /// Blocking it leaves the declared type standing for that one
+    /// receiver, which costs a `never`-returning call inside a guard
+    /// body going unrecognised when recognising it depended on
+    /// narrowing a receiver from another guard in the same body.
     ///
-    /// The source is part of the key because the same subject text
-    /// (`$this->conn`) routinely names unrelated properties in
-    /// different files; without it, a nested walk over another file
-    /// would be blocked by an outer walk it has nothing to do with.
-    /// The cursor offset deliberately is *not* part of the key: the
-    /// fan-out comes from re-entering on the same subject at the many
-    /// offsets where it appears, so keying by offset would let every
-    /// occurrence start its own walk and the blowup would survive.
+    /// The source is what the entry holds because the same body is not
+    /// the only thing a walk can descend into: resolving a receiver
+    /// routinely crosses into another file, and a walk over that file
+    /// is new work rather than a repeat of the one that asked for it.
     ///
     /// Entries are pushed and popped in call order, so this is a stack
     /// rather than a set: at realistic nesting depths a linear scan
     /// beats hashing, and it keeps the walk down to one allocation.
-    static NARROWING_IN_PROGRESS: RefCell<Vec<(usize, String)>> = const { RefCell::new(Vec::new()) };
+    static NARROWING_IN_PROGRESS: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
 }
 
 /// RAII guard that pops the entry [`apply_property_narrowing`] pushed
@@ -85,13 +83,10 @@ pub(crate) fn apply_property_narrowing(
     let source = rctx.content.as_ptr() as usize;
     let entered = NARROWING_IN_PROGRESS.with(|stack| {
         let mut stack = stack.borrow_mut();
-        if stack
-            .iter()
-            .any(|(src, key)| *src == source && key == property_path)
-        {
+        if stack.contains(&source) {
             return false;
         }
-        stack.push((source, property_path.to_string()));
+        stack.push(source);
         true
     });
     if !entered {

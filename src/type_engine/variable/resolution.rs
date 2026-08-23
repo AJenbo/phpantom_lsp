@@ -55,10 +55,90 @@ thread_local! {
         RefCell::new(HashSet::new());
 
     /// Variable resolution queries currently in progress on this
-    /// thread.  Keyed by `(content_ptr, name_hash, cursor_offset,
-    /// class_name)` so that only the exact same query is suppressed.
-    static RESOLVING_VARS: RefCell<HashSet<(usize, u64, u32, Atom)>> =
+    /// thread.  Keyed by [`VarQueryKey`] so that only the exact same
+    /// query is suppressed.
+    static RESOLVING_VARS: RefCell<HashSet<VarQueryKey>> =
         RefCell::new(HashSet::new());
+
+    /// When `Some`, memoises what [`resolve_variable_types`] computed
+    /// the hard way, keyed by [`VarQueryKey`].  Activated with the rest
+    /// of the request-scoped type-engine memos, so it lives exactly as
+    /// long as one request / one file's diagnostic pass.
+    ///
+    /// Without it, a body is walked from its first statement once per
+    /// *ask*, not once per question: deciding whether a guard branch
+    /// exits resolves the receiver of every call it holds, and each of
+    /// those receivers sends the walker over the whole body again.  On a
+    /// long method whose branches each hold a chained call — the shape
+    /// `phpstan-src`'s `AnalyseCommand::execute` has — the same handful
+    /// of `(variable, offset)` questions get asked hundreds of times.
+    static VAR_TYPE_MEMO: RefCell<Option<HashMap<VarQueryKey, Vec<ResolvedType>>>> =
+        const { RefCell::new(None) };
+}
+
+/// What identifies one "what is the type of `$var` here?" question: the
+/// source it is asked of, the hash of the un-prefixed variable name, the
+/// offset, and the class the question is asked in.
+///
+/// The source is `(pointer, length)` rather than the pointer alone: the
+/// memo outlives any single query, so a freed buffer whose address is
+/// handed straight back to a different one would otherwise read as the
+/// same source.
+type VarQueryKey = ((usize, usize), u64, u32, Atom);
+
+/// Build the key identifying one variable query.
+///
+/// Callers spell the same variable both with and without the `$`
+/// prefix, so the name is normalised before hashing.  It is hashed
+/// rather than interned: this runs on every variable resolution, and
+/// `atom` would take the global interner lock and allocate for the
+/// unprefixed spelling.
+fn var_query_key(
+    content: &str,
+    var_name: &str,
+    cursor_offset: u32,
+    class_name: Atom,
+) -> VarQueryKey {
+    let mut hasher = DefaultHasher::new();
+    var_name
+        .strip_prefix('$')
+        .unwrap_or(var_name)
+        .hash(&mut hasher);
+    (
+        (content.as_ptr() as usize, content.len()),
+        hasher.finish(),
+        cursor_offset,
+        class_name,
+    )
+}
+
+/// RAII guard that clears [`VAR_TYPE_MEMO`] when the pass that installed
+/// it ends.  Nested activation is a no-op, so an inner pass cannot
+/// discard the entries an outer one is still relying on.
+pub(crate) struct VarTypeMemoGuard {
+    owns: bool,
+}
+
+impl Drop for VarTypeMemoGuard {
+    fn drop(&mut self) {
+        if self.owns {
+            VAR_TYPE_MEMO.with(|cell| {
+                *cell.borrow_mut() = None;
+            });
+        }
+    }
+}
+
+/// Activate the variable-type memo for the current thread.
+pub(crate) fn with_var_type_memo() -> VarTypeMemoGuard {
+    let already_active = VAR_TYPE_MEMO.with(|cell| cell.borrow().is_some());
+    if already_active {
+        return VarTypeMemoGuard { owns: false };
+    }
+    VAR_TYPE_MEMO.with(|cell| {
+        *cell.borrow_mut() = Some(HashMap::new());
+    });
+    VarTypeMemoGuard { owns: true }
 }
 
 /// RAII guard for [`BUILDING_TOP_LEVEL_SCOPE`].
@@ -89,7 +169,7 @@ fn try_acquire_top_level_guard(content: &str) -> Option<TopLevelScopeGuard> {
 
 /// RAII guard for [`RESOLVING_VARS`].
 struct ResolvingVarGuard {
-    key: (usize, u64, u32, Atom),
+    key: VarQueryKey,
 }
 
 impl Drop for ResolvingVarGuard {
@@ -100,32 +180,12 @@ impl Drop for ResolvingVarGuard {
     }
 }
 
-/// Try to acquire the variable resolution guard.
+/// Try to acquire the variable resolution guard for `key`.
 /// Returns `Some(guard)` on success, `None` on re-entry.
-fn try_acquire_var_guard(
-    content: &str,
-    var_name: &str,
-    cursor_offset: u32,
-    class_name: Atom,
-) -> Option<ResolvingVarGuard> {
-    // Callers spell the same variable both with and without the `$`
-    // prefix, so normalise before keying.  The name is hashed rather
-    // than interned: this runs on every variable resolution, and
-    // `atom` would take the global interner lock and allocate for the
-    // unprefixed spelling.  Only the queries live on the current stack
-    // (a handful) share the set, so a 64-bit hash cannot realistically
-    // collide.
-    let mut hasher = DefaultHasher::new();
-    var_name
-        .strip_prefix('$')
-        .unwrap_or(var_name)
-        .hash(&mut hasher);
-    let key = (
-        content.as_ptr() as usize,
-        hasher.finish(),
-        cursor_offset,
-        class_name,
-    );
+///
+/// Only the queries on the current stack (a handful) share the set, so
+/// the hashed name in the key cannot realistically collide.
+fn try_acquire_var_guard(key: VarQueryKey) -> Option<ResolvingVarGuard> {
     let inserted = RESOLVING_VARS.with(|set| set.borrow_mut().insert(key));
     if inserted {
         Some(ResolvingVarGuard { key })
@@ -254,19 +314,43 @@ pub(crate) fn resolve_variable_types(
         // the full resolution path.
     }
 
+    let key = var_query_key(content, var_name, cursor_offset, current_class.name);
+
+    // ── Memo ────────────────────────────────────────────────────
+    // Everything below walks the enclosing body from its first
+    // statement, which reaches the same answer every time within one
+    // pass — except inside a body-return inference, where the walk
+    // seeds the body's parameters with what the *call site* passed.
+    // The same variable at the same offset legitimately answers
+    // differently for each caller then, and what decided it is not in
+    // the key, so that walk neither reads the memo nor writes to it.
+    let memoisable =
+        !crate::type_engine::call_resolution::body_inference_in_progress();
+    if memoisable
+        && let Some(hit) = VAR_TYPE_MEMO.with(|cell| {
+            cell.borrow()
+                .as_ref()
+                .and_then(|memo| memo.get(&key).cloned())
+        })
+    {
+        return hit;
+    }
+
     // ── Re-entry guard (Guard 2) ────────────────────────────────
     // Break cycles where the same variable query re-enters through
     // call-argument resolution or template substitution paths that
     // bypass scope_var_resolver.  A re-entrant query cannot
     // contribute information while its outer invocation is still
     // incomplete.
-    let _var_guard =
-        match try_acquire_var_guard(content, var_name, cursor_offset, current_class.name) {
-            Some(guard) => guard,
-            None => return vec![],
-        };
+    //
+    // A suppressed query is not memoised: the empty answer describes
+    // the stack it was asked on, not the question.
+    let _var_guard = match try_acquire_var_guard(key) {
+        Some(guard) => guard,
+        None => return vec![],
+    };
 
-    with_parsed_program(content, "resolve_variable_types", |program, _content| {
+    let resolved = with_parsed_program(content, "resolve_variable_types", |program, _content| {
         let active_cache = crate::virtual_members::active_resolved_class_cache();
         let ctx = VarResolutionCtx {
             var_name,
@@ -287,7 +371,17 @@ pub(crate) fn resolve_variable_types(
         };
 
         resolve_variable_in_statements(program.statements.iter(), &ctx)
-    })
+    });
+
+    if memoisable {
+        VAR_TYPE_MEMO.with(|cell| {
+            if let Some(memo) = cell.borrow_mut().as_mut() {
+                memo.insert(key, resolved.clone());
+            }
+        });
+    }
+
+    resolved
 }
 
 /// Resolve the type of a variable at `cursor_offset` as a [`PhpType`].

@@ -1056,15 +1056,19 @@ remembers the answer, so a body holding n such subjects walks itself n
 times, and each walk resolves the expressions it passes, which resolves
 subjects of their own.
 
-The re-entry guard on `NARROWING_IN_PROGRESS` stops that from
-compounding without bound (it was exponential before, #385), but the
-remaining growth is still steep: on the reproducer from that issue a
-release build measures 0.13 s at 20 guard/chain pairs, 0.36 s at 30, and
-2.79 s at 60, so roughly cubic in the number of narrowed subjects. Real
-code stays well under those sizes, which is why this is Low rather than a
-bug, but a generated file or a long legacy method can reach them.
+`NARROWING_IN_PROGRESS` stops that from compounding without bound — a
+walk no longer starts while another is running over the same source —
+but the remaining growth is still superlinear: on the reproducer from
+#385 a release build measures under 0.05 s at 20 guard/chain pairs,
+0.1 s at 30, and 0.4 s at 60, so roughly quadratic in the number of
+narrowed subjects. Real code stays well under those sizes, which is why
+this is Low rather than a bug, but a generated file or a long legacy
+method can reach them.
 
-Memoising the walk would collapse it. The result depends on the source,
+Memoising the walk would collapse it, and blocking nested walks is what
+makes that straightforward: every walk that runs now runs with nothing
+above it on the same source, so its answer no longer depends on which
+other walks happened to be in flight. The result depends on the source,
 the subject key, the cursor offset, and the classes handed in, so a
 per-request map keyed by those four and cleared with the rest of the
 request caches would turn the n walks into n lookups. The awkward part is
