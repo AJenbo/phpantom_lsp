@@ -60,271 +60,37 @@ feeds a `string`-typed parameter or return raises a false
 
 ## Narrowing
 
-### B228. A condition-established narrowing of a method-call expression doesn't survive assignment, `elseif` siblings, or loop merges
+### B258. Two variables assigned in the same branch lose their correlated nullability at the merge
 
-**Impact: High · Complexity: Very High**
-
-`@phpstan-assert-if-true`/`-if-false` tags whose subject is a method-call
-expression off the receiver (`$this->getFoo()`, written `$this->getFoo()`
-in the tag) narrow correctly for a *direct* re-evaluation of that same
-call right after the guard:
+**Impact: Medium · Complexity: High**
 
 ```php
-if (!$scope->isInClass()) {
-    return;
-}
-$scope->getClassReflection()->isFinal(); // fine: direct re-evaluation
-```
-
-But the narrowing is lost as soon as the guarded fact has to survive
-anything beyond that:
-
-- **Assigned to a variable**, then the variable used elsewhere:
-  ```php
-  if (!$scope->isInClass()) {
-      return;
-  }
-  $classReflection = $scope->getClassReflection(); // stored type is still ?ClassReflection
-  $this->consistentConstructorHelper->findConsistentConstructor($classReflection); // false type_mismatch_argument
-  ```
-  (`src/Rules/Classes/InstantiationRule.php:153`, and the `$declaringClass`/`$parametersAcceptor`/`$scope` clusters throughout `type_mismatch_argument`.)
-- **A sibling `elseif`'s condition** also checks the same guard method,
-  which corrupts the fact for a later, unrelated branch
-  (`src/Analyser/ExprHandler/InstanceofHandler.php:140,142`).
-- **A `foreach` + `continue` guard** (`if (!$scope->isInClass()) { continue; }`)
-  loses the fact for the rest of the loop body
-  (`src/Rules/Api/NodeConnectingVisitorAttributesRule.php:62`,
-  `src/Rules/Properties/ReadOnlyByPhpDocPropertyAssignRule.php:88`,
-  `src/Rules/Properties/ReadOnlyPropertyAssignRule.php:78,81`).
-- **A plain (non-assert-if-true) `=== null` + `continue` guard on a
-  repeated method call**, once nested inside an outer loop with extra
-  loop-scoped state, loses the fact the same way
-  (`src/Type/Php/BackedEnumFromMethodDynamicReturnTypeExtension.php:67`).
-- The same shape recurs, unconfirmed in isolation but structurally
-  identical to the above, in `src/Analyser/NodeScopeResolver.php:1103,1112,1116`
-  (`$finalScope === null` → assign → `continue`, later `!== null` → use).
-
-The mechanism that establishes these facts is the synthetic-key scope
-tracking in `type_engine/variable/forward_walk/cond_narrowing.rs`
-(`apply_assertion_to_key`, `seed_synthetic_key_if_needed`, keyed by a
-string like `$scope->getClassReflection()`). Direct re-evaluation of the
-same call expression clearly consults this key (the first example
-works), but the general-purpose RHS-assignment path
-(`type_engine/variable/rhs_resolution/`) computes a method call's type
-from the raw signature only and never checks whether the call's printed
-form matches a currently-narrowed synthetic key — and whatever merges
-scope state at branch/loop boundaries in `forward_walk/control_flow.rs`
-doesn't carry synthetic keys across the merge either. Fixing the
-assignment path and the merge path are likely two separate, but
-related, changes.
-
-### B229. `instanceof` narrowing is not recognized for several common condition shapes
-
-**Impact: High · Complexity: High**
-
-Plain `$var instanceof Foo` narrowing works for the simple case (a bare
-local variable, tested directly in an `if`'s top-level condition), but
-several very common variations on the same idiom are not recognized —
-this is the dominant false-positive cluster in `unknown_member` (60+ of
-105 diagnostics):
-
-- **A right-hand `&&` clause inside an `elseif` condition** doesn't see
-  the `instanceof` on its left:
-  ```php
-  } elseif ($expr->var instanceof Variable && is_string($expr->var->name)) {
-  ```
-  (`src/Analyser/ExprHandler/AssignHandler.php:167`,
-  `src/Analyser/ExprHandler/MatchHandler.php:279`,
-  `src/PhpDoc/TypeNodeResolver.php:786`, `src/Type/FileTypeMapper.php:467`.)
-- **An array-index expression as the `instanceof` subject**
-  (`$types[$i] instanceof MixedType && !$types[$i]->isExplicitMixed()`),
-  even inside a plain `if` and across statements in the body
-  (`src/Type/TypeCombinator.php:251-297` — 6 lines,
-  `src/Type/Constant/ConstantArrayType.php:2567,3503`,
-  `src/Type/Generic/GenericObjectType.php:323`).
-- **A ternary condition**
-  (`$paramType instanceof UnionType ? $paramType->getTypes() : [...]`)
-  (`src/Reflection/GenericParametersAcceptorResolver.php:176`).
-- **`$this`**, once the enclosing class implements *any* interface
-  (confirmed: identical code is fine with no `implements`, breaks the
-  moment one is added) (`src/Type/ValueOfType.php:59`,
-  `src/Type/ObjectType.php:744`).
-
-Likely home: `type_engine/variable/forward_walk/` — the condition
-narrowing appears to special-case a plain `if` over a simple local
-variable subject and not generalize to `ElseIf_`/`Ternary`/array-index/
-property-fetch subjects the way real PHPStan's `TypeSpecifier` does.
-
-### B230. `$a === $b` doesn't narrow the nullable side against a definite-type operand
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-$inAssignRightSideVariableName = $context->getInAssignRightSideVariableName(); // ?string
-// ...
-if ($inAssignRightSideVariableName === $use->var->name) { // $use->var->name is string
-    $scope->hasVariableType($inAssignRightSideVariableName); // false: expects string, got ?string
-```
-
-(`src/Analyser/NodeScopeResolver.php:3080-3098`.) For `===` to hold, both
-operands must share a value, so a nullable variable compared identical
-to a definite non-null value narrows to that non-null type within the
-truthy branch — real PHPStan does this and is silent on this file.
-`type_engine/variable/forward_walk/cond_narrowing.rs` has specific
-handling for `$x === null`/`$x == null` but nothing for `$x === $y`
-where `$y`'s type is independently known to exclude null.
-
-### B231. `array_key_exists()` doesn't narrow an optional array-shape key the way `isset()` does
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-/** @param array{a?: array<int,string>} $shape */
-function get(array $shape): array
-{
-    if (isset($shape['a'])) {
-        return $shape['a']; // fine: array<int,string>
+$acceptor = null;
+$reflection = null;
+if ($name !== '') {
+    $reflection = $this->find($name);
+    if ($reflection !== null) {
+        $acceptor = $this->select($reflection);   // non-null exactly when $reflection is
     }
-    if (array_key_exists('a', $shape)) {
-        return $shape['a']; // false type_mismatch_return: ?array<int,string> vs array
-    }
-    return [];
+}
+
+if ($reflection !== null) {
+    $this->useBoth($reflection, $acceptor);       // false type_mismatch_argument on $acceptor
 }
 ```
 
-Confirmed against `src/File/FileExcluderFactory.php:37,47`
-(`array_key_exists('analyse', $this->excludePaths)` guarding
-`$this->excludePaths['analyse']`, an optional key in a promoted
-property's docblock shape) and reproduced standalone for both local
-variables and properties, so it isn't a property-vs-local-var
-distinction — `array_key_exists` on an optional shape key simply isn't
-wired into the same narrowing `isset()` already gets.
+The merge keeps each variable's own union (`?Reflection`, `?Acceptor`)
+and forgets that the two were written on the same path, so the later
+`$reflection !== null` check cannot recover what it implies about
+`$acceptor`. Real PHPStan is silent on the shape as its own source
+writes it, and it is not in its baseline, so it tracks the correlation
+somehow — the mechanism is not root-caused here.
 
-### B232. `use (&$var)` doesn't establish `$var` as defined when it's new to the enclosing scope
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-$linesOfCode = 0;              // <- if this line didn't exist:
-$counter = function () use (&$linesOfCode): void {
-    $linesOfCode++;            // by-ref use auto-vivifies $linesOfCode as null
-};
-```
-
-PHP auto-vivifies a by-reference `use` capture that doesn't already
-exist in the outer scope (as `null`), which is legal and is exactly
-`src/Analyser/NodeScopeResolver.php:3666` (`$hookImpurePoints`) and
-`src/Command/AnalyseApplication.php:272` (`$linesOfCode`) — both are
-only ever assigned *inside* the closure body. PHPantom's forward walker
-reports "Undefined variable" at the `use` clause instead of treating it
-as a declaration. Home: `type_engine/variable/forward_walk/`, wherever
-closure `use` clauses are processed.
-
-### B233. `isset($var) && …` doesn't mark a possibly-undefined variable as defined for the rest of the branch
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-if (isset($tokenType) && $tokenType !== IgnoreLexer::TOKEN_WHITESPACE) {
-    $lastTokenTypeLabel = $this->tokenLabel($tokenType); // false "Undefined variable"
-}
-```
-
-(`src/Parser/RichParser.php:308-309` — `$tokenType` is only assigned
-starting on the second iteration of the enclosing loop, so on the first
-pass it's genuinely possibly-undefined outside the guard, but
-`isset($tokenType)` being true in the truthy branch guarantees it's
-defined for the rest of that branch, which real PHPStan accounts for
-and PHPantom does not.)
-
-### B234. `is_float()`/`is_int()`'s negative branch doesn't strip a member from a declared union
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-/** @var int|float $newAutoIndex */
-$newAutoIndex = $offsetValue + 1;
-if (is_float($newAutoIndex)) {
-    // ...
-} elseif (!$optional) {
-    $this->nextAutoIndexes = [$newAutoIndex]; // false: expects list<int>, got array{int|float}
-```
-
-(`src/Type/Constant/ConstantArrayTypeBuilder.php:235-242`.) Real PHPStan
-narrows `$newAutoIndex` to plain `int` inside the `is_float()` check's
-negative branch (`elseif`); PHPantom leaves the full `int|float` union
-in place, which then leaks into the array-literal element type.
-
-### B235. A lost chained-call re-narrowing misattributes the member lookup to the enclosing file's own class
-
-**Impact: Medium-High · Complexity: Medium-High**
-
-When a `!== null` check on a method-call chain
-(`$scope->getParentScope() !== null`) is reused later without the
-chain's result being cached, PHPantom doesn't just fail to narrow — it
-misattributes the member lookup to the *current file's own class*,
-producing a diagnostic that names a completely unrelated class:
-
-```
-Method 'hasExpressionType' not found on class 'PHPStan\Debug\ReproChainReuse'
-```
-
-for code that never mentions `ReproChainReuse` at all. Confirmed at
-`src/Node/ClassPropertiesNode.php:246` and
-`src/Reflection/BetterReflection/BetterReflectionProvider.php:170`. Same
-narrowing subsystem as B228, but called out separately because the
-symptom actively misleads about *which* class is missing the member,
-not just *that* one is.
-
-### B236. `instanceof $variable` (a class-string held in a variable) narrowing is unsupported
-
-**Impact: Medium · Complexity: Medium-High**
-
-```php
-/** @param class-string<Continue_>|class-string<Break_> $stmtClass */
-function f(Node $statement, string $stmtClass): void
-{
-    if (!$statement instanceof $stmtClass) {
-        continue;
-    }
-    $statement->num; // unknown_member: PHPantom never narrowed $statement at all
-}
-```
-
-(`src/Analyser/StatementResult.php:95`,
-`src/Analyser/InternalStatementResult.php:106`.) Only `instanceof` with
-a literal class name appears to be handled; a variable holding a
-`class-string<T>` as the right-hand side isn't matched at all, so the
-guard has no effect. Likely home: `type_engine/resolver/`'s
-`instanceof` handling.
-
-### B237. A vendor interface's own `@phpstan-assert-if-true Type $this` tag isn't honored
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-// PHPUnit\Event\Code\Test, declared in the vendor package itself:
-// @phpstan-assert-if-true TestMethod $this
-public function isTestMethod(): bool;
-```
-
-```php
-if (!$test->isTestMethod()) {
-    return;
-}
-$test->className(); // unknown_member: $test not narrowed to TestMethod
-```
-
-(`src/Testing/PHPUnit/InitContainerBeforeTestSubscriber.php:23`.) Unlike
-`PHPStan\Analyser\Scope::isInClass()` (B228's example), this tag isn't
-missing from the vendor source — PHPUnit declares it directly on its
-own interface — so this isn't the same gap `stub_patches.rs`'s
-`THIRD_PARTY_ASSERT_IF_TRUE` list works around. The general
-`@phpstan-assert-if-true` call-site mechanism (documented in
-`docs/todo/type-inference.md`) doesn't appear to apply to a `$this`-target
-tag declared on a class outside the project/vendor scan root, or
-there's a narrower gap in how this specific interface gets its
-docblock tags parsed; not fully root-caused.
+Reproduced standalone. Real-world hits are the `$parametersAcceptor`
+cluster in `src/Analyser/ExprHandler/` (`FuncCallHandler.php:977,1042`,
+`MethodCallHandler.php:169,350`, `StaticCallHandler.php:240,455`), where
+the acceptor is built in the same branch that resolves the method
+reflection the later check tests.
 
 ## Arithmetic
 
@@ -610,33 +376,6 @@ for it, but the stored key no longer records which quote style it came
 from. The fix is to decode the key at parse time (or record the quote
 style alongside it) so `is_decimal_int_array_key` can be asked about the
 runtime key, after which the backslash special case can go entirely.
-
-### B256. `instanceof` does not narrow an array element (`$types[$i]`)
-
-**Impact: Medium-High · Complexity: Medium**
-
-```php
-/** @param list<Ty> $types */
-function f(array $types): void
-{
-    for ($i = 0; $i < count($types); $i++) {
-        if ($types[$i] instanceof ShapeTy) {
-            echo $types[$i]->propName(); // false unknown_member on Ty
-        }
-    }
-}
-```
-
-The narrowing engine keys a narrowed type by its subject, and an
-array-dim-fetch subject is not one of them: the guard is recorded but
-never read back, so the element keeps the array's declared element type
-inside the branch. Narrowing the same value through a local
-(`$t = $types[$i]; if ($t instanceof ShapeTy)`) or a `foreach` binding
-works, which is the shape most code takes and why this stayed hidden.
-It surfaced as ~17 false `unknown_member` reports across
-`src/Type/TypeCombinator.php:1791-2063` the moment the elements of
-`$types` resolved to a real union instead of to nothing. PHPStan and
-Psalm both narrow a constant offset this way.
 
 ### B257. A closure parameter binds the whole container when the argument is a union of array shapes
 

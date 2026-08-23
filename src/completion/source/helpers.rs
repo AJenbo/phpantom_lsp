@@ -885,7 +885,7 @@ fn walk_array_segments(
             // shape yields the union of its value types (via
             // `iterable_element_type`); generic arrays yield their
             // value type as before.
-            BracketSegment::ElementAccess => current
+            BracketSegment::VariableIndex(_) | BracketSegment::ElementAccess => current
                 .extract_value_type(true)
                 .cloned()
                 .or_else(|| current.iterable_element_type()),

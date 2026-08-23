@@ -128,23 +128,45 @@ pub enum BracketSegment {
     /// decimal string form so it can address positional shape entries
     /// (`array{Foo, Bar}`) as well as explicit numeric keys.
     IntKey(String),
-    /// A variable or otherwise non-literal index access, e.g. `[$i]` or `[]`.
+    /// A plain variable index, e.g. `[$i]`.
+    ///
+    /// Carries the variable's name (including the `$`).  Which entry it
+    /// addresses is unknown, so it yields the same element type
+    /// [`ElementAccess`](BracketSegment::ElementAccess) does; the name is
+    /// kept because two reads written the same way are the same subject,
+    /// which is what lets a guard on `$types[$i]` narrow a later read of
+    /// it.
+    VariableIndex(String),
+    /// An otherwise non-literal index access, e.g. `[$a + 1]` or `[]`.
     ElementAccess,
 }
 
 /// Classify the text inside a `[…]` bracket into a [`BracketSegment`].
 ///
 /// Quoted strings become [`BracketSegment::StringKey`]; bare integer
-/// literals become [`BracketSegment::IntKey`]; everything else (variables,
+/// literals become [`BracketSegment::IntKey`]; a plain variable becomes
+/// [`BracketSegment::VariableIndex`]; everything else (compound
 /// expressions, empty `[]`) becomes [`BracketSegment::ElementAccess`].
 fn classify_bracket_inner(inner: &str) -> BracketSegment {
     if let Some(key) = crate::text_scan::unquote_php_string(inner) {
         BracketSegment::StringKey(key.to_string())
     } else if !inner.is_empty() && inner.bytes().all(|b| b.is_ascii_digit()) {
         BracketSegment::IntKey(inner.to_string())
+    } else if is_plain_variable(inner) {
+        BracketSegment::VariableIndex(inner.to_string())
     } else {
         BracketSegment::ElementAccess
     }
+}
+
+/// Whether `text` is a bare `$name` with nothing else in it.
+fn is_plain_variable(text: &str) -> bool {
+    let Some(name) = text.strip_prefix('$') else {
+        return false;
+    };
+    !name.is_empty()
+        && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+        && !name.as_bytes()[0].is_ascii_digit()
 }
 
 impl SubjectExpr {
@@ -227,12 +249,18 @@ impl SubjectExpr {
 
         // ── Enum case / static access: `ClassName::Member` ─────────
         // Only match when there is no `->` after `::` (that would be a
-        // chain like `ClassName::make()->prop`).
+        // chain like `ClassName::make()->prop`), and no bracket access
+        // after it either: `self::$map['k']` is an element *of* the
+        // static property, so it belongs to the array-access branch
+        // below, which parses `self::$map` as its base.  Keeping it here
+        // would look for a static member literally named `$map['k']`,
+        // find nothing, and answer with the class itself.
         if !subject.starts_with('$')
             && subject.contains("::")
             && !subject.ends_with(')')
             && let Some((class_part, member)) = subject.split_once("::")
             && !member.contains("->")
+            && !(member.contains('[') && subject.ends_with(']'))
         {
             return SubjectExpr::StaticAccess {
                 class: class_part.to_string(),
@@ -313,6 +341,11 @@ impl SubjectExpr {
                             BracketSegment::IntKey(n) => {
                                 out.push('[');
                                 out.push_str(n);
+                                out.push(']');
+                            }
+                            BracketSegment::VariableIndex(name) => {
+                                out.push('[');
+                                out.push_str(name);
                                 out.push(']');
                             }
                             BracketSegment::ElementAccess => out.push_str("[]"),

@@ -1320,3 +1320,361 @@ function floorStock(array $qtys): int
 "#
     ));
 }
+
+// ─── An assertion tag resolves its type where it was written ───────────────
+
+const VENDOR_ASSERT_SCAFFOLD: &str = r#"<?php
+namespace Vendor\Events;
+
+interface Test
+{
+    /** @phpstan-assert-if-true TestMethod $this */
+    public function isTestMethod(): bool;
+}
+
+final class TestMethod implements Test
+{
+    public function isTestMethod(): bool { return true; }
+
+    public function className(): string { return 'x'; }
+}
+"#;
+
+/// The unqualified `TestMethod` in the tag names
+/// `Vendor\Events\TestMethod`, the way PHP resolves every other
+/// unqualified name in the file that declares it.  The call site's own
+/// namespace has nothing to do with it.
+#[test]
+fn an_assertion_tag_resolves_its_type_against_the_declaring_namespace() {
+    let messages = type_diagnostics(&format!(
+        r#"{VENDOR_ASSERT_SCAFFOLD}
+namespace App;
+
+use Vendor\Events\Test;
+
+function takesString(string $s): void {{}}
+
+function f(Test $test): void
+{{
+    if (!$test->isTestMethod()) {{
+        return;
+    }}
+    takesString($test->className());
+}}
+"#
+    ));
+    assert!(
+        messages.is_empty(),
+        "the tag's type resolves in its own namespace, got: {messages:?}"
+    );
+}
+
+/// `is_a($s, C::class, true)` on a subject that can only hold a string
+/// proves a `class-string<C>`.  Adding `C` itself would put an object
+/// alternative into a value that is definitely a string.
+#[test]
+fn is_a_with_allow_string_on_a_string_subject_proves_only_a_class_string() {
+    let messages = type_diagnostics(
+        r#"<?php
+namespace Repro;
+
+class Base {}
+
+/** @param class-string<Base> $cls */
+function initialize(string $cls): void {}
+
+function f(string $name): void
+{
+    if (!is_a($name, Base::class, true)) {
+        return;
+    }
+    initialize($name);
+}
+"#,
+    );
+    assert!(
+        messages.is_empty(),
+        "the subject stays a string, got: {messages:?}"
+    );
+}
+
+const B228_SCAFFOLD: &str = r#"<?php
+namespace Repro;
+
+class ClassReflection { public function isFinal(): bool { return true; } }
+
+interface Invoker { public function invoke(): void; }
+
+interface Scope
+{
+    /** @phpstan-assert-if-true !null $this->getClassReflection() */
+    public function isInClass(): bool;
+
+    public function getClassReflection(): ?ClassReflection;
+}
+
+function useClass(ClassReflection $r): void {}
+"#;
+
+/// The receiver of the guard can be a property, not just a local: a
+/// scope held in a field is guarded exactly the same way.
+#[test]
+fn an_assert_tag_narrows_through_a_property_receiver() {
+    assert_no_type_errors(&format!(
+        r#"{B228_SCAFFOLD}
+class Holder {{
+    private Scope $scope;
+
+    public function __construct(Scope $s) {{ $this->scope = $s; }}
+
+    public function f(): void
+    {{
+        if (!$this->scope->isInClass()) {{
+            return;
+        }}
+        $reflection = $this->scope->getClassReflection();
+        useClass($reflection);
+    }}
+}}
+"#
+    ));
+}
+
+/// An intersection-typed receiver carries one entry per member, so the
+/// member that declares the tag has to be found among them rather than
+/// by looking up the joined `A&B` text as a class name.
+#[test]
+fn an_assert_tag_narrows_through_an_intersection_typed_receiver() {
+    assert_no_type_errors(&format!(
+        r#"{B228_SCAFFOLD}
+function f(Scope&Invoker $scope): void
+{{
+    if (!$scope->isInClass()) {{
+        return;
+    }}
+    $reflection = $scope->getClassReflection();
+    useClass($reflection);
+}}
+"#
+    ));
+}
+
+/// The proof holds for every later occurrence of the guarded call, not
+/// just the first.  Evaluating the call is what the proof is about, so
+/// it must not count as the event that invalidates it.
+#[test]
+fn a_guarded_call_stays_narrowed_across_repeated_uses() {
+    assert_no_type_errors(&format!(
+        r#"{B228_SCAFFOLD}
+function f(Scope $scope): void
+{{
+    if (!$scope->isInClass()) {{
+        return;
+    }}
+    useClass($scope->getClassReflection());
+    useClass($scope->getClassReflection());
+    useClass($scope->getClassReflection());
+}}
+"#
+    ));
+}
+
+/// The same across a branch boundary: a use inside a nested `if` and
+/// another after it.
+#[test]
+fn a_guarded_call_survives_a_nested_branch() {
+    assert_no_type_errors(&format!(
+        r#"{B228_SCAFFOLD}
+class Stmt2 {{ public ?string $type = null; }}
+
+function f(Scope $scope, Stmt2 $node): void
+{{
+    if (!$scope->isInClass()) {{
+        throw new \\RuntimeException('x');
+    }}
+    if ($node->type !== null) {{
+        useClass($scope->getClassReflection());
+    }}
+    useClass($scope->getClassReflection());
+}}
+"#
+    ));
+}
+
+/// A `foreach` whose body guards with `continue` keeps the proof for the
+/// rest of that iteration, including after an earlier `continue` guard
+/// and a statement before the jump.
+#[test]
+fn a_continue_guard_keeps_the_proof_for_the_rest_of_the_iteration() {
+    assert_no_type_errors(&format!(
+        r#"{B228_SCAFFOLD}
+/** @param list<int> $items */
+function f(Scope $scope, array $items): void
+{{
+    $errors = [];
+    foreach ($items as $item) {{
+        if ($item === 0) {{
+            continue;
+        }}
+        if (!$scope->isInClass()) {{
+            $errors[] = 'x';
+            continue;
+        }}
+        useClass($scope->getClassReflection());
+        useClass($scope->getClassReflection());
+    }}
+    echo count($errors);
+}}
+"#
+    ));
+}
+
+/// An impure call on the receiver still drops what it could have
+/// changed: the row `$stmt->fetch()` was checked on is not the row a
+/// later `$stmt->execute()` leaves behind.
+#[test]
+fn an_impure_call_on_the_receiver_still_drops_the_other_proofs() {
+    let messages = type_diagnostics(
+        r#"<?php
+namespace Repro;
+
+class Row {}
+
+class Stmt
+{
+    public function fetch(): ?Row { return null; }
+
+    public function execute(): void {}
+}
+
+function useRow(Row $row): void {}
+
+function f(Stmt $stmt): void
+{
+    if ($stmt->fetch() === null) {
+        return;
+    }
+    $stmt->execute();
+    useRow($stmt->fetch());
+}
+"#,
+    );
+    assert_eq!(
+        messages.len(),
+        1,
+        "execute() moved the statement past the checked row, got: {messages:?}"
+    );
+}
+
+/// A predicate that carries the tag can sit anywhere in an `&&` chain:
+/// the whole condition holding means every operand did.
+#[test]
+fn an_assert_tag_in_a_later_and_operand_narrows_the_branch() {
+    assert_no_type_errors(&format!(
+        r#"{B228_SCAFFOLD}
+function f(Scope $scope, string $name): void
+{{
+    if (
+        $name === 'static'
+        && $scope->isInClass()
+    ) {{
+        useClass($scope->getClassReflection());
+    }}
+}}
+"#
+    ));
+}
+
+/// The same in an `elseif`, which is how the check is usually written
+/// once there is more than one class keyword to handle.
+#[test]
+fn an_assert_tag_in_an_elseif_and_chain_narrows_the_branch() {
+    assert_no_type_errors(&format!(
+        r#"{B228_SCAFFOLD}
+function f(Scope $scope, string $name): void
+{{
+    if ($name === 'self') {{
+        echo 'self';
+    }} elseif ($name === 'static' && $scope->isInClass()) {{
+        useClass($scope->getClassReflection());
+    }}
+}}
+"#
+    ));
+}
+
+/// An `||` proves nothing: the branch can be entered without the
+/// predicate having held.
+#[test]
+fn an_assert_tag_in_an_or_chain_proves_nothing() {
+    let messages = type_diagnostics(&format!(
+        r#"{B228_SCAFFOLD}
+function f(Scope $scope, string $name): void
+{{
+    if ($name === 'static' || $scope->isInClass()) {{
+        useClass($scope->getClassReflection());
+    }}
+}}
+"#
+    ));
+    assert_eq!(
+        messages.len(),
+        1,
+        "an `||` branch can be entered without the predicate, got: {messages:?}"
+    );
+}
+
+/// A class that implements the predicate's interface without repeating
+/// its docblock inherits the contract's tags: `$this->isInClass()` inside
+/// the implementation proves what the interface promised.
+#[test]
+fn an_assert_tag_is_inherited_from_an_implemented_interface() {
+    assert_no_type_errors(&format!(
+        r#"{B228_SCAFFOLD}
+class MutatingScope implements Scope
+{{
+    private ?ClassReflection $reflection = null;
+
+    public function isInClass(): bool
+    {{
+        return $this->reflection !== null;
+    }}
+
+    public function getClassReflection(): ?ClassReflection
+    {{
+        return $this->reflection;
+    }}
+
+    public function resolve(): void
+    {{
+        if (!$this->isInClass()) {{
+            return;
+        }}
+        useClass($this->getClassReflection());
+    }}
+}}
+"#
+    ));
+}
+
+/// A sibling branch that tests the same predicate must not corrupt the
+/// fact for the branches after it: the inverse of `A && guard()` is an
+/// alternative, and the alternative where `A` failed says nothing about
+/// what `guard()` proves.
+#[test]
+fn a_sibling_branch_testing_the_same_predicate_does_not_corrupt_the_next() {
+    assert_no_type_errors(&format!(
+        r#"{B228_SCAFFOLD}
+function f(Scope $scope, string $name): void
+{{
+    if ($name === 'self' && $scope->isInClass()) {{
+        useClass($scope->getClassReflection());
+    }} elseif ($name === 'static' && $scope->isInClass()) {{
+        useClass($scope->getClassReflection());
+    }} elseif ($name === 'parent' && $scope->isInClass()) {{
+        useClass($scope->getClassReflection());
+    }}
+}}
+"#
+    ));
+}

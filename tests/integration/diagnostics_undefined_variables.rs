@@ -539,6 +539,69 @@ function test(): void {
     assert!(diags.is_empty(), "Got: {:?}", diags);
 }
 
+#[test]
+fn by_reference_use_capture_declares_a_variable_new_to_the_outer_scope() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function test(): int {
+    $counter = function () use (&$total): void {
+        $total++;
+    };
+    $counter();
+    return (int) $total;
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "PHP auto-vivifies a by-reference capture as null. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn flags_a_by_value_use_capture_of_a_variable_new_to_the_outer_scope() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function test(): void {
+    $fn = function () use ($total): void {
+        echo $total;
+    };
+    $fn();
+}
+"#,
+    );
+    assert_eq!(
+        diags.len(),
+        1,
+        "A by-value capture reads the outer variable. Got: {:?}",
+        diags,
+    );
+    assert!(diags[0].message.contains("$total"));
+}
+
+#[test]
+fn flags_a_read_before_a_by_reference_use_capture() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function test(): void {
+    echo $total;
+    $fn = function () use (&$total): void {
+        $total = 1;
+    };
+    $fn();
+}
+"#,
+    );
+    assert_eq!(
+        diags.len(),
+        1,
+        "The capture declares the variable at the `use` site, not before it. Got: {:?}",
+        diags,
+    );
+    assert!(diags[0].message.contains("$total"));
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Arrow functions
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1206,6 +1269,117 @@ function test(): void {
     );
     assert_eq!(diags.len(), 1, "Got: {:?}", diags);
     assert!(diags[0].message.contains("$y"));
+}
+
+#[test]
+fn isset_guard_covers_the_branch_body_when_the_write_is_a_loop_back_edge() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+/** @param list<int> $tokens */
+function test(array $tokens): void {
+    foreach ($tokens as $token) {
+        if (isset($tokenType) && $tokenType !== 5) {
+            echo $tokenType;
+        }
+        $tokenType = $token;
+    }
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "isset() proves $tokenType exists for the whole branch. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn isset_guard_covers_an_elseif_branch_body() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+/** @param list<int> $tokens */
+function test(array $tokens): void {
+    foreach ($tokens as $token) {
+        if ($token === 0) {
+            echo "zero";
+        } elseif (isset($previous)) {
+            echo $previous;
+        }
+        $previous = $token;
+    }
+}
+"#,
+    );
+    assert!(diags.is_empty(), "Got: {:?}", diags);
+}
+
+#[test]
+fn isset_guard_does_not_cover_the_statements_after_the_branch() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+/** @param list<int> $tokens */
+function test(array $tokens): void {
+    foreach ($tokens as $token) {
+        if (isset($tokenType)) {
+            echo $tokenType;
+        }
+        echo $tokenType;
+        $tokenType = $token;
+    }
+}
+"#,
+    );
+    assert_eq!(
+        diags.len(),
+        1,
+        "The read outside the guarded branch is still unproven. Got: {:?}",
+        diags,
+    );
+    assert!(diags[0].message.contains("$tokenType"));
+}
+
+#[test]
+fn isset_guard_does_not_cover_a_variable_never_written_in_the_scope() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function test(): void {
+    if (isset($tpyo)) {
+        echo $tpyo;
+    }
+}
+"#,
+    );
+    assert_eq!(
+        diags.len(),
+        1,
+        "With no write anywhere the isset() can never hold. Got: {:?}",
+        diags,
+    );
+    assert!(diags[0].message.contains("$tpyo"));
+}
+
+#[test]
+fn isset_guard_in_an_or_chain_does_not_cover_the_branch_body() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+/** @param list<int> $tokens */
+function test(array $tokens): void {
+    foreach ($tokens as $token) {
+        if (isset($tokenType) || $token === 0) {
+            echo $tokenType;
+        }
+        $tokenType = $token;
+    }
+}
+"#,
+    );
+    assert_eq!(
+        diags.len(),
+        1,
+        "An `||` branch can be entered without the isset() holding. Got: {:?}",
+        diags,
+    );
+    assert!(diags[0].message.contains("$tokenType"));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

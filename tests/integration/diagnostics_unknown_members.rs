@@ -13374,3 +13374,79 @@ class Bag
         messages
     );
 }
+
+/// `self` in a member's declared type names the class the member was read
+/// off, not the class the reading code sits in.  Resolving it against the
+/// enclosing class made the lookup report a method missing from a class
+/// the code never mentions.
+#[test]
+fn a_self_returning_getter_is_not_attributed_to_the_enclosing_class() {
+    let backend = create_test_backend();
+    let uri = "file:///self_return.php";
+    let diags = unknown_member_diagnostics_with_scope_cache(
+        &backend,
+        uri,
+        r#"<?php
+interface Scope
+{
+    public function getParentScope(): ?self;
+
+    public function hasExpressionType(string $expr): bool;
+}
+
+class Reader
+{
+    public function run(Scope $scope): void
+    {
+        if ($scope->getParentScope() !== null) {
+            echo $scope->getParentScope()->hasExpressionType('x') ? 'y' : 'n';
+        }
+    }
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "the guarded chain resolves to Scope, not to Reader. Got: {:?}",
+        diags,
+    );
+}
+
+/// An element of a static array property is a subject in its own right:
+/// `self::$map['k']` reads the element, not a static member literally
+/// named `$map['k']`.  Failing to split it made the lookup answer with
+/// the enclosing class and report a method missing from it.
+#[test]
+fn an_element_of_a_static_array_property_resolves_to_the_element_type() {
+    let backend = create_test_backend();
+    let uri = "file:///static_array_element.php";
+    let diags = unknown_member_diagnostics_with_scope_cache(
+        &backend,
+        uri,
+        r#"<?php
+class Anon
+{
+    public function getDisplayName(): string { return 'x'; }
+}
+
+class Provider
+{
+    /** @var array<string, Anon> */
+    private static array $anonymousClasses = [];
+
+    public function name(string $className): string
+    {
+        if (isset(self::$anonymousClasses[$className])) {
+            return self::$anonymousClasses[$className]->getDisplayName();
+        }
+        return $className;
+    }
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "the element is an Anon, not the Provider. Got: {:?}",
+        diags,
+    );
+}

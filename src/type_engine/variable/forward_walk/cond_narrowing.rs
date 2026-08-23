@@ -490,6 +490,58 @@ pub(crate) fn apply_condition_narrowing<'b>(
                 continue;
             }
 
+            // `$x instanceof $stmtClass` — the right-hand side is a value
+            // holding the class name, so what it narrows to is whatever
+            // that value's type says the class is.
+            if let Some((rhs, negated)) =
+                narrowing::try_extract_dynamic_instanceof(operand, var_name)
+            {
+                let targets = dynamic_instanceof_targets(rhs, scope, ctx);
+                if !targets.is_empty() {
+                    let var_ctx = build_var_ctx(var_name, ctx, &scope_resolver);
+                    if negated {
+                        let mut results = scope.get(var_name).to_vec();
+                        for target in &targets {
+                            ResolvedType::apply_narrowing(&mut results, |classes| {
+                                narrowing::apply_instanceof_exclusion(target, &var_ctx, classes)
+                            });
+                        }
+                        if !results.is_empty() {
+                            scope.set(var_name, results);
+                        }
+                    } else {
+                        let mut resolved = Vec::new();
+                        for target in &targets {
+                            let mut single = Vec::new();
+                            ResolvedType::apply_narrowing(&mut single, |classes| {
+                                narrowing::apply_instanceof_inclusion(
+                                    target, false, &var_ctx, classes,
+                                )
+                            });
+                            ResolvedType::extend_unique(&mut resolved, single);
+                        }
+                        // An operand that names no loadable class (an
+                        // unsubstituted `@template T` is the common one)
+                        // proves nothing, so the subject is left as it
+                        // was rather than emptied.
+                        if !resolved.is_empty() {
+                            let alternatives = targets.len() > 1;
+                            ResolvedType::extend_unique(
+                                instanceof_results.entry(var_name.clone()).or_default(),
+                                resolved,
+                            );
+                            let c = conjuncts.entry(var_name.clone()).or_default();
+                            if alternatives {
+                                c.saw_alternatives = true;
+                            } else {
+                                c.operands += 1;
+                            }
+                        }
+                    }
+                    continue;
+                }
+            }
+
             // Single instanceof (including negated, is_a, get_class),
             // or a boolean that stands for one.
             if let Some(extraction) =
@@ -593,6 +645,9 @@ pub(crate) fn apply_condition_narrowing<'b>(
 
     // property_exists($var, 'name') / method_exists($var, 'name') narrowing.
     apply_member_exists_narrowing(condition, scope, false);
+
+    // array_key_exists('k', $arr) narrowing on an optional shape key.
+    apply_array_key_exists_narrowing(condition, scope, ctx, false);
 
     // `if (preg_match(…, $matches))` — the body runs on a successful match,
     // so `$matches` has the keys the pattern describes.
@@ -747,6 +802,49 @@ fn preg_outcome_alias(expr: &Expression<'_>, scope: &ScopeState) -> Option<(Preg
 /// same thing.  Keeping one implementation is what stops the guard form
 /// from drifting back into *adding* `T` to the union instead of
 /// filtering it down to `T`.
+/// The classes `$subject instanceof <value>` narrows to, when the
+/// right-hand side is a value rather than a literal class name.
+///
+/// A `class-string<T>` names `T`; a union of them names each `T` as an
+/// alternative; and an object-typed right-hand side stands for its own
+/// class, which is what `$node instanceof $other` checks.  A bare
+/// `class-string` or plain `string` names nothing, so the check proves
+/// nothing and the subject is left alone.
+fn dynamic_instanceof_targets(
+    rhs: &Expression<'_>,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Vec<PhpType> {
+    let scope_snapshot = scope.locals.clone();
+    let scope_resolver = |vn: &str| -> Vec<ResolvedType> {
+        scope_snapshot.get(&atom(vn)).cloned().unwrap_or_default()
+    };
+    let var_ctx = build_var_ctx("", ctx, &scope_resolver);
+    let Some(resolved) =
+        crate::type_engine::variable::resolution::resolve_arg_raw_type(rhs, &var_ctx)
+    else {
+        return Vec::new();
+    };
+
+    let mut targets = Vec::new();
+    for member in resolved.union_members() {
+        let target = match member.kind() {
+            TypeKind::ClassString(Some(inner)) | TypeKind::InterfaceString(Some(inner)) => {
+                inner.clone()
+            }
+            // An object-typed operand stands for its own class.  A
+            // keyword type (`string`, `object`, `mixed`) names no class,
+            // so the check proves nothing about the subject.
+            TypeKind::Named(_) | TypeKind::Generic { .. } if !member.is_keyword() => member.clone(),
+            _ => continue,
+        };
+        if !targets.contains(&target) {
+            targets.push(target);
+        }
+    }
+    targets
+}
+
 fn commit_instanceof_narrowing(
     var_name: &str,
     mut narrowed: Vec<ResolvedType>,
@@ -853,6 +951,16 @@ fn commit_instanceof_narrowing(
     }
     if !names_class && broad_object {
         scope.set(var_name, with_string_alt(narrowed));
+        return;
+    }
+
+    // The other half of that rule: a subject that can only hold a string
+    // has no object alternative for the checked class to filter down to,
+    // so `is_a($s, C::class, true)` proves a `class-string<C>` and
+    // nothing more.  Leave it to `apply_class_string_guard_narrowing`,
+    // which runs right after this pass — adding `C` here would put an
+    // object alternative into a value that is definitely a string.
+    if allow_string && !string_alt.is_empty() && !names_class {
         return;
     }
 
@@ -1018,6 +1126,54 @@ pub(crate) fn apply_condition_narrowing_inverse_single<'b>(
             continue;
         }
 
+        // `if (!$x instanceof $stmtClass) { continue; }` — the
+        // fall-through proves the dynamic check held.
+        if let Some((rhs, negated)) = narrowing::try_extract_dynamic_instanceof(condition, var_name)
+        {
+            let targets = dynamic_instanceof_targets(rhs, scope, ctx);
+            if !targets.is_empty() {
+                let var_ctx = build_var_ctx(var_name, ctx, &scope_resolver);
+                if negated {
+                    let mut narrowed = Vec::new();
+                    for target in &targets {
+                        let mut single = Vec::new();
+                        ResolvedType::apply_narrowing(&mut single, |classes| {
+                            narrowing::apply_instanceof_inclusion(target, false, &var_ctx, classes)
+                        });
+                        ResolvedType::extend_unique(&mut narrowed, single);
+                    }
+                    // An operand that names no loadable class proves
+                    // nothing; committing an empty result would instead
+                    // mark the subject unresolvable.
+                    if !narrowed.is_empty() {
+                        commit_instanceof_narrowing(
+                            var_name,
+                            narrowed,
+                            false,
+                            false,
+                            scope,
+                            ctx,
+                            &scope_resolver,
+                        );
+                    }
+                } else {
+                    let had_types = !scope.get(var_name).is_empty();
+                    let mut results = scope.get(var_name).to_vec();
+                    for target in &targets {
+                        ResolvedType::apply_narrowing(&mut results, |classes| {
+                            narrowing::apply_instanceof_exclusion(target, &var_ctx, classes)
+                        });
+                    }
+                    if !results.is_empty() {
+                        scope.set(var_name, results);
+                    } else if had_types {
+                        scope.unreachable = true;
+                    }
+                }
+                continue;
+            }
+        }
+
         if let Some(extraction) =
             narrowing::try_extract_instanceof_with_negation(condition, var_name).or_else(|| {
                 alias_extractions
@@ -1079,6 +1235,10 @@ pub(crate) fn apply_condition_narrowing_inverse_single<'b>(
     // known to exist.
     apply_member_exists_narrowing(condition, scope, true);
 
+    // Inverse `array_key_exists` narrowing: after
+    // `if (!array_key_exists('k', $arr)) { return; }` the key is present.
+    apply_array_key_exists_narrowing(condition, scope, ctx, true);
+
     // A union of objects the check on `$x->prop` could only have failed
     // for some of.  Callers hand this one operand at a time, so the
     // `&&` / `||` decomposition is already done.
@@ -1126,6 +1286,15 @@ pub(crate) fn apply_condition_narrowing_inverse<'b>(
             for branch in &branch_scopes[1..] {
                 merged.merge_branch(branch);
             }
+            // A synthetic key only one branch established is not a fact
+            // about the merge: the other branches say nothing about it, so
+            // the declared type still stands.  Without this,
+            // `!($n === 'self' && $s->isInClass())` left
+            // `$s->getClassReflection()` narrowed to the `null` that one
+            // alternative implies, and a sibling `elseif` that proves the
+            // opposite could no longer widen it back.
+            let branch_refs: Vec<&ScopeState> = branch_scopes.iter().collect();
+            retain_synthetic_keys_common_to_all(&mut merged, &branch_refs);
             *scope = merged;
         }
         return;
@@ -1354,6 +1523,132 @@ pub(crate) fn apply_member_exists_narrowing<'b>(
     }
 }
 
+/// Apply `array_key_exists('k', $arr)` narrowing to an array shape's
+/// optional key.
+///
+/// A shape's optional key reads as `T|null`, because the key may be
+/// absent.  `array_key_exists` proves it is present, so the read is
+/// plain `T` — the same refinement `isset()` gets, minus the extra proof
+/// that the value itself is not null:
+///
+/// ```php
+/// /** @param array{a?: array<int,string>} $shape */
+/// if (array_key_exists('a', $shape)) {
+///     return $shape['a']; // array<int,string>, not ?array<int,string>
+/// }
+/// ```
+///
+/// `inverted` selects the polarity the caller establishes, so an
+/// `if (!array_key_exists('a', $shape)) { return; }` guard refines its
+/// fall-through.  Only the direction that proves the key *present* adds
+/// information: an absent key is not something the shape can record.
+pub(crate) fn apply_array_key_exists_narrowing<'b>(
+    condition: &'b Expression<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+    inverted: bool,
+) {
+    for operand in collect_and_chain_operands(condition) {
+        let Some((base_key, key_name, negated)) = array_key_exists_target(operand) else {
+            continue;
+        };
+        if negated != inverted {
+            continue;
+        }
+        // A property or static-property subject (`$this->excludePaths`)
+        // is not a tracked local, so its shape has to be brought into
+        // the scope before it can be refined.
+        seed_synthetic_key_if_needed(&base_key, scope, ctx);
+        mark_array_shape_key_present(&base_key, &key_name, scope);
+        // Seed the element key after the shape is refined, so an offset
+        // read consulting it sees the present-key type rather than the
+        // optional one it would have resolved a moment earlier.
+        seed_synthetic_key_if_needed(&format!("{base_key}[\"{key_name}\"]"), scope, ctx);
+    }
+}
+
+/// Extract the `(base subject key, key name, negated)` of an
+/// `array_key_exists('k', $arr)` check, unwrapping parentheses and a
+/// leading `!`.
+fn array_key_exists_target(expr: &Expression<'_>) -> Option<(String, String, bool)> {
+    match expr {
+        Expression::Parenthesized(inner) => array_key_exists_target(inner.expression),
+        Expression::UnaryPrefix(prefix) if prefix.operator.is_not() => {
+            array_key_exists_target(prefix.operand)
+                .map(|(base, key, negated)| (base, key, !negated))
+        }
+        Expression::Call(Call::Function(call)) => {
+            let Expression::Identifier(ident) = call.function else {
+                return None;
+            };
+            if bytes_to_str(ident.value()).trim_start_matches('\\') != "array_key_exists" {
+                return None;
+            }
+            let args: Vec<_> = call.argument_list.arguments.iter().collect();
+            if args.len() < 2 {
+                return None;
+            }
+            let key_name = narrowing::string_literal_value(narrowing::argument_value(args[0]))?;
+            let base_key = narrowing::expr_to_subject_key(narrowing::argument_value(args[1]))?;
+            Some((base_key, key_name, false))
+        }
+        _ => None,
+    }
+}
+
+/// Mark one key of an array shape as present, leaving its value type
+/// alone.
+///
+/// The sibling [`strip_null_from_array_shape_key`] also drops `null` from
+/// the value, which is what `isset()` proves.  `array_key_exists` proves
+/// only presence, so a shape entry declared `?T` stays `?T`.
+fn mark_array_shape_key_present(base_var: &str, key_name: &str, scope: &mut ScopeState) {
+    let types = scope.get(base_var).to_vec();
+    if types.is_empty() {
+        return;
+    }
+    let narrowed: Vec<ResolvedType> = types
+        .into_iter()
+        .map(|mut rt| {
+            rt.type_string = mark_shape_key_present(&rt.type_string, key_name);
+            rt
+        })
+        .collect();
+    scope.set(base_var, narrowed);
+}
+
+/// Recursively clear the `optional` flag on one key of an array shape.
+fn mark_shape_key_present(ty: &crate::php_type::PhpType, key: &str) -> crate::php_type::PhpType {
+    use crate::php_type::{PhpType, ShapeEntry, TypeKind};
+    match ty.kind() {
+        TypeKind::ArrayShape(entries) => {
+            let new_entries: Vec<ShapeEntry> = entries
+                .iter()
+                .map(|e| {
+                    if e.key.as_deref() == Some(key) {
+                        ShapeEntry {
+                            key: e.key.clone(),
+                            value_type: e.value_type.clone(),
+                            optional: false,
+                        }
+                    } else {
+                        e.clone()
+                    }
+                })
+                .collect();
+            PhpType::array_shape(new_entries)
+        }
+        TypeKind::Nullable(inner) => PhpType::nullable(mark_shape_key_present(inner, key)),
+        TypeKind::Union(members) => PhpType::union(
+            members
+                .iter()
+                .map(|m| mark_shape_key_present(m, key))
+                .collect(),
+        ),
+        other => other.clone().into(),
+    }
+}
+
 /// Apply `in_array($var, $haystack, true)` narrowing.
 ///
 /// When `inverted` is false (truthy branch / while body), the variable is
@@ -1544,6 +1839,22 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
 ) {
     use crate::types::AssertionKind;
 
+    // `$name === 'static' && $scope->isInClass()` proves both operands in
+    // the truthy branch, so each one's own tags apply.  Written as one
+    // expression the chain is not a call at all, and the extractors below
+    // would find nothing to read.  The inverse path needs no equivalent:
+    // `apply_condition_narrowing_inverse` does the De Morgan
+    // decomposition and hands this function a single operand.
+    if !inverted {
+        let operands = collect_and_chain_operands(condition);
+        if operands.len() > 1 {
+            for operand in &operands {
+                apply_phpstan_assert_condition_narrowing(operand, scope, ctx, inverted);
+            }
+            return;
+        }
+    }
+
     // Unwrap parentheses and detect negation (`!func($var)`).
     let (func_call_expr, condition_negated) = narrowing::unwrap_condition_negation(condition);
 
@@ -1642,16 +1953,17 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
             // ancestor (e.g. PHPUnit's `Assert`) are found.  Uses raw class
             // loads only, avoiding a full merge that would poison the shared
             // resolved-class cache mid-walk.
-            let method = match narrowing::find_assertion_method_in_chain(
+            let (method, declaring_fqn) = match narrowing::find_assertion_method_in_chain(
                 &class_info,
                 &method_name,
                 ctx.class_loader,
                 &mut Vec::new(),
                 0,
             ) {
-                Some(m) => m,
+                Some(found) => found,
                 None => return,
             };
+            let declaring_namespace = namespace_of_fqn(&declaring_fqn);
             for assertion in &method.type_assertions {
                 let applies_positively = match assertion.kind {
                     AssertionKind::IfTrue => function_returned_true,
@@ -1672,7 +1984,11 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
                     let resolved_assert_type = if assertion.asserted_type.contains_self_ref() {
                         assertion.asserted_type.replace_self(&class_info.fqn())
                     } else {
-                        assertion.asserted_type.clone()
+                        qualify_assertion_type(
+                            &assertion.asserted_type,
+                            declaring_namespace.as_deref(),
+                            ctx,
+                        )
                     };
                     apply_assertion_to_key(
                         &arg_var,
@@ -1686,24 +2002,33 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
             }
         }
         Call::Method(method_call) => {
-            // Instance method: `$var->method()` with `@phpstan-assert-if-true Type $this`
-            let receiver_var = match method_call.object {
-                Expression::Variable(Variable::Direct(dv)) => bytes_to_str(dv.name).to_string(),
-                _ => return,
+            // Instance method: `$var->method()` with `@phpstan-assert-if-true Type $this`.
+            // The receiver is any subject the scope can key, not just a
+            // bare local: `$this->scope->isInClass()` is the same promise
+            // about the same value, and the guard is written that way
+            // wherever the scope is held in a property.
+            let Some(receiver_var) = narrowing::expr_to_subject_key(method_call.object) else {
+                return;
             };
             let method_name = match &method_call.method {
                 ClassLikeMemberSelector::Identifier(ident) => bytes_to_str(ident.value).to_string(),
                 _ => return,
             };
+            // A compound receiver is not a tracked local, so its type has
+            // to be brought into the scope before it can be read.
+            seed_synthetic_key_if_needed(&receiver_var, scope, ctx);
             // Resolve the receiver's type to find the method's assertions.
-            let receiver_types = scope.get(&receiver_var);
+            let receiver_types = scope.get(&receiver_var).to_vec();
             if receiver_types.is_empty() {
                 return;
             }
             // Collect assertions from all candidate classes.
             let mut to_apply: Vec<(crate::php_type::PhpType, bool, String)> = Vec::new();
-            for rt in receiver_types {
-                let receiver = match (ctx.class_loader)(&rt.type_string.to_string()) {
+            for rt in &receiver_types {
+                // An intersection-typed receiver carries one entry per
+                // member, so the class each entry names is looked up
+                // rather than the joined `A&B` text, which is not a class.
+                let receiver = match resolve_receiver_class(rt, ctx) {
                     Some(ci) => ci,
                     None => {
                         continue;
@@ -1712,16 +2037,17 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
                 // Search the trait/parent chain for the method's assertions
                 // using raw class loads only (a full merge would poison the
                 // shared resolved-class cache mid-walk).
-                let method = match narrowing::find_assertion_method_in_chain(
+                let (method, declaring_fqn) = match narrowing::find_assertion_method_in_chain(
                     &receiver,
                     &method_name,
                     ctx.class_loader,
                     &mut Vec::new(),
                     0,
                 ) {
-                    Some(m) => m,
+                    Some(found) => found,
                     None => continue,
                 };
+                let declaring_namespace = namespace_of_fqn(&declaring_fqn);
                 for assertion in &method.type_assertions {
                     let applies_positively = match assertion.kind {
                         AssertionKind::IfTrue => function_returned_true,
@@ -1741,7 +2067,11 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
                     let resolved_type = if assertion.asserted_type.contains_self_ref() {
                         assertion.asserted_type.replace_self(&receiver.fqn())
                     } else {
-                        assertion.asserted_type.clone()
+                        qualify_assertion_type(
+                            &assertion.asserted_type,
+                            declaring_namespace.as_deref(),
+                            ctx,
+                        )
                     };
                     if assertion.param_name == "$this" {
                         // Narrows the receiver variable itself.
@@ -1779,6 +2109,73 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
         }
         _ => {}
     }
+}
+
+/// The class a resolved receiver entry stands for, for looking up the
+/// method whose docblock carries the assertion.
+///
+/// The entry's own `class_info` is the authority when it has one.  An
+/// entry that only carries a type string is looked up by that text,
+/// except that an intersection (`A&B`) is not a class name — each member
+/// is tried in turn, since the assertion may be declared on any of them.
+fn resolve_receiver_class(
+    rt: &ResolvedType,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Option<Arc<crate::types::ClassInfo>> {
+    if let Some(ci) = &rt.class_info {
+        return Some(Arc::clone(ci));
+    }
+    if let TypeKind::Intersection(members) = rt.type_string.kind() {
+        return members
+            .iter()
+            .find_map(|member| (ctx.class_loader)(&member.to_string()));
+    }
+    (ctx.class_loader)(&rt.type_string.to_string())
+}
+
+/// Qualify the unqualified class names in an assertion's type against
+/// the namespace of the file that declared the tag.
+///
+/// `@phpstan-assert-if-true TestMethod $this` on an interface in
+/// `PHPUnit\Event\Code` names `PHPUnit\Event\Code\TestMethod`, the way
+/// PHP resolves every other unqualified name in that file.  The call
+/// site's namespace has nothing to do with it, and the short-name index
+/// that would otherwise find the class covers the project's own files
+/// only — so a tag a vendor package declares on itself resolved to
+/// nothing at all.
+///
+/// A name that does not resolve to a class under the declaring namespace
+/// is left alone, so an already-qualified name and the short-name
+/// fallback both keep working.
+fn qualify_assertion_type(
+    asserted: &PhpType,
+    declaring_namespace: Option<&str>,
+    ctx: &ForwardWalkCtx<'_>,
+) -> PhpType {
+    let Some(namespace) = declaring_namespace.filter(|ns| !ns.is_empty()) else {
+        return asserted.clone();
+    };
+    asserted.resolve_names(&|name| {
+        if name.contains('\\') {
+            return name.to_string();
+        }
+        let qualified = format!("{}\\{}", namespace, name);
+        if (ctx.class_loader)(&qualified).is_some() {
+            qualified
+        } else {
+            name.to_string()
+        }
+    })
+}
+
+/// The namespace part of a fully-qualified class name, or `None` for a
+/// class in the global namespace.
+fn namespace_of_fqn(fqn: &str) -> Option<String> {
+    let trimmed = fqn.trim_start_matches('\\');
+    trimmed
+        .rfind('\\')
+        .map(|pos| trimmed[..pos].to_string())
+        .filter(|ns| !ns.is_empty())
 }
 
 /// Apply one `@phpstan-assert-if-true` / `-if-false` conclusion to the
@@ -2427,6 +2824,9 @@ pub(crate) fn apply_null_narrowing_truthy<'b>(
     if let Some((var_name, constant)) = extract_class_constant_identity(condition, true) {
         strip_null_by_constant_identity(&var_name, constant, scope, ctx);
     }
+    // `$x === $y` — the same reasoning for any comparand whose own type
+    // rules out null.
+    apply_identity_comparison_null_narrowing(condition, scope, ctx, true);
     // `!empty($x)` — truthy branch means $x is non-empty (truthy):
     // strip null and false from the type.
     if let Some(var_name) = extract_not_empty_var(condition) {
@@ -2517,6 +2917,10 @@ pub(crate) fn apply_null_narrowing_inverse<'b>(
     if let Some((var_name, constant)) = extract_class_constant_identity(condition, false) {
         strip_null_by_constant_identity(&var_name, constant, scope, ctx);
     }
+    // When the condition is `$x !== $y`, the inverse (else/guard) means
+    // the two were identical, so a comparand that cannot be null leaves
+    // no null in the subject.
+    apply_identity_comparison_null_narrowing(condition, scope, ctx, false);
     // When the condition is `$x === ''` / `$x === []`, the inverse
     // (else/guard) means $x is non-empty.
     if let Some((var_name, empty, non_empty)) = extract_empty_value_check(condition)
@@ -2582,7 +2986,7 @@ pub(crate) fn apply_nullsafe_receiver_narrowing<'b>(
     // A chain compared identical to a value that cannot be null held a
     // non-null value itself, which is the same proof about its receivers.
     let mut compared: Vec<(&Expression<'_>, &Expression<'_>)> = Vec::new();
-    collect_identity_compared_chains(condition, truthy, &mut compared);
+    collect_identity_comparisons(condition, truthy, &mut compared);
     for (chain, comparand) in compared {
         let chain_keys: Vec<String> = nullsafe_receiver_keys(chain)
             .into_iter()
@@ -2602,6 +3006,47 @@ pub(crate) fn apply_nullsafe_receiver_narrowing<'b>(
     }
 }
 
+/// Strip `null` from a subject that an identity comparison has matched
+/// against a value that cannot be `null`.
+///
+/// `$a === $b` holding means both sides carried the same value, so a
+/// nullable `$a` compared identical to a definitely-non-null `$b` holds
+/// no null in that branch:
+///
+/// ```php
+/// $name = $context->getName(); // ?string
+/// if ($name === $node->name) {  // $node->name is string
+///     takesString($name);       // string
+/// }
+/// ```
+///
+/// Only identity qualifies: `null == 0` and `null == false` are both
+/// true, so a loose comparison proves nothing.
+fn apply_identity_comparison_null_narrowing<'b>(
+    condition: &'b Expression<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+    truthy: bool,
+) {
+    let mut compared: Vec<(&Expression<'_>, &Expression<'_>)> = Vec::new();
+    collect_identity_comparisons(condition, truthy, &mut compared);
+
+    for (subject, comparand) in compared {
+        let Some(key) =
+            expr_to_var_name(subject).or_else(|| narrowing::expr_to_subject_key(subject))
+        else {
+            continue;
+        };
+        // The cheap half first: with no null to rule out there is
+        // nothing to narrow, and resolving the comparand costs a full
+        // type resolution.
+        if !scope_value_is_nullable(&key, scope) || expr_accepts_null(comparand, scope, ctx) {
+            continue;
+        }
+        strip_null_from_scope(&key, scope);
+    }
+}
+
 /// Whether the value `expr` evaluates to could be `null`.
 ///
 /// An expression that resolves to nothing counts as nullable: an unknown
@@ -2616,24 +3061,24 @@ fn expr_accepts_null(expr: &Expression<'_>, scope: &ScopeState, ctx: &ForwardWal
         .is_none_or(|ty| ty.accepts_null())
 }
 
-/// Collect the `(chain, comparand)` pairs of every identity comparison the
-/// condition proves held, where one side is a `?->` chain.
+/// Collect the `(subject, comparand)` pairs of every identity comparison
+/// the condition proves held, in both operand orders.
 ///
-/// `$x?->m() === $rhs` succeeding means the chain did not short-circuit,
-/// provided `$rhs` cannot itself be `null` — which the caller decides,
-/// since it costs a type resolution.  `$x?->m() !== $rhs` failing is the
-/// same proof, so the else branch of a `!==` narrows too.
-fn collect_identity_compared_chains<'b>(
+/// Whichever side a caller cares about, the identity holding means both
+/// sides carried the same value, so a proof about one is a proof about
+/// the other.  `A === B` holding and `A !== B` failing are the same
+/// proof, which is why the `truthy` flag flips for `!==`.
+fn collect_identity_comparisons<'b>(
     condition: &'b Expression<'b>,
     truthy: bool,
     out: &mut Vec<(&'b Expression<'b>, &'b Expression<'b>)>,
 ) {
     match condition {
         Expression::Parenthesized(inner) => {
-            collect_identity_compared_chains(inner.expression, truthy, out);
+            collect_identity_comparisons(inner.expression, truthy, out);
         }
         Expression::UnaryPrefix(prefix) if prefix.operator.is_not() => {
-            collect_identity_compared_chains(prefix.operand, !truthy, out);
+            collect_identity_comparisons(prefix.operand, !truthy, out);
         }
         Expression::Binary(bin) => {
             // `A && B` proves both when true; `A || B` proves neither
@@ -2644,8 +3089,8 @@ fn collect_identity_compared_chains<'b>(
                 _ => false,
             };
             if decomposes {
-                collect_identity_compared_chains(bin.lhs, truthy, out);
-                collect_identity_compared_chains(bin.rhs, truthy, out);
+                collect_identity_comparisons(bin.lhs, truthy, out);
+                collect_identity_comparisons(bin.rhs, truthy, out);
                 return;
             }
             // Only identity qualifies: `null == false` and `null == 0` are
@@ -4248,6 +4693,16 @@ fn resolve_member_key_type(
         };
         let Some(hint) = type_hint else {
             continue;
+        };
+        // `self` / `static` / `$this` in the member's declared type name
+        // the class the member was read off, not the class the reading
+        // code happens to sit in.  `Scope::getParentScope(): ?self` seeded
+        // against the enclosing class made a member lookup on the result
+        // report a method missing from a class the code never mentions.
+        let hint = if hint.contains_self_ref() {
+            hint.resolve_self_refs(&cls.fqn(), cls.parent_class.as_ref().map(|p| p.as_str()))
+        } else {
+            hint
         };
         let resolved_classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
             &hint,

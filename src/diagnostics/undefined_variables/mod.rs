@@ -70,7 +70,7 @@ mod offset_guards;
 pub(crate) use feature_guards::{collect_compact_vars, has_get_defined_vars};
 use feature_guards::{has_dynamic_variables, has_extract_call};
 use offset_guards::{
-    collect_error_suppressed_offsets, collect_guarded_offsets,
+    collect_error_suppressed_offsets, collect_guarded_offsets, collect_isset_guarded_regions,
     collect_short_circuit_guarded_offsets, collect_var_annotations,
 };
 
@@ -418,6 +418,11 @@ fn check_scope(
     let mut guarded_offsets = collect_guarded_offsets(body);
     guarded_offsets.extend(collect_short_circuit_guarded_offsets(body));
 
+    // Collect the branch bodies a positive `isset()` check guards, so a
+    // read there is not reported just because the only write to the
+    // variable sits later in the source.
+    let isset_regions = collect_isset_guarded_regions(body);
+
     if scope.frames.is_empty() {
         return;
     }
@@ -536,6 +541,21 @@ fn check_scope(
                 .any(|(name, off)| *name == access.name && *off < access.offset);
 
             if has_prior_write {
+                continue;
+            }
+
+            // A positive `isset()` in an enclosing branch condition
+            // proves the variable exists for that whole branch.  Require
+            // a write somewhere in the scope: with none at all the
+            // `isset()` can never be true, and the read is a genuine
+            // typo rather than a write this source-ordered pass missed.
+            let written_anywhere = || frame_writes.iter().any(|(name, _)| *name == access.name);
+            if isset_regions.iter().any(|region| {
+                access.offset >= region.start
+                    && access.offset <= region.end
+                    && region.names.iter().any(|name| name == &access.name)
+            }) && written_anywhere()
+            {
                 continue;
             }
 

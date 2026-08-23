@@ -145,11 +145,19 @@ pub(crate) fn walk_body_forward<'b>(
             // cursor on `$e->errorInfo` needs instanceof narrowing.
             match stmt {
                 Statement::If(if_stmt) => {
-                    let cond_span = if_stmt.condition.span();
-                    if ctx.cursor_offset >= cond_span.start.offset
-                        && ctx.cursor_offset <= cond_span.end.offset
+                    // An `elseif`'s own condition narrows its later `&&`
+                    // operands exactly as the leading `if`'s does, so both
+                    // are offered the cursor pass.
+                    for condition in
+                        std::iter::once(if_stmt.condition).chain(elseif_conditions(&if_stmt.body))
                     {
-                        apply_cursor_ternary_narrowing(if_stmt.condition, scope, ctx);
+                        let cond_span = condition.span();
+                        if ctx.cursor_offset >= cond_span.start.offset
+                            && ctx.cursor_offset <= cond_span.end.offset
+                        {
+                            apply_cursor_ternary_narrowing(condition, scope, ctx);
+                            break;
+                        }
                     }
                 }
                 Statement::While(while_stmt) => {

@@ -342,6 +342,45 @@ pub(in crate::type_engine) fn apply_instanceof_exclusion(
     false
 }
 
+/// If `expr` is `$var instanceof <value>` — an `instanceof` whose
+/// right-hand side is a value rather than a literal class name — return
+/// that right-hand side and whether the check is negated.
+///
+/// PHP resolves `$x instanceof $class` against whatever `$class` holds:
+/// a `class-string` names the class directly, and an object stands for
+/// its own class.  Which it is takes a type resolution the extractors in
+/// this module have no context for, so the expression is handed back for
+/// the caller to resolve.
+pub(in crate::type_engine) fn try_extract_dynamic_instanceof<'b>(
+    expr: &'b Expression<'b>,
+    var_name: &str,
+) -> Option<(&'b Expression<'b>, bool)> {
+    match expr {
+        Expression::Parenthesized(inner) => {
+            try_extract_dynamic_instanceof(inner.expression, var_name)
+        }
+        Expression::UnaryPrefix(prefix) if prefix.operator.is_not() => {
+            try_extract_dynamic_instanceof(prefix.operand, var_name)
+                .map(|(rhs, negated)| (rhs, !negated))
+        }
+        Expression::Binary(bin) if bin.operator.is_instanceof() => {
+            if expr_to_subject_key(bin.lhs).as_deref() != Some(var_name) {
+                return None;
+            }
+            match bin.rhs {
+                // A literal class name needs no resolution, and is what
+                // `try_extract_instanceof` already reads.
+                Expression::Identifier(_)
+                | Expression::Self_(_)
+                | Expression::Static(_)
+                | Expression::Parent(_) => None,
+                rhs => Some((rhs, false)),
+            }
+        }
+        _ => None,
+    }
+}
+
 /// If `expr` is `$var instanceof ClassName` and the variable name
 /// matches `var_name`, return the class name.
 ///

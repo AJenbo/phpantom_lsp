@@ -463,6 +463,85 @@ function f(array $frame): void {
     );
 }
 
+/// `array_key_exists()` proves the key is there, so the read is no
+/// longer the `null` a missing offset yields.
+#[test]
+fn array_key_exists_on_an_optional_shape_key_proves_it_is_there() {
+    let backend = create_test_backend();
+    let uri = "file:///key_exists_shape_key.php";
+    let content = r#"<?php
+/** @param array{file: string, type?: string} $frame */
+function f(array $frame): void {
+    if (array_key_exists('type', $frame)) {
+        $type = $frame['type'];
+        $type; // <-- here
+    }
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(text.contains("string"), "expected string, got: {text}");
+    assert!(
+        !text.contains("null"),
+        "the key is known to be present: {text}"
+    );
+}
+
+/// The subject may be a property rather than a local, and the guard may
+/// be written as an early return.
+#[test]
+fn array_key_exists_guard_clause_proves_a_property_shape_key() {
+    let backend = create_test_backend();
+    let uri = "file:///key_exists_property.php";
+    let content = r#"<?php
+class Excluder {
+    /** @var array{analyse?: list<string>} */
+    private array $paths = [];
+
+    public function f(): void {
+        if (!array_key_exists('analyse', $this->paths)) {
+            return;
+        }
+        $analyse = $this->paths['analyse'];
+        $analyse; // <-- here
+    }
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(
+        text.contains("list<string>"),
+        "expected list<string>, got: {text}"
+    );
+    assert!(
+        !text.contains("null"),
+        "the guard's fall-through proves the key is present: {text}"
+    );
+}
+
+/// Presence is all `array_key_exists()` proves: a key declared nullable
+/// keeps its `null`, which is where it differs from `isset()`.
+#[test]
+fn array_key_exists_does_not_rule_out_a_null_value() {
+    let backend = create_test_backend();
+    let uri = "file:///key_exists_nullable_value.php";
+    let content = r#"<?php
+/** @param array{type?: string|null} $frame */
+function f(array $frame): void {
+    if (array_key_exists('type', $frame)) {
+        $type = $frame['type'];
+        $type; // <-- here
+    }
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(
+        text.contains("null") || text.contains("?string"),
+        "the value itself may still be null: {text}"
+    );
+}
+
 // ─── An inline `@var` seeds the assignment, then flows ─────────────────────
 
 /// The annotation describes what the assignment produced, not what the
@@ -1182,5 +1261,453 @@ namespace App {{
     assert!(
         text.contains("?User"),
         "a different function proves nothing, got: {text}"
+    );
+}
+
+// ─── An identity comparison carries the comparand's proof ───────────────────
+
+/// `$a === $b` holding means both sides carried the same value, so a
+/// nullable subject compared identical to a value that cannot be null
+/// holds no null in that branch.
+#[test]
+fn identity_against_a_non_null_operand_strips_null() {
+    let backend = create_test_backend();
+    let uri = "file:///identity_non_null.php";
+    let content = r#"<?php
+class Ctx {
+    public function name(): ?string { return null; }
+}
+function f(Ctx $ctx, string $wanted): void {
+    $name = $ctx->name();
+    if ($name === $wanted) {
+        $name; // <-- here
+    }
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(
+        text.contains("string") && !text.contains("?string") && !text.contains("null"),
+        "the identity rules out the null, got: {text}"
+    );
+}
+
+/// Operand order does not change what the identity proves.
+#[test]
+fn identity_narrows_with_the_subject_on_the_right() {
+    let backend = create_test_backend();
+    let uri = "file:///identity_reversed.php";
+    let content = r#"<?php
+class Ctx {
+    public function name(): ?string { return null; }
+}
+function f(Ctx $ctx, string $wanted): void {
+    $name = $ctx->name();
+    if ($wanted === $name) {
+        $name; // <-- here
+    }
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(
+        text.contains("string") && !text.contains("?string") && !text.contains("null"),
+        "the identity rules out the null, got: {text}"
+    );
+}
+
+/// `$a !== $b` returning false is the same proof, so the fall-through of
+/// a `!==` guard clause narrows too.
+#[test]
+fn a_not_identical_guard_clause_strips_null_on_fall_through() {
+    let backend = create_test_backend();
+    let uri = "file:///identity_guard.php";
+    let content = r#"<?php
+class Ctx {
+    public function name(): ?string { return null; }
+}
+function f(Ctx $ctx, string $wanted): void {
+    $name = $ctx->name();
+    if ($name !== $wanted) {
+        return;
+    }
+    $name; // <-- here
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(
+        text.contains("string") && !text.contains("?string") && !text.contains("null"),
+        "the guard's fall-through proves the identity held, got: {text}"
+    );
+}
+
+/// A comparand that is itself nullable proves nothing: both sides could
+/// have been null.
+#[test]
+fn identity_against_a_nullable_operand_proves_nothing() {
+    let backend = create_test_backend();
+    let uri = "file:///identity_nullable_operand.php";
+    let content = r#"<?php
+class Ctx {
+    public function name(): ?string { return null; }
+    public function other(): ?string { return null; }
+}
+function f(Ctx $ctx): void {
+    $name = $ctx->name();
+    if ($name === $ctx->other()) {
+        $name; // <-- here
+    }
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(
+        text.contains("?string"),
+        "both sides could have been null, got: {text}"
+    );
+}
+
+/// A loose comparison proves nothing: `null == 0` and `null == false`
+/// are both true.
+#[test]
+fn a_loose_comparison_does_not_strip_null() {
+    let backend = create_test_backend();
+    let uri = "file:///loose_comparison.php";
+    let content = r#"<?php
+class Ctx {
+    public function count(): ?int { return null; }
+}
+function f(Ctx $ctx, int $wanted): void {
+    $count = $ctx->count();
+    if ($count == $wanted) {
+        $count; // <-- here
+    }
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(
+        text.contains("?int"),
+        "`null == 0` holds, so the loose check proves nothing, got: {text}"
+    );
+}
+
+// ─── A type guard's negative branch strips the member it checked ────────────
+
+/// `is_float()` failing rules out `float`, so the else branch of the check
+/// (and a reassignment merged back from the taken branch) leaves plain
+/// `int` to flow into an array literal.
+#[test]
+fn is_float_negative_branch_strips_float_from_a_declared_union() {
+    let backend = create_test_backend();
+    let uri = "file:///is_float_else.php";
+    let content = r#"<?php
+function f(int $offsetValue, int $max): void {
+    /** @var int|float $newAutoIndex */
+    $newAutoIndex = $offsetValue + 1;
+    if (is_float($newAutoIndex)) {
+        $newAutoIndex = $max;
+    }
+    $indexes = [$newAutoIndex];
+    $indexes; // <-- here
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(
+        text.contains("array{int}"),
+        "both paths leave an int, got: {text}"
+    );
+}
+
+/// The mirror case: `is_int()` failing leaves `float`.
+#[test]
+fn is_int_negative_branch_strips_int_from_a_declared_union() {
+    let backend = create_test_backend();
+    let uri = "file:///is_int_else.php";
+    let content = r#"<?php
+/** @param int|float $value */
+function f($value): void {
+    if (is_int($value)) {
+        return;
+    }
+    $value; // <-- here
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(text.contains("float"), "expected float, got: {text}");
+    assert!(!text.contains("int"), "the int is ruled out, got: {text}");
+}
+
+// ─── `instanceof` against a value holding the class name ────────────────────
+
+const DYNAMIC_SCAFFOLD: &str = r#"
+class Stmt {}
+class Continue_ extends Stmt { public ?int $num = null; }
+class Break_ extends Stmt { public ?int $num = null; }
+"#;
+
+/// `$x instanceof $class` resolves against whatever `$class` holds, so a
+/// `class-string<T>` narrows the subject to `T`.
+#[test]
+fn instanceof_a_class_string_variable_narrows_the_subject() {
+    let backend = create_test_backend();
+    let uri = "file:///dynamic_instanceof.php";
+    let content = format!(
+        r#"<?php
+{DYNAMIC_SCAFFOLD}
+/**
+ * @param class-string<Continue_> $stmtClass
+ */
+function f(Stmt $statement, string $stmtClass): void {{
+    if ($statement instanceof $stmtClass) {{
+        $statement; // <-- here
+    }}
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(
+        text.contains("Continue_"),
+        "expected Continue_, got: {text}"
+    );
+}
+
+/// A union of `class-string`s narrows to the union of the classes they
+/// name, and the guard-clause form proves the same thing.
+#[test]
+fn a_negated_dynamic_instanceof_guard_narrows_past_it() {
+    let backend = create_test_backend();
+    let uri = "file:///dynamic_instanceof_guard.php";
+    let content = format!(
+        r#"<?php
+{DYNAMIC_SCAFFOLD}
+/**
+ * @param list<Stmt> $stmts
+ * @param class-string<Continue_>|class-string<Break_> $stmtClass
+ */
+function f(array $stmts, string $stmtClass): void {{
+    foreach ($stmts as $statement) {{
+        if (!$statement instanceof $stmtClass) {{
+            continue;
+        }}
+        $statement; // <-- here
+    }}
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(
+        text.contains("Continue_") || text.contains("Break_"),
+        "expected one of the checked classes, got: {text}"
+    );
+    assert!(
+        !text.contains("$statement = Stmt\n"),
+        "the check filtered the union, got: {text}"
+    );
+}
+
+/// An object-typed right-hand side stands for its own class, which is
+/// what `$a instanceof $b` checks at runtime.
+#[test]
+fn instanceof_an_object_valued_operand_narrows_the_subject() {
+    let backend = create_test_backend();
+    let uri = "file:///dynamic_instanceof_object.php";
+    let content = format!(
+        r#"<?php
+{DYNAMIC_SCAFFOLD}
+function f(Stmt $statement, Break_ $other): void {{
+    if ($statement instanceof $other) {{
+        $statement; // <-- here
+    }}
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(text.contains("Break_"), "expected Break_, got: {text}");
+}
+
+/// An unsubstituted `@template T` names no loadable class, so the check
+/// proves nothing.  Narrowing to it would leave the subject unresolvable
+/// and report every later member access on it.
+#[test]
+fn instanceof_an_unsubstituted_template_operand_leaves_the_subject_alone() {
+    let backend = create_test_backend();
+    let uri = "file:///dynamic_instanceof_template.php";
+    let content = r#"<?php
+class Node {
+    public function name(): string { return 'n'; }
+}
+interface Finder {
+    /**
+     * @template T of Node
+     * @param class-string<T> $targetType
+     * @return T[]
+     */
+    public function findChildren($targetType): array;
+}
+class Artifact implements Finder {
+    /** @return list<Node> */
+    public function children(): array { return []; }
+
+    public function findChildren($targetType): array
+    {
+        foreach ($this->children() as $node) {
+            if ($node instanceof $targetType) {
+                echo 'match';
+            }
+            $found = $node;
+            $found; // <-- here
+        }
+        return [];
+    }
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(
+        text.contains("Node"),
+        "the subject keeps its declared type, got: {text}"
+    );
+}
+
+/// A plain `string` names no class, so the check proves nothing and the
+/// subject keeps its declared type rather than being narrowed to noise.
+#[test]
+fn instanceof_an_unspecific_string_operand_proves_nothing() {
+    let backend = create_test_backend();
+    let uri = "file:///dynamic_instanceof_plain.php";
+    let content = format!(
+        r#"<?php
+{DYNAMIC_SCAFFOLD}
+function f(Stmt $statement, string $stmtClass): void {{
+    if ($statement instanceof $stmtClass) {{
+        $statement; // <-- here
+    }}
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(text.contains("Stmt"), "expected Stmt, got: {text}");
+}
+
+// ─── An `elseif`'s own condition narrows its later operands ─────────────────
+
+const ELSEIF_SCAFFOLD: &str = r#"
+class Ty {}
+class ShapeTy extends Ty {
+    public function propName(): string { return 'x'; }
+}
+"#;
+
+/// The right-hand operand of an `&&` sees what the left one proved,
+/// whether the condition belongs to the leading `if` or to an `elseif`.
+#[test]
+fn an_elseif_condition_narrows_its_own_and_chain() {
+    let backend = create_test_backend();
+    let uri = "file:///elseif_and_chain.php";
+    let content = format!(
+        r#"<?php
+{ELSEIF_SCAFFOLD}
+function f(Ty $t, bool $flag): void {{
+    if ($flag) {{
+        echo 'flag';
+    }} elseif ($t instanceof ShapeTy && $t->propName() !== '') {{
+        $t; // <-- here
+    }}
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(text.contains("ShapeTy"), "expected ShapeTy, got: {text}");
+}
+
+/// The same for a property subject, which is the shape the check is
+/// usually written on.
+#[test]
+fn an_elseif_condition_narrows_a_property_subject_for_its_later_operands() {
+    let backend = create_test_backend();
+    let uri = "file:///elseif_property.php";
+    let content = format!(
+        r#"<?php
+{ELSEIF_SCAFFOLD}
+class Holder {{
+    private Ty $type;
+
+    public function __construct(Ty $type) {{ $this->type = $type; }}
+
+    public function f(bool $flag): void {{
+        if ($flag) {{
+            echo 'flag';
+        }} elseif ($this->type instanceof ShapeTy && $this->type->propName() !== '') {{
+            $narrowed = $this->type;
+            $narrowed; // <-- here
+        }}
+    }}
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(text.contains("ShapeTy"), "expected ShapeTy, got: {text}");
+}
+
+// ─── An array element addressed by a variable is one subject ───────────────
+
+/// `$types[$i]` written twice is the same read, so a guard on the first
+/// narrows the second — the same way a constant offset already did.
+#[test]
+fn instanceof_narrows_an_array_element_addressed_by_a_variable() {
+    let backend = create_test_backend();
+    let uri = "file:///array_variable_index.php";
+    let content = format!(
+        r#"<?php
+{ELSEIF_SCAFFOLD}
+/** @param list<Ty> $types */
+function f(array $types): void {{
+    for ($i = 0; $i < count($types); $i++) {{
+        if ($types[$i] instanceof ShapeTy && $types[$i]->propName() !== '') {{
+            $element = $types[$i];
+            $element; // <-- here
+        }}
+    }}
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(text.contains("ShapeTy"), "expected ShapeTy, got: {text}");
+}
+
+/// A different index is a different subject, so the guard proves nothing
+/// about it.
+#[test]
+fn a_guard_on_one_index_does_not_narrow_another() {
+    let backend = create_test_backend();
+    let uri = "file:///array_other_index.php";
+    let content = format!(
+        r#"<?php
+{ELSEIF_SCAFFOLD}
+/** @param list<Ty> $types */
+function f(array $types, int $i, int $j): void {{
+    if ($types[$i] instanceof ShapeTy) {{
+        $other = $types[$j];
+        $other; // <-- here
+    }}
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(
+        !text.contains("ShapeTy"),
+        "a different index proves nothing, got: {text}"
     );
 }

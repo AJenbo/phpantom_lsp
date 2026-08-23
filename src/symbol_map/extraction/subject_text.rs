@@ -234,10 +234,11 @@ fn lower_spine_base<'a>(expr: &'a Expression<'a>) -> Option<SubjectExpr> {
             if base.to_subject_text().is_empty() {
                 return None;
             }
-            // Preserve string keys for array-shape resolution and integer
-            // indices for positional narrowing; collapse everything else to
-            // generic element access (`[]`), matching the convention used by
-            // `extract_arrow_subject`.
+            // Preserve string keys for array-shape resolution, integer
+            // indices for positional narrowing, and a plain variable index
+            // so `$types[$i]` is one subject a guard can narrow; collapse
+            // everything else to generic element access (`[]`), matching
+            // the convention used by `extract_arrow_subject`.
             let segment = match access.index {
                 Expression::Literal(Literal::String(s)) => {
                     // `s.raw` includes surrounding quotes (e.g. `'key'`).
@@ -251,6 +252,9 @@ fn lower_spine_base<'a>(expr: &'a Expression<'a>) -> Option<SubjectExpr> {
                         .map(|v| v.to_string())
                         .unwrap_or_else(|| bytes_to_str(i.raw).to_string());
                     BracketSegment::IntKey(n)
+                }
+                Expression::Variable(Variable::Direct(dv)) => {
+                    BracketSegment::VariableIndex(bytes_to_str(dv.name).to_string())
                 }
                 _ => BracketSegment::ElementAccess,
             };

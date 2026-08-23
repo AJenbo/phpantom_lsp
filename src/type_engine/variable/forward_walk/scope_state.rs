@@ -188,9 +188,17 @@ impl ScopeState {
     /// the program has already ruled out. PHPStan keeps property fetches
     /// across a method call for the same reason, and Psalm keeps them
     /// across anything it can see is pure.
-    pub fn invalidate_receiver_state(&mut self, receiver: &str) {
+    ///
+    /// `made` is the key of the call doing the invalidating, when it has
+    /// one, and is kept. A proof about `$s->getClassReflection()` is a
+    /// proof about what that call returns, so evaluating it is the thing
+    /// the proof is about rather than an event that invalidates it —
+    /// dropping it would make the guard-then-use idiom hold for exactly
+    /// one use, which is not what a `@phpstan-assert` tag promises.
+    pub fn invalidate_receiver_state(&mut self, receiver: &str, made: Option<&str>) {
         let reads_receiver = |key: &str| {
             key != receiver
+                && Some(key) != made
                 && crate::type_engine::types::narrowing::is_call_key(key)
                 && crate::type_engine::types::narrowing::key_reads_variable(key, receiver)
         };

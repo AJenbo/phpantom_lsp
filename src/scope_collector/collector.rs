@@ -1136,9 +1136,16 @@ fn walk_closure(closure: &Closure<'_>, collector: &mut Collector<'_>) {
             let is_ref = var.ampersand.is_some();
             captures.push((name.clone(), is_ref));
 
-            // The captured variable is a read in the outer scope at
-            // the `use(...)` site.
-            collector.push_access(name, var.variable.span().start.offset, AccessKind::Read);
+            // The captured variable is a read in the outer scope at the
+            // `use(...)` site.  A by-reference capture is also a write
+            // there: PHP auto-vivifies the outer variable as `null` when
+            // it does not exist yet, so the capture itself declares it.
+            let kind = if is_ref {
+                AccessKind::ReadWrite
+            } else {
+                AccessKind::Read
+            };
+            collector.push_access(name, var.variable.span().start.offset, kind);
         }
     }
 

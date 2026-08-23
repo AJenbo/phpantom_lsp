@@ -170,7 +170,7 @@ fn build_method_assertion_info<'a>(
     argument_list: &'a ArgumentList<'a>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<CallAssertionInfo<'a>> {
-    let method =
+    let (method, _) =
         find_assertion_method_in_chain(class, method_name, ctx.class_loader, &mut Vec::new(), 0)?;
     Some(CallAssertionInfo {
         assertions: method.type_assertions,
@@ -187,15 +187,17 @@ fn build_method_assertion_info<'a>(
 /// mutates the shared resolved-class cache.
 ///
 /// Returns an owned clone of the first matching method that has non-empty
-/// `type_assertions`.  A `visited` set and `depth` bound guard against
-/// cyclic hierarchies.
+/// `type_assertions`, paired with the FQN of the class that declared it.
+/// The declaring class is what an unqualified name in the tag resolves
+/// against, which is not necessarily the receiver's own class.  A
+/// `visited` set and `depth` bound guard against cyclic hierarchies.
 pub(in crate::type_engine) fn find_assertion_method_in_chain(
     class: &ClassInfo,
     method_name: &str,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     visited: &mut Vec<Atom>,
     depth: usize,
-) -> Option<crate::types::MethodInfo> {
+) -> Option<(crate::types::MethodInfo, Atom)> {
     find_method_in_chain_where(
         class,
         method_name,
@@ -209,6 +211,9 @@ pub(in crate::type_engine) fn find_assertion_method_in_chain(
 /// [`find_assertion_method_in_chain`] generalised over what makes a
 /// definition the interesting one: assertion tags for the assert
 /// narrowing, a conditional return type for the `never`-branch one.
+///
+/// The second element of the result is the FQN of the class the returned
+/// definition was found on.
 pub(in crate::type_engine) fn find_method_in_chain_where(
     class: &ClassInfo,
     method_name: &str,
@@ -216,7 +221,7 @@ pub(in crate::type_engine) fn find_method_in_chain_where(
     carries_metadata: &dyn Fn(&crate::types::MethodInfo) -> bool,
     visited: &mut Vec<Atom>,
     depth: usize,
-) -> Option<crate::types::MethodInfo> {
+) -> Option<(crate::types::MethodInfo, Atom)> {
     if depth > 15 {
         return None;
     }
@@ -236,7 +241,7 @@ pub(in crate::type_engine) fn find_method_in_chain_where(
         .find(|m| m.name.eq_ignore_ascii_case(method_name))
         && carries_metadata(method)
     {
-        return Some(method.as_ref().clone());
+        return Some((method.as_ref().clone(), fqn));
     }
 
     // Traits mixed into this class.
@@ -268,6 +273,25 @@ pub(in crate::type_engine) fn find_method_in_chain_where(
         )
     {
         return Some(method);
+    }
+
+    // Implemented interfaces, last: a class that redeclares the method
+    // without a docblock inherits the contract's, which is where a
+    // predicate's `@phpstan-assert` tags normally live (`Scope` declares
+    // them and `MutatingScope` implements them).
+    for interface_name in &class.interfaces {
+        if let Some(interface) = class_loader(interface_name)
+            && let Some(method) = find_method_in_chain_where(
+                &interface,
+                method_name,
+                class_loader,
+                carries_metadata,
+                visited,
+                depth + 1,
+            )
+        {
+            return Some(method);
+        }
     }
 
     None
@@ -804,7 +828,7 @@ fn conditional_return_from_chain<'a>(
     argument_list: &'a ArgumentList<'a>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<CallReturnInfo<'a>> {
-    let method = find_method_in_chain_where(
+    let (method, _) = find_method_in_chain_where(
         class,
         method_name,
         ctx.class_loader,

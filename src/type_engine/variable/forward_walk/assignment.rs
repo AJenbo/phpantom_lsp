@@ -285,20 +285,23 @@ pub(crate) fn process_receiver_mutation<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    let mut receivers: Vec<String> = Vec::new();
+    let mut receivers: Vec<(String, Option<String>)> = Vec::new();
     collect_impure_call_receivers(expr, scope, ctx, &mut receivers);
-    for receiver in receivers {
-        scope.invalidate_receiver_state(&receiver);
+    for (receiver, made) in receivers {
+        scope.invalidate_receiver_state(&receiver, made.as_deref());
     }
 }
 
 /// Walk `expr` for method calls whose receiver has state worth
 /// invalidating, collecting each receiver key at most once.
+///
+/// Each entry pairs the receiver with the key of the call made on it, so
+/// the invalidation can keep the proof about that very call.
 fn collect_impure_call_receivers<'b>(
     expr: &'b Expression<'b>,
     scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
-    out: &mut Vec<String>,
+    out: &mut Vec<(String, Option<String>)>,
 ) {
     match expr {
         Expression::Parenthesized(inner) => {
@@ -347,8 +350,9 @@ fn collect_impure_call_receivers<'b>(
             if callee_is_pure(object, bytes_to_str(ident.value), scope, ctx) {
                 return;
             }
-            if !out.contains(&receiver) {
-                out.push(receiver);
+            let made = narrowing::expr_to_subject_key(expr);
+            if !out.iter().any(|(r, m)| *r == receiver && *m == made) {
+                out.push((receiver, made));
             }
         }
         _ => {}

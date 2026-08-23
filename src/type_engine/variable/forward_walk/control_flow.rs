@@ -15,6 +15,26 @@ use crate::types::ResolvedType;
 
 // ─── Control flow handling ──────────────────────────────────────────────────
 
+/// The conditions of an `if`'s `elseif` clauses, in source order.
+///
+/// Both body styles carry the same clauses under different types, and
+/// several passes need to treat an `elseif`'s condition exactly as they
+/// treat the leading `if`'s.
+pub(crate) fn elseif_conditions<'b>(body: &'b IfBody<'b>) -> Vec<&'b Expression<'b>> {
+    match body {
+        IfBody::Statement(body) => body
+            .else_if_clauses
+            .iter()
+            .map(|clause| clause.condition)
+            .collect(),
+        IfBody::ColonDelimited(body) => body
+            .else_if_clauses
+            .iter()
+            .map(|clause| clause.condition)
+            .collect(),
+    }
+}
+
 /// Process an `if` statement with branch merging.
 pub(crate) fn process_if<'b>(
     if_stmt: &'b If<'b>,
@@ -188,6 +208,9 @@ pub(crate) fn process_if_statement_body<'b>(
         if is_diagnostic_scope_active() {
             record_scope_snapshot(ei.condition.span().start.offset, &ei_scope);
         }
+        // An `elseif`'s own `&&` / `||` chain narrows its later operands
+        // just as the leading `if`'s does.
+        record_short_circuit_snapshots(ei.condition, &ei_scope, ctx);
         process_condition_assignment(ei.condition, &mut ei_scope, ctx);
         seed_pass_by_ref_in_condition(ei.condition, &mut ei_scope, ctx);
         apply_condition_narrowing(ei.condition, &mut ei_scope, ctx);
@@ -446,6 +469,9 @@ pub(crate) fn process_if_colon_body<'b>(
         if is_diagnostic_scope_active() {
             record_scope_snapshot(ei.condition.span().start.offset, &ei_scope);
         }
+        // An `elseif`'s own `&&` / `||` chain narrows its later operands
+        // just as the leading `if`'s does.
+        record_short_circuit_snapshots(ei.condition, &ei_scope, ctx);
         process_condition_assignment(ei.condition, &mut ei_scope, ctx);
         seed_pass_by_ref_in_condition(ei.condition, &mut ei_scope, ctx);
         apply_condition_narrowing(ei.condition, &mut ei_scope, ctx);
