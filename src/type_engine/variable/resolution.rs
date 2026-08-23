@@ -324,8 +324,7 @@ pub(crate) fn resolve_variable_types(
     // The same variable at the same offset legitimately answers
     // differently for each caller then, and what decided it is not in
     // the key, so that walk neither reads the memo nor writes to it.
-    let memoisable =
-        !crate::type_engine::call_resolution::body_inference_in_progress();
+    let memoisable = !crate::type_engine::call_resolution::body_inference_in_progress();
     if memoisable
         && let Some(hit) = VAR_TYPE_MEMO.with(|cell| {
             cell.borrow()

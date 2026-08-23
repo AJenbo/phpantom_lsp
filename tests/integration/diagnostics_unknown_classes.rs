@@ -920,6 +920,37 @@ class MyProvider {
         );
     }
 
+    #[test]
+    fn no_false_positive_for_int_mask_members() {
+        // `int-mask<A|B>` / `int-mask-of<A>` name the int constants that make
+        // up a bitmask, not classes.
+        let backend = Backend::new_test();
+        let uri = "file:///test.php";
+        let content = concat!(
+            "<?php\n",
+            "\n",
+            "class Matcher {\n",
+            "    public const UNMATCHED_AS_NULL = 512;\n",
+            "\n",
+            "    /** @var int-mask<PREG_OFFSET_CAPTURE | PREG_PATTERN_ORDER | self::UNMATCHED_AS_NULL> */\n",
+            "    private int $flags = 0;\n",
+            "\n",
+            "    /**\n",
+            "     * @param int-mask<PREG_OFFSET_CAPTURE, PREG_PATTERN_ORDER> \\$flags\n",
+            "     * @return int-mask-of<self::UNMATCHED_AS_NULL>\n",
+            "     */\n",
+            "    public function match(int $flags): int { return $flags; }\n",
+            "}\n",
+        );
+
+        let diags = collect(&backend, uri, content);
+        assert!(
+            diags.is_empty(),
+            "int-mask members are int constants, not classes, got: {:?}",
+            diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
     // ── No-namespace file tests ─────────────────────────────────────────
 
     #[test]
