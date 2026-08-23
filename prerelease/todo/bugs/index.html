@@ -858,6 +858,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Standard-library return types">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b227-the-replace-function-familys-conditional-return-type-never-collapses" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B227. The replace function family's conditional return type never collapses
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -868,6 +885,122 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Narrowing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b228-a-condition-established-narrowing-of-a-method-call-expression-doesnt-survive-assignment-elseif-siblings-or-loop-merges" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B228. A condition-established narrowing of a method-call expression doesn't survive assignment, <code>elseif</code> siblings, or loop merges
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b229-instanceof-narrowing-is-not-recognized-for-several-common-condition-shapes" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B229. <code>instanceof</code> narrowing is not recognized for several common condition shapes
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b230-a-b-doesnt-narrow-the-nullable-side-against-a-definite-type-operand" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B230. <code>$a === $b</code> doesn't narrow the nullable side against a definite-type operand
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b231-array_key_exists-doesnt-narrow-an-optional-array-shape-key-the-way-isset-does" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B231. <code>array_key_exists()</code> doesn't narrow an optional array-shape key the way <code>isset()</code> does
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b232-use-var-doesnt-establish-var-as-defined-when-its-new-to-the-enclosing-scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B232. <code>use (&amp;$var)</code> doesn't establish <code>$var</code> as defined when it's new to the enclosing scope
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b233-issetvar-doesnt-mark-a-possibly-undefined-variable-as-defined-for-the-rest-of-the-branch" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B233. <code>isset($var) &amp;&amp; …</code> doesn't mark a possibly-undefined variable as defined for the rest of the branch
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b234-is_floatis_ints-negative-branch-doesnt-strip-a-member-from-a-declared-union" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B234. <code>is_float()</code>/<code>is_int()</code>'s negative branch doesn't strip a member from a declared union
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b235-a-lost-chained-call-re-narrowing-misattributes-the-member-lookup-to-the-enclosing-files-own-class" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B235. A lost chained-call re-narrowing misattributes the member lookup to the enclosing file's own class
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b236-instanceof-variable-a-class-string-held-in-a-variable-narrowing-is-unsupported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B236. <code>instanceof $variable</code> (a class-string held in a variable) narrowing is unsupported
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b237-a-vendor-interfaces-own-phpstan-assert-if-true-type-this-tag-isnt-honored" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B237. A vendor interface's own <code>@phpstan-assert-if-true Type $this</code> tag isn't honored
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -893,6 +1026,72 @@
   
     <nav class="md-nav" aria-label="Symbol resolution">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b238-new-selfnew-static-resolves-by-short-name-colliding-with-a-same-named-global-class" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B238. <code>new self(...)</code>/<code>new static(...)</code> resolves by short name, colliding with a same-named global class
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b239-this-inside-a-trait-method-resolves-to-the-trait-itself-not-the-using-class" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B239. <code>$this</code> inside a trait method resolves to the trait itself, not the using class
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b240-static-return-type-on-an-intersection-typed-receiver-drops-the-non-declaring-interface-members" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B240. <code>static</code> return type on an intersection-typed receiver drops the non-declaring interface members
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b241-an-abstract-class-isnt-accepted-where-a-union-of-exactly-its-known-subclasses-is-declared" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B241. An abstract class isn't accepted where a union of exactly its known subclasses is declared
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b242-composerautoloadclassloader-is-invisible-to-class-resolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B242. <code>Composer\Autoload\ClassLoader</code> is invisible to class resolution
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b243-two-more-confirmed-unknown_member-false-positives-with-an-unidentified-mechanism" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B243. Two more confirmed <code>unknown_member</code> false positives with an unidentified mechanism
+      </span>
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#b218-new-reflectionpropertyfooclass-bar-forgets-what-it-reflects" class="md-nav__link">
@@ -930,6 +1129,67 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Array types">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b244-the-single-argument-docblock-array-shorthand-arrayt-defaults-its-key-to-int" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B244. The single-argument docblock array shorthand <code>array&lt;T&gt;</code> defaults its key to <code>int</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b245-foreach-over-a-bare-variable-skips-phpstan-typephpstan-import-type-alias-expansion" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B245. <code>foreach</code> over a bare variable skips <code>@phpstan-type</code>/<code>@phpstan-import-type</code> alias expansion
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b246-array_keysarray_values-dont-propagate-the-source-arrays-real-key-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B246. <code>array_keys()</code>/<code>array_values()</code> don't propagate the source array's real key type
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b247-no-benevolent-union-for-a-foreach-key-when-the-arrays-key-type-is-genuinely-unknown" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B247. No <code>Benevolent</code> union for a <code>foreach</code> key when the array's key type is genuinely unknown
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b248-list-destructuring-against-a-long-array-shape-can-bind-a-variable-to-the-wrong-elements-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B248. List-destructuring against a long <code>array{...}</code> shape can bind a variable to the wrong element's type
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -951,6 +1211,56 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Miscellaneous">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b251-a-closures-by-reference-use-mutation-isnt-tracked-when-the-closure-is-invoked-indirectly" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B251. A closure's by-reference <code>use</code> mutation isn't tracked when the closure is invoked indirectly
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b252-doesnt-route-its-rhs-through-the-callable-property-invocation-resolution-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B252. <code>??=</code> doesn't route its RHS through the callable-property-invocation resolution path
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b253-a-closure-parameters-type-isnt-inferred-from-a-template-parameterized-callablet-x-signature" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B253. A closure parameter's type isn't inferred from a <code>@template</code>-parameterized <code>callable(T): X</code> signature
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b254-unused-variable-check-doesnt-account-for-a-closures-use-capture-feeding-a-required-files-scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B254. Unused-variable check doesn't account for a closure's <code>use()</code> capture feeding a <code>require</code>d file's scope
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1452,6 +1762,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Standard-library return types">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b227-the-replace-function-familys-conditional-return-type-never-collapses" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B227. The replace function family's conditional return type never collapses
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1462,6 +1789,122 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Narrowing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b228-a-condition-established-narrowing-of-a-method-call-expression-doesnt-survive-assignment-elseif-siblings-or-loop-merges" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B228. A condition-established narrowing of a method-call expression doesn't survive assignment, <code>elseif</code> siblings, or loop merges
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b229-instanceof-narrowing-is-not-recognized-for-several-common-condition-shapes" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B229. <code>instanceof</code> narrowing is not recognized for several common condition shapes
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b230-a-b-doesnt-narrow-the-nullable-side-against-a-definite-type-operand" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B230. <code>$a === $b</code> doesn't narrow the nullable side against a definite-type operand
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b231-array_key_exists-doesnt-narrow-an-optional-array-shape-key-the-way-isset-does" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B231. <code>array_key_exists()</code> doesn't narrow an optional array-shape key the way <code>isset()</code> does
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b232-use-var-doesnt-establish-var-as-defined-when-its-new-to-the-enclosing-scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B232. <code>use (&amp;$var)</code> doesn't establish <code>$var</code> as defined when it's new to the enclosing scope
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b233-issetvar-doesnt-mark-a-possibly-undefined-variable-as-defined-for-the-rest-of-the-branch" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B233. <code>isset($var) &amp;&amp; …</code> doesn't mark a possibly-undefined variable as defined for the rest of the branch
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b234-is_floatis_ints-negative-branch-doesnt-strip-a-member-from-a-declared-union" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B234. <code>is_float()</code>/<code>is_int()</code>'s negative branch doesn't strip a member from a declared union
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b235-a-lost-chained-call-re-narrowing-misattributes-the-member-lookup-to-the-enclosing-files-own-class" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B235. A lost chained-call re-narrowing misattributes the member lookup to the enclosing file's own class
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b236-instanceof-variable-a-class-string-held-in-a-variable-narrowing-is-unsupported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B236. <code>instanceof $variable</code> (a class-string held in a variable) narrowing is unsupported
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b237-a-vendor-interfaces-own-phpstan-assert-if-true-type-this-tag-isnt-honored" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B237. A vendor interface's own <code>@phpstan-assert-if-true Type $this</code> tag isn't honored
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1487,6 +1930,72 @@
   
     <nav class="md-nav" aria-label="Symbol resolution">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b238-new-selfnew-static-resolves-by-short-name-colliding-with-a-same-named-global-class" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B238. <code>new self(...)</code>/<code>new static(...)</code> resolves by short name, colliding with a same-named global class
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b239-this-inside-a-trait-method-resolves-to-the-trait-itself-not-the-using-class" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B239. <code>$this</code> inside a trait method resolves to the trait itself, not the using class
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b240-static-return-type-on-an-intersection-typed-receiver-drops-the-non-declaring-interface-members" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B240. <code>static</code> return type on an intersection-typed receiver drops the non-declaring interface members
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b241-an-abstract-class-isnt-accepted-where-a-union-of-exactly-its-known-subclasses-is-declared" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B241. An abstract class isn't accepted where a union of exactly its known subclasses is declared
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b242-composerautoloadclassloader-is-invisible-to-class-resolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B242. <code>Composer\Autoload\ClassLoader</code> is invisible to class resolution
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b243-two-more-confirmed-unknown_member-false-positives-with-an-unidentified-mechanism" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B243. Two more confirmed <code>unknown_member</code> false positives with an unidentified mechanism
+      </span>
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#b218-new-reflectionpropertyfooclass-bar-forgets-what-it-reflects" class="md-nav__link">
@@ -1524,6 +2033,67 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Array types">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b244-the-single-argument-docblock-array-shorthand-arrayt-defaults-its-key-to-int" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B244. The single-argument docblock array shorthand <code>array&lt;T&gt;</code> defaults its key to <code>int</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b245-foreach-over-a-bare-variable-skips-phpstan-typephpstan-import-type-alias-expansion" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B245. <code>foreach</code> over a bare variable skips <code>@phpstan-type</code>/<code>@phpstan-import-type</code> alias expansion
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b246-array_keysarray_values-dont-propagate-the-source-arrays-real-key-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B246. <code>array_keys()</code>/<code>array_values()</code> don't propagate the source array's real key type
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b247-no-benevolent-union-for-a-foreach-key-when-the-arrays-key-type-is-genuinely-unknown" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B247. No <code>Benevolent</code> union for a <code>foreach</code> key when the array's key type is genuinely unknown
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b248-list-destructuring-against-a-long-array-shape-can-bind-a-variable-to-the-wrong-elements-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B248. List-destructuring against a long <code>array{...}</code> shape can bind a variable to the wrong element's type
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1545,6 +2115,56 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Miscellaneous">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b251-a-closures-by-reference-use-mutation-isnt-tracked-when-the-closure-is-invoked-indirectly" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B251. A closure's by-reference <code>use</code> mutation isn't tracked when the closure is invoked indirectly
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b252-doesnt-route-its-rhs-through-the-callable-property-invocation-resolution-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B252. <code>??=</code> doesn't route its RHS through the callable-property-invocation resolution path
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b253-a-closure-parameters-type-isnt-inferred-from-a-template-parameterized-callablet-x-signature" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B253. A closure parameter's type isn't inferred from a <code>@template</code>-parameterized <code>callable(T): X</code> signature
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b254-unused-variable-check-doesnt-account-for-a-closures-use-capture-feeding-a-required-files-scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B254. Unused-variable check doesn't account for a closure's <code>use()</code> capture feeding a <code>require</code>d file's scope
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1586,22 +2206,388 @@ each bug's row lives in the current sprint/backlog.</p>
 <h2 id="type-comparison">Type comparison<a class="headerlink" href="#type-comparison" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="standard-library-return-types">Standard-library return types<a class="headerlink" href="#standard-library-return-types" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b227-the-replace-function-familys-conditional-return-type-never-collapses">B227. The replace function family's conditional return type never collapses<a class="headerlink" href="#b227-the-replace-function-familys-conditional-return-type-never-collapses" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium-High · Complexity: Low-Medium</strong></p>
+<p><code>str_replace</code>, <code>str_ireplace</code>, <code>substr_replace</code>, <code>preg_replace</code>,
+<code>preg_replace_callback</code>, <code>preg_replace_callback_array</code>, and <code>preg_filter</code>
+are patched in <code>stub_patches.rs</code> (<code>patch_replace_family</code>) with a
+conditional return type keyed on <code>$subject</code>: array in, array out;
+string in, string out. In practice the conditional never resolves to a
+single branch — it always falls back to the full <code>string|array&lt;string&gt;</code>
+union, even when <code>$subject</code> is a plain, unambiguous <code>string</code> local or a
+string literal:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">function relative(string $filename): string</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">{</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    return str_replace(&#39;\\&#39;, &#39;/&#39;, $filename); // string|array&lt;string&gt;, not string</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">}</span>
+</code></pre></div>
+<p>By contrast, other functions patched the same way but keyed on an
+"is string" discriminant (<code>range()</code>, keyed on <code>$start</code>) resolve
+correctly. The "is array" discriminant is the common thread across
+every failing case (<code>patch_range</code> uses <code>PhpType::named(atom("string"))</code>
+as its condition; <code>patch_replace_family</code> uses <code>PhpType::array()</code>), which
+points at <code>condition_category</code>/<code>type_category</code> in
+<code>type_engine/types/conditional.rs</code> or the conditional-evaluation
+dispatch in <code>type_engine/types/narrowing/assertions.rs</code>
+(<code>evaluate_conditional_for</code>) mishandling an array discriminant
+specifically. Confirmed via minimal repro with a string variable, a
+string literal, and a plain array variable as <code>$subject</code> — all three
+return the unresolved union instead of picking a branch.</p>
+<p>Real-world hits: any <code>str_replace()</code>/<code>str_ireplace()</code> call whose result
+feeds a <code>string</code>-typed parameter or return raises a false
+<code>type_mismatch_argument</code>/<code>type_mismatch_return</code>.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b228-a-condition-established-narrowing-of-a-method-call-expression-doesnt-survive-assignment-elseif-siblings-or-loop-merges">B228. A condition-established narrowing of a method-call expression doesn't survive assignment, <code>elseif</code> siblings, or loop merges<a class="headerlink" href="#b228-a-condition-established-narrowing-of-a-method-call-expression-doesnt-survive-assignment-elseif-siblings-or-loop-merges" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: High · Complexity: Very High</strong></p>
+<p><code>@phpstan-assert-if-true</code>/<code>-if-false</code> tags whose subject is a method-call
+expression off the receiver (<code>$this-&gt;getFoo()</code>, written <code>$this-&gt;getFoo()</code>
+in the tag) narrow correctly for a <em>direct</em> re-evaluation of that same
+call right after the guard:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">if (!$scope-&gt;isInClass()) {</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">    return;</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">}</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">$scope-&gt;getClassReflection()-&gt;isFinal(); // fine: direct re-evaluation</span>
+</code></pre></div>
+<p>But the narrowing is lost as soon as the guarded fact has to survive
+anything beyond that:</p>
+<ul>
+<li><strong>Assigned to a variable</strong>, then the variable used elsewhere:
+  <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">if (!$scope-&gt;isInClass()) {</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    return;</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">}</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">$classReflection = $scope-&gt;getClassReflection(); // stored type is still ?ClassReflection</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">$this-&gt;consistentConstructorHelper-&gt;findConsistentConstructor($classReflection); // false type_mismatch_argument</span>
+</code></pre></div>
+  (<code>src/Rules/Classes/InstantiationRule.php:153</code>, and the <code>$declaringClass</code>/<code>$parametersAcceptor</code>/<code>$scope</code> clusters throughout <code>type_mismatch_argument</code>.)</li>
+<li><strong>A sibling <code>elseif</code>'s condition</strong> also checks the same guard method,
+  which corrupts the fact for a later, unrelated branch
+  (<code>src/Analyser/ExprHandler/InstanceofHandler.php:140,142</code>).</li>
+<li><strong>A <code>foreach</code> + <code>continue</code> guard</strong> (<code>if (!$scope-&gt;isInClass()) { continue; }</code>)
+  loses the fact for the rest of the loop body
+  (<code>src/Rules/Api/NodeConnectingVisitorAttributesRule.php:62</code>,
+  <code>src/Rules/Properties/ReadOnlyByPhpDocPropertyAssignRule.php:88</code>,
+  <code>src/Rules/Properties/ReadOnlyPropertyAssignRule.php:78,81</code>).</li>
+<li><strong>A plain (non-assert-if-true) <code>=== null</code> + <code>continue</code> guard on a
+  repeated method call</strong>, once nested inside an outer loop with extra
+  loop-scoped state, loses the fact the same way
+  (<code>src/Type/Php/BackedEnumFromMethodDynamicReturnTypeExtension.php:67</code>).</li>
+<li>The same shape recurs, unconfirmed in isolation but structurally
+  identical to the above, in <code>src/Analyser/NodeScopeResolver.php:1103,1112,1116</code>
+  (<code>$finalScope === null</code> → assign → <code>continue</code>, later <code>!== null</code> → use).</li>
+</ul>
+<p>The mechanism that establishes these facts is the synthetic-key scope
+tracking in <code>type_engine/variable/forward_walk/cond_narrowing.rs</code>
+(<code>apply_assertion_to_key</code>, <code>seed_synthetic_key_if_needed</code>, keyed by a
+string like <code>$scope-&gt;getClassReflection()</code>). Direct re-evaluation of the
+same call expression clearly consults this key (the first example
+works), but the general-purpose RHS-assignment path
+(<code>type_engine/variable/rhs_resolution/</code>) computes a method call's type
+from the raw signature only and never checks whether the call's printed
+form matches a currently-narrowed synthetic key — and whatever merges
+scope state at branch/loop boundaries in <code>forward_walk/control_flow.rs</code>
+doesn't carry synthetic keys across the merge either. Fixing the
+assignment path and the merge path are likely two separate, but
+related, changes.</p>
+<h3 id="b229-instanceof-narrowing-is-not-recognized-for-several-common-condition-shapes">B229. <code>instanceof</code> narrowing is not recognized for several common condition shapes<a class="headerlink" href="#b229-instanceof-narrowing-is-not-recognized-for-several-common-condition-shapes" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: High · Complexity: High</strong></p>
+<p>Plain <code>$var instanceof Foo</code> narrowing works for the simple case (a bare
+local variable, tested directly in an <code>if</code>'s top-level condition), but
+several very common variations on the same idiom are not recognized —
+this is the dominant false-positive cluster in <code>unknown_member</code> (60+ of
+105 diagnostics):</p>
+<ul>
+<li><strong>A right-hand <code>&amp;&amp;</code> clause inside an <code>elseif</code> condition</strong> doesn't see
+  the <code>instanceof</code> on its left:
+  <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">} elseif ($expr-&gt;var instanceof Variable &amp;&amp; is_string($expr-&gt;var-&gt;name)) {</span>
+</code></pre></div>
+  (<code>src/Analyser/ExprHandler/AssignHandler.php:167</code>,
+  <code>src/Analyser/ExprHandler/MatchHandler.php:279</code>,
+  <code>src/PhpDoc/TypeNodeResolver.php:786</code>, <code>src/Type/FileTypeMapper.php:467</code>.)</li>
+<li><strong>An array-index expression as the <code>instanceof</code> subject</strong>
+  (<code>$types[$i] instanceof MixedType &amp;&amp; !$types[$i]-&gt;isExplicitMixed()</code>),
+  even inside a plain <code>if</code> and across statements in the body
+  (<code>src/Type/TypeCombinator.php:251-297</code> — 6 lines,
+  <code>src/Type/Constant/ConstantArrayType.php:2567,3503</code>,
+  <code>src/Type/Generic/GenericObjectType.php:323</code>).</li>
+<li><strong>A ternary condition</strong>
+  (<code>$paramType instanceof UnionType ? $paramType-&gt;getTypes() : [...]</code>)
+  (<code>src/Reflection/GenericParametersAcceptorResolver.php:176</code>).</li>
+<li><strong><code>$this</code></strong>, once the enclosing class implements <em>any</em> interface
+  (confirmed: identical code is fine with no <code>implements</code>, breaks the
+  moment one is added) (<code>src/Type/ValueOfType.php:59</code>,
+  <code>src/Type/ObjectType.php:744</code>).</li>
+</ul>
+<p>Likely home: <code>type_engine/variable/forward_walk/</code> — the condition
+narrowing appears to special-case a plain <code>if</code> over a simple local
+variable subject and not generalize to <code>ElseIf_</code>/<code>Ternary</code>/array-index/
+property-fetch subjects the way real PHPStan's <code>TypeSpecifier</code> does.</p>
+<h3 id="b230-a-b-doesnt-narrow-the-nullable-side-against-a-definite-type-operand">B230. <code>$a === $b</code> doesn't narrow the nullable side against a definite-type operand<a class="headerlink" href="#b230-a-b-doesnt-narrow-the-nullable-side-against-a-definite-type-operand" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">$inAssignRightSideVariableName = $context-&gt;getInAssignRightSideVariableName(); // ?string</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">// ...</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">if ($inAssignRightSideVariableName === $use-&gt;var-&gt;name) { // $use-&gt;var-&gt;name is string</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">    $scope-&gt;hasVariableType($inAssignRightSideVariableName); // false: expects string, got ?string</span>
+</code></pre></div>
+<p>(<code>src/Analyser/NodeScopeResolver.php:3080-3098</code>.) For <code>===</code> to hold, both
+operands must share a value, so a nullable variable compared identical
+to a definite non-null value narrows to that non-null type within the
+truthy branch — real PHPStan does this and is silent on this file.
+<code>type_engine/variable/forward_walk/cond_narrowing.rs</code> has specific
+handling for <code>$x === null</code>/<code>$x == null</code> but nothing for <code>$x === $y</code>
+where <code>$y</code>'s type is independently known to exclude null.</p>
+<h3 id="b231-array_key_exists-doesnt-narrow-an-optional-array-shape-key-the-way-isset-does">B231. <code>array_key_exists()</code> doesn't narrow an optional array-shape key the way <code>isset()</code> does<a class="headerlink" href="#b231-array_key_exists-doesnt-narrow-an-optional-array-shape-key-the-way-isset-does" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">/** @param array{a?: array&lt;int,string&gt;} $shape */</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">function get(array $shape): array</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">{</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">    if (isset($shape[&#39;a&#39;])) {</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">        return $shape[&#39;a&#39;]; // fine: array&lt;int,string&gt;</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x">    }</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="x">    if (array_key_exists(&#39;a&#39;, $shape)) {</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="x">        return $shape[&#39;a&#39;]; // false type_mismatch_return: ?array&lt;int,string&gt; vs array</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="x">    }</span>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="x">    return [];</span>
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="x">}</span>
+</code></pre></div>
+<p>Confirmed against <code>src/File/FileExcluderFactory.php:37,47</code>
+(<code>array_key_exists('analyse', $this-&gt;excludePaths)</code> guarding
+<code>$this-&gt;excludePaths['analyse']</code>, an optional key in a promoted
+property's docblock shape) and reproduced standalone for both local
+variables and properties, so it isn't a property-vs-local-var
+distinction — <code>array_key_exists</code> on an optional shape key simply isn't
+wired into the same narrowing <code>isset()</code> already gets.</p>
+<h3 id="b232-use-var-doesnt-establish-var-as-defined-when-its-new-to-the-enclosing-scope">B232. <code>use (&amp;$var)</code> doesn't establish <code>$var</code> as defined when it's new to the enclosing scope<a class="headerlink" href="#b232-use-var-doesnt-establish-var-as-defined-when-its-new-to-the-enclosing-scope" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">$linesOfCode = 0;              // &lt;- if this line didn&#39;t exist:</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">$counter = function () use (&amp;$linesOfCode): void {</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">    $linesOfCode++;            // by-ref use auto-vivifies $linesOfCode as null</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">};</span>
+</code></pre></div>
+<p>PHP auto-vivifies a by-reference <code>use</code> capture that doesn't already
+exist in the outer scope (as <code>null</code>), which is legal and is exactly
+<code>src/Analyser/NodeScopeResolver.php:3666</code> (<code>$hookImpurePoints</code>) and
+<code>src/Command/AnalyseApplication.php:272</code> (<code>$linesOfCode</code>) — both are
+only ever assigned <em>inside</em> the closure body. PHPantom's forward walker
+reports "Undefined variable" at the <code>use</code> clause instead of treating it
+as a declaration. Home: <code>type_engine/variable/forward_walk/</code>, wherever
+closure <code>use</code> clauses are processed.</p>
+<h3 id="b233-issetvar-doesnt-mark-a-possibly-undefined-variable-as-defined-for-the-rest-of-the-branch">B233. <code>isset($var) &amp;&amp; …</code> doesn't mark a possibly-undefined variable as defined for the rest of the branch<a class="headerlink" href="#b233-issetvar-doesnt-mark-a-possibly-undefined-variable-as-defined-for-the-rest-of-the-branch" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">if (isset($tokenType) &amp;&amp; $tokenType !== IgnoreLexer::TOKEN_WHITESPACE) {</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">    $lastTokenTypeLabel = $this-&gt;tokenLabel($tokenType); // false &quot;Undefined variable&quot;</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">}</span>
+</code></pre></div>
+<p>(<code>src/Parser/RichParser.php:308-309</code> — <code>$tokenType</code> is only assigned
+starting on the second iteration of the enclosing loop, so on the first
+pass it's genuinely possibly-undefined outside the guard, but
+<code>isset($tokenType)</code> being true in the truthy branch guarantees it's
+defined for the rest of that branch, which real PHPStan accounts for
+and PHPantom does not.)</p>
+<h3 id="b234-is_floatis_ints-negative-branch-doesnt-strip-a-member-from-a-declared-union">B234. <code>is_float()</code>/<code>is_int()</code>'s negative branch doesn't strip a member from a declared union<a class="headerlink" href="#b234-is_floatis_ints-negative-branch-doesnt-strip-a-member-from-a-declared-union" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">/** @var int|float $newAutoIndex */</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">$newAutoIndex = $offsetValue + 1;</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="x">if (is_float($newAutoIndex)) {</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="x">    // ...</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="x">} elseif (!$optional) {</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="x">    $this-&gt;nextAutoIndexes = [$newAutoIndex]; // false: expects list&lt;int&gt;, got array{int|float}</span>
+</code></pre></div>
+<p>(<code>src/Type/Constant/ConstantArrayTypeBuilder.php:235-242</code>.) Real PHPStan
+narrows <code>$newAutoIndex</code> to plain <code>int</code> inside the <code>is_float()</code> check's
+negative branch (<code>elseif</code>); PHPantom leaves the full <code>int|float</code> union
+in place, which then leaks into the array-literal element type.</p>
+<h3 id="b235-a-lost-chained-call-re-narrowing-misattributes-the-member-lookup-to-the-enclosing-files-own-class">B235. A lost chained-call re-narrowing misattributes the member lookup to the enclosing file's own class<a class="headerlink" href="#b235-a-lost-chained-call-re-narrowing-misattributes-the-member-lookup-to-the-enclosing-files-own-class" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium-High · Complexity: Medium-High</strong></p>
+<p>When a <code>!== null</code> check on a method-call chain
+(<code>$scope-&gt;getParentScope() !== null</code>) is reused later without the
+chain's result being cached, PHPantom doesn't just fail to narrow — it
+misattributes the member lookup to the <em>current file's own class</em>,
+producing a diagnostic that names a completely unrelated class:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>Method &#39;hasExpressionType&#39; not found on class &#39;PHPStan\Debug\ReproChainReuse&#39;
+</code></pre></div>
+<p>for code that never mentions <code>ReproChainReuse</code> at all. Confirmed at
+<code>src/Node/ClassPropertiesNode.php:246</code> and
+<code>src/Reflection/BetterReflection/BetterReflectionProvider.php:170</code>. Same
+narrowing subsystem as B228, but called out separately because the
+symptom actively misleads about <em>which</em> class is missing the member,
+not just <em>that</em> one is.</p>
+<h3 id="b236-instanceof-variable-a-class-string-held-in-a-variable-narrowing-is-unsupported">B236. <code>instanceof $variable</code> (a class-string held in a variable) narrowing is unsupported<a class="headerlink" href="#b236-instanceof-variable-a-class-string-held-in-a-variable-narrowing-is-unsupported" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">/** @param class-string&lt;Continue_&gt;|class-string&lt;Break_&gt; $stmtClass */</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">function f(Node $statement, string $stmtClass): void</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x">{</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x">    if (!$statement instanceof $stmtClass) {</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="x">        continue;</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="x">    }</span>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="x">    $statement-&gt;num; // unknown_member: PHPantom never narrowed $statement at all</span>
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="x">}</span>
+</code></pre></div>
+<p>(<code>src/Analyser/StatementResult.php:95</code>,
+<code>src/Analyser/InternalStatementResult.php:106</code>.) Only <code>instanceof</code> with
+a literal class name appears to be handled; a variable holding a
+<code>class-string&lt;T&gt;</code> as the right-hand side isn't matched at all, so the
+guard has no effect. Likely home: <code>type_engine/resolver/</code>'s
+<code>instanceof</code> handling.</p>
+<h3 id="b237-a-vendor-interfaces-own-phpstan-assert-if-true-type-this-tag-isnt-honored">B237. A vendor interface's own <code>@phpstan-assert-if-true Type $this</code> tag isn't honored<a class="headerlink" href="#b237-a-vendor-interfaces-own-phpstan-assert-if-true-type-this-tag-isnt-honored" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">// PHPUnit\Event\Code\Test, declared in the vendor package itself:</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="x">// @phpstan-assert-if-true TestMethod $this</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="x">public function isTestMethod(): bool;</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">if (!$test-&gt;isTestMethod()) {</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="x">    return;</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="x">}</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="x">$test-&gt;className(); // unknown_member: $test not narrowed to TestMethod</span>
+</code></pre></div>
+<p>(<code>src/Testing/PHPUnit/InitContainerBeforeTestSubscriber.php:23</code>.) Unlike
+<code>PHPStan\Analyser\Scope::isInClass()</code> (B228's example), this tag isn't
+missing from the vendor source — PHPUnit declares it directly on its
+own interface — so this isn't the same gap <code>stub_patches.rs</code>'s
+<code>THIRD_PARTY_ASSERT_IF_TRUE</code> list works around. The general
+<code>@phpstan-assert-if-true</code> call-site mechanism (documented in
+<code>docs/todo/type-inference.md</code>) doesn't appear to apply to a <code>$this</code>-target
+tag declared on a class outside the project/vendor scan root, or
+there's a narrower gap in how this specific interface gets its
+docblock tags parsed; not fully root-caused.</p>
 <h2 id="arithmetic">Arithmetic<a class="headerlink" href="#arithmetic" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
+<h3 id="b238-new-selfnew-static-resolves-by-short-name-colliding-with-a-same-named-global-class">B238. <code>new self(...)</code>/<code>new static(...)</code> resolves by short name, colliding with a same-named global class<a class="headerlink" href="#b238-new-selfnew-static-resolves-by-short-name-colliding-with-a-same-named-global-class" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: High · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="x">namespace PHPStan\Analyser;</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="x">final class Error implements JsonSerializable</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="x">{</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="x">    public function __construct(private string $message, private ?int $line = null) {}</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="x">    public function changeFilePath(string $newFilePath): self</span>
+<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="x">    {</span>
+<a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a><span class="x">        return new self($this-&gt;message, $this-&gt;line); // resolves to the built-in \Error!</span>
+<a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a><span class="x">    }</span>
+<a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a><span class="x">}</span>
+</code></pre></div>
+<p><code>type_engine/variable/rhs_resolution/instantiation.rs</code>
+(<code>resolve_rhs_instantiation</code>, around line 26-33) resolves <code>self</code>/<code>static</code>
+via <code>ctx.current_class.name.to_string()</code> — the class's <em>short</em> name —
+instead of <code>ctx.current_class.fqn()</code>. Every other branch of the same
+match resolves a written class name through
+<code>crate::util::resolve_source_class_name</code> (namespace-aware). Since
+<code>PHPStan\Analyser\Error</code> shares its short name with the built-in
+<code>\Error</code>, <code>new self(...)</code> inside it misresolves to the global class,
+producing false <code>type_mismatch_argument</code>/<code>type_mismatch_return</code> on
+every constructor call and every method that returns <code>new self(...)</code>
+(confirmed at <code>src/Analyser/Error.php</code> — 8 call sites × 2 argument
+positions, plus 10 <code>type_mismatch_return</code> hits across its fluent
+<code>changeXxx()</code> methods). Any user class whose short name collides with a
+PHP built-in (or any other loaded class) is affected, not just this one.</p>
+<h3 id="b239-this-inside-a-trait-method-resolves-to-the-trait-itself-not-the-using-class">B239. <code>$this</code> inside a trait method resolves to the trait itself, not the using class<a class="headerlink" href="#b239-this-inside-a-trait-method-resolves-to-the-trait-itself-not-the-using-class" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: High · Complexity: Medium-High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="x">trait TemplateTypeTrait</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="x">{</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="x">    public function getTypeWithoutSubtractedType(): Type</span>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="x">    {</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="x">        // ...</span>
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="x">        return $this; // Return type &lt;TheTrait&gt; is incompatible with declared return type Type</span>
+<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="x">    }</span>
+<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="x">}</span>
+</code></pre></div>
+<p>(<code>src/Type/Generic/TemplateTypeTrait.php:140</code> and 20+ similar sites
+across <code>src/Type/Traits/*.php</code>.) <code>$this</code> inside a trait method that
+returns <code>$this</code> typed as an interface/abstract type the trait doesn't
+itself implement should resolve to the class the trait is mixed into
+(late static binding through traits), not to the trait as a
+pseudo-class. This is the classic "trait <code>$this</code> not resolved" gap;
+minimal repro confirms it reproduces with a bare <code>trait</code>/<code>use</code>/<code>return
+$this</code> with no other machinery involved.</p>
+<h3 id="b240-static-return-type-on-an-intersection-typed-receiver-drops-the-non-declaring-interface-members">B240. <code>static</code> return type on an intersection-typed receiver drops the non-declaring interface members<a class="headerlink" href="#b240-static-return-type-on-an-intersection-typed-receiver-drops-the-non-declaring-interface-members" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="x">interface IfaceA { /** @return static */ public function filter(): self; }</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="x">interface IfaceB { public function ifaceBMethod(): void; }</span>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="x">function needsBoth(IfaceA&amp;IfaceB $x): void {}</span>
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a>
+<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="x">function test(IfaceA&amp;IfaceB $scope): void</span>
+<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a><span class="x">{</span>
+<a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="x">    $filtered = $scope-&gt;filter();</span>
+<a id="__codelineno-15-9" name="__codelineno-15-9" href="#__codelineno-15-9"></a><span class="x">    needsBoth($filtered); // false: expects IfaceA&amp;IfaceB, got IfaceA</span>
+<a id="__codelineno-15-10" name="__codelineno-15-10" href="#__codelineno-15-10"></a><span class="x">}</span>
+</code></pre></div>
+<p>Confirmed minimal repro, and live in phpstan-src at
+<code>src/Rules/Methods/CallMethodsRule.php:55</code> /
+<code>CallStaticMethodsRule.php:56</code> (<code>Scope&amp;NodeCallbackInvoker&amp;CollectedDataEmitter</code>,
+narrowed via <code>$scope-&gt;filterByTruthyValue(...)</code> which is <code>@return
+static</code>). <code>static</code> should resolve to the receiver's full statically-known
+type — here the whole intersection — but instead resolves only to
+whichever single interface declares the called method.</p>
+<h3 id="b241-an-abstract-class-isnt-accepted-where-a-union-of-exactly-its-known-subclasses-is-declared">B241. An abstract class isn't accepted where a union of exactly its known subclasses is declared<a class="headerlink" href="#b241-an-abstract-class-isnt-accepted-where-a-union-of-exactly-its-known-subclasses-is-declared" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="x">// PhpParser\Node\Stmt\ClassLike is abstract; Class_/Interface_/Trait_/Enum_</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="x">// are its only subclasses in the known universe.</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="x">private function createAstClassReflection(Node\Stmt\ClassLike $stmt, ...): ClassReflection</span>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="x">{</span>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="x">    // ...</span>
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="x">    $nodeToReflection-&gt;__invoke($this-&gt;reflector, $stmt, ...);</span>
+<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a><span class="x">    // $node param declared: Class_|Interface_|Trait_|Enum_|Function_|Closure|ArrowFunction|Const_|FuncCall</span>
+<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="x">    // false: ClassLike does not satisfy that union</span>
+<a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a><span class="x">}</span>
+</code></pre></div>
+<p>(<code>src/Analyser/NodeScopeResolver.php:2794</code> and three
+<code>BetterReflection/SourceLocator/*.php</code> sites.) Real PHPStan is silent —
+it appears to reason that <code>ClassLike</code>'s only subclasses are exactly the
+four named in the union, so a <code>ClassLike</code>-typed value is exhaustively
+covered. Reproducing this "sealed hierarchy" exhaustiveness check would
+need enumerating every known subclass of an abstract type across the
+whole project + vendor at check time; rare enough in practice
+(<code>PhpParser\Node\Stmt\ClassLike</code> may be the only real-world instance
+seen so far) that it's filed for completeness rather than urgency.</p>
+<h3 id="b242-composerautoloadclassloader-is-invisible-to-class-resolution">B242. <code>Composer\Autoload\ClassLoader</code> is invisible to class resolution<a class="headerlink" href="#b242-composerautoloadclassloader-is-invisible-to-class-resolution" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p>Every Composer-managed project has this class available via
+<code>vendor/composer/ClassLoader.php</code>, but it's loaded through a
+hand-written <code>spl_autoload_register</code> bootstrap in
+<code>vendor/composer/autoload_real.php</code> (<code>loadClassLoader()</code> →
+<code>require __DIR__ . '/ClassLoader.php'</code>), not through
+<code>autoload_classmap.php</code> or any package's <code>psr-4</code>/<code>psr-0</code> map. The vendor
+classmap scanner (<code>classmap_scanner/</code>, <code>composer.rs</code>) has no special
+case for this universal bootstrap file, so <code>Composer\Autoload\ClassLoader</code>
+resolves as <code>unknown_class</code> on any project that references it directly
+— a fairly common pattern for code that introspects its own autoloader,
+as phpstan-src does at <code>src/Testing/TestCaseSourceLocatorFactory.php:55,56</code>
+and <code>src/autoloadFunctions.php:62,73</code>. Since <code>vendor/composer/ClassLoader.php</code>
+is present verbatim in every Composer install regardless of declared
+dependencies, this would recur on any Composer project, not just this
+one.</p>
+<h3 id="b243-two-more-confirmed-unknown_member-false-positives-with-an-unidentified-mechanism">B243. Two more confirmed <code>unknown_member</code> false positives with an unidentified mechanism<a class="headerlink" href="#b243-two-more-confirmed-unknown_member-false-positives-with-an-unidentified-mechanism" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Unknown</strong></p>
+<p>Two additional confirmed-real false positives surfaced during the
+<code>unknown_member</code> sweep whose exact cause wasn't pinned down:</p>
+<ul>
+<li><code>Nette\Neon\Exception::getMessage()</code> not found
+  (<code>src/DependencyInjection/NeonAdapter.php:57</code>,
+  <code>NeonCachedFileReader.php:45</code>), despite the class extending
+  <code>\Exception</code> — an identical hand-written class in isolation resolves
+  fine, so it's specific to something about this vendor path (possibly
+  a classmap/PSR-4 interaction in a monorepo with many nested
+  <code>composer.json</code> files), not <code>extends \Exception</code> in general.</li>
+<li><code>PHPStan\Analyser\Scope::mergeWith()</code> not found
+  (<code>src/Analyser/NodeScopeResolver.php:5404,5412</code> and 6 similar lines).
+  <code>Scope</code> genuinely has no <code>mergeWith</code> (only <code>MutatingScope</code> does), and
+  PHPantom's own <code>dumpType</code>-equivalent confirms it believes the
+  expression's static type is bare <code>Scope</code> — yet real PHPStan raises no
+  error on the call. No stub, mixin, or reflection extension explaining
+  why real PHPStan accepts this was found; filed as a confirmed false
+  positive without a full explanation of the real-PHPStan side.</li>
+</ul>
 <h3 id="b218-new-reflectionpropertyfooclass-bar-forgets-what-it-reflects">B218. <code>new ReflectionProperty(Foo::class, 'bar')</code> forgets what it reflects<a class="headerlink" href="#b218-new-reflectionpropertyfooclass-bar-forgets-what-it-reflects" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
 <p>A reflection value built by <code>ReflectionClass::getProperty('bar')</code> carries
 the class and the property name, so reading it types as the property
 declares. Constructing the same value directly does not:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">$viaClass = (new \ReflectionClass(Configuration::class))-&gt;getProperty(&#39;shell&#39;);</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">$viaClass-&gt;getValue($config);   // ?Shell</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">$direct = new \ReflectionProperty(Configuration::class, &#39;shell&#39;);</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">$direct-&gt;getValue($config);     // mixed</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="x">$viaClass = (new \ReflectionClass(Configuration::class))-&gt;getProperty(&#39;shell&#39;);</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="x">$viaClass-&gt;getValue($config);   // ?Shell</span>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="x">$direct = new \ReflectionProperty(Configuration::class, &#39;shell&#39;);</span>
+<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="x">$direct-&gt;getValue($config);     // mixed</span>
 </code></pre></div>
 <p>The two spellings are interchangeable in real code, so the second should
 resolve like the first. The binding cannot come from the constructor's
@@ -1622,21 +2608,21 @@ until it sees an assignment to it in the same top-to-bottom pass. That
 loses the one thing a <code>static</code> local actually means: its value can carry
 over from an <em>earlier call</em> that assigned it in a branch the current
 call never reaches.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">function info(?Configuration $config = null) {</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">    static $lastConfig;</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    if ($config !== null) {</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">        $lastConfig = $config;</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">        return null;</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">    }</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">    $config = $lastConfig ?: new Configuration();</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">    // $shell::VERSION below needs $config resolved to Configuration for</span>
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="x">    // Sudo::fetchProperty($config, &#39;shell&#39;) to type as ?Shell (the</span>
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="x">    // pass-through accessor inference already handles that part).</span>
-<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="x">    $shell = Sudo::fetchProperty($config, &#39;shell&#39;);</span>
-<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="x">    if ($shell) {</span>
-<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="x">        $shellInfo = [&#39;PsySH version&#39; =&gt; $shell::VERSION];</span>
-<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="x">    }</span>
-<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="x">function info(?Configuration $config = null) {</span>
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="x">    static $lastConfig;</span>
+<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="x">    if ($config !== null) {</span>
+<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="x">        $lastConfig = $config;</span>
+<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a><span class="x">        return null;</span>
+<a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a><span class="x">    }</span>
+<a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a><span class="x">    $config = $lastConfig ?: new Configuration();</span>
+<a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a><span class="x">    // $shell::VERSION below needs $config resolved to Configuration for</span>
+<a id="__codelineno-18-9" name="__codelineno-18-9" href="#__codelineno-18-9"></a><span class="x">    // Sudo::fetchProperty($config, &#39;shell&#39;) to type as ?Shell (the</span>
+<a id="__codelineno-18-10" name="__codelineno-18-10" href="#__codelineno-18-10"></a><span class="x">    // pass-through accessor inference already handles that part).</span>
+<a id="__codelineno-18-11" name="__codelineno-18-11" href="#__codelineno-18-11"></a><span class="x">    $shell = Sudo::fetchProperty($config, &#39;shell&#39;);</span>
+<a id="__codelineno-18-12" name="__codelineno-18-12" href="#__codelineno-18-12"></a><span class="x">    if ($shell) {</span>
+<a id="__codelineno-18-13" name="__codelineno-18-13" href="#__codelineno-18-13"></a><span class="x">        $shellInfo = [&#39;PsySH version&#39; =&gt; $shell::VERSION];</span>
+<a id="__codelineno-18-14" name="__codelineno-18-14" href="#__codelineno-18-14"></a><span class="x">    }</span>
+<a id="__codelineno-18-15" name="__codelineno-18-15" href="#__codelineno-18-15"></a><span class="x">}</span>
 </code></pre></div>
 <p>On the call that falls through to the second half, <code>$lastConfig</code> is read
 without ever having been assigned within <em>this</em> walk, so <code>$config</code>
@@ -1656,11 +2642,213 @@ anywhere in the enclosing function body (not only the ones preceding the
 read in this pass), since the assignment that matters can sit in a
 branch this call never takes.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b244-the-single-argument-docblock-array-shorthand-arrayt-defaults-its-key-to-int">B244. The single-argument docblock array shorthand <code>array&lt;T&gt;</code> defaults its key to <code>int</code><a class="headerlink" href="#b244-the-single-argument-docblock-array-shorthand-arrayt-defaults-its-key-to-int" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium-High · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="x">/** @return array&lt;TypeAliasTag&gt; */</span>
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="x">public function getTypeAliasTags(): array { /* ... */ }</span>
+<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a>
+<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="x">/** @var array&lt;string, TypeAlias&gt;|null */</span>
+<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a><span class="x">private $typeAliases;</span>
+<a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a>
+<a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a><span class="x">$this-&gt;typeAliases = array_map(fn ($tag) =&gt; ..., $this-&gt;getTypeAliasTags());</span>
+<a id="__codelineno-19-8" name="__codelineno-19-8" href="#__codelineno-19-8"></a><span class="x">// false type_mismatch_property: expects array&lt;string, TypeAlias&gt;|null, got array&lt;int, TypeAlias&gt;</span>
+</code></pre></div>
+<p>(<code>src/Reflection/ClassReflection.php:1460,1492</code>.) PHPStan's own
+<code>\PHPStan\dumpType</code> confirms the single-argument shorthand
+<code>array&lt;TypeAliasTag&gt;</code> (key omitted) resolves to a keyless <code>array&lt;TypeAliasTag&gt;</code>,
+not <code>array&lt;int, TypeAliasTag&gt;</code> — real PHPStan accepts assigning such a
+value to an <code>array&lt;string, T&gt;</code>-typed property, while an <em>explicit</em>
+<code>array&lt;int, T&gt;</code> annotation is correctly rejected the same way PHPantom
+rejects it here. PHPantom's docblock parser appears to default the
+omitted key to <code>int</code>, and that assumed key then propagates through
+<code>array_map</code>/<code>array_merge</code> into a spurious key-type mismatch. Home:
+wherever <code>array&lt;T&gt;</code> single-argument generics are parsed into a
+<code>PhpType</code>, likely in <code>docblock/</code>.</p>
+<h3 id="b245-foreach-over-a-bare-variable-skips-phpstan-typephpstan-import-type-alias-expansion">B245. <code>foreach</code> over a bare variable skips <code>@phpstan-type</code>/<code>@phpstan-import-type</code> alias expansion<a class="headerlink" href="#b245-foreach-over-a-bare-variable-skips-phpstan-typephpstan-import-type-alias-expansion" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p><code>resolve_foreach_iterable_type</code> in
+<code>type_engine/variable/forward_walk/control_flow.rs</code> (around line
+1362-1368) has an early-return branch: when the foreach expression is a
+direct <code>$variable</code> whose type is already bound in scope, it returns the
+scope's type immediately without calling <code>resolve_type_alias_typed</code>.
+Every <em>other</em> branch of the same function (the <code>resolve_rhs_with_scope</code>
+fallback, the docblock fallback, the subject-resolver fallback) does
+call it. So a variable typed through a <code>@param Foo $x</code> /
+<code>@phpstan-import-type Foo from …</code> alias keeps its unexpanded
+<code>Named("Foo")</code> type when iterated, and <code>iteration_key_type</code> falls back
+to the generic <code>int|string</code> default instead of the alias's real key
+type:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="x">/** @phpstan-type LinesToIgnore = array&lt;string, array&lt;int, X|null&gt;&gt; */</span>
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="x">function f(LinesToIgnore $linesToIgnore): void</span>
+<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="x">{</span>
+<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="x">    foreach ($linesToIgnore as $file =&gt; $lines) {</span>
+<a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a><span class="x">        // $file resolves to int|string, not string</span>
+<a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a><span class="x">    }</span>
+<a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a><span class="x">}</span>
+</code></pre></div>
+<p>Confirmed: a plain <code>array&lt;string, int&gt;</code> parameter (no alias) narrows the
+foreach key correctly; the identical array wrapped in a same-file
+<code>@phpstan-type</code> alias does not. Examples:
+<code>src/Analyser/AnalyserResultFinalizer.php:198-220</code>,
+<code>src/Analyser/FileAnalyser.php:146-173</code> (<code>LinesToIgnore</code>),
+<code>src/Analyser/ResultCache/ResultCachePathTransformer.php:132-135</code> and
+<code>src/Command/AnalyseApplication.php:206-208</code> (<code>CollectorData</code>).</p>
+<h3 id="b246-array_keysarray_values-dont-propagate-the-source-arrays-real-key-type">B246. <code>array_keys()</code>/<code>array_values()</code> don't propagate the source array's real key type<a class="headerlink" href="#b246-array_keysarray_values-dont-propagate-the-source-arrays-real-key-type" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: High · Complexity: High</strong></p>
+<p>Regardless of whether the source array's key type is <code>string</code>
+(declared via <code>@param</code>/<code>@return</code>, a promoted property, or a method
+return docblock) or <code>int</code> (a list), <code>array_keys()</code> on it — or a variable
+reassigned from <code>array_values()</code> of it — always yields <code>int|string</code> for
+the resulting keys, never the real key type:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="x">/** @var array&lt;string, ExpressionTypeHolder&gt; $expressionTypes */</span>
+<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="x">foreach (array_keys($expressionTypes) as $key) {</span>
+<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a><span class="x">    // $key: int|string, should be string</span>
+<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="x">}</span>
+</code></pre></div>
+<p>This is by far the largest single cluster found in this sweep (~35
+diagnostics). Confirmed not tied to B245's alias path — reproduces the
+same way for a plain, non-alias <code>array&lt;string, string&gt;</code> parameter run
+through <code>$x = array_values($x); foreach ($x as $i =&gt; ...)</code>. Likely
+home: the function-level <code>@template</code> substitution path
+(<code>build_function_template_subs</code>, <code>extract_array_type_at_position</code> in
+<code>type_engine/variable/rhs_resolution/calls.rs</code>) and/or
+<code>type_engine/call_resolution/return_types.rs</code> — either the argument's
+structured key type isn't reaching the <code>TKey</code>/<code>TValue</code> binding, or the
+substituted <code>list&lt;T&gt;</code> result loses its "keys are exactly int" shape
+once it round-trips through variable assignment/scope storage.
+Representative sites: <code>src/Analyser/MutatingScope.php:518-543</code>,
+<code>src/Reflection/Type/MergedPureUnlessCallableIsImpureParameters.php:29-53</code>,
+<code>src/Type/FileTypeMapper.php:310-311,787-795</code>,
+<code>src/Analyser/ExprHandler/BooleanOrHandler.php:162-170</code>,
+<code>src/Rules/Api/{NodeConnectingVisitorAttributesRule,OldPhpParser4ClassRule,RuntimeReflectionFunctionRule,RuntimeReflectionInstantiationRule}.php</code>,
+<code>src/Analyser/NodeScopeResolver.php:3838-3882,4164</code>,
+<code>src/Reflection/InitializerExprTypeResolver.php:2213-2214</code>,
+<code>src/Cache/FileCacheStorage.php:172-177</code>, <code>src/Parallel/ProcessPool.php:68-69</code>,
+<code>src/DependencyInjection/ValidateServiceTagsExtension.php:83-93</code>,
+<code>src/Node/ClassPropertiesNode.php:313-314</code>,
+<code>src/Reflection/SignatureMap/FunctionSignatureMapProvider.php:332-333</code>,
+<code>src/Reflection/Php/{EnumAllowedSubTypesClassReflectionExtension.php:23-24,PhpClassReflectionExtension.php:622-623,889-891}</code>,
+<code>src/Rules/Generics/GenericAncestorsCheck.php:167-172</code>,
+<code>src/Analyser/ResultCache/ResultCacheManager.php:1216-1226</code>,
+<code>src/Command/AnalyseCommand.php:640-658</code>,
+<code>src/Analyser/VolatileExpressionHelper.php:94-98</code>.</p>
+<h3 id="b247-no-benevolent-union-for-a-foreach-key-when-the-arrays-key-type-is-genuinely-unknown">B247. No <code>Benevolent</code> union for a <code>foreach</code> key when the array's key type is genuinely unknown<a class="headerlink" href="#b247-no-benevolent-union-for-a-foreach-key-when-the-arrays-key-type-is-genuinely-unknown" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
+<p>When <code>iteration_key_type</code> can't determine a key type at all (a bare
+<code>array</code>, or <code>mixed</code> narrowed by <code>is_array()</code>), the <code>bind_foreach_key</code>
+fallback in <code>control_flow.rs</code> builds a strict
+<code>PhpType::union([int, string])</code>. Real PHPStan uses a
+<code>BenevolentUnionType(int|string)</code> for this exact case, which its own
+diagnostics treat as satisfying a single-branch parameter (confirmed:
+<code>substr($key, ...)</code> raises no error against PHPStan's benevolent
+<code>(int|string)</code>, but a plain declared <code>@param int|string $x</code> passed the
+same value the same way does error). PHPantom already has
+<code>TypeKind::Benevolent</code> and <code>is_type_compatible</code> already special-cases it
+("any member satisfies") for builtins like <code>tempnam</code>/<code>curl_init</code> in
+<code>src/diagnostics/type_errors/compatibility.rs</code> — it's just not applied
+to this one fallback site. Swapping <code>PhpType::union(...)</code> for
+<code>PhpType::benevolent(PhpType::union(...))</code> there should fix it
+uniformly. Examples: <code>src/DependencyInjection/ContainerFactory.php:431-436</code>,
+<code>src/DependencyInjection/ConditionalTagsExtension.php:40-56</code>,
+<code>src/Rules/Ignore/IgnoreParseErrorRule.php:34-39</code>.</p>
+<h3 id="b248-list-destructuring-against-a-long-array-shape-can-bind-a-variable-to-the-wrong-elements-type">B248. List-destructuring against a long <code>array{...}</code> shape can bind a variable to the wrong element's type<a class="headerlink" href="#b248-list-destructuring-against-a-long-array-shape-can-bind-a-variable-to-the-wrong-elements-type" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: High · Complexity: Medium-High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="x">// getPhpDocs() : array{ ..., 17 =&gt; array&lt;(string|int), VarTag&gt;, ... } (21 elements total)</span>
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="x">[..., , , $varTags, , ...] = $this-&gt;getPhpDocs(...); // skip-destructuring to position 17</span>
+<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="x">$varTags[0]-&gt;getType(); // PHPantom binds $varTags to a *different* position&#39;s type (bool)</span>
+</code></pre></div>
+<p>(<code>src/Analyser/NodeScopeResolver.php:1333,1349</code>.) This is not just a
+false-positive diagnostic — the bound variable's inferred type is
+silently wrong, which would degrade hover/completion/go-to-definition
+just as much as diagnostics. Also reproduces on a plain 2-element list
+<code>foreach</code> (<code>foreach ($this-&gt;inFunctionCallsStack as [, $parameter])</code> in
+<code>src/Analyser/MutatingScope.php:1122</code> — <code>$parameter</code> picks up position
+0's type instead of position 1's the moment position 0 is left blank,
+confirmed by reverting the blank and watching the false positive
+disappear), so a skipped leading position is enough on its own; it
+doesn't need a long shape. Confirmed with a faithful 21-element repro
+of the same skip-destructuring pattern; a 5-element version of the same
+pattern stayed clean, so the bug needs the shape's length or overall
+complexity to manifest, not the skip pattern alone. Likely an
+off-by-some-count indexing bug in whatever walks list-destructuring
+positions against an <code>array{...}</code> shape's keys in
+<code>type_engine/variable/forward_walk/</code>.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b251-a-closures-by-reference-use-mutation-isnt-tracked-when-the-closure-is-invoked-indirectly">B251. A closure's by-reference <code>use</code> mutation isn't tracked when the closure is invoked indirectly<a class="headerlink" href="#b251-a-closures-by-reference-use-mutation-isnt-tracked-when-the-closure-is-invoked-indirectly" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="x">$constructorResult = null;</span>
+<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="x">$nodeScopeResolver-&gt;processStmtNode($expr-&gt;class, $scope, $storage, new GatheringNodeCallback(</span>
+<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="x">    static function (Node $node, ...) use (&amp;$constructorResult): void {</span>
+<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a><span class="x">        $constructorResult = $node;</span>
+<a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a><span class="x">    },</span>
+<a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a><span class="x">    $nodeCallback,</span>
+<a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a><span class="x">), ...);</span>
+<a id="__codelineno-23-8" name="__codelineno-23-8" href="#__codelineno-23-8"></a><span class="x">if ($constructorResult !== null) {</span>
+<a id="__codelineno-23-9" name="__codelineno-23-9" href="#__codelineno-23-9"></a><span class="x">    $constructorResult-&gt;getStatementResult(); // still typed null past the guard</span>
+</code></pre></div>
+<p>(<code>src/Analyser/ExprHandler/NewHandler.php:153,154</code>.) A directly-invoked
+<code>use (&amp;$x)</code> closure (<code>$callback($arg)</code>) is tracked fine; wrapping the
+same closure in an object and invoking it through a separate method
+call (mirroring <code>GatheringNodeCallback</code>'s <code>invoke()</code>) loses the
+reference mutation entirely, so <code>$constructorResult</code>'s type never
+updates and stays "null" even past the <code>!== null</code> guard.</p>
+<h3 id="b252-doesnt-route-its-rhs-through-the-callable-property-invocation-resolution-path">B252. <code>??=</code> doesn't route its RHS through the callable-property-invocation resolution path<a class="headerlink" href="#b252-doesnt-route-its-rhs-through-the-callable-property-invocation-resolution-path" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="x">/** @var callable(): MutatingScope $leftTruthyScope */</span>
+<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="x">private $leftTruthyScope;</span>
+<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a>
+<a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a><span class="x">$leftTruthyScope = null;</span>
+<a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a><span class="x">$leftTruthyScope ??= ($this-&gt;leftTruthyScope)();</span>
+<a id="__codelineno-24-6" name="__codelineno-24-6" href="#__codelineno-24-6"></a><span class="x">$leftTruthyScope-&gt;getType($targetExpr); // false: method call on null</span>
+</code></pre></div>
+<p>(<code>src/Analyser/DisjunctionHolderProjectionAugment.php:78,84</code>.) Isolated
+down to the exact failing ingredient: a direct call <code>($this-&gt;prop)()</code>
+alone resolves fine, <code>$x ??= new Foo()</code> alone resolves fine, only
+<code>$x ??= ($this-&gt;callableProp)()</code> fails — the <code>??=</code> handler doesn't
+reuse the same resolution path a bare invocation of a callable-typed
+property already gets right.</p>
+<h3 id="b253-a-closure-parameters-type-isnt-inferred-from-a-template-parameterized-callablet-x-signature">B253. A closure parameter's type isn't inferred from a <code>@template</code>-parameterized <code>callable(T): X</code> signature<a class="headerlink" href="#b253-a-closure-parameters-type-isnt-inferred-from-a-template-parameterized-callablet-x-signature" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium-High · Complexity: High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="x">/** @template T @param T $node @param callable(T): void $fn */</span>
+<a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a><span class="x">function fixNode($node, callable $fn): void { $fn($node); }</span>
+<a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a>
+<a id="__codelineno-25-4" name="__codelineno-25-4" href="#__codelineno-25-4"></a><span class="x">fixNode($property, function ($property) {</span>
+<a id="__codelineno-25-5" name="__codelineno-25-5" href="#__codelineno-25-5"></a><span class="x">    $property-&gt;isReadOnly(); // $property&#39;s inferred type is unresolved/mismatched, not the bound T</span>
+<a id="__codelineno-25-6" name="__codelineno-25-6" href="#__codelineno-25-6"></a><span class="x">});</span>
+</code></pre></div>
+<p>When a closure is passed to a method whose docblock is
+<code>@param callable(T): X $fn</code> with <code>T</code> bound from the call-site argument,
+real PHPStan infers the closure's own parameter type from <code>T</code> (even
+overriding a wider explicit hint); PHPantom leaves it as the literal
+template name or the declared hint. Explains every <code>unknown_member</code>
+"subject type 'TNode'/'TValue' could not be resolved" hit:
+<code>src/Parser/LastConditionVisitor.php:91</code>,
+<code>src/Rules/Properties/OverridingPropertyRule.php:68,104</code>,
+<code>build/PHPStan/Build/NamedArgumentsRule.php:183,232</code>,
+<code>build/PHPStan/Build/FinalClassRule.php:77</code>,
+<code>src/Reflection/Type/IntersectionTypeMethodReflection.php:240</code>. Likely
+home: <code>type_engine/</code>'s generic/template substitution for
+callable-type parameters.</p>
+<h3 id="b254-unused-variable-check-doesnt-account-for-a-closures-use-capture-feeding-a-required-files-scope">B254. Unused-variable check doesn't account for a closure's <code>use()</code> capture feeding a <code>require</code>d file's scope<a class="headerlink" href="#b254-unused-variable-check-doesnt-account-for-a-closures-use-capture-feeding-a-required-files-scope" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="x">(static function (string $file) use ($container): void {</span>
+<a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a><span class="x">    require_once $file; // the required file executes in this closure&#39;s own variable scope</span>
+<a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a><span class="x">})($file);</span>
+</code></pre></div>
+<p>(<code>src/Command/CommandHelper.php:642</code>,
+<code>src/Testing/PHPStanTestCaseTrait.php:49</code> — both flag <code>$container</code> as
+unused.) <code>$container</code> is never referenced <em>by name</em> inside the closure
+body, but <code>require_once</code> runs the target file's code inside the
+closure's own scope, so the required file can legitimately read
+<code>$container</code> as a local variable — a known idiom for exposing a
+variable to dynamically-included code without leaking the rest of the
+enclosing scope. The <code>unused_variable</code> check has no notion of "used via
+a same-scope <code>require</code>/<code>include</code>" at all. (Neither bundled bootstrap
+file in phpstan-src currently reads <code>$container</code> back, so these two
+specific instances may or may not be live in practice — but the
+checker's blind spot is real regardless of this instance's outcome.)</p>
 
 
 

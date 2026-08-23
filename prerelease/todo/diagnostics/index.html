@@ -1882,30 +1882,28 @@ now resolves to <code>mixed</code> rather than to the surviving literal.</p>
 <h2 id="d17-docblock_native_mismatch-only-judges-nullability">D17. <code>docblock_native_mismatch</code> only judges nullability<a class="headerlink" href="#d17-docblock_native_mismatch-only-judges-nullability" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Medium-High</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/** @param int $name */</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">function greet(?string $name): void {}   // not flagged: int is not string at all</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">function greet(string $name): void {}    // not flagged: int is not string at all</span>
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">/** @param Foo $value */</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">function take(?Foo $value): void {}      // not flagged: `Foo` may be nullable</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">function take(Bar $value): void {}       // not flagged: `Foo` may alias `Bar`</span>
 </code></pre></div>
 <p><code>src/diagnostics/docblock_native_mismatch.rs</code> compares a documented type
-against its native hint on one axis only: whether the annotation denies a
-<code>null</code> the signature accepts. Two shapes are therefore still silent.</p>
-<p>The first is a documented type that is not a subtype of the native hint at
-all (<code>@param int</code> on a <code>?string</code>, <code>@return array</code> on a <code>: string</code>). That is
-the check PHPStan's <code>IncompatiblePhpDocTypeRule</code> performs, and the one the
-existing <code>is_type_compatible</code> in <code>src/diagnostics/type_errors/compatibility.rs</code>
+against its native hint on one axis only: whether the annotation admits a
+<code>null</code> the signature rules out. A documented type that is not a subtype of
+the native hint on any <em>other</em> axis (<code>@param int</code> on a <code>string</code>, <code>@return
+array</code> on a <code>: string</code>) stays silent. That is the check PHPStan's
+<code>IncompatiblePhpDocTypeRule</code> performs, and the one the existing
+<code>is_type_compatible</code> in <code>src/diagnostics/type_errors/compatibility.rs</code>
 already has the machinery for.</p>
-<p>The second is a bare class-like name, which <code>nullability_is_decidable</code> steps
-around on purpose: <code>Foo</code> may be a <code>@template</code> parameter or an imported
-<code>@psalm-type</code> alias that resolves to a nullable type, and the diagnostic has
-no resolution step that would tell those apart from a class named <code>Foo</code>.
-Resolving the name (against the declaration's own <code>@template</code> list, the
-enclosing class's, and the file's <code>@psalm-type</code>/<code>@psalm-import-type</code> tags)
-would let the nullability check cover the class-name case as well.</p>
-<p><strong>Fix:</strong> Resolve the documented type's names before comparing, then run the
-comparison through <code>is_type_compatible</code> rather than the nullability test
-alone. Both halves want the same measurement, so they are one change rather
-than two.</p>
+<p>Covering it means resolving the documented type's bare names first, since a
+<code>Foo</code> that a <code>@template</code> list or an imported <code>@psalm-type</code> alias stands
+behind may well be the native <code>Bar</code> after resolution. The nullability axis
+sidesteps that today: a name that resolves to something nullable never
+spells <code>null</code> itself, so the check simply does not fire on it.</p>
+<p><strong>Fix:</strong> Resolve the documented type's names against the declaration's own
+<code>@template</code> list, the enclosing class's, and the file's
+<code>@psalm-type</code>/<code>@psalm-import-type</code> tags, then run the comparison through
+<code>is_type_compatible</code> rather than the nullability test alone.</p>
 <hr />
 <h2 id="d18-arrayint-t-is-accepted-wherever-a-listt-is-declared">D18. <code>array&lt;int, T&gt;</code> is accepted wherever a <code>list&lt;T&gt;</code> is declared<a class="headerlink" href="#d18-arrayint-t-is-accepted-wherever-a-listt-is-declared" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Medium-High</strong></p>

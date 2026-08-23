@@ -1659,16 +1659,172 @@ unlikely to move the needle for most users.</p>
 <td></td>
 </tr>
 <tr>
-<td>B218</td>
-<td><a href="../todo/bugs/#b218-new-reflectionpropertyfooclass-bar-forgets-what-it-reflects"><code>new ReflectionProperty(Foo::class, 'bar')</code> forgets what it reflects</a></td>
-<td>Low</td>
+<td>B238</td>
+<td><a href="../todo/bugs/#b238-new-selfnew-static-resolves-by-short-name-colliding-with-a-same-named-global-class"><code>new self(...)</code>/<code>new static(...)</code> resolves by short name, colliding with a same-named global class</a></td>
+<td>High</td>
 <td>Medium</td>
+</tr>
+<tr>
+<td>B239</td>
+<td><a href="../todo/bugs/#b239-this-inside-a-trait-method-resolves-to-the-trait-itself-not-the-using-class"><code>$this</code> inside a trait method resolves to the trait itself, not the using class</a></td>
+<td>High</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>B248</td>
+<td><a href="../todo/bugs/#b248-list-destructuring-against-a-long-array-shape-can-bind-a-variable-to-the-wrong-elements-type">List-destructuring against a long <code>array{...}</code> shape can bind a variable to the wrong element's type</a></td>
+<td>High</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>B229</td>
+<td><a href="../todo/bugs/#b229-instanceof-narrowing-is-not-recognized-for-several-common-condition-shapes"><code>instanceof</code> narrowing is not recognized for several common condition shapes</a></td>
+<td>High</td>
+<td>High</td>
+</tr>
+<tr>
+<td>B246</td>
+<td><a href="../todo/bugs/#b246-array_keysarray_values-dont-propagate-the-source-arrays-real-key-type"><code>array_keys()</code>/<code>array_values()</code> don't propagate the source array's real key type</a></td>
+<td>High</td>
+<td>High</td>
+</tr>
+<tr>
+<td>B228</td>
+<td><a href="../todo/bugs/#b228-a-condition-established-narrowing-of-a-method-call-expression-doesnt-survive-assignment-elseif-siblings-or-loop-merges">A condition-established narrowing of a method-call expression doesn't survive assignment, <code>elseif</code> siblings, or loop merges</a></td>
+<td>High</td>
+<td>Very High</td>
+</tr>
+<tr>
+<td>B227</td>
+<td><a href="../todo/bugs/#b227-the-replace-function-familys-conditional-return-type-never-collapses">The replace function family's conditional return type never collapses</a></td>
+<td>Medium-High</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>B235</td>
+<td><a href="../todo/bugs/#b235-a-lost-chained-call-re-narrowing-misattributes-the-member-lookup-to-the-enclosing-files-own-class">A lost chained-call re-narrowing misattributes the member lookup to the enclosing file's own class</a></td>
+<td>Medium-High</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>B253</td>
+<td><a href="../todo/bugs/#b253-a-closure-parameters-type-isnt-inferred-from-a-template-parameterized-callablet-x-signature">A closure parameter's type isn't inferred from a <code>@template</code>-parameterized <code>callable(T): X</code> signature</a></td>
+<td>Medium-High</td>
+<td>High</td>
+</tr>
+<tr>
+<td>B230</td>
+<td><a href="../todo/bugs/#b230-a--b-doesnt-narrow-the-nullable-side-against-a-definite-type-operand"><code>$a === $b</code> doesn't narrow the nullable side against a definite-type operand</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B231</td>
+<td><a href="../todo/bugs/#b231-array_key_exists-doesnt-narrow-an-optional-array-shape-key-the-way-isset-does"><code>array_key_exists()</code> doesn't narrow an optional array-shape key the way <code>isset()</code> does</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B232</td>
+<td><a href="../todo/bugs/#b232-use-var-doesnt-establish-var-as-defined-when-its-new-to-the-enclosing-scope"><code>use (&amp;$var)</code> doesn't establish <code>$var</code> as defined when it's new to the enclosing scope</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B233</td>
+<td><a href="../todo/bugs/#b233-issetvar--doesnt-mark-a-possibly-undefined-variable-as-defined-for-the-rest-of-the-branch"><code>isset($var) &amp;&amp; …</code> doesn't mark a possibly-undefined variable as defined for the rest of the branch</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B234</td>
+<td><a href="../todo/bugs/#b234-is_floatis_ints-negative-branch-doesnt-strip-a-member-from-a-declared-union"><code>is_float()</code>/<code>is_int()</code>'s negative branch doesn't strip a member from a declared union</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B237</td>
+<td><a href="../todo/bugs/#b237-a-vendor-interfaces-own-phpstan-assert-if-true-type-this-tag-isnt-honored">A vendor interface's own <code>@phpstan-assert-if-true Type $this</code> tag isn't honored</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B240</td>
+<td><a href="../todo/bugs/#b240-static-return-type-on-an-intersection-typed-receiver-drops-the-non-declaring-interface-members"><code>static</code> return type on an intersection-typed receiver drops the non-declaring interface members</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B242</td>
+<td><a href="../todo/bugs/#b242-composerautoloadclassloader-is-invisible-to-class-resolution"><code>Composer\Autoload\ClassLoader</code> is invisible to class resolution</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B244</td>
+<td><a href="../todo/bugs/#b244-the-single-argument-docblock-array-shorthand-arrayt-defaults-its-key-to-int">The single-argument docblock array shorthand <code>array&lt;T&gt;</code> defaults its key to <code>int</code></a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B245</td>
+<td><a href="../todo/bugs/#b245-foreach-over-a-bare-variable-skips-phpstan-typephpstan-import-type-alias-expansion"><code>foreach</code> over a bare variable skips <code>@phpstan-type</code>/<code>@phpstan-import-type</code> alias expansion</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B252</td>
+<td><a href="../todo/bugs/#b252-doesnt-route-its-rhs-through-the-callable-property-invocation-resolution-path"><code>??=</code> doesn't route its RHS through the callable-property-invocation resolution path</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B236</td>
+<td><a href="../todo/bugs/#b236-instanceof-variable-a-class-string-held-in-a-variable-narrowing-is-unsupported"><code>instanceof $variable</code> (a class-string held in a variable) narrowing is unsupported</a></td>
+<td>Medium</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>B251</td>
+<td><a href="../todo/bugs/#b251-a-closures-by-reference-use-mutation-isnt-tracked-when-the-closure-is-invoked-indirectly">A closure's by-reference <code>use</code> mutation isn't tracked when the closure is invoked indirectly</a></td>
+<td>Medium</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>B247</td>
+<td><a href="../todo/bugs/#b247-no-benevolent-union-for-a-foreach-key-when-the-arrays-key-type-is-genuinely-unknown">No <code>Benevolent</code> union for a <code>foreach</code> key when the array's key type is genuinely unknown</a></td>
+<td>Low-Medium</td>
+<td>Low</td>
 </tr>
 <tr>
 <td>B226</td>
 <td><a href="../todo/bugs/#b226-a-function-static-variables-type-is-not-tracked-across-its-own-reads">A function-<code>static</code> variable's type is not tracked across its own reads</a></td>
 <td>Low-Medium</td>
 <td>Medium-High</td>
+</tr>
+<tr>
+<td>B243</td>
+<td><a href="../todo/bugs/#b243-two-more-confirmed-unknown_member-false-positives-with-an-unidentified-mechanism">Two more confirmed <code>unknown_member</code> false positives with an unidentified mechanism</a></td>
+<td>Low-Medium</td>
+<td>Unknown</td>
+</tr>
+<tr>
+<td>B218</td>
+<td><a href="../todo/bugs/#b218-new-reflectionpropertyfooclass-bar-forgets-what-it-reflects"><code>new ReflectionProperty(Foo::class, 'bar')</code> forgets what it reflects</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B254</td>
+<td><a href="../todo/bugs/#b254-unused-variable-check-doesnt-account-for-a-closures-use-capture-feeding-a-required-files-scope">Unused-variable check doesn't account for a closure's <code>use()</code> capture feeding a <code>require</code>d file's scope</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B241</td>
+<td><a href="../todo/bugs/#b241-an-abstract-class-isnt-accepted-where-a-union-of-exactly-its-known-subclasses-is-declared">An abstract class isn't accepted where a union of exactly its known subclasses is declared</a></td>
+<td>Low</td>
+<td>High</td>
 </tr>
 <tr>
 <td></td>
