@@ -347,7 +347,7 @@ fn widen_non_bool_scalar_literals(ty: &PhpType) -> PhpType {
 /// guess for iteration but an over-claim for anything reporting a key back
 /// to the user. Those come back as `None` here so the caller can decline
 /// rather than invent an `int` the argument never promised.
-fn array_key_domain(ty: &PhpType) -> Option<PhpType> {
+pub(crate) fn array_key_domain(ty: &PhpType) -> Option<PhpType> {
     (!ty.has_open_key_domain())
         .then(|| ty.iterable_key_type())
         .flatten()
@@ -369,9 +369,14 @@ fn array_map_container(element: PhpType, args: &dyn ArrayFuncArgs) -> PhpType {
     if is_list_type(&input) {
         return PhpType::list(element);
     }
-    match input.iterable_key_type() {
+    // Keys are carried over untouched, so an input that never named its key
+    // type produces a result that cannot name one either. Answering
+    // `array<int, T>` (or `list<T>`) here would invent the `0, 1, 2, …` an
+    // `array<T>` input never promised, and the invention then contradicts
+    // whatever the caller assigns the result to.
+    match array_key_domain(&input) {
         Some(key) => PhpType::generic_array(key, element),
-        None => PhpType::list(element),
+        None => PhpType::generic_array_val(element),
     }
 }
 

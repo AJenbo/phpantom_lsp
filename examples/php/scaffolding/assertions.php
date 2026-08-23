@@ -1248,6 +1248,20 @@ function runDemoAssertions(): void
     assert($nPen instanceof Scaffolding\Pen, 'Nested destructured pen must be Scaffolding\Pen');
     assert($nPencil instanceof Scaffolding\Pencil, 'Nested destructured pencil must be Scaffolding\Pencil');
 
+    // ── Skipped destructuring positions ─────────────────────────────────
+    /** @var array{string, Scaffolding\Pen, Scaffolding\Pencil} $skipDestr */
+    $skipDestr = ['label', new Scaffolding\Pen(), new Scaffolding\Pencil()];
+    [, $sPen, ] = $skipDestr;
+    assert($sPen instanceof Scaffolding\Pen, 'A hole must not shift position 1 back to position 0');
+    [, , $sPencil] = $skipDestr;
+    assert($sPencil instanceof Scaffolding\Pencil, 'Two holes must land on position 2');
+
+    /** @var array<int, array{string, Scaffolding\Pen}> $skipRows */
+    $skipRows = [['blue', new Scaffolding\Pen()]];
+    foreach ($skipRows as [, $sRowPen]) {
+        assert($sRowPen instanceof Scaffolding\Pen, 'Foreach hole must not shift position 1 back to position 0');
+    }
+
     // ── Foreach destructuring ───────────────────────────────────────────
     /** @var array<int, array{tool: Scaffolding\Pen, count: int}> $foreachDestrInv */
     $foreachDestrInv = [['tool' => new Scaffolding\Pen(), 'count' => 5]];

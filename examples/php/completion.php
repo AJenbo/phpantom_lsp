@@ -3261,6 +3261,21 @@ class IterationDemo
         strlen($label);                   // string from outer position 0
         $nestedPen->write();              // Scaffolding\Pen from inner position 0
         $nestedPencil->sketch();          // Scaffolding\Pencil from inner position 1
+
+        // Skipped positions still count: a hole names nothing but occupies
+        // its slot, so everything after it shifts along with it.
+        /** @var array{string, Scaffolding\Pen, Scaffolding\Pencil} $triple */
+        $triple = ['label', new Scaffolding\Pen(), new Scaffolding\Pencil()];
+        [, $skippedPen, ] = $triple;
+        $skippedPen->write();             // Scaffolding\Pen from position 1
+        [, , $skippedPencil] = $triple;
+        $skippedPencil->sketch();         // Scaffolding\Pencil from position 2
+
+        /** @var array<int, array{string, Scaffolding\Pen}> $labelled */
+        $labelled = [];
+        foreach ($labelled as [, $rowPen]) {
+            $rowPen->write();             // Scaffolding\Pen from position 1
+        }
     }
 }
 

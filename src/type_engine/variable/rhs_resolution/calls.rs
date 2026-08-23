@@ -579,55 +579,92 @@ pub(super) fn resolve_arg_call_raw_type(
 /// Variables and property chains resolve through
 /// [`resolve_arg_variable_raw_type`] (docblock annotations, forward-walk
 /// scope, assignment scanning); call expressions resolve through the
-/// shared call return-type pipeline via [`resolve_arg_call_raw_type`].
+/// shared call return-type pipeline via [`resolve_arg_call_raw_type`];
+/// an element read out of another array goes through
+/// [`resolve_arg_dim_raw_type`].  Anything left over is handed to the
+/// general argument resolver.
 pub(super) fn resolve_arg_iterable_raw_type(
     arg_text: &str,
     rctx: &crate::type_engine::resolver::ResolutionCtx<'_>,
 ) -> Option<PhpType> {
     resolve_arg_variable_raw_type(arg_text, rctx)
         .or_else(|| resolve_arg_call_raw_type(arg_text, rctx))
+        .or_else(|| resolve_arg_dim_raw_type(arg_text, rctx))
+        .or_else(|| Backend::resolve_arg_text_to_type(arg_text, rctx))
+}
+
+/// Resolve `$base['key']` by reading one element out of `$base`'s own raw
+/// type.
+///
+/// The general resolver answers with the *classes* an expression can be, so
+/// an element that is itself an array — an `array<string, Config>` read out
+/// of an `array<string, array<string, Config>>` — comes back from it empty,
+/// and a `@template TKey` bound from `array_keys($delta['old'])` has
+/// nothing to bind to.  The container's own raw type does carry the answer,
+/// so it is resolved through the same entry point (which shortens the text
+/// by one subscript each time, so the recursion terminates) and indexed.
+fn resolve_arg_dim_raw_type(
+    arg_text: &str,
+    rctx: &crate::type_engine::resolver::ResolutionCtx<'_>,
+) -> Option<PhpType> {
+    let trimmed = arg_text.trim();
+    let inner = trimmed.strip_suffix(']')?;
+    let open = matching_subscript_start(inner)?;
+    let base = inner[..open].trim();
+    // An array literal (`[1, 2, 3]`) is all subscript and no base.
+    if base.is_empty() {
+        return None;
+    }
+    let base_type = resolve_arg_iterable_raw_type(base, rctx)?;
+    // A shape answers per key, so a literal subscript is looked up by name
+    // before falling back to the one element type a generic array has.
+    let dim = inner[open + 1..].trim();
+    let literal_key = dim
+        .strip_prefix('\'')
+        .and_then(|d| d.strip_suffix('\''))
+        .or_else(|| dim.strip_prefix('"').and_then(|d| d.strip_suffix('"')))
+        .unwrap_or(dim);
+    base_type
+        .shape_value_type(literal_key)
+        .cloned()
+        .or_else(|| base_type.extract_value_type(false).cloned())
+}
+
+/// The byte index of the `[` that opens the subscript closed by the `]`
+/// this text used to end with, or `None` when the brackets do not balance.
+fn matching_subscript_start(before_close: &str) -> Option<usize> {
+    let mut depth = 0usize;
+    for (idx, ch) in before_close.char_indices().rev() {
+        match ch {
+            ']' => depth += 1,
+            '[' if depth == 0 => return Some(idx),
+            '[' => depth -= 1,
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Extract the concrete type at `position` from an array type string.
 ///
 /// For array types with two generic parameters (key + value):
 /// - `array<int, User>` at position 0 → `"int"`, position 1 → `"User"`
-/// - `User[]` at position 0 → `"int"` (implicit key), position 1 → `"User"`
+/// - `User[]` at position 0 → nothing, position 1 → `"User"`
 /// - `list<User>` at position 0 → `"int"`, position 1 → `"User"`
+/// - `array{a: int, b: int}` at position 0 → `"string"`, position 1 → `"int"`
 ///
 /// For single-param forms:
 /// - `array<User>` at position 0 → `"User"`
 pub(super) fn extract_array_type_at_position(ty: &PhpType, position: usize) -> Option<PhpType> {
     match position {
-        // A `list<V>` writes no key argument but is not silent about its
-        // keys: PHP defines a list as sequentially `int`-indexed from 0.
-        // Without this, `array_keys(list<User>)` binds `TKey` to nothing
-        // and reports `list<mixed>`. A single-argument `array<V>` is a
-        // different case and deliberately absent: its key is `array-key`,
-        // which is what the unbound declaration already says.
-        0 => ty
-            .extract_key_type(false)
-            .cloned()
-            .or_else(|| implicit_list_key_type(ty)),
+        // Only the types that actually pin their keys down answer here: a
+        // `list<V>` and an `array{…}` shape name no key argument but are
+        // not silent about their keys, while `array<V>`, `V[]` and a bare
+        // `array` are. Leaving the open ones unbound is what lets `TKey`
+        // fall back to the `array-key` its declaration already promises,
+        // rather than inventing the `int` a sequential array would have.
+        0 => crate::type_engine::variable::array_func_rules::array_key_domain(ty),
         1 => ty.extract_value_type(false).cloned(),
-        _ => None,
-    }
-}
-
-/// The `int` key type a `list<V>` implies, or `None` for any other type.
-fn implicit_list_key_type(ty: &PhpType) -> Option<PhpType> {
-    match ty.kind() {
-        TypeKind::Generic(g)
-            if g.args.len() == 1
-                && matches!(
-                    g.name.to_ascii_lowercase().as_str(),
-                    "list" | "non-empty-list"
-                ) =>
-        {
-            Some(PhpType::int())
-        }
-        TypeKind::Nullable(inner) => implicit_list_key_type(inner),
-        TypeKind::Union(members) => members.iter().find_map(implicit_list_key_type),
         _ => None,
     }
 }

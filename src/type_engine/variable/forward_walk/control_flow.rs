@@ -1355,7 +1355,31 @@ pub(crate) fn process_foreach<'b>(
 }
 
 /// Resolve the iterable expression's type for a foreach.
+///
+/// Every answer is run through `resolve_type_alias_typed` so a
+/// `@phpstan-type` / `@phpstan-import-type` alias is expanded to the array
+/// type it names before the caller reads a key or element type off it.
+/// The expansion lives here rather than in each branch of
+/// [`resolve_foreach_iterable_type_raw`] so a new branch cannot forget it.
 pub(crate) fn resolve_foreach_iterable_type<'b>(
+    foreach: &'b Foreach<'b>,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Option<PhpType> {
+    let raw = resolve_foreach_iterable_type_raw(foreach, scope, ctx)?;
+    Some(
+        crate::type_engine::type_resolution::resolve_type_alias_typed(
+            &raw,
+            &ctx.current_class.name,
+            ctx.all_classes,
+            ctx.class_loader,
+        )
+        .unwrap_or(raw),
+    )
+}
+
+/// The unexpanded iterable type, tried source by source.
+fn resolve_foreach_iterable_type_raw<'b>(
     foreach: &'b Foreach<'b>,
     scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
@@ -1372,17 +1396,7 @@ pub(crate) fn resolve_foreach_iterable_type<'b>(
     // Fall back to resolve_rhs_expression for complex expressions.
     let resolved = resolve_rhs_with_scope(foreach.expression, scope, ctx);
     if !resolved.is_empty() {
-        let joined = ResolvedType::types_joined(&resolved);
-        // Expand type aliases (e.g. `@phpstan-type UserList array<int, User>`)
-        // so that `extract_value_type` can see the underlying generic type.
-        let expanded = crate::type_engine::type_resolution::resolve_type_alias_typed(
-            &joined,
-            &ctx.current_class.name,
-            ctx.all_classes,
-            ctx.class_loader,
-        )
-        .unwrap_or(joined);
-        return Some(expanded);
+        return Some(ResolvedType::types_joined(&resolved));
     }
 
     // Fallback: for simple `$variable` iterators, check for an inline
@@ -1399,15 +1413,7 @@ pub(crate) fn resolve_foreach_iterable_type<'b>(
         )
         .map(|t| crate::util::resolve_php_type_names(&t, ctx.class_loader))
         {
-            // Expand type aliases on the docblock result too.
-            let expanded = crate::type_engine::type_resolution::resolve_type_alias_typed(
-                &docblock_type,
-                &ctx.current_class.name,
-                ctx.all_classes,
-                ctx.class_loader,
-            )
-            .unwrap_or(docblock_type);
-            return Some(expanded);
+            return Some(docblock_type);
         }
     }
 
@@ -1690,6 +1696,12 @@ pub(crate) fn bind_foreach_value<'b>(
                             continue;
                         }
                     }
+                    // A hole (`foreach ($x as [, $parameter])`) names nothing
+                    // but still consumes the position.
+                    ArrayElement::Missing(_) => {
+                        positional_index += 1;
+                        continue;
+                    }
                     _ => continue,
                 };
 
@@ -1858,8 +1870,15 @@ pub(crate) fn bind_foreach_key<'b>(
                 &iterable_ctx(ctx),
             )
         });
-        let key_type =
-            key_type.unwrap_or_else(|| PhpType::union(vec![PhpType::int(), PhpType::string()]));
+        // Benevolent, because `int|string` here is not something the array
+        // said — it is the whole of PHP's key domain, standing in for a key
+        // type nobody wrote down.  Holding the user to both branches of a
+        // union we invented turns every `substr($key, …)` into a false
+        // positive, so a single branch satisfies it (`is_type_compatible`
+        // implements that half).
+        let key_type = key_type.unwrap_or_else(|| {
+            PhpType::benevolent(PhpType::union(vec![PhpType::int(), PhpType::string()]))
+        });
         let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
             &key_type,
             &ctx.current_class.name,

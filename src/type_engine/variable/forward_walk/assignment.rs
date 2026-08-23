@@ -2146,6 +2146,12 @@ pub(crate) fn bind_destructured_pattern<'b>(
                 positional_index += 1;
                 (val.value, key)
             }
+            // A hole (`[, $second]`) names nothing but still consumes the
+            // position, so every later element shifts along with it.
+            ArrayElement::Missing(_) => {
+                positional_index += 1;
+                continue;
+            }
             _ => continue,
         };
 

@@ -181,6 +181,7 @@ pub fn apply_function_stub_patches(func: &mut FunctionInfo) {
         "stream_bucket_make_writeable" => patch_stream_bucket_make_writeable(func),
         "array_map" => patch_array_map(func),
         "array_filter" => patch_array_filter(func),
+        "array_fill_keys" => patch_array_fill_keys(func),
         "array_keys" => patch_array_key_value_generics(func, "$array", "list<TKey>"),
         "array_values" => patch_array_key_value_generics(func, "$array", "list<TValue>"),
         "array_search" => patch_array_key_value_generics(func, "$haystack", "TKey|false"),
@@ -385,6 +386,50 @@ fn patch_array_key_value_generics(func: &mut FunctionInfo, array_param: &str, re
         .into_iter()
         .collect();
     func.template_bindings = vec![(atom(TKEY), array_name), (atom(TVALUE), array_name)];
+}
+
+/// Give `array_fill_keys()` the generics that turn its two arguments into
+/// the result's key and value types.
+///
+/// The stub is `array_fill_keys(array $keys, mixed $value): array`, so a
+/// caller loses the one thing the call establishes: the keys of the result
+/// are exactly the *values* of `$keys`. That matters downstream, because
+/// `array_keys(array_fill_keys($names, true))` should hand back the
+/// `$names` it started from rather than a bare `array-key`.
+///
+/// Unlike [`patch_array_key_value_generics`], `TKey` binds from the array
+/// parameter's *element* type, not its key type.
+fn patch_array_fill_keys(func: &mut FunctionInfo) {
+    const TKEY: &str = "TKey";
+    const TVALUE: &str = "TValue";
+
+    let keys_name = match func.parameters.first() {
+        Some(p) if p.name.as_str() == "$keys" => p.name,
+        _ => return,
+    };
+    let value_name = match func.parameters.get(1) {
+        Some(p) if p.name.as_str() == "$value" => p.name,
+        _ => return,
+    };
+
+    let keys_hint = PhpType::parse(&format!("array<{TKEY}>"));
+    let value_hint = PhpType::parse(TVALUE);
+    for param in func.parameters.make_mut() {
+        if param.name == keys_name {
+            param.type_hint = Some(keys_hint.clone());
+        } else if param.name == value_name {
+            param.type_hint = Some(value_hint.clone());
+        }
+    }
+
+    func.return_type = Some(PhpType::parse(&format!("array<{TKEY}, {TVALUE}>")));
+    func.template_params = vec![atom(TKEY), atom(TVALUE)];
+    // `$keys` whose element type is unknown leaves `TKey` on PHP's own
+    // answer — whatever a `foreach` writes into an array is an `array-key`.
+    func.template_param_bounds = [(atom(TKEY), PhpType::parse("array-key"))]
+        .into_iter()
+        .collect();
+    func.template_bindings = vec![(atom(TKEY), keys_name), (atom(TVALUE), value_name)];
 }
 
 /// Patch `range()` to have a conditional return type.

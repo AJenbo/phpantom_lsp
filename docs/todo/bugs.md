@@ -560,161 +560,105 @@ branch this call never takes.
 
 ## Array types
 
-### B244. The single-argument docblock array shorthand `array<T>` defaults its key to `int`
+### B246. `array_keys()` on an array whose keys the `+` operator merged
 
-**Impact: Medium-High · Complexity: Medium**
-
-```php
-/** @return array<TypeAliasTag> */
-public function getTypeAliasTags(): array { /* ... */ }
-
-/** @var array<string, TypeAlias>|null */
-private $typeAliases;
-
-$this->typeAliases = array_map(fn ($tag) => ..., $this->getTypeAliasTags());
-// false type_mismatch_property: expects array<string, TypeAlias>|null, got array<int, TypeAlias>
-```
-
-(`src/Reflection/ClassReflection.php:1460,1492`.) PHPStan's own
-`\PHPStan\dumpType` confirms the single-argument shorthand
-`array<TypeAliasTag>` (key omitted) resolves to a keyless `array<TypeAliasTag>`,
-not `array<int, TypeAliasTag>` — real PHPStan accepts assigning such a
-value to an `array<string, T>`-typed property, while an *explicit*
-`array<int, T>` annotation is correctly rejected the same way PHPantom
-rejects it here. PHPantom's docblock parser appears to default the
-omitted key to `int`, and that assumed key then propagates through
-`array_map`/`array_merge` into a spurious key-type mismatch. Home:
-wherever `array<T>` single-argument generics are parsed into a
-`PhpType`, likely in `docblock/`.
-
-### B245. `foreach` over a bare variable skips `@phpstan-type`/`@phpstan-import-type` alias expansion
-
-**Impact: Medium · Complexity: Medium**
-
-`resolve_foreach_iterable_type` in
-`type_engine/variable/forward_walk/control_flow.rs` (around line
-1362-1368) has an early-return branch: when the foreach expression is a
-direct `$variable` whose type is already bound in scope, it returns the
-scope's type immediately without calling `resolve_type_alias_typed`.
-Every *other* branch of the same function (the `resolve_rhs_with_scope`
-fallback, the docblock fallback, the subject-resolver fallback) does
-call it. So a variable typed through a `@param Foo $x` /
-`@phpstan-import-type Foo from …` alias keeps its unexpanded
-`Named("Foo")` type when iterated, and `iteration_key_type` falls back
-to the generic `int|string` default instead of the alias's real key
-type:
+**Impact: Low · Complexity: Medium**
 
 ```php
-/** @phpstan-type LinesToIgnore = array<string, array<int, X|null>> */
-function f(LinesToIgnore $linesToIgnore): void
+/** @param array<string, Holder> $a
+ *  @param array<string, Holder> $b */
+function f(array $a, array $b): void
 {
-    foreach ($linesToIgnore as $file => $lines) {
-        // $file resolves to int|string, not string
+    foreach (array_keys($a + $b) as $key) {
+        // $key: array-key, should be string
     }
 }
 ```
 
-Confirmed: a plain `array<string, int>` parameter (no alias) narrows the
-foreach key correctly; the identical array wrapped in a same-file
-`@phpstan-type` alias does not. Examples:
-`src/Analyser/AnalyserResultFinalizer.php:198-220`,
-`src/Analyser/FileAnalyser.php:146-173` (`LinesToIgnore`),
-`src/Analyser/ResultCache/ResultCachePathTransformer.php:132-135` and
-`src/Command/AnalyseApplication.php:206-208` (`CollectorData`).
+(`src/Analyser/VolatileExpressionHelper.php:94-98`.) Assigning the same
+expression first (`$c = $a + $b;`) and calling `array_keys($c)` narrows
+correctly, so the array-union operator itself is understood. The gap is in
+the *text*-based argument resolver
+(`resolve_arg_iterable_raw_type` / `Backend::resolve_arg_text_to_type` in
+`type_engine/variable/rhs_resolution/calls.rs` and
+`type_engine/call_resolution/`): it reads an argument written as source
+text, and `resolve_operator_type` there knows `.` and `?:` but not `+`,
+while the class-walk resolver behind it only reports class-backed results
+and so answers nothing for an array. Splitting `+` in that text resolver
+would duplicate what the AST walker already computes correctly, so the
+real fix is to give the argument path access to the walker's answer
+rather than to teach the text path a second set of operator rules.
 
-### B246. `array_keys()`/`array_values()` don't propagate the source array's real key type
+### B255. An array shape key spelled with a backslash widens the shape's key type to `int|string`
 
-**Impact: High · Complexity: High**
-
-Regardless of whether the source array's key type is `string`
-(declared via `@param`/`@return`, a promoted property, or a method
-return docblock) or `int` (a list), `array_keys()` on it — or a variable
-reassigned from `array_values()` of it — always yields `int|string` for
-the resulting keys, never the real key type:
+**Impact: Low · Complexity: Medium**
 
 ```php
-/** @var array<string, ExpressionTypeHolder> $expressionTypes */
-foreach (array_keys($expressionTypes) as $key) {
+$replacements = ['~\n~' => '|n', '~\r~' => '|r'];
+foreach (array_keys($replacements) as $key) {
     // $key: int|string, should be string
 }
 ```
 
-This is by far the largest single cluster found in this sweep (~35
-diagnostics). Confirmed not tied to B245's alias path — reproduces the
-same way for a plain, non-alias `array<string, string>` parameter run
-through `$x = array_values($x); foreach ($x as $i => ...)`. Likely
-home: the function-level `@template` substitution path
-(`build_function_template_subs`, `extract_array_type_at_position` in
-`type_engine/variable/rhs_resolution/calls.rs`) and/or
-`type_engine/call_resolution/return_types.rs` — either the argument's
-structured key type isn't reaching the `TKey`/`TValue` binding, or the
-substituted `list<T>` result loses its "keys are exactly int" shape
-once it round-trips through variable assignment/scope storage.
-Representative sites: `src/Analyser/MutatingScope.php:518-543`,
-`src/Reflection/Type/MergedPureUnlessCallableIsImpureParameters.php:29-53`,
-`src/Type/FileTypeMapper.php:310-311,787-795`,
-`src/Analyser/ExprHandler/BooleanOrHandler.php:162-170`,
-`src/Rules/Api/{NodeConnectingVisitorAttributesRule,OldPhpParser4ClassRule,RuntimeReflectionFunctionRule,RuntimeReflectionInstantiationRule}.php`,
-`src/Analyser/NodeScopeResolver.php:3838-3882,4164`,
-`src/Reflection/InitializerExprTypeResolver.php:2213-2214`,
-`src/Cache/FileCacheStorage.php:172-177`, `src/Parallel/ProcessPool.php:68-69`,
-`src/DependencyInjection/ValidateServiceTagsExtension.php:83-93`,
-`src/Node/ClassPropertiesNode.php:313-314`,
-`src/Reflection/SignatureMap/FunctionSignatureMapProvider.php:332-333`,
-`src/Reflection/Php/{EnumAllowedSubTypesClassReflectionExtension.php:23-24,PhpClassReflectionExtension.php:622-623,889-891}`,
-`src/Rules/Generics/GenericAncestorsCheck.php:167-172`,
-`src/Analyser/ResultCache/ResultCacheManager.php:1216-1226`,
-`src/Command/AnalyseCommand.php:640-658`,
-`src/Analyser/VolatileExpressionHelper.php:94-98`.
+(`src/Command/ErrorFormatter/TeamcityErrorFormatter.php:121-126`.)
+`iterable_key_type` in `php_type/mod.rs` widens any shape key containing a
+backslash to `int|string`, because the parser stores a shape key in its
+*escape spelling* rather than its decoded runtime value, and a
+double-quoted `"\x38"` really does decode to the integer key `8`. A
+single-quoted key decodes nothing of the sort, so the widening is wrong
+for it, but the stored key no longer records which quote style it came
+from. The fix is to decode the key at parse time (or record the quote
+style alongside it) so `is_decimal_int_array_key` can be asked about the
+runtime key, after which the backslash special case can go entirely.
 
-### B247. No `Benevolent` union for a `foreach` key when the array's key type is genuinely unknown
+### B256. `instanceof` does not narrow an array element (`$types[$i]`)
 
-**Impact: Low-Medium · Complexity: Low**
-
-When `iteration_key_type` can't determine a key type at all (a bare
-`array`, or `mixed` narrowed by `is_array()`), the `bind_foreach_key`
-fallback in `control_flow.rs` builds a strict
-`PhpType::union([int, string])`. Real PHPStan uses a
-`BenevolentUnionType(int|string)` for this exact case, which its own
-diagnostics treat as satisfying a single-branch parameter (confirmed:
-`substr($key, ...)` raises no error against PHPStan's benevolent
-`(int|string)`, but a plain declared `@param int|string $x` passed the
-same value the same way does error). PHPantom already has
-`TypeKind::Benevolent` and `is_type_compatible` already special-cases it
-("any member satisfies") for builtins like `tempnam`/`curl_init` in
-`src/diagnostics/type_errors/compatibility.rs` — it's just not applied
-to this one fallback site. Swapping `PhpType::union(...)` for
-`PhpType::benevolent(PhpType::union(...))` there should fix it
-uniformly. Examples: `src/DependencyInjection/ContainerFactory.php:431-436`,
-`src/DependencyInjection/ConditionalTagsExtension.php:40-56`,
-`src/Rules/Ignore/IgnoreParseErrorRule.php:34-39`.
-
-### B248. List-destructuring against a long `array{...}` shape can bind a variable to the wrong element's type
-
-**Impact: High · Complexity: Medium-High**
+**Impact: Medium-High · Complexity: Medium**
 
 ```php
-// getPhpDocs() : array{ ..., 17 => array<(string|int), VarTag>, ... } (21 elements total)
-[..., , , $varTags, , ...] = $this->getPhpDocs(...); // skip-destructuring to position 17
-$varTags[0]->getType(); // PHPantom binds $varTags to a *different* position's type (bool)
+/** @param list<Ty> $types */
+function f(array $types): void
+{
+    for ($i = 0; $i < count($types); $i++) {
+        if ($types[$i] instanceof ShapeTy) {
+            echo $types[$i]->propName(); // false unknown_member on Ty
+        }
+    }
+}
 ```
 
-(`src/Analyser/NodeScopeResolver.php:1333,1349`.) This is not just a
-false-positive diagnostic — the bound variable's inferred type is
-silently wrong, which would degrade hover/completion/go-to-definition
-just as much as diagnostics. Also reproduces on a plain 2-element list
-`foreach` (`foreach ($this->inFunctionCallsStack as [, $parameter])` in
-`src/Analyser/MutatingScope.php:1122` — `$parameter` picks up position
-0's type instead of position 1's the moment position 0 is left blank,
-confirmed by reverting the blank and watching the false positive
-disappear), so a skipped leading position is enough on its own; it
-doesn't need a long shape. Confirmed with a faithful 21-element repro
-of the same skip-destructuring pattern; a 5-element version of the same
-pattern stayed clean, so the bug needs the shape's length or overall
-complexity to manifest, not the skip pattern alone. Likely an
-off-by-some-count indexing bug in whatever walks list-destructuring
-positions against an `array{...}` shape's keys in
-`type_engine/variable/forward_walk/`.
+The narrowing engine keys a narrowed type by its subject, and an
+array-dim-fetch subject is not one of them: the guard is recorded but
+never read back, so the element keeps the array's declared element type
+inside the branch. Narrowing the same value through a local
+(`$t = $types[$i]; if ($t instanceof ShapeTy)`) or a `foreach` binding
+works, which is the shape most code takes and why this stayed hidden.
+It surfaced as ~17 false `unknown_member` reports across
+`src/Type/TypeCombinator.php:1791-2063` the moment the elements of
+`$types` resolved to a real union instead of to nothing. PHPStan and
+Psalm both narrow a constant offset this way.
+
+### B257. A closure parameter binds the whole container when the argument is a union of array shapes
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+$expected = $cond ? [self::TOKEN_A] : [self::TOKEN_A, self::TOKEN_B];
+array_map(fn ($token) => $this->lexer->getLabel($token), $expected);
+// $token: array{3}|array{4, 2}, should be int
+```
+
+(`src/Parser/RichParser.php:311-316`.) The `ArrayElement` template binding
+in `build_function_template_subs`
+(`type_engine/variable/rhs_resolution/calls.rs`) reads the element type
+with `extract_value_type`, which answers nothing for a *union* of
+`array{…}` shapes; the `!resolved_type.is_array_like()` fallback beside it
+then binds the template to the container itself, so the callback's
+parameter is typed as the array rather than as one of its elements. Two
+things need fixing: `extract_value_type` should join the element types of
+a shape union the way `iterable_element_type` already does, and the
+fallback should decline rather than bind a container it could not read an
+element out of.
 
 ## Docblock handling
 
