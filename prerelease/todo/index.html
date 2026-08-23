@@ -1671,20 +1671,8 @@ unlikely to move the needle for most users.</p>
 <td>Medium-High</td>
 </tr>
 <tr>
-<td>B248</td>
-<td><a href="../todo/bugs/#b248-list-destructuring-against-a-long-array-shape-can-bind-a-variable-to-the-wrong-elements-type">List-destructuring against a long <code>array{...}</code> shape can bind a variable to the wrong element's type</a></td>
-<td>High</td>
-<td>Medium-High</td>
-</tr>
-<tr>
 <td>B229</td>
 <td><a href="../todo/bugs/#b229-instanceof-narrowing-is-not-recognized-for-several-common-condition-shapes"><code>instanceof</code> narrowing is not recognized for several common condition shapes</a></td>
-<td>High</td>
-<td>High</td>
-</tr>
-<tr>
-<td>B246</td>
-<td><a href="../todo/bugs/#b246-array_keysarray_values-dont-propagate-the-source-arrays-real-key-type"><code>array_keys()</code>/<code>array_values()</code> don't propagate the source array's real key type</a></td>
 <td>High</td>
 <td>High</td>
 </tr>
@@ -1705,6 +1693,12 @@ unlikely to move the needle for most users.</p>
 <td><a href="../todo/bugs/#b235-a-lost-chained-call-re-narrowing-misattributes-the-member-lookup-to-the-enclosing-files-own-class">A lost chained-call re-narrowing misattributes the member lookup to the enclosing file's own class</a></td>
 <td>Medium-High</td>
 <td>Medium-High</td>
+</tr>
+<tr>
+<td>B256</td>
+<td><a href="../todo/bugs/#b256-instanceof-does-not-narrow-an-array-element-typesi"><code>instanceof</code> does not narrow an array element (<code>$types[$i]</code>)</a></td>
+<td>Medium-High</td>
+<td>Medium</td>
 </tr>
 <tr>
 <td>B253</td>
@@ -1761,14 +1755,8 @@ unlikely to move the needle for most users.</p>
 <td>Medium</td>
 </tr>
 <tr>
-<td>B244</td>
-<td><a href="../todo/bugs/#b244-the-single-argument-docblock-array-shorthand-arrayt-defaults-its-key-to-int">The single-argument docblock array shorthand <code>array&lt;T&gt;</code> defaults its key to <code>int</code></a></td>
-<td>Medium</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>B245</td>
-<td><a href="../todo/bugs/#b245-foreach-over-a-bare-variable-skips-phpstan-typephpstan-import-type-alias-expansion"><code>foreach</code> over a bare variable skips <code>@phpstan-type</code>/<code>@phpstan-import-type</code> alias expansion</a></td>
+<td>B257</td>
+<td><a href="../todo/bugs/#b257-a-closure-parameter-binds-the-whole-container-when-the-argument-is-a-union-of-array-shapes">A closure parameter binds the whole container when the argument is a union of array shapes</a></td>
 <td>Medium</td>
 <td>Medium</td>
 </tr>
@@ -1791,12 +1779,6 @@ unlikely to move the needle for most users.</p>
 <td>Medium-High</td>
 </tr>
 <tr>
-<td>B247</td>
-<td><a href="../todo/bugs/#b247-no-benevolent-union-for-a-foreach-key-when-the-arrays-key-type-is-genuinely-unknown">No <code>Benevolent</code> union for a <code>foreach</code> key when the array's key type is genuinely unknown</a></td>
-<td>Low-Medium</td>
-<td>Low</td>
-</tr>
-<tr>
 <td>B226</td>
 <td><a href="../todo/bugs/#b226-a-function-static-variables-type-is-not-tracked-across-its-own-reads">A function-<code>static</code> variable's type is not tracked across its own reads</a></td>
 <td>Low-Medium</td>
@@ -1817,6 +1799,18 @@ unlikely to move the needle for most users.</p>
 <tr>
 <td>B254</td>
 <td><a href="../todo/bugs/#b254-unused-variable-check-doesnt-account-for-a-closures-use-capture-feeding-a-required-files-scope">Unused-variable check doesn't account for a closure's <code>use()</code> capture feeding a <code>require</code>d file's scope</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B246</td>
+<td><a href="../todo/bugs/#b246-array_keys-on-an-array-whose-keys-the--operator-merged"><code>array_keys()</code> on an array whose keys the <code>+</code> operator merged</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B255</td>
+<td><a href="../todo/bugs/#b255-an-array-shape-key-spelled-with-a-backslash-widens-the-shapes-key-type-to-intstring">An array shape key spelled with a backslash widens the shape's key type to <code>int\|string</code></a></td>
 <td>Low</td>
 <td>Medium</td>
 </tr>
