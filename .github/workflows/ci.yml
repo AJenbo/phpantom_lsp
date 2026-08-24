@@ -136,7 +136,12 @@ jobs:
           fi
       - name: Run benchmarks
         shell: bash
-        run: cargo bench --bench completion -- --output-format bencher | tee raw_output.txt
+        run: |
+          # History lives on gh-pages, so Criterion's own baseline is
+          # unused -- and the restored target cache leaves a partial one
+          # behind that it then errors on for every benchmark.
+          rm -rf target/criterion
+          cargo bench --bench completion -- --output-format bencher | tee raw_output.txt
       - name: Convert to milliseconds
         shell: bash
         run: |
@@ -187,7 +192,9 @@ jobs:
       - name: Run benchmarks
         if: steps.check-gh-pages.outputs.exists == 'true'
         shell: bash
-        run: cargo bench --bench completion -- --output-format bencher | tee raw_output.txt
+        run: |
+          rm -rf target/criterion
+          cargo bench --bench completion -- --output-format bencher | tee raw_output.txt
       - name: Convert to milliseconds
         if: steps.check-gh-pages.outputs.exists == 'true'
         shell: bash
