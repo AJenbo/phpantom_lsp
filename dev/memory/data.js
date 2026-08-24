@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787597942158,
+  "lastUpdate": 1787602675375,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -24513,6 +24513,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 69.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "7fe5801a65ae36c46f758bd584668391f66e4354",
+          "message": "A conditional return type's winning intersection arm no longer comes\nback as a union",
+          "timestamp": "2026-08-24T22:04:42+02:00",
+          "tree_id": "433270d92eb121892f862aa1e0c08cdd5cbc9383",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/7fe5801a65ae36c46f758bd584668391f66e4354"
+        },
+        "date": 1787602668367,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 36.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 71.1,
             "unit": "MiB"
           }
         ]
