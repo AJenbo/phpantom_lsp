@@ -35,6 +35,12 @@ def main() -> None:
                 "range": f"\u00b1 {range_ms:.3f}",
             }
         )
+    if not results:
+        sys.exit(
+            "no benchmark results parsed from stdin -- the benchmark run "
+            "probably failed to build or crashed before reporting"
+        )
+
     json.dump(results, sys.stdout, indent=2)
     sys.stdout.write("\n")
 

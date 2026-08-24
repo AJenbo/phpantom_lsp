@@ -135,6 +135,7 @@ jobs:
             git push origin "$commit:refs/heads/gh-pages"
           fi
       - name: Run benchmarks
+        shell: bash
         run: cargo bench --bench completion -- --output-format bencher | tee raw_output.txt
       - name: Convert to milliseconds
         run: python3 benches/format_bench_output.py < raw_output.txt > output.json
@@ -178,6 +179,7 @@ jobs:
           fi
       - name: Run benchmarks
         if: steps.check-gh-pages.outputs.exists == 'true'
+        shell: bash
         run: cargo bench --bench completion -- --output-format bencher | tee raw_output.txt
       - name: Convert to milliseconds
         if: steps.check-gh-pages.outputs.exists == 'true'
@@ -226,6 +228,7 @@ jobs:
       - name: Build release binary
         run: cargo build --release
       - name: Measure memory usage
+        shell: bash
         run: |
           # THP mode affects resident memory (2 MiB backing pages in
           # `always` mode); log it so the numbers are interpretable.
@@ -277,6 +280,7 @@ jobs:
           fi
       - name: Measure memory usage
         if: steps.check-gh-pages.outputs.exists == 'true'
+        shell: bash
         run: |
           cat /sys/kernel/mm/transparent_hugepage/enabled || true
           python3 benches/memory_usage.py --binary "target/$CARGO_BUILD_TARGET/release/phpantom_lsp" | tee memory_output.json
