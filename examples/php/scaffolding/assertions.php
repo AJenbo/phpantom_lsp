@@ -706,6 +706,8 @@ function runDemoAssertions(): void
     $reflectedWidget = (new ReflectionInstantiationDemo())->reflectedWidget($holder);
     assert($reflectedWidget instanceof Scaffolding\ReflectedWidget, 'ReflectionProperty::getValue() must be Scaffolding\ReflectedWidget');
     assert((new ReflectionInstantiationDemo())->reflectedWidget(new Scaffolding\ReflectedHolder()) === null, 'A null private property must read back as null');
+    $directWidget = (new ReflectionInstantiationDemo())->directWidget($holder);
+    assert($directWidget === $widget, 'new \ReflectionProperty() must read the same property getProperty() does');
     $accessedWidget = (new ReflectionInstantiationDemo())->accessedWidget($holder);
     assert($accessedWidget instanceof Scaffolding\ReflectedWidget, 'An accessor must return what its arguments name');
     assert(ReflectionInstantiationDemo::fetchProperty($holder, 'widget') === $widget, 'fetchProperty() must read the property the name argument gives');

@@ -87,6 +87,15 @@ function probe(Configuration $config, string $dynamicName, $unknown): void {
 
     $reflUnknown = new \ReflectionObject($unknown);
     $unknownValue = $reflUnknown->getProperty('shell')->getValue($unknown);
+
+    $direct = new \ReflectionProperty(Configuration::class, 'shell');
+    $directValue = $direct->getValue($config);
+    $directNamedClass = (new \ReflectionProperty('Configuration', 'verbosity'))->getValue($config);
+    $directInstance = (new \ReflectionProperty($config, 'inheritedShell'))->getValue($config);
+    $directLabelled = (new \ReflectionProperty(property: 'shell', class: Configuration::class))->getValue($config);
+
+    $directDynamic = (new \ReflectionProperty(Configuration::class, $dynamicName))->getValue($config);
+    $directUnknownClass = (new \ReflectionProperty($unknown, 'shell'))->getValue($unknown);
 }
 "#;
 
@@ -122,6 +131,25 @@ fn a_reflected_property_read_types_as_the_property_declares() {
     );
 }
 
+/// `new ReflectionProperty(C::class, 'name')` and
+/// `(new ReflectionClass(C::class))->getProperty('name')` are the same value
+/// written two ways, so they carry the same class and name. The class may be
+/// named by a `::class` constant, a quoted name, or an instance, and the two
+/// arguments may arrive labelled.
+#[test]
+fn a_directly_constructed_reflection_property_carries_what_it_reflects() {
+    assert_assigned_types(
+        FIXTURE,
+        &[
+            ("$direct", "ReflectionProperty<Configuration, 'shell'>"),
+            ("$directValue", "?Shell"),
+            ("$directNamedClass", "int"),
+            ("$directInstance", "?Shell"),
+            ("$directLabelled", "?Shell"),
+        ],
+    );
+}
+
 /// Everything the rule cannot decide keeps `getValue()`'s declared `mixed`:
 /// a property name that is not a literal, a property with no declared type,
 /// a name that matches no property, and a reflected value whose class is
@@ -135,6 +163,8 @@ fn an_undecidable_reflected_read_stays_mixed() {
             ("$untypedValue", "mixed"),
             ("$absentValue", "mixed"),
             ("$unknownValue", "mixed"),
+            ("$directDynamic", "mixed"),
+            ("$directUnknownClass", "mixed"),
         ],
     );
 }

@@ -1343,6 +1343,22 @@ impl Backend {
                     None => return vec![],
                 };
 
+                // `new ReflectionProperty(C::class, 'name')` is the value
+                // `ReflectionClass::getProperty('name')` builds, written
+                // the other way, so it carries the same class and name.
+                if super::is_reflected_property_class(cls_arc.fqn().as_str())
+                    && let Some(ty) = super::resolve_reflected_property_at_new(
+                        &cls_arc,
+                        &split_text_args(text_args),
+                        ctx,
+                    )
+                {
+                    if let Some(ref mut hint_out) = return_type_hint_out {
+                        **hint_out = Some(ty);
+                    }
+                    return vec![cls_arc];
+                }
+
                 // Fast path: no template params, no inference needed.
                 if cls_arc.template_params.is_empty() || text_args.is_empty() {
                     return vec![cls_arc];

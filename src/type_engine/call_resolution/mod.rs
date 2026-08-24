@@ -64,7 +64,10 @@ mod target_cache;
 mod template_subs;
 
 pub(crate) use facade_owner::facade_concrete_owner;
-pub(crate) use reflection::{is_reflected_property_call, resolve_reflected_property_at_call};
+pub(crate) use reflection::{
+    is_reflected_property_call, is_reflected_property_class, resolve_reflected_property_at_call,
+    resolve_reflected_property_at_new,
+};
 pub(crate) use return_types::{
     MethodReturnCtx, folded_class_constant_type, folded_global_constant_type,
     resolve_static_access_type,

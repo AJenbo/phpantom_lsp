@@ -4858,6 +4858,23 @@ class ReflectionInstantiationDemo
     }
 
     /**
+     * The same read, written without the `ReflectionClass` step.
+     *
+     * `new \ReflectionProperty($class, $name)` and
+     * `(new \ReflectionClass($class))->getProperty($name)` build the same
+     * value, so the direct spelling carries the class and the name too.
+     */
+    public function directWidget(Scaffolding\ReflectedHolder $holder): ?Scaffolding\ReflectedWidget
+    {
+        // ReflectionProperty<Demo\Scaffolding\ReflectedHolder, 'widget'>
+        $property = new \ReflectionProperty(Scaffolding\ReflectedHolder::class, 'widget');
+
+        // Try: `$property->getValue($holder)->` — Scaffolding\ReflectedWidget
+        // members (label()), the same as the getProperty() spelling above
+        return $property->getValue($holder);          // ?Scaffolding\ReflectedWidget
+    }
+
+    /**
      * A reflection-based accessor, which is how the read above is usually
      * written: the object and the property name both arrive as arguments,
      * so nothing the signature could say would be true of every call.  The

@@ -53,6 +53,32 @@ pub(super) fn resolve_rhs_instantiation(
             ctx.class_loader,
         );
 
+        // ── Reflected property construction ─────────────────────
+        // `new ReflectionProperty(C::class, 'name')` is the value
+        // `ReflectionClass::getProperty('name')` builds, written the
+        // other way, so it carries the same class and name.
+        if classes.len() == 1
+            && crate::type_engine::call_resolution::is_reflected_property_class(
+                classes[0].fqn().as_str(),
+            )
+            && let Some(ref arg_list) = inst.argument_list
+        {
+            let arg_texts =
+                crate::type_engine::variable::raw_type_inference::extract_arg_texts_from_ast(
+                    arg_list,
+                    ctx.content,
+                );
+            let arg_refs: Vec<&str> = arg_texts.iter().map(String::as_str).collect();
+            let reflected = crate::type_engine::call_resolution::resolve_reflected_property_at_new(
+                &classes[0],
+                &arg_refs,
+                &ctx.as_resolution_ctx(),
+            );
+            if let Some(ty) = reflected {
+                return ResolvedType::from_classes_with_hint(classes, ty);
+            }
+        }
+
         // ── Constructor template inference ──────────────────────
         // When the class has `@template` params and the constructor
         // has `@param` bindings for them, infer concrete types from

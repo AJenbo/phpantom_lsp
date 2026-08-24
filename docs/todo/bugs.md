@@ -140,33 +140,6 @@ it needs a `composer install` in the checkout. Filed as a confirmed false
 positive whose cause is still unaccounted for; the eight call sites are
 the only ones seen anywhere.
 
-### B218. `new ReflectionProperty(Foo::class, 'bar')` forgets what it reflects
-
-**Impact: Low · Complexity: Medium**
-
-A reflection value built by `ReflectionClass::getProperty('bar')` carries
-the class and the property name, so reading it types as the property
-declares. Constructing the same value directly does not:
-
-```php
-$viaClass = (new \ReflectionClass(Configuration::class))->getProperty('shell');
-$viaClass->getValue($config);   // ?Shell
-
-$direct = new \ReflectionProperty(Configuration::class, 'shell');
-$direct->getValue($config);     // mixed
-```
-
-The two spellings are interchangeable in real code, so the second should
-resolve like the first. The binding cannot come from the constructor's
-docblock: `class-string<T>|T $class` would bind the class through the
-existing machinery, but the `$property` name is a string literal, and a
-literal only binds to a `@template` whose bound is a type operator
-(`key-of<…>` and friends). Either the two `new`-expression resolution
-paths need the same rule the two call paths got, or literal binding has
-to be widened to a `@template TName of string`, which is what PHPStan
-does for literal string types and would want measuring against the whole
-corpus first.
-
 ## Array types
 
 No outstanding items.
