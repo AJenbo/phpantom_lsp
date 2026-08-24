@@ -138,7 +138,14 @@ jobs:
         shell: bash
         run: cargo bench --bench completion -- --output-format bencher | tee raw_output.txt
       - name: Convert to milliseconds
-        run: python3 benches/format_bench_output.py < raw_output.txt > output.json
+        shell: bash
+        run: |
+          python3 benches/format_bench_output.py < raw_output.txt > output.json || {
+            echo "::group::raw_output.txt"
+            cat raw_output.txt
+            echo "::endgroup::"
+            exit 1
+          }
       - name: Store benchmark result
         uses: benchmark-action/github-action-benchmark@v1
         with:
@@ -183,7 +190,14 @@ jobs:
         run: cargo bench --bench completion -- --output-format bencher | tee raw_output.txt
       - name: Convert to milliseconds
         if: steps.check-gh-pages.outputs.exists == 'true'
-        run: python3 benches/format_bench_output.py < raw_output.txt > output.json
+        shell: bash
+        run: |
+          python3 benches/format_bench_output.py < raw_output.txt > output.json || {
+            echo "::group::raw_output.txt"
+            cat raw_output.txt
+            echo "::endgroup::"
+            exit 1
+          }
       - name: Compare against baseline
         if: steps.check-gh-pages.outputs.exists == 'true'
         uses: benchmark-action/github-action-benchmark@v1

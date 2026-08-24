@@ -1,5 +1,4 @@
 use mago_syntax::cst::sequence::TokenSeparatedSequence;
-use mago_syntax::cst::*;
 
 use super::*;
 use crate::type_engine::subject_expr::{BracketSegment, SubjectExpr};

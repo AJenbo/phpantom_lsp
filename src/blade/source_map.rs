@@ -283,7 +283,7 @@ mod tests {
                 let end = start
                     + text[start + 1..]
                         .find(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_')
-                        .map_or(text.len() - start - 1, |offset| offset)
+                        .unwrap_or(text.len() - start - 1)
                     + 1;
                 for character in start..end {
                     let position = at(line as u32, character as u32);
