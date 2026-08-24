@@ -13494,3 +13494,78 @@ class NeonAdapter
         "getMessage() is inherited from the global \\Exception, got: {msgs:?}"
     );
 }
+
+/// A guard on an array element addressed by a computed offset describes
+/// every later read written the same way, including the one that reads a
+/// member straight off it.
+#[test]
+fn a_computed_element_read_sees_the_guard_that_narrowed_it() {
+    let backend = create_test_backend();
+
+    let php = r#"<?php
+
+class Stmt {}
+
+class IfStmt extends Stmt
+{
+    /** @var list<Stmt> */
+    public array $elseifs = [];
+}
+
+/** @param list<Stmt> $statements */
+function probe(array $statements, int $count): void
+{
+    if (!$statements[$count - 2] instanceof IfStmt) {
+        return;
+    }
+    $if = $statements[$count - 2];
+    echo count($if->elseifs);
+    echo count($statements[$count - 2]->elseifs);
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, "file:///computed.php", php);
+    let msgs: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+    assert!(
+        msgs.is_empty(),
+        "the guard narrows both reads, got: {msgs:?}"
+    );
+}
+
+/// An assignment replaces whatever the variable held, so a right-hand
+/// side that resolves to nothing leaves it unknown rather than still
+/// carrying the type it was initialised with.
+#[test]
+fn an_unresolvable_assignment_drops_the_variables_previous_type() {
+    let backend = create_test_backend();
+
+    let php = r#"<?php
+
+class Scope
+{
+    public function merge(Scope $other): Scope { return $this; }
+}
+
+function accumulate(array $ends): ?Scope
+{
+    $acc = null;
+    foreach ($ends as $end) {
+        $endScope = $end->getScope();
+        if ($acc === null) {
+            $acc = $endScope;
+            continue;
+        }
+        $acc = $acc->merge($endScope);
+    }
+
+    return $acc;
+}
+"#;
+    backend.update_ast("file:///accumulate.php", php);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics("file:///accumulate.php", php, &mut diags);
+    let msgs: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+    assert!(
+        msgs.is_empty(),
+        "`$acc` no longer holds the initial null, got: {msgs:?}"
+    );
+}

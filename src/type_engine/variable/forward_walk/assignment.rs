@@ -1614,8 +1614,14 @@ pub(crate) fn process_assignment_expr<'b>(
         scope.invalidate_proofs(&lhs_name);
         if !rhs_types.is_empty() {
             scope.set(&lhs_name, rhs_types);
-        } else if !scope.contains(&lhs_name) {
-            scope.set_empty(&lhs_name);
+        } else {
+            // The right-hand side did not resolve, so nothing is known
+            // about what the variable now holds — but the value it held
+            // before the assignment is gone either way. Keeping the old
+            // type is what made `$acc = $acc->merge($x)` (with `$x`
+            // unresolved) report a member access on the `null` that
+            // `$acc` was initialised with.
+            scope.set_unknown(&lhs_name);
         }
         // `$isHtml = $raw instanceof HtmlString` makes `$isHtml` stand
         // for the check, so testing it later narrows `$raw`.

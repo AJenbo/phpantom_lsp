@@ -167,7 +167,18 @@ pub(crate) fn try_enter_closure_expr<'b>(
             return try_enter_closure_expr(inner.expression, scope, ctx, None);
         }
         Expression::Assignment(assignment) => {
-            // Process the assignment first so the LHS var is in scope.
+            // A closure the cursor sits in has to be written on the
+            // right-hand side, and only then is processing the assignment
+            // first (so the left-hand side is in scope for it) worth
+            // anything.  Every other cursor position would apply the
+            // assignment a second time — `process_statement` walks it too
+            // — and `$x = $x->format()` would resolve against the string
+            // the first pass already stored rather than the object.
+            let rhs_span = assignment.rhs.span();
+            if ctx.cursor_offset < rhs_span.start.offset || ctx.cursor_offset > rhs_span.end.offset
+            {
+                return false;
+            }
             process_assignment_expr(expr, scope, ctx);
             return try_enter_closure_expr(assignment.rhs, scope, ctx, None);
         }

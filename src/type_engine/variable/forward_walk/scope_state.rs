@@ -144,6 +144,16 @@ impl ScopeState {
         self.locals.entry(atom(var_name)).or_default();
     }
 
+    /// Replace whatever was known about a variable with "no type known".
+    ///
+    /// Unlike [`Self::set_empty`], this overwrites an existing entry: it
+    /// is what an assignment whose right-hand side resolves to nothing
+    /// records, since the old value is gone whether or not the new one
+    /// could be typed.
+    pub fn set_unknown(&mut self, var_name: &str) {
+        self.locals.insert(atom(var_name), Vec::new());
+    }
+
     /// Insert a variable's types from parameter seeding.
     pub fn seed(&mut self, var_name: &str, types: Vec<ResolvedType>) {
         if types.is_empty() {

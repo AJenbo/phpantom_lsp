@@ -1777,10 +1777,13 @@ fn subject_scope_key(expr: &SubjectExpr) -> String {
                     match seg {
                         BracketSegment::StringKey(s) => key.push_str(&format!("[\"{}\"]", s)),
                         BracketSegment::IntKey(n) => key.push_str(&format!("[\"{}\"]", n)),
-                        // A variable index keeps its name, matching the
-                        // `$types[$i]` form `expr_to_subject_key` writes,
-                        // so a guard on one read narrows the next.
-                        BracketSegment::VariableIndex(name) => key.push_str(&format!("[{}]", name)),
+                        // A computed index keeps its written form, matching
+                        // the `$types[$i]` / `$types[$count-2]` shape
+                        // `expr_to_subject_key` writes, so a guard on one
+                        // read narrows the next.
+                        BracketSegment::ComputedIndex(index) => {
+                            key.push_str(&format!("[{}]", index))
+                        }
                         BracketSegment::ElementAccess => key.push_str("[]"),
                     }
                 }

@@ -26,7 +26,7 @@ dependency.
 
 | Item | Reason |
 |------|--------|
-| Editor-side Blade language registration | The tree-sitter grammar, `.blade.php` file association, and `languageId: "blade"` wiring belong to editor extensions, not the server. Zed's official PHP extension (which absorbed PHPantom's plain-PHP wiring; this repo no longer bundles `zed-extension/`) will not grow Blade support — that registration belongs to the planned `zed-laravel` extension. On VS Code, Blade extensions already set `languageId` to `"blade"`, so PHPantom's integration needs to register for both `"php"` and `"blade"`. Neovim's `lspconfig` can be configured to send `.blade.php` files with the correct `languageId`. |
+| Editor-side Blade language registration | The tree-sitter grammar, `.blade.php` file association, and `languageId: "blade"` wiring belong to editor extensions, not the server. Zed's official PHP extension (which absorbed PHPantom's plain-PHP wiring; this repo no longer bundles `zed-extension/`) will not grow Blade support — that registration belongs to a third-party Blade extension instead, which already exists (`zed-laravel-blade`, MIT, unaffiliated) and lists PHPantom as one of several selectable language servers alongside Intelephense, PhpTools, and Phpactor. On VS Code, Blade extensions already set `languageId` to `"blade"`, so PHPantom's integration needs to register for both `"php"` and `"blade"`. Neovim's `lspconfig` can be configured to send `.blade.php` files with the correct `languageId`. |
 | Rendering or booting to resolve templates | Consistent with `laravel.md`: we never run PHP or boot a Laravel application. |
 
 ---
@@ -91,6 +91,44 @@ directive-registration half.) Scan literal directive registrations too
   `@elseadmin`, `@endadmin`, `@unlessadmin`);
 - directive name completion (`DIRECTIVE_COMPLETIONS` in
   `src/blade/directives.rs`) includes them.
+
+---
+
+## BL25. Anonymous component attribute completion from undeclared template reads
+
+**Impact: Medium · Complexity: Medium**
+
+`anonymous_component_attributes()` in
+`src/completion/handler/blade_component.rs` only reads a component's
+`@props()` declaration. A `.blade.php` anonymous component with no
+`@props` block — the common case for a small partial that just reads
+`$title`/`$icon` straight from the tag's attributes — gets no attribute
+completion at all when its tag is typed elsewhere in the project.
+Laravel Idea covers exactly this case: it treats every variable an
+anonymous component's view reads that nothing else declares as an
+implicit prop, and offers it as a completion candidate the same as a
+declared one.
+
+- When `@props()` is absent (or to fill in names it leaves out), fall
+  back to a free-variable scan of the component's own template: names
+  read but never assigned within it (no `@php` assignment, loop
+  variable, `@aware`, or outer-scope source) are the template's
+  implicit attribute list.
+- This reads the *callee*'s own body, not caller call sites, so it
+  stays consistent with this document's "signatures over call-site
+  scanning" philosophy above — the template still declares its own
+  contract, just implicitly through usage instead of a `@props()` line.
+
+### Tests
+
+- An anonymous component with no `@props` and a bare `{{ $title }}`
+  read offers `title` as an attribute when its tag is completed
+  elsewhere.
+- A variable the template assigns itself (`@php($label = strtoupper($title))`)
+  or receives from `@aware` is not offered; only genuinely free reads
+  are.
+- A component that does declare `@props()` is unaffected — declared
+  names still win and still show their default/required detail.
 
 ---
 

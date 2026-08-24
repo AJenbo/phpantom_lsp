@@ -30,13 +30,24 @@ contributor even though it's short.
 
 # Scheduled Sprints
 
-## Sprint 6 — 0.10.0 release, full indexing
+## Sprint 7 — 0.11.0 Blade support
 
 | #    | Item                                                                                                                                                      | Impact      | Complexity  |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
-|      | **Release 0.10.0**                                                                                                                                        |             |             |
+|     | Clear [refactoring gate](todo/refactor.md)                                                                                                                      | —           | —           |
+| BL11 | [Custom directive discovery](todo/blade.md#bl11-custom-directive-discovery) (`Blade::directive()` / `Blade::if()` registrations)                          | Medium      | Medium      |
+| BL25 | [Anonymous component attribute completion from undeclared template reads](todo/blade.md#bl25-anonymous-component-attribute-completion-from-undeclared-template-reads) | Medium     | Medium      |
+| L52  | ["Create missing view" quick-fix for an unresolved view name](todo/laravel.md#l52-create-missing-view-quick-fix-for-an-unresolved-view-name)              | Low-Medium  | Medium      |
+| BL23 | [Unbalanced component tag diagnostics](todo/blade.md#bl23-unbalanced-component-tag-diagnostics)                            | Low-Medium | Medium     |
+| BL14 | [Folding ranges for Blade files](todo/blade.md#bl14-folding-ranges-for-blade-files)                                        | Low-Medium | Medium     |
+| BL24 | [Named slot variables scoped to the component that receives them](todo/blade.md#bl24-named-slot-variables-scoped-to-the-component-that-receives-them) | Low-Medium | Medium |
+| BL17 | [`format --check` CLI subcommand for CI](todo/blade.md#bl17-format-check-cli-subcommand-for-ci) (depends on BL16)         | Low-Medium | Medium     |
+| BL1  | [Blade-aware code actions](todo/blade.md#bl1-blade-aware-code-actions)                                                      | Medium     | Medium-High |
+| BL15 | [Document outline (symbols) for Blade files](todo/blade.md#bl15-document-outline-symbols-for-blade-files)                   | Low-Medium | Medium-High |
+| BL16 | [Blade-aware formatting](todo/blade.md#bl16-blade-aware-formatting)                                                          | Low-Medium | High       |
+|      | **Release 0.11.0**                                                                                                                                        |             |             |
 
-## Sprint 7 — 1.0 release & IDE extensions
+## Sprint 8 — 1.0 release & IDE extensions
 
 | #   | Item                                                                                                                                                            | Impact      | Complexity  |
 | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
@@ -51,19 +62,6 @@ contributor even though it's short.
 | F20 | [Migrate to the maintained `tower-lsp` fork](todo/lsp-features.md#f20-migrate-to-the-maintained-tower-lsp-fork)                                              | Low-Medium  | Very High   |
 | F21 | [Static `typeHierarchyProvider` advertisement](todo/lsp-features.md#f21-static-typehierarchyprovider-advertisement-depends-on-f20) (depends on F20; also needs an upstream `lsp-types` fix) | Low-Medium  | Low         |
 |     | **Release 1.0.0 + IDE extensions**                                                                                                                              |             |             |
-
-## Sprint 8 — Blade support
-
-| #    | Item                                                                                                                       | Impact     | Complexity |
-| ---- | --------------------------------------------------------------------------------------------------------------------------- | ---------- | ---------- |
-|      | Clear [refactoring gate](todo/refactor.md)                                                                                | —          | —          |
-| BL23 | [Unbalanced component tag diagnostics](todo/blade.md#bl23-unbalanced-component-tag-diagnostics)                            | Low-Medium | Medium     |
-| BL14 | [Folding ranges for Blade files](todo/blade.md#bl14-folding-ranges-for-blade-files)                                        | Low-Medium | Medium     |
-| BL24 | [Named slot variables scoped to the component that receives them](todo/blade.md#bl24-named-slot-variables-scoped-to-the-component-that-receives-them) | Low-Medium | Medium |
-| BL17 | [`format --check` CLI subcommand for CI](todo/blade.md#bl17-format-check-cli-subcommand-for-ci) (depends on BL16)         | Low-Medium | Medium     |
-| BL1  | [Blade-aware code actions](todo/blade.md#bl1-blade-aware-code-actions)                                                      | Medium     | Medium-High |
-| BL15 | [Document outline (symbols) for Blade files](todo/blade.md#bl15-document-outline-symbols-for-blade-files)                   | Low-Medium | Medium-High |
-| BL16 | [Blade-aware formatting](todo/blade.md#bl16-blade-aware-formatting)                                                          | Low-Medium | High       |
 
 # Backlog
 
@@ -102,10 +100,9 @@ unlikely to move the needle for most users.
 | T10 | [Ternary expression as RHS of list destructuring](todo/type-inference.md#t10-ternary-expression-as-rhs-of-list-destructuring)                                               | Low         | Medium      |
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Medium      |
 |     | **[Bugs](todo/bugs.md)**                                                                                                                                                    |             |             |
-| B227 | [The replace function family's conditional return type never collapses](todo/bugs.md#b227-the-replace-function-familys-conditional-return-type-never-collapses) | Medium-High | Low-Medium  |
-| B259 | [`instanceof` on an array element with a computed key never narrows](todo/bugs.md#b259-instanceof-on-an-array-element-with-a-computed-key-never-narrows) | Medium | Medium |
 | B258 | [Two variables assigned in the same branch lose their correlated nullability at the merge](todo/bugs.md#b258-two-variables-assigned-in-the-same-branch-lose-their-correlated-nullability-at-the-merge) | Medium | High |
 | B243 | [`PHPStan\Analyser\Scope::mergeWith()` is a confirmed false positive with no explanation on the PHPStan side](todo/bugs.md#b243-phpstananalyserscopemergewith-is-a-confirmed-false-positive-with-no-explanation-on-the-phpstan-side) | Low-Medium | Unknown |
+| B261 | [A property keeps its narrowing across a write the resolver cannot type](todo/bugs.md#b261-a-property-keeps-its-narrowing-across-a-write-the-resolver-cannot-type) | Low-Medium | Medium |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |
@@ -183,8 +180,6 @@ unlikely to move the needle for most users.
 | L10 | `View::withX()` / `RedirectResponse::withX()` dynamic methods                                                                                                               | Low         | Medium      |
 | L39 | [Unused view and translation key detection](todo/laravel.md#l39-unused-view-and-translation-key-detection)                                                                  | Low         | Medium      |
 | L51 | ["Convert facade call to dependency injection" refactor](todo/laravel.md#l51-convert-facade-call-to-dependency-injection-refactor)                                          | Low         | Medium      |
-|     | **[Blade](todo/blade.md)**                                                                                                                                                  |             |             |
-| BL11 | [Custom directive discovery](todo/blade.md#bl11-custom-directive-discovery) (`Blade::directive()` / `Blade::if()` registrations)                                              | Medium      | Medium      |
 |     | **[External Stubs](todo/external-stubs.md)**                                                                                                                                |             |             |
 | E7  | [Stub-based framework patches](todo/external-stubs.md#e7-stub-based-framework-patches)                                                                                      | Medium      | Medium-High |
 | E6  | Stub install prompt for non-Composer projects                                                                                                                               | Low         | Medium      |

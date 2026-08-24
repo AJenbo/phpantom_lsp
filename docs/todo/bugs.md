@@ -21,68 +21,41 @@ No outstanding items.
 
 ## Standard-library return types
 
-### B227. The replace function family's conditional return type never collapses
-
-**Impact: Medium-High · Complexity: Low-Medium**
-
-`str_replace`, `str_ireplace`, `substr_replace`, `preg_replace`,
-`preg_replace_callback`, `preg_replace_callback_array`, and `preg_filter`
-are patched in `stub_patches.rs` (`patch_replace_family`) with a
-conditional return type keyed on `$subject`: array in, array out;
-string in, string out. In practice the conditional never resolves to a
-single branch — it always falls back to the full `string|array<string>`
-union, even when `$subject` is a plain, unambiguous `string` local or a
-string literal:
-
-```php
-function relative(string $filename): string
-{
-    return str_replace('\\', '/', $filename); // string|array<string>, not string
-}
-```
-
-By contrast, other functions patched the same way but keyed on an
-"is string" discriminant (`range()`, keyed on `$start`) resolve
-correctly. The "is array" discriminant is the common thread across
-every failing case (`patch_range` uses `PhpType::named(atom("string"))`
-as its condition; `patch_replace_family` uses `PhpType::array()`), which
-points at `condition_category`/`type_category` in
-`type_engine/types/conditional.rs` or the conditional-evaluation
-dispatch in `type_engine/types/narrowing/assertions.rs`
-(`evaluate_conditional_for`) mishandling an array discriminant
-specifically. Confirmed via minimal repro with a string variable, a
-string literal, and a plain array variable as `$subject` — all three
-return the unresolved union instead of picking a branch.
-
-Real-world hits: any `str_replace()`/`str_ireplace()` call whose result
-feeds a `string`-typed parameter or return raises a false
-`type_mismatch_argument`/`type_mismatch_return`.
+No outstanding items.
 
 ## Narrowing
 
-### B259. `instanceof` on an array element with a computed key never narrows
+### B261. A property keeps its narrowing across a write the resolver cannot type
 
-**Impact: Medium · Complexity: Medium**
+**Impact: Low-Medium · Complexity: Medium**
 
 ```php
-/** @param NodeStmt[] $statements */
-function probe(array $statements, int $count): void
+class Holder
 {
-    if (!$statements[$count - 2] instanceof IfStmt) {
-        return;
+    /** @var A|C */
+    public $prop;
+
+    public function f($u): void
+    {
+        if ($this->prop instanceof A) {
+            $this->prop = $u->make();
+            $this->prop->onlyC();   // false unknown_member, "on class 'A'"
+        }
     }
-    $if = $statements[$count - 2];
-    $if->elseifs;                       // false unknown_member
-    $statements[$count - 2]->elseifs;   // same, read directly
 }
 ```
 
-A literal key (`$statements[2]`) narrows correctly, so the subject key
-built for a computed index expression is what the proof is missed on.
-Real-world hits are `src/Parser/LastConditionVisitor.php:86,91`, where
-the unresolved element also breaks the `@template TValue` binding of the
-`array_last()` call it is passed to, so the same line additionally
-reports "subject type 'TValue' could not be resolved".
+The property branch of `process_assignment_expr`
+(`forward_walk/assignment.rs`) records the written type under the
+property-path key, but `ScopeState::set` ignores an empty type list, so
+a right-hand side that resolves to nothing leaves the `instanceof`
+narrowing from before the write in place. The same defect on a plain
+variable was fixed by writing "no type known" over the old entry; a
+property cannot use that, because the correct fallback for a property is
+its *declared* type, not unknown, so the key has to be dropped rather
+than blanked. Narrower than the variable case: it only misreports when
+the declared type is wider than what the check narrowed it to, since
+otherwise the declared type answers the same way.
 
 ### B258. Two variables assigned in the same branch lose their correlated nullability at the merge
 

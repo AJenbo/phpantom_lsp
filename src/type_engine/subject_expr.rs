@@ -128,45 +128,65 @@ pub enum BracketSegment {
     /// decimal string form so it can address positional shape entries
     /// (`array{Foo, Bar}`) as well as explicit numeric keys.
     IntKey(String),
-    /// A plain variable index, e.g. `[$i]`.
+    /// An index computed from at least one variable, e.g. `[$i]` or
+    /// `[$count - 2]`.
     ///
-    /// Carries the variable's name (including the `$`).  Which entry it
+    /// Carries the index in its spaceless written form.  Which entry it
     /// addresses is unknown, so it yields the same element type
-    /// [`ElementAccess`](BracketSegment::ElementAccess) does; the name is
+    /// [`ElementAccess`](BracketSegment::ElementAccess) does; the text is
     /// kept because two reads written the same way are the same subject,
     /// which is what lets a guard on `$types[$i]` narrow a later read of
     /// it.
-    VariableIndex(String),
-    /// An otherwise non-literal index access, e.g. `[$a + 1]` or `[]`.
+    ComputedIndex(String),
+    /// An otherwise non-literal index access, e.g. `[strlen($s)]` or `[]`.
     ElementAccess,
 }
 
 /// Classify the text inside a `[…]` bracket into a [`BracketSegment`].
 ///
 /// Quoted strings become [`BracketSegment::StringKey`]; bare integer
-/// literals become [`BracketSegment::IntKey`]; a plain variable becomes
-/// [`BracketSegment::VariableIndex`]; everything else (compound
-/// expressions, empty `[]`) becomes [`BracketSegment::ElementAccess`].
+/// literals become [`BracketSegment::IntKey`]; an arithmetic offset built
+/// from variables becomes [`BracketSegment::ComputedIndex`]; everything
+/// else (empty `[]`, a call, a nested literal key) becomes
+/// [`BracketSegment::ElementAccess`].
 fn classify_bracket_inner(inner: &str) -> BracketSegment {
     if let Some(key) = crate::text_scan::unquote_php_string(inner) {
         BracketSegment::StringKey(key.to_string())
     } else if !inner.is_empty() && inner.bytes().all(|b| b.is_ascii_digit()) {
         BracketSegment::IntKey(inner.to_string())
-    } else if is_plain_variable(inner) {
-        BracketSegment::VariableIndex(inner.to_string())
+    } else if let Some(text) = computed_index_text(inner) {
+        BracketSegment::ComputedIndex(text)
     } else {
         BracketSegment::ElementAccess
     }
 }
 
-/// Whether `text` is a bare `$name` with nothing else in it.
-fn is_plain_variable(text: &str) -> bool {
-    let Some(name) = text.strip_prefix('$') else {
-        return false;
-    };
-    !name.is_empty()
-        && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
-        && !name.as_bytes()[0].is_ascii_digit()
+/// The spaceless form of an index that reads a variable (`$i`,
+/// `$count - 2`), or `None` when the text is anything else.
+///
+/// Written text reaches this from the source (`$a[$count - 2]`) and from a
+/// stored subject that was already normalised, so the spaces come out and
+/// both spellings land on the key the AST side builds. The accepted
+/// alphabet is deliberately narrow: an index that calls, concatenates, or
+/// reads a nested literal key is left as a plain element access rather
+/// than risk two different reads normalising to one string.
+fn computed_index_text(inner: &str) -> Option<String> {
+    if !inner.contains('$') {
+        return None;
+    }
+    if !inner.bytes().all(|b| {
+        b.is_ascii_alphanumeric()
+            || matches!(
+                b,
+                b'_' | b'$' | b'+' | b'-' | b'*' | b'/' | b'%' | b'(' | b')'
+            )
+            || b.is_ascii_whitespace()
+            || b >= 0x80
+    }) {
+        return None;
+    }
+    let text: String = inner.chars().filter(|c| !c.is_whitespace()).collect();
+    (!text.is_empty()).then_some(text)
 }
 
 impl SubjectExpr {
@@ -343,9 +363,9 @@ impl SubjectExpr {
                                 out.push_str(n);
                                 out.push(']');
                             }
-                            BracketSegment::VariableIndex(name) => {
+                            BracketSegment::ComputedIndex(index) => {
                                 out.push('[');
-                                out.push_str(name);
+                                out.push_str(index);
                                 out.push(']');
                             }
                             BracketSegment::ElementAccess => out.push_str("[]"),

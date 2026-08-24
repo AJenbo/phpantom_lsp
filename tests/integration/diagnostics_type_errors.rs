@@ -10673,6 +10673,25 @@ function test(string $text): void {
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
+/// The same conditional decides a direct `return`, not just an argument:
+/// a `string`-typed parameter fed straight into `str_replace()` and
+/// returned still satisfies a `string` return type.
+#[test]
+fn a_replace_on_a_string_subject_satisfies_a_string_return_type() {
+    let php = r#"<?php
+function relative(string $filename): string
+{
+    return str_replace('\\', '/', $filename);
+}
+"#;
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///test.php";
+    backend.update_ast(uri, php);
+    let mut out = Vec::new();
+    backend.collect_return_type_diagnostics(uri, php, &mut out);
+    assert!(out.is_empty(), "got {out:?}");
+}
+
 /// The array branch is still enforced: an array subject returns an array,
 /// which no `string` parameter accepts.
 #[test]

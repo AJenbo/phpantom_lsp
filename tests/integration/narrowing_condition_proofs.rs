@@ -1686,6 +1686,58 @@ function f(array $types): void {{
     assert!(text.contains("ShapeTy"), "expected ShapeTy, got: {text}");
 }
 
+/// An offset computed from a variable (`$stmts[$count - 2]`) addresses one
+/// element just as a bare variable index does, so the guard carries.
+#[test]
+fn instanceof_narrows_an_array_element_addressed_by_a_computed_index() {
+    let backend = create_test_backend();
+    let uri = "file:///array_computed_index.php";
+    let content = format!(
+        r#"<?php
+{ELSEIF_SCAFFOLD}
+/** @param list<Ty> $types */
+function f(array $types, int $count): void {{
+    if (!$types[$count - 2] instanceof ShapeTy) {{
+        return;
+    }}
+    $element = $types[$count - 2];
+    $element; // <-- here
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(text.contains("ShapeTy"), "expected ShapeTy, got: {text}");
+}
+
+/// Writing to a variable the offset reads makes the element key stale, so
+/// the guard stops describing it.
+#[test]
+fn writing_to_an_index_operand_drops_the_computed_element_narrowing() {
+    let backend = create_test_backend();
+    let uri = "file:///array_computed_index_write.php";
+    let content = format!(
+        r#"<?php
+{ELSEIF_SCAFFOLD}
+/** @param list<Ty> $types */
+function f(array $types, int $count): void {{
+    if (!$types[$count - 2] instanceof ShapeTy) {{
+        return;
+    }}
+    $count = 0;
+    $element = $types[$count - 2];
+    $element; // <-- here
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(
+        !text.contains("ShapeTy"),
+        "a moved offset proves nothing, got: {text}"
+    );
+}
+
 /// A different index is a different subject, so the guard proves nothing
 /// about it.
 #[test]

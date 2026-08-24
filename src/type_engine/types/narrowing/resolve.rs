@@ -296,14 +296,16 @@ fn is_name_char(c: char) -> bool {
 }
 
 /// Build the subject key for an array access: `$a["k"]` for a literal
-/// index, `$a[$i]` for a variable one.
+/// index, `$a[$i]` or `$a[$count-2]` for a computed one.
 ///
-/// A variable index addresses one element just as a literal one does, for
-/// as long as the index holds the value it held at the check. Writing to
-/// it drops the key — [`key_reads_variable`] sees the index inside the
-/// brackets — which is the rule a call key's arguments already follow.
-/// The index is left unquoted so it cannot collide with a literal key that
-/// happens to spell a variable name.
+/// A computed index addresses one element just as a literal one does, for
+/// as long as every variable it reads holds the value it held at the
+/// check. Writing to one of them drops the key — [`key_reads_variable`]
+/// sees the index inside the brackets — which is the rule a call key's
+/// arguments already follow. That is also why an index with no variable
+/// in it is left out: it buys nothing the literal form does not already
+/// cover. The index is left unquoted so it cannot collide with a literal
+/// key that happens to spell a variable name.
 ///
 /// Kept out of [`expr_to_subject_key`] so its frame stays small: a long
 /// method chain recurses once per link and pays for every local the match
@@ -314,10 +316,69 @@ fn array_access_subject_key(aa: &mago_syntax::cst::ArrayAccess<'_>) -> Option<St
     if let Some(key) = array_access_key_as_string(aa) {
         return Some(format!("{}[\"{}\"]", base, key));
     }
-    let index = expr_to_subject_key(aa.index)?;
-    index
-        .starts_with('$')
-        .then(|| format!("{}[{}]", base, index))
+    let index = array_index_key(aa.index)?;
+    index.contains('$').then(|| format!("{}[{}]", base, index))
+}
+
+/// Render an index expression that is not a literal key.
+///
+/// A bare variable (`$i`) is the common case; an offset computed from one
+/// (`$count - 2`, `$i + 1`) is the same read written with arithmetic, so
+/// it renders to a key too. Spaces are dropped so `$count - 2` and
+/// `$count-2` are one subject, and parentheses are kept so `1-($i-2)` and
+/// `(1-$i)-2` are not.
+///
+/// Only the arithmetic operators are rendered. An index that writes
+/// (`$i++`), concatenates, or compares is not the same read twice, and
+/// falls back to whatever [`expr_to_subject_key`] makes of it — for those
+/// shapes, nothing.
+pub(crate) fn array_index_key(expr: &Expression<'_>) -> Option<String> {
+    match expr {
+        Expression::Binary(bin) => {
+            let operator = arithmetic_operator_text(&bin.operator)?;
+            let lhs = array_index_key(bin.lhs)?;
+            let rhs = array_index_key(bin.rhs)?;
+            Some(format!("{}{}{}", lhs, operator, rhs))
+        }
+        Expression::UnaryPrefix(unary) => {
+            use mago_syntax::cst::unary::UnaryPrefixOperator;
+            let sign = match unary.operator {
+                UnaryPrefixOperator::Negation(_) => '-',
+                UnaryPrefixOperator::Plus(_) => '+',
+                _ => return None,
+            };
+            Some(format!("{}{}", sign, array_index_key(unary.operand)?))
+        }
+        Expression::Parenthesized(inner) => {
+            let rendered = array_index_key(inner.expression)?;
+            // Only a compound operand needs its grouping recorded; `($i)`
+            // and `$i` are the same read and should share a key.
+            Some(match inner.expression {
+                Expression::Binary(_) => format!("({})", rendered),
+                _ => rendered,
+            })
+        }
+        Expression::Literal(Literal::Integer(i)) => Some(
+            i.value
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| bytes_to_str(i.raw).to_string()),
+        ),
+        other => expr_to_subject_key(other),
+    }
+}
+
+/// The written form of an operator that computes an offset, or `None` for
+/// one that does something else with its operands.
+fn arithmetic_operator_text(operator: &BinaryOperator<'_>) -> Option<&'static str> {
+    match operator {
+        BinaryOperator::Addition(_) => Some("+"),
+        BinaryOperator::Subtraction(_) => Some("-"),
+        BinaryOperator::Multiplication(_) => Some("*"),
+        BinaryOperator::Division(_) => Some("/"),
+        BinaryOperator::Modulo(_) => Some("%"),
+        BinaryOperator::Exponentiation(_) => Some("**"),
+        _ => None,
+    }
 }
 
 /// Build the subject key for a method call, matching the
