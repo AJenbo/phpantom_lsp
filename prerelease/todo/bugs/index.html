@@ -890,6 +890,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#b259-instanceof-on-an-array-element-with-a-computed-key-never-narrows" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B259. <code>instanceof</code> on an array element with a computed key never narrows
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#b258-two-variables-assigned-in-the-same-branch-lose-their-correlated-nullability-at-the-merge" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -990,43 +1001,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b251-a-closures-by-reference-use-mutation-isnt-tracked-when-the-closure-is-invoked-indirectly" class="md-nav__link">
+  <a href="#b260-a-conditional-return-type-whose-winning-arm-is-an-intersection-comes-back-as-a-union" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B251. A closure's by-reference <code>use</code> mutation isn't tracked when the closure is invoked indirectly
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b252-doesnt-route-its-rhs-through-the-callable-property-invocation-resolution-path" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B252. <code>??=</code> doesn't route its RHS through the callable-property-invocation resolution path
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b253-a-closure-parameters-type-isnt-inferred-from-a-template-parameterized-callablet-x-signature" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B253. A closure parameter's type isn't inferred from a <code>@template</code>-parameterized <code>callable(T): X</code> signature
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b254-unused-variable-check-doesnt-account-for-a-closures-use-capture-feeding-a-required-files-scope" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B254. Unused-variable check doesn't account for a closure's <code>use()</code> capture feeding a <code>require</code>d file's scope
+        B260. A conditional return type whose winning arm is an intersection comes back as a union
       </span>
     </span>
   </a>
@@ -1568,6 +1546,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#b259-instanceof-on-an-array-element-with-a-computed-key-never-narrows" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B259. <code>instanceof</code> on an array element with a computed key never narrows
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#b258-two-variables-assigned-in-the-same-branch-lose-their-correlated-nullability-at-the-merge" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1668,43 +1657,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b251-a-closures-by-reference-use-mutation-isnt-tracked-when-the-closure-is-invoked-indirectly" class="md-nav__link">
+  <a href="#b260-a-conditional-return-type-whose-winning-arm-is-an-intersection-comes-back-as-a-union" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B251. A closure's by-reference <code>use</code> mutation isn't tracked when the closure is invoked indirectly
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b252-doesnt-route-its-rhs-through-the-callable-property-invocation-resolution-path" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B252. <code>??=</code> doesn't route its RHS through the callable-property-invocation resolution path
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b253-a-closure-parameters-type-isnt-inferred-from-a-template-parameterized-callablet-x-signature" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B253. A closure parameter's type isn't inferred from a <code>@template</code>-parameterized <code>callable(T): X</code> signature
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b254-unused-variable-check-doesnt-account-for-a-closures-use-capture-feeding-a-required-files-scope" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B254. Unused-variable check doesn't account for a closure's <code>use()</code> capture feeding a <code>require</code>d file's scope
+        B260. A conditional return type whose winning arm is an intersection comes back as a union
       </span>
     </span>
   </a>
@@ -1785,20 +1741,39 @@ return the unresolved union instead of picking a branch.</p>
 feeds a <code>string</code>-typed parameter or return raises a false
 <code>type_mismatch_argument</code>/<code>type_mismatch_return</code>.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
+<h3 id="b259-instanceof-on-an-array-element-with-a-computed-key-never-narrows">B259. <code>instanceof</code> on an array element with a computed key never narrows<a class="headerlink" href="#b259-instanceof-on-an-array-element-with-a-computed-key-never-narrows" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">/** @param NodeStmt[] $statements */</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">function probe(array $statements, int $count): void</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">{</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">    if (!$statements[$count - 2] instanceof IfStmt) {</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">        return;</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">    }</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">    $if = $statements[$count - 2];</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">    $if-&gt;elseifs;                       // false unknown_member</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="x">    $statements[$count - 2]-&gt;elseifs;   // same, read directly</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="x">}</span>
+</code></pre></div>
+<p>A literal key (<code>$statements[2]</code>) narrows correctly, so the subject key
+built for a computed index expression is what the proof is missed on.
+Real-world hits are <code>src/Parser/LastConditionVisitor.php:86,91</code>, where
+the unresolved element also breaks the <code>@template TValue</code> binding of the
+<code>array_last()</code> call it is passed to, so the same line additionally
+reports "subject type 'TValue' could not be resolved".</p>
 <h3 id="b258-two-variables-assigned-in-the-same-branch-lose-their-correlated-nullability-at-the-merge">B258. Two variables assigned in the same branch lose their correlated nullability at the merge<a class="headerlink" href="#b258-two-variables-assigned-in-the-same-branch-lose-their-correlated-nullability-at-the-merge" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">$acceptor = null;</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">$reflection = null;</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">if ($name !== &#39;&#39;) {</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">    $reflection = $this-&gt;find($name);</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">    if ($reflection !== null) {</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">        $acceptor = $this-&gt;select($reflection);   // non-null exactly when $reflection is</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">    }</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">}</span>
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="x">if ($reflection !== null) {</span>
-<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="x">    $this-&gt;useBoth($reflection, $acceptor);       // false type_mismatch_argument on $acceptor</span>
-<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">$acceptor = null;</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">$reflection = null;</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">if ($name !== &#39;&#39;) {</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">    $reflection = $this-&gt;find($name);</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">    if ($reflection !== null) {</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">        $acceptor = $this-&gt;select($reflection);   // non-null exactly when $reflection is</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">    }</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">}</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="x">if ($reflection !== null) {</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="x">    $this-&gt;useBoth($reflection, $acceptor);       // false type_mismatch_argument on $acceptor</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="x">}</span>
 </code></pre></div>
 <p>The merge keeps each variable's own union (<code>?Reflection</code>, <code>?Acceptor</code>)
 and forgets that the two were written on the same path, so the later
@@ -1834,11 +1809,11 @@ the only ones seen anywhere.</p>
 <p>A reflection value built by <code>ReflectionClass::getProperty('bar')</code> carries
 the class and the property name, so reading it types as the property
 declares. Constructing the same value directly does not:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">$viaClass = (new \ReflectionClass(Configuration::class))-&gt;getProperty(&#39;shell&#39;);</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">$viaClass-&gt;getValue($config);   // ?Shell</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">$direct = new \ReflectionProperty(Configuration::class, &#39;shell&#39;);</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">$direct-&gt;getValue($config);     // mixed</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">$viaClass = (new \ReflectionClass(Configuration::class))-&gt;getProperty(&#39;shell&#39;);</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">$viaClass-&gt;getValue($config);   // ?Shell</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">$direct = new \ReflectionProperty(Configuration::class, &#39;shell&#39;);</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">$direct-&gt;getValue($config);     // mixed</span>
 </code></pre></div>
 <p>The two spellings are interchangeable in real code, so the second should
 resolve like the first. The binding cannot come from the constructor's
@@ -1855,79 +1830,29 @@ corpus first.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b251-a-closures-by-reference-use-mutation-isnt-tracked-when-the-closure-is-invoked-indirectly">B251. A closure's by-reference <code>use</code> mutation isn't tracked when the closure is invoked indirectly<a class="headerlink" href="#b251-a-closures-by-reference-use-mutation-isnt-tracked-when-the-closure-is-invoked-indirectly" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">$constructorResult = null;</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">$nodeScopeResolver-&gt;processStmtNode($expr-&gt;class, $scope, $storage, new GatheringNodeCallback(</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    static function (Node $node, ...) use (&amp;$constructorResult): void {</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">        $constructorResult = $node;</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">    },</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">    $nodeCallback,</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">), ...);</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="x">if ($constructorResult !== null) {</span>
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="x">    $constructorResult-&gt;getStatementResult(); // still typed null past the guard</span>
+<h3 id="b260-a-conditional-return-type-whose-winning-arm-is-an-intersection-comes-back-as-a-union">B260. A conditional return type whose winning arm is an intersection comes back as a union<a class="headerlink" href="#b260-a-conditional-return-type-whose-winning-arm-is-an-intersection-comes-back-as-a-union" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>A test helper that mocks a container binding is declared</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">/**</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x"> * @template TInstance of object</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x"> * @param string|class-string&lt;TInstance&gt; $abstract</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x"> * @return ($abstract is class-string&lt;TInstance&gt; ? TInstance&amp;MockLike : MockLike)</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x"> */</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">protected function mock($abstract) {}</span>
 </code></pre></div>
-<p>(<code>src/Analyser/ExprHandler/NewHandler.php:153,154</code>.) A directly-invoked
-<code>use (&amp;$x)</code> closure (<code>$callback($arg)</code>) is tracked fine; wrapping the
-same closure in an object and invoking it through a separate method
-call (mirroring <code>GatheringNodeCallback</code>'s <code>invoke()</code>) loses the
-reference mutation entirely, so <code>$constructorResult</code>'s type never
-updates and stays "null" even past the <code>!== null</code> guard.</p>
-<h3 id="b252-doesnt-route-its-rhs-through-the-callable-property-invocation-resolution-path">B252. <code>??=</code> doesn't route its RHS through the callable-property-invocation resolution path<a class="headerlink" href="#b252-doesnt-route-its-rhs-through-the-callable-property-invocation-resolution-path" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">/** @var callable(): MutatingScope $leftTruthyScope */</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">private $leftTruthyScope;</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">$leftTruthyScope = null;</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">$leftTruthyScope ??= ($this-&gt;leftTruthyScope)();</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">$leftTruthyScope-&gt;getType($targetExpr); // false: method call on null</span>
-</code></pre></div>
-<p>(<code>src/Analyser/DisjunctionHolderProjectionAugment.php:78,84</code>.) Isolated
-down to the exact failing ingredient: a direct call <code>($this-&gt;prop)()</code>
-alone resolves fine, <code>$x ??= new Foo()</code> alone resolves fine, only
-<code>$x ??= ($this-&gt;callableProp)()</code> fails — the <code>??=</code> handler doesn't
-reuse the same resolution path a bare invocation of a callable-typed
-property already gets right.</p>
-<h3 id="b253-a-closure-parameters-type-isnt-inferred-from-a-template-parameterized-callablet-x-signature">B253. A closure parameter's type isn't inferred from a <code>@template</code>-parameterized <code>callable(T): X</code> signature<a class="headerlink" href="#b253-a-closure-parameters-type-isnt-inferred-from-a-template-parameterized-callablet-x-signature" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium-High · Complexity: High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">/** @template T @param T $node @param callable(T): void $fn */</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">function fixNode($node, callable $fn): void { $fn($node); }</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">fixNode($property, function ($property) {</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">    $property-&gt;isReadOnly(); // $property&#39;s inferred type is unresolved/mismatched, not the bound T</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x">});</span>
-</code></pre></div>
-<p>When a closure is passed to a method whose docblock is
-<code>@param callable(T): X $fn</code> with <code>T</code> bound from the call-site argument,
-real PHPStan infers the closure's own parameter type from <code>T</code> (even
-overriding a wider explicit hint); PHPantom leaves it as the literal
-template name or the declared hint. Explains every <code>unknown_member</code>
-"subject type 'TNode'/'TValue' could not be resolved" hit:
-<code>src/Parser/LastConditionVisitor.php:91</code>,
-<code>src/Rules/Properties/OverridingPropertyRule.php:68,104</code>,
-<code>build/PHPStan/Build/NamedArgumentsRule.php:183,232</code>,
-<code>build/PHPStan/Build/FinalClassRule.php:77</code>,
-<code>src/Reflection/Type/IntersectionTypeMethodReflection.php:240</code>. Likely
-home: <code>type_engine/</code>'s generic/template substitution for
-callable-type parameters.</p>
-<h3 id="b254-unused-variable-check-doesnt-account-for-a-closures-use-capture-feeding-a-required-files-scope">B254. Unused-variable check doesn't account for a closure's <code>use()</code> capture feeding a <code>require</code>d file's scope<a class="headerlink" href="#b254-unused-variable-check-doesnt-account-for-a-closures-use-capture-feeding-a-required-files-scope" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">(static function (string $file) use ($container): void {</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">    require_once $file; // the required file executes in this closure&#39;s own variable scope</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">})($file);</span>
-</code></pre></div>
-<p>(<code>src/Command/CommandHelper.php:642</code>,
-<code>src/Testing/PHPStanTestCaseTrait.php:49</code> — both flag <code>$container</code> as
-unused.) <code>$container</code> is never referenced <em>by name</em> inside the closure
-body, but <code>require_once</code> runs the target file's code inside the
-closure's own scope, so the required file can legitimately read
-<code>$container</code> as a local variable — a known idiom for exposing a
-variable to dynamically-included code without leaking the rest of the
-enclosing scope. The <code>unused_variable</code> check has no notion of "used via
-a same-scope <code>require</code>/<code>include</code>" at all. (Neither bundled bootstrap
-file in phpstan-src currently reads <code>$container</code> back, so these two
-specific instances may or may not be live in practice — but the
-checker's blind spot is real regardless of this instance's outcome.)</p>
+<p>and returning its result from a method declared <code>Widget&amp;MockLike</code> is
+reported as returning <code>Widget|MockLike</code> — the two members of the winning
+arm's intersection, joined the wrong way. Same family as B227 (a
+conditional return type that never collapses to one arm), except here
+the discriminant is <code>is class-string&lt;T&gt;</code>.</p>
+<p>Not reduced: an isolated class, and a trait whose using class inherits
+the helper, both resolve the intersection correctly, so something in the
+real stack (the framework's own trait chain, or the mock interface being
+reached through several <code>use</code> levels) is needed to trigger it. Reproduces
+on a Laravel test trait that wraps <code>$this-&gt;mock(SomeInterface::class)</code>
+and hands the result back, and only when the whole project is analysed —
+analysing the single file reports nothing, so a cache primed by an
+earlier file is part of it.</p>
 
 
 
