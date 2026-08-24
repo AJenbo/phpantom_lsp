@@ -997,23 +997,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b260-a-conditional-return-type-whose-winning-arm-is-an-intersection-comes-back-as-a-union" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B260. A conditional return type whose winning arm is an intersection comes back as a union
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1653,23 +1636,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b260-a-conditional-return-type-whose-winning-arm-is-an-intersection-comes-back-as-a-union" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B260. A conditional return type whose winning arm is an intersection comes back as a union
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1830,29 +1796,7 @@ corpus first.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b260-a-conditional-return-type-whose-winning-arm-is-an-intersection-comes-back-as-a-union">B260. A conditional return type whose winning arm is an intersection comes back as a union<a class="headerlink" href="#b260-a-conditional-return-type-whose-winning-arm-is-an-intersection-comes-back-as-a-union" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<p>A test helper that mocks a container binding is declared</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">/**</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x"> * @template TInstance of object</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x"> * @param string|class-string&lt;TInstance&gt; $abstract</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x"> * @return ($abstract is class-string&lt;TInstance&gt; ? TInstance&amp;MockLike : MockLike)</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x"> */</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">protected function mock($abstract) {}</span>
-</code></pre></div>
-<p>and returning its result from a method declared <code>Widget&amp;MockLike</code> is
-reported as returning <code>Widget|MockLike</code> — the two members of the winning
-arm's intersection, joined the wrong way. Same family as B227 (a
-conditional return type that never collapses to one arm), except here
-the discriminant is <code>is class-string&lt;T&gt;</code>.</p>
-<p>Not reduced: an isolated class, and a trait whose using class inherits
-the helper, both resolve the intersection correctly, so something in the
-real stack (the framework's own trait chain, or the mock interface being
-reached through several <code>use</code> levels) is needed to trigger it. Reproduces
-on a Laravel test trait that wraps <code>$this-&gt;mock(SomeInterface::class)</code>
-and hands the result back, and only when the whole project is analysed —
-analysing the single file reports nothing, so a cache primed by an
-earlier file is part of it.</p>
+<p>No outstanding items.</p>
 
 
 
