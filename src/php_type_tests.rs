@@ -661,13 +661,48 @@ fn iterable_key_type_normalizes_explicit_numeric_shape_keys() {
             .unwrap(),
         PhpType::string()
     );
+    // A quoted key is decoded the way PHP decodes the literal: `"\x38"` is
+    // the string `8`, which PHP stores as the integer key `8`, while the
+    // single-quoted spelling of the same characters decodes nothing and
+    // stays a string key.
     assert_eq!(
         PhpType::parse(r#"array{"\x38": User}"#)
             .iterable_key_type()
-            .unwrap()
-            .to_string(),
-        "int|string"
+            .unwrap(),
+        PhpType::int()
     );
+    assert_eq!(
+        PhpType::parse(r#"array{'\x38': User}"#)
+            .iterable_key_type()
+            .unwrap(),
+        PhpType::string()
+    );
+    assert_eq!(
+        PhpType::parse(r#"array{'~\n~': string, '~\r~': string}"#)
+            .iterable_key_type()
+            .unwrap(),
+        PhpType::string()
+    );
+}
+
+/// A quoted shape key survives being displayed and parsed again: the
+/// escapes the display writes are the ones PHP reads back.
+#[test]
+fn shape_keys_round_trip_through_their_display_form() {
+    for key in [r"~\n~", "a'b", "a\"b", "with space", "\n", "\t"] {
+        let shape = PhpType::array_shape(vec![ShapeEntry {
+            key: Some(key.to_string()),
+            value_type: PhpType::string(),
+            optional: false,
+        }]);
+        let reparsed = PhpType::parse(&shape.to_string());
+        assert_eq!(
+            reparsed.shape_entries().and_then(|e| e[0].key.as_deref()),
+            Some(key),
+            "{}",
+            shape
+        );
+    }
 }
 
 #[test]

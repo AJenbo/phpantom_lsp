@@ -20,13 +20,25 @@ use crate::type_engine::variable::resolution::build_var_resolver_from_ctx;
 
 use super::array_access::{class_string_inner_binding, insert_or_union};
 use super::instantiation::{
-    TemplateBindingMode, candidate_binding_modes, classify_template_binding,
+    TemplateBindingMode, array_element_binding, candidate_binding_modes, classify_template_binding,
     extract_array_position, extract_generic_arg_from_ancestor,
 };
 use super::{
     extract_closure_or_arrow_return_type, resolve_rhs_expression, resolve_var_types,
     resolved_type_with_lookup,
 };
+
+/// A call argument's type as the AST walker resolves it, looked up by the
+/// argument's source text.
+///
+/// The argument resolver behind template binding reads an argument as
+/// source *text*, so it can only answer for the expression shapes it has a
+/// rule for. An operator it does not split (`$a + $b`) or a construct it
+/// cannot parse leaves a `@template` unbound even though the walker
+/// resolved that very expression on its way into the call. A caller that
+/// reached the call through the AST hands this in so the binding modes can
+/// ask the walker rather than grow a second set of expression rules.
+pub(crate) type ArgWalkerTypes<'a> = &'a dyn Fn(&str) -> Option<PhpType>;
 
 /// Apply one binding mode for `tpl_name`, recording whatever it resolves
 /// into `subs`.
@@ -40,12 +52,19 @@ fn apply_template_binding_mode(
     binding_mode: &TemplateBindingMode,
     tpl_name: &str,
     arg_text: &str,
+    walker_types: Option<ArgWalkerTypes<'_>>,
     param_hint: Option<&PhpType>,
     rctx: &crate::type_engine::resolver::ResolutionCtx<'_>,
 ) {
+    // Only consulted where the text-driven resolver came back empty, so a
+    // caller that reached this through the AST pays for the walk exactly
+    // on the arguments that would otherwise bind nothing.
+    let from_walker = || walker_types.and_then(|lookup| lookup(arg_text));
     match *binding_mode {
         TemplateBindingMode::Direct => {
-            if let Some(resolved_type) = Backend::resolve_arg_text_to_type(arg_text, rctx) {
+            if let Some(resolved_type) =
+                Backend::resolve_arg_text_to_type(arg_text, rctx).or_else(from_walker)
+            {
                 // An array-literal argument resolves only to the bare
                 // `array` keyword, which erases its own keys. Bound
                 // directly (no wrapping hint to unify against), that
@@ -108,6 +127,7 @@ fn apply_template_binding_mode(
                 }
             } else if let Some(resolved_type) = Backend::resolve_arg_text_to_type(arg_text, rctx)
                 .or_else(|| resolve_arg_call_raw_type(arg_text, rctx))
+                .or_else(from_walker)
             {
                 // Extract the element type from array-like types
                 // so we bind T to the element, not the whole array.
@@ -115,15 +135,8 @@ fn apply_template_binding_mode(
                 // declared return type is an array (`getConfigs()`
                 // returning `array<string, Config>`) — those carry no
                 // class info, so the general resolver yields nothing.
-                if let Some(elem_type) = resolved_type.extract_value_type(false) {
-                    insert_or_union(subs, tpl_name.to_string(), elem_type.clone());
-                } else if !resolved_type.is_array_like() {
-                    // The argument resolved to a genuine (non-array)
-                    // type — bind it directly.  A bare array-like
-                    // container whose element type can't be extracted
-                    // is left unbound so `T` falls back to its bound
-                    // (or `mixed`) rather than binding `T` to `array`.
-                    insert_or_union(subs, tpl_name.to_string(), resolved_type);
+                if let Some(elem_type) = array_element_binding(resolved_type) {
+                    insert_or_union(subs, tpl_name.to_string(), elem_type);
                 }
             }
         }
@@ -153,7 +166,8 @@ fn apply_template_binding_mode(
             // (`$this->getUsers()` returning `array<int, User>`) —
             // and extract the positional generic argument.
             if is_array_like_wrapper(wrapper_name)
-                && let Some(resolved) = resolve_arg_iterable_raw_type(arg_text, rctx)
+                && let Some(resolved) =
+                    resolve_arg_iterable_raw_type(arg_text, rctx).or_else(from_walker)
                 && let Some(concrete) = extract_array_type_at_position(&resolved, tpl_position)
             {
                 insert_or_union(subs, tpl_name.to_string(), concrete);
@@ -243,6 +257,7 @@ fn apply_template_binding_mode(
 pub(crate) fn build_function_template_subs(
     func_info: &crate::types::FunctionInfo,
     arg_texts: &[String],
+    walker_types: Option<ArgWalkerTypes<'_>>,
     rctx: &crate::type_engine::resolver::ResolutionCtx<'_>,
 ) -> HashMap<String, PhpType> {
     let mut subs = HashMap::new();
@@ -330,7 +345,15 @@ pub(crate) fn build_function_template_subs(
         // parameter takes.
         let before = subs.get(tpl_name.as_str()).cloned();
         for mode in candidate_binding_modes(tpl_name, param_hint) {
-            apply_template_binding_mode(&mut subs, &mode, tpl_name, arg_text, param_hint, rctx);
+            apply_template_binding_mode(
+                &mut subs,
+                &mode,
+                tpl_name,
+                arg_text,
+                walker_types,
+                param_hint,
+                rctx,
+            );
             if subs.get(tpl_name.as_str()) != before.as_ref() {
                 break;
             }
@@ -359,12 +382,13 @@ pub(crate) fn substitute_function_templates(
     func_info: &crate::types::FunctionInfo,
     ty: PhpType,
     arg_texts: &[String],
+    walker_types: Option<ArgWalkerTypes<'_>>,
     rctx: &crate::type_engine::resolver::ResolutionCtx<'_>,
 ) -> PhpType {
     if !ty.references_any_name(&func_info.template_params) {
         return ty;
     }
-    let subs = build_function_template_subs(func_info, arg_texts, rctx);
+    let subs = build_function_template_subs(func_info, arg_texts, walker_types, rctx);
     if subs.is_empty() {
         return ty;
     }
@@ -826,6 +850,36 @@ fn declared_closure_params(
         .collect()
 }
 
+/// Answer a call argument's type from the AST expression it was written
+/// as, matched by that expression's own source text.
+///
+/// The text a binding mode is handed came out of one of these spans, so
+/// comparing the two finds the expression it names. Two arguments written
+/// identically resolve identically, which is what makes matching on the
+/// text rather than the position safe here.
+pub(crate) fn walker_arg_types<'b, 'c>(
+    argument_list: &'b ArgumentList<'b>,
+    ctx: &'c VarResolutionCtx<'c>,
+) -> impl Fn(&str) -> Option<PhpType> + use<'b, 'c> {
+    move |arg_text| {
+        let wanted = arg_text.trim();
+        argument_list.arguments.iter().find_map(|arg| {
+            let value = match arg {
+                Argument::Positional(positional) => positional.value,
+                Argument::Named(named) => named.value,
+            };
+            let span = value.span();
+            let written = ctx
+                .content
+                .get(span.start.offset as usize..span.end.offset as usize)?;
+            if written.trim() != wanted {
+                return None;
+            }
+            crate::type_engine::variable::resolution::resolve_arg_raw_type(value, ctx)
+        })
+    }
+}
+
 /// Resolve a plain function call: `someFunc()`, array functions, variable
 /// invocations (`$fn()`), and conditional return types.
 pub(super) fn resolve_rhs_function_call<'b>(
@@ -1152,6 +1206,7 @@ pub(super) fn resolve_rhs_function_call<'b>(
                 // The winning branch can name a function-level `@template`
                 // (`tap()` returns `TValue`), which only the call-site
                 // arguments fill in.
+                let walker_types = walker_arg_types(&func_call.argument_list, ctx);
                 let ty = substitute_function_templates(
                     &func_info,
                     ty,
@@ -1159,6 +1214,7 @@ pub(super) fn resolve_rhs_function_call<'b>(
                         &func_call.argument_list,
                         content,
                     ),
+                    Some(&walker_types),
                     &rctx,
                 );
                 let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
@@ -1193,7 +1249,9 @@ pub(super) fn resolve_rhs_function_call<'b>(
                     content,
                 );
             let rctx = ctx.as_resolution_ctx();
-            let subs = build_function_template_subs(&func_info, &arg_texts, &rctx);
+            let walker_types = walker_arg_types(&func_call.argument_list, ctx);
+            let subs =
+                build_function_template_subs(&func_info, &arg_texts, Some(&walker_types), &rctx);
             if !subs.is_empty()
                 && let Some(ref ret) = func_info.return_type
             {

@@ -210,6 +210,54 @@ class Tag {}
     );
 }
 
+/// An argument the text-driven resolver cannot read (the array-union `+`,
+/// which it has no rule for) still binds `array_keys()`'s key template,
+/// because the binding falls back to the type the walker resolved for that
+/// very expression.
+#[test]
+fn array_keys_reads_an_argument_only_the_walker_can_resolve() {
+    let content = r#"<?php
+class Holder {}
+/**
+ * @param array<string, Holder> $a
+ * @param array<string, Holder> $b
+ * @param array<int, Holder> $ints
+ */
+function probe(array $a, array $b, array $ints): void
+{
+    foreach (array_keys($a + $b) as $key) {
+        echo /*MERGED*/$key;
+    }
+    foreach (array_keys($a + $ints) as $mixed) {
+        echo /*MIXED*/$mixed;
+    }
+}
+"#;
+    assert_marked_types(content, &[("MERGED", "string"), ("MIXED", "string|int")]);
+}
+
+/// A single-quoted key holding a backslash is the characters it spells:
+/// `'~\n~'` is a four-character string, not the newline a double-quoted
+/// literal would decode, so nothing about it can be an integer key.
+#[test]
+fn a_backslash_in_a_single_quoted_array_key_leaves_it_a_string_key() {
+    let content = r#"<?php
+function probe(): void
+{
+    $replacements = ['~\n~' => '|n', '~\r~' => '|r'];
+    foreach (array_keys($replacements) as $key) {
+        echo /*KEY*/$key;
+    }
+
+    $decoded = ["\x38" => 'eight'];
+    foreach (array_keys($decoded) as $index) {
+        echo /*DECODED*/$index;
+    }
+}
+"#;
+    assert_marked_types(content, &[("KEY", "string"), ("DECODED", "int")]);
+}
+
 /// A key type nobody wrote down is benevolent: `int|string` here is PHP's
 /// whole key domain standing in for an unknown, not a union the array
 /// declared, so holding a call to both branches of it is a false positive.

@@ -650,15 +650,8 @@ pub(super) fn build_constructor_template_subs(
                     // declared return type is an array (`getConfigs()`
                     // returning `array<string, Config>`) — those carry no
                     // class info, so the general resolver yields nothing.
-                    if let Some(elem_type) = resolved_type.extract_value_type(false) {
-                        insert_or_union(&mut subs, tpl_name.to_string(), elem_type.clone());
-                    } else if !resolved_type.is_array_like() {
-                        // The argument resolved to a genuine (non-array)
-                        // type — bind it directly.  A bare array-like
-                        // container whose element type can't be extracted
-                        // is left unbound so `T` falls back to its bound
-                        // (or `mixed`) rather than binding `T` to `array`.
-                        insert_or_union(&mut subs, tpl_name.to_string(), resolved_type);
+                    if let Some(elem_type) = array_element_binding(resolved_type) {
+                        insert_or_union(&mut subs, tpl_name.to_string(), elem_type);
                     }
                 }
             }
@@ -705,6 +698,30 @@ pub(super) fn build_constructor_template_subs(
     }
 
     subs
+}
+
+/// What an `@param T[] $items` template binds to for an argument that
+/// resolved to `resolved_type`.
+///
+/// A container binds the element type iteration would yield, so `T` names
+/// one element rather than the whole array. Anything that is not a
+/// container is itself the element (`@param T[] $items` bound from a
+/// spread-like single value).
+///
+/// Returns `None` for a container whose elements cannot be read — a bare
+/// `array`, or a union whose array-like members are all opaque. Leaving
+/// `T` unbound lets it fall back to its declared bound (or `mixed`),
+/// which beats binding it to the container and typing every callback
+/// parameter as the array it iterates.
+pub(crate) fn array_element_binding(resolved_type: PhpType) -> Option<PhpType> {
+    if resolved_type
+        .union_members()
+        .iter()
+        .any(|member| member.is_array_like())
+    {
+        return resolved_type.iterable_element_type();
+    }
+    Some(resolved_type)
 }
 
 /// How a template parameter is referenced in a `@param` type annotation.

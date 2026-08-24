@@ -1061,6 +1061,7 @@ impl Backend {
                                     .into_iter()
                                     .map(str::to_string)
                                     .collect::<Vec<String>>(),
+                                None,
                                 ctx,
                             );
                             let classes: Vec<Arc<ClassInfo>> =
@@ -1110,6 +1111,7 @@ impl Backend {
                         let subs = crate::type_engine::variable::rhs_resolution::build_function_template_subs(
                             &func_info,
                             &split_args,
+                            None,
                             ctx,
                         );
 
@@ -1384,12 +1386,8 @@ impl Backend {
                                     {
                                         // Extract the element type from array-like types
                                         // so we bind T to the element, not the whole array.
-                                        if let Some(elem_type) =
-                                            resolved_type.extract_value_type(false)
-                                        {
-                                            crate::type_engine::variable::rhs_resolution::insert_or_union(&mut subs, tpl_name.to_string(), elem_type.clone());
-                                        } else {
-                                            crate::type_engine::variable::rhs_resolution::insert_or_union(&mut subs, tpl_name.to_string(), resolved_type);
+                                        if let Some(elem_type) = crate::type_engine::variable::rhs_resolution::array_element_binding(resolved_type) {
+                                            crate::type_engine::variable::rhs_resolution::insert_or_union(&mut subs, tpl_name.to_string(), elem_type);
                                         }
                                     }
                                 }

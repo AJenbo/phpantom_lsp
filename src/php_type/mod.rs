@@ -1908,13 +1908,6 @@ impl PhpType {
                         Some(key) if key.contains("::") => {
                             PhpType::union(vec![PhpType::int(), PhpType::string()])
                         }
-                        // Shape keys retain escape spelling rather than a
-                        // decoded runtime value. An escaped string may decode
-                        // to a canonical decimal key (e.g. `"\x38"`), so both
-                        // legal PHP key domains must remain possible.
-                        Some(key) if key.contains('\\') => {
-                            PhpType::union(vec![PhpType::int(), PhpType::string()])
-                        }
                         Some(key) if is_decimal_int_array_key(key) => PhpType::int(),
                         Some(_) => PhpType::string(),
                     })

@@ -54,8 +54,14 @@ pub(crate) fn infer_callable_params_from_function_fw(
                 argument_list,
                 ctx.content,
             );
-            let subs =
-                super::super::rhs_resolution::build_function_template_subs(&fi, &arg_texts, &rctx);
+            let walker_types =
+                super::super::rhs_resolution::walker_arg_types(argument_list, &var_ctx);
+            let subs = super::super::rhs_resolution::build_function_template_subs(
+                &fi,
+                &arg_texts,
+                Some(&walker_types),
+                &rctx,
+            );
             if !subs.is_empty() {
                 params = params.into_iter().map(|p| p.substitute(&subs)).collect();
             }

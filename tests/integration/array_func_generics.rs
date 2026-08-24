@@ -795,3 +795,60 @@ function probe(array $rows, array $byName, array $lines): void {
         ],
     );
 }
+
+/// The type reported for the variable right after a `/*NAME*/` marker.
+fn type_at_marker(backend: &Backend, uri: &str, content: &str, marker: &str) -> String {
+    let needle = format!("/*{marker}*/$");
+    let (line, character) = content
+        .lines()
+        .enumerate()
+        .find_map(|(i, l)| {
+            l.find(&needle)
+                .map(|c| (i as u32, (c + needle.len()) as u32))
+        })
+        .unwrap_or_else(|| panic!("marker {marker} not found in the fixture"));
+    let hover = backend
+        .handle_hover(uri, content, Position { line, character })
+        .unwrap_or_else(|| panic!("no hover at marker {marker}"));
+    let HoverContents::Markup(markup) = &hover.contents else {
+        panic!("Expected MarkupContent");
+    };
+    markup
+        .value
+        .lines()
+        .find_map(|l| l.split_once(" = ").map(|(_, ty)| ty.trim().to_string()))
+        .unwrap_or_else(|| panic!("no type in hover at marker {marker}: {}", markup.value))
+}
+
+/// A callback parameter is bound from one element of the array it is handed,
+/// including when the argument is a union of array shapes: a `@template`
+/// that cannot read an element out of a container binds nothing rather than
+/// binding the container itself.
+#[test]
+fn a_callback_parameter_binds_an_element_of_a_shape_union() {
+    let content = r#"<?php
+class Lexer {
+    public function getLabel(int $token): string { return ''; }
+}
+class RichParser {
+    private const TOKEN_A = 3;
+    private const TOKEN_B = 2;
+    private Lexer $lexer;
+
+    /** @param array<string, Lexer> $opaque */
+    public function probe(bool $cond, array $opaque): void
+    {
+        $expected = $cond ? [self::TOKEN_A] : [self::TOKEN_A, self::TOKEN_B];
+        array_map(fn ($token) => $this->lexer->getLabel(/*TOKEN*/$token), $expected);
+        array_map(fn ($lexer) => /*OPAQUE*/$lexer, $opaque);
+    }
+}
+"#;
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///array_func_generics_shape_union.php";
+    backend.update_ast(uri, content);
+    // Both arms are literal, so the element type is the values themselves
+    // rather than the `int` they widen to.
+    assert_eq!(type_at_marker(&backend, uri, content, "TOKEN"), "3|2");
+    assert_eq!(type_at_marker(&backend, uri, content, "OPAQUE"), "Lexer");
+}

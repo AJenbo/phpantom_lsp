@@ -145,78 +145,7 @@ corpus first.
 
 ## Array types
 
-### B246. `array_keys()` on an array whose keys the `+` operator merged
-
-**Impact: Low · Complexity: Medium**
-
-```php
-/** @param array<string, Holder> $a
- *  @param array<string, Holder> $b */
-function f(array $a, array $b): void
-{
-    foreach (array_keys($a + $b) as $key) {
-        // $key: array-key, should be string
-    }
-}
-```
-
-(`src/Analyser/VolatileExpressionHelper.php:94-98`.) Assigning the same
-expression first (`$c = $a + $b;`) and calling `array_keys($c)` narrows
-correctly, so the array-union operator itself is understood. The gap is in
-the *text*-based argument resolver
-(`resolve_arg_iterable_raw_type` / `Backend::resolve_arg_text_to_type` in
-`type_engine/variable/rhs_resolution/calls.rs` and
-`type_engine/call_resolution/`): it reads an argument written as source
-text, and `resolve_operator_type` there knows `.` and `?:` but not `+`,
-while the class-walk resolver behind it only reports class-backed results
-and so answers nothing for an array. Splitting `+` in that text resolver
-would duplicate what the AST walker already computes correctly, so the
-real fix is to give the argument path access to the walker's answer
-rather than to teach the text path a second set of operator rules.
-
-### B255. An array shape key spelled with a backslash widens the shape's key type to `int|string`
-
-**Impact: Low · Complexity: Medium**
-
-```php
-$replacements = ['~\n~' => '|n', '~\r~' => '|r'];
-foreach (array_keys($replacements) as $key) {
-    // $key: int|string, should be string
-}
-```
-
-(`src/Command/ErrorFormatter/TeamcityErrorFormatter.php:121-126`.)
-`iterable_key_type` in `php_type/mod.rs` widens any shape key containing a
-backslash to `int|string`, because the parser stores a shape key in its
-*escape spelling* rather than its decoded runtime value, and a
-double-quoted `"\x38"` really does decode to the integer key `8`. A
-single-quoted key decodes nothing of the sort, so the widening is wrong
-for it, but the stored key no longer records which quote style it came
-from. The fix is to decode the key at parse time (or record the quote
-style alongside it) so `is_decimal_int_array_key` can be asked about the
-runtime key, after which the backslash special case can go entirely.
-
-### B257. A closure parameter binds the whole container when the argument is a union of array shapes
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-$expected = $cond ? [self::TOKEN_A] : [self::TOKEN_A, self::TOKEN_B];
-array_map(fn ($token) => $this->lexer->getLabel($token), $expected);
-// $token: array{3}|array{4, 2}, should be int
-```
-
-(`src/Parser/RichParser.php:311-316`.) The `ArrayElement` template binding
-in `build_function_template_subs`
-(`type_engine/variable/rhs_resolution/calls.rs`) reads the element type
-with `extract_value_type`, which answers nothing for a *union* of
-`array{…}` shapes; the `!resolved_type.is_array_like()` fallback beside it
-then binds the template to the container itself, so the callback's
-parameter is typed as the array rather than as one of its elements. Two
-things need fixing: `extract_value_type` should join the element types of
-a shape union the way `iterable_element_type` already does, and the
-fallback should decline rather than bind a container it could not read an
-element out of.
+No outstanding items.
 
 ## Docblock handling
 

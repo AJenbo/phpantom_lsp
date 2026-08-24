@@ -394,6 +394,7 @@ impl Backend {
             let subs = crate::type_engine::variable::rhs_resolution::build_function_template_subs(
                 func,
                 &split_args,
+                None,
                 rctx,
             );
             if !subs.is_empty() {
