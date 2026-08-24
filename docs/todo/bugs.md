@@ -177,32 +177,4 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B260. A conditional return type whose winning arm is an intersection comes back as a union
-
-**Impact: Low-Medium · Complexity: Medium**
-
-A test helper that mocks a container binding is declared
-
-```php
-/**
- * @template TInstance of object
- * @param string|class-string<TInstance> $abstract
- * @return ($abstract is class-string<TInstance> ? TInstance&MockLike : MockLike)
- */
-protected function mock($abstract) {}
-```
-
-and returning its result from a method declared `Widget&MockLike` is
-reported as returning `Widget|MockLike` — the two members of the winning
-arm's intersection, joined the wrong way. Same family as B227 (a
-conditional return type that never collapses to one arm), except here
-the discriminant is `is class-string<T>`.
-
-Not reduced: an isolated class, and a trait whose using class inherits
-the helper, both resolve the intersection correctly, so something in the
-real stack (the framework's own trait chain, or the mock interface being
-reached through several `use` levels) is needed to trigger it. Reproduces
-on a Laravel test trait that wraps `$this->mock(SomeInterface::class)`
-and hands the result back, and only when the whole project is analysed —
-analysing the single file reports nothing, so a cache primed by an
-earlier file is part of it.
+No outstanding items.

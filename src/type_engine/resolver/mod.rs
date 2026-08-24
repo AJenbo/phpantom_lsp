@@ -603,12 +603,21 @@ fn resolve_target_classes_expr_inner(
             // rebind on a class that only fixes its generics via
             // `@extends`) the hint's generic base names one of the
             // resolved classes directly, so the args are its own rebind
-            // rather than a leftover from an unrelated wrapper type.
+            // rather than a leftover from an unrelated wrapper type.  An
+            // intersection hint (e.g. a conditional return type's winning
+            // branch, `Foo&MockInterface`) is used unconditionally: without
+            // it, `classes` is a flat, untagged list of the intersection's
+            // members, which `types_joined` cannot tell apart from a union
+            // of alternatives.
             if let Some(h) = hint {
                 let hint_names_a_class = matches!(h.kind(), TypeKind::Generic(g) if classes
                     .iter()
                     .any(|c| g.name.as_str() == c.fqn().as_str() || g.name.as_str() == c.name.as_str()));
-                if classes.iter().any(|c| !c.template_params.is_empty()) || hint_names_a_class {
+                let is_intersection = matches!(h.kind(), TypeKind::Intersection(_));
+                if is_intersection
+                    || classes.iter().any(|c| !c.template_params.is_empty())
+                    || hint_names_a_class
+                {
                     return ResolvedType::from_classes_with_hint(classes, h);
                 }
                 // A scalar conditional branch (and the `object`/`?object`

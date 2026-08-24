@@ -106,7 +106,6 @@ unlikely to move the needle for most users.
 | B259 | [`instanceof` on an array element with a computed key never narrows](todo/bugs.md#b259-instanceof-on-an-array-element-with-a-computed-key-never-narrows) | Medium | Medium |
 | B258 | [Two variables assigned in the same branch lose their correlated nullability at the merge](todo/bugs.md#b258-two-variables-assigned-in-the-same-branch-lose-their-correlated-nullability-at-the-merge) | Medium | High |
 | B243 | [`PHPStan\Analyser\Scope::mergeWith()` is a confirmed false positive with no explanation on the PHPStan side](todo/bugs.md#b243-phpstananalyserscopemergewith-is-a-confirmed-false-positive-with-no-explanation-on-the-phpstan-side) | Low-Medium | Unknown |
-| B260 | [A conditional return type whose winning arm is an intersection comes back as a union](todo/bugs.md#b260-a-conditional-return-type-whose-winning-arm-is-an-intersection-comes-back-as-a-union) | Low-Medium | Medium |
 | B218 | [`new ReflectionProperty(Foo::class, 'bar')` forgets what it reflects](todo/bugs.md#b218-new-reflectionpropertyfooclass-bar-forgets-what-it-reflects)                        | Low         | Medium      |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |

@@ -2987,6 +2987,66 @@ namespace App {
 }
 
 #[test]
+fn mock_conditional_return_preserves_intersection_through_a_trait_this() {
+    // Same shape as `mock_conditional_return_preserves_interface_intersection`,
+    // but `mock()` is called from *inside a trait* rather than directly on
+    // the test class.  `$this` there stands for whatever uses the trait, so
+    // it resolves to several classes at once (the trait itself, the using
+    // class, and its ancestor chain, all tagged as one intersection) instead
+    // of the single owner the other test exercises.  A conditional return
+    // type carries no plain `return_type` at all (only `conditional_return`),
+    // so the first of those several owners whose merged method is found
+    // must not lock in an empty hint before a later owner gets a chance to
+    // resolve the conditional.
+    let php = r#"<?php
+namespace Mockery {
+    interface MockInterface {}
+}
+
+namespace App {
+    class Client {}
+
+    trait InteractsWithContainer
+    {
+        /**
+         * @template TInstance of object
+         *
+         * @param  string|class-string<TInstance>  $abstract
+         * @return ($abstract is class-string<TInstance> ? TInstance&\Mockery\MockInterface : \Mockery\MockInterface)
+         */
+        protected function mock($abstract) {}
+    }
+
+    class BaseTestCase
+    {
+        use InteractsWithContainer;
+    }
+
+    trait MocksClient
+    {
+        protected function mockClient(): Client&\Mockery\MockInterface
+        {
+            $clientMock = $this->mock(Client::class);
+
+            return $clientMock;
+        }
+    }
+
+    class MyTest extends BaseTestCase
+    {
+        use MocksClient;
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_return_error(&diags),
+        "$this->mock(Client::class) inside a trait should resolve to Client&MockInterface, got: {}",
+        return_error_messages(&diags).join("; ")
+    );
+}
+
+#[test]
 fn mock_helpers_survive_an_imprecise_method_tag_on_the_test_base() {
     // A test class that also carries `@method MockInterface mock()` in
     // its own docblock.  The tag is a lie: `mock()` exists for real on

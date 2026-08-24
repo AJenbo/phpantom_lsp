@@ -324,6 +324,59 @@ fn replace_support_carbon_return(ty: &PhpType, configured_class: &str) -> Option
     }
 }
 
+/// Resolve a method's PHPStan-style conditional return type (if any)
+/// against call-site arguments and template substitutions, returning the
+/// winning branch with template substitutions already applied.
+///
+/// Returns `None` when the method has no conditional return type, or when
+/// the condition cannot be decided from the arguments — callers fall back
+/// to the method's plain `return_type` in that case.  Shared by
+/// [`Backend::resolve_method_return_types_with_args`] (which needs the
+/// winning branch's classes) and the call-chain hint capture in
+/// `resolve_call_return_types_on_receiver_inner` (which needs the winning
+/// branch's full type, e.g. to preserve an intersection) so the two agree
+/// on what a conditional return type resolves to.
+fn resolve_conditional_return_hint(
+    method: &MethodInfo,
+    text_args: &str,
+    var_resolver: VarClassStringResolver<'_>,
+    template_subs: &HashMap<String, PhpType>,
+    calling_class_name: Option<&str>,
+    declaring_fqn: &str,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<PhpType> {
+    let cond = method.conditional_return.as_ref()?;
+    let class_values =
+        crate::inheritance::class_scoped_template_values(template_subs, &method.template_params);
+    let tpl = TemplateContext {
+        defaults: Some(class_values.as_ref()),
+        params: &method.template_params,
+        bindings: &method.template_bindings,
+        arg_type_resolver: None,
+    };
+    let resolved = if !text_args.is_empty() {
+        resolve_conditional_with_text_args_and_defaults(
+            cond,
+            &method.parameters,
+            text_args,
+            var_resolver,
+            crate::type_engine::conditional_resolution::ConditionalClassContext {
+                calling: calling_class_name,
+                declaring: Some(declaring_fqn),
+            },
+            class_loader,
+            &tpl,
+        )
+    } else {
+        resolve_conditional_without_args_and_defaults(cond, &method.parameters, tpl.defaults)
+    }?;
+    Some(if !template_subs.is_empty() {
+        resolved.substitute(template_subs)
+    } else {
+        resolved
+    })
+}
+
 impl Backend {
     pub(crate) fn configured_laravel_date_return(
         owner: &ClassInfo,
@@ -610,12 +663,36 @@ impl Backend {
                             ctx.resolved_class_cache,
                         );
                         if let Some(m) = merged.get_method_ci(method_name) {
-                            if let Some(ref ret) = m.return_type {
-                                let substituted = if !template_subs.is_empty() {
-                                    ret.substitute(&template_subs)
-                                } else {
-                                    ret.clone()
-                                };
+                            // Try the conditional return type first, exactly
+                            // as `resolve_method_return_types_with_args`
+                            // does for the classes below — a conditional
+                            // return type (e.g. `mock()`'s `(TInstance
+                            // is class-string<T> ? T&MockInterface :
+                            // MockInterface)`) often carries no plain
+                            // `return_type` at all, so reading only
+                            // `return_type` here would leave the hint
+                            // empty even though the classes resolve fine,
+                            // silently dropping the winning branch's shape
+                            // (e.g. an intersection) from the hint.
+                            let substituted = resolve_conditional_return_hint(
+                                m,
+                                text_args,
+                                Some(&var_resolver),
+                                &template_subs,
+                                ctx.current_class.map(|c| c.name.as_str()),
+                                merged.fqn().as_str(),
+                                ctx.class_loader,
+                            )
+                            .or_else(|| {
+                                m.return_type.as_ref().map(|ret| {
+                                    if !template_subs.is_empty() {
+                                        ret.substitute(&template_subs)
+                                    } else {
+                                        ret.clone()
+                                    }
+                                })
+                            });
+                            if let Some(substituted) = substituted {
                                 // Collapse any conditional nested inside the
                                 // return type (e.g. `Collection<($k is
                                 // array|string ? array-key : TGroupKey), …>`)
@@ -1592,56 +1669,24 @@ impl Backend {
         // back to template-substituted return type, then plain return type.
         let resolve_method = |method: &MethodInfo| -> Vec<Arc<ClassInfo>> {
             // Try conditional return type first (PHPStan syntax)
-            if let Some(ref cond) = method.conditional_return {
-                let class_values = crate::inheritance::class_scoped_template_values(
-                    template_subs,
-                    &method.template_params,
-                );
-                let tpl = TemplateContext {
-                    defaults: Some(class_values.as_ref()),
-                    params: &method.template_params,
-                    bindings: &method.template_bindings,
-                    arg_type_resolver: None,
-                };
-                let resolved_type = if !text_args.is_empty() {
-                    resolve_conditional_with_text_args_and_defaults(
-                        cond,
-                        &method.parameters,
-                        text_args,
-                        var_resolver,
-                        crate::type_engine::conditional_resolution::ConditionalClassContext {
-                            calling: mr_ctx.calling_class_name,
-                            declaring: Some(class_info.fqn().as_str()),
-                        },
-                        mr_ctx.class_loader,
-                        &tpl,
-                    )
-                } else {
-                    resolve_conditional_without_args_and_defaults(
-                        cond,
-                        &method.parameters,
-                        tpl.defaults,
-                    )
-                };
-                if let Some(ref parsed) = resolved_type {
-                    // Apply method-level template substitutions to the
-                    // resolved conditional type (e.g. `TModel` → concrete
-                    // class when TModel is a method-level @template param).
-                    let effective = if !template_subs.is_empty() {
-                        parsed.substitute(template_subs)
-                    } else {
-                        parsed.clone()
-                    };
-                    let classes: Vec<Arc<ClassInfo>> =
-                        crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                            &effective,
-                            &class_info.fqn(),
-                            all_classes,
-                            class_loader,
-                        );
-                    if !classes.is_empty() {
-                        return classes;
-                    }
+            if let Some(effective) = resolve_conditional_return_hint(
+                method,
+                text_args,
+                var_resolver,
+                template_subs,
+                mr_ctx.calling_class_name,
+                class_info.fqn().as_str(),
+                mr_ctx.class_loader,
+            ) {
+                let classes: Vec<Arc<ClassInfo>> =
+                    crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                        &effective,
+                        &class_info.fqn(),
+                        all_classes,
+                        class_loader,
+                    );
+                if !classes.is_empty() {
+                    return classes;
                 }
             }
 
