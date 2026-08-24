@@ -1408,6 +1408,32 @@ pub(super) fn resolve_rhs_function_call<'b>(
         }
 
         let callee_results = resolve_rhs_expression(callee_expr, ctx);
+        // A callable-typed value carries its return type in the type
+        // string itself (`callable(): Scope`, `Closure(): Item`), which is
+        // how a property or a method result annotated that way arrives
+        // here.  Read it the same way the `$fn()` path does before falling
+        // back to `__invoke()`.
+        for rt in &callee_results {
+            if let Some(ret_type) = rt.type_string.callable_return_type() {
+                let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                    ret_type,
+                    current_class_name,
+                    all_classes,
+                    class_loader,
+                );
+                if !resolved.is_empty() {
+                    return ResolvedType::from_classes_with_hint(resolved, ret_type.clone());
+                }
+                if !ret_type.is_empty() {
+                    return vec![resolved_type_with_lookup(
+                        ret_type.clone(),
+                        current_class_name,
+                        all_classes,
+                        class_loader,
+                    )];
+                }
+            }
+        }
         for rt in &callee_results {
             if let Some(ref owner_cls) = rt.class_info
                 && let Some(invoke) = owner_cls.get_method("__invoke")

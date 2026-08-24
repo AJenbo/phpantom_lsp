@@ -126,7 +126,20 @@ pub(crate) fn infer_callable_params_from_receiver_fw(
     // We extract those args, pair them with the class's @template
     // params (e.g. `TModel`), and substitute so that callable params
     // like `Closure(Builder<TModel>)` become `Closure(Builder<Product>)`.
-    let template_subs = build_receiver_template_subs(&resolved_types, &receiver_classes, ctx);
+    let mut template_subs = build_receiver_template_subs(&resolved_types, &receiver_classes, ctx);
+
+    // A method-level `@template` is bound by this call's own arguments
+    // instead, so `@param callable(T): void $fn` only becomes concrete once
+    // the argument that binds `T` is resolved.
+    if let Some(owner) = receiver_classes.first() {
+        template_subs.extend(method_template_subs_for_call(
+            owner,
+            method_name,
+            argument_list,
+            &rctx,
+            ctx,
+        ));
+    }
 
     // Apply template substitution, then replace `$this`/`static`
     // tokens with the receiver's full type.
@@ -294,6 +307,22 @@ pub(crate) fn build_receiver_template_subs(
     HashMap::new()
 }
 
+/// Build the substitution map for a method's own `@template` params from
+/// the call-site argument texts, so a `@param callable(T): X` signature
+/// hands the closure the type `T` was bound to.
+fn method_template_subs_for_call(
+    owner: &ClassInfo,
+    method_name: &str,
+    argument_list: &ArgumentList<'_>,
+    rctx: &crate::type_engine::resolver::ResolutionCtx<'_>,
+    ctx: &ForwardWalkCtx<'_>,
+) -> HashMap<String, PhpType> {
+    let arg_texts =
+        super::super::raw_type_inference::extract_arg_texts_from_ast(argument_list, ctx.content);
+    let arg_refs: Vec<&str> = arg_texts.iter().map(String::as_str).collect();
+    crate::Backend::build_method_template_subs(owner, method_name, &arg_refs, rctx)
+}
+
 /// Infer callable parameter types for a closure passed at position
 /// `arg_idx` to a static method call.
 pub(crate) fn infer_callable_params_from_static_receiver_fw(
@@ -305,8 +334,6 @@ pub(crate) fn infer_callable_params_from_static_receiver_fw(
     scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Vec<PhpType> {
-    let _ = scope; // scope not needed for static receiver resolution
-
     let owner = super::super::closure_resolution::static_receiver_class_name(
         class_expr,
         Some(ctx.current_class),
@@ -347,7 +374,7 @@ pub(crate) fn infer_callable_params_from_static_receiver_fw(
         // `Closure(Collection<int, Customer>)`.
         let receiver_type =
             super::super::closure_resolution::build_receiver_self_type_pub(cls, ctx.class_loader);
-        let template_subs = if let TypeKind::Generic(g) = receiver_type.kind()
+        let mut template_subs = if let TypeKind::Generic(g) = receiver_type.kind()
             && !g.args.is_empty()
             && !cls.template_params.is_empty()
         {
@@ -355,6 +382,24 @@ pub(crate) fn infer_callable_params_from_static_receiver_fw(
         } else {
             HashMap::new()
         };
+
+        // The method's own `@template` params are bound by this call's
+        // arguments, the same as for an instance call.
+        let scope_locals = &scope.locals;
+        let scope_resolver = |var_name: &str| -> Vec<ResolvedType> {
+            scope_locals
+                .get(&atom(var_name))
+                .cloned()
+                .unwrap_or_default()
+        };
+        let var_ctx = ctx.var_ctx_for_with_scope("$__infer", ctx.cursor_offset, &scope_resolver);
+        template_subs.extend(method_template_subs_for_call(
+            cls,
+            method_name,
+            argument_list,
+            &var_ctx.as_resolution_ctx(),
+            ctx,
+        ));
 
         let params = if !template_subs.is_empty() {
             params

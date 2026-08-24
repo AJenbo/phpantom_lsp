@@ -1486,13 +1486,62 @@ impl Backend {
             //    ClassName that SubjectExpr::parse couldn't distinguish
             //    from a function name) ───────────────────────────────
             _ => {
-                let callee_classes = ResolvedType::into_arced_classes(
-                    crate::type_engine::resolver::resolve_target_classes_expr(
-                        callee,
-                        AccessKind::Arrow,
-                        ctx,
-                    ),
+                let callee_resolved = crate::type_engine::resolver::resolve_target_classes_expr(
+                    callee,
+                    AccessKind::Arrow,
+                    ctx,
                 );
+
+                // A callable-typed callee carries its return type in the
+                // type string rather than on a class, which is how a
+                // property annotated `@var callable(): Scope` arrives
+                // here.  Read it the same way the `$fn(…)` path does.
+                // Subject resolution keeps only class-typed results, so a
+                // property whose type is a bare `callable(…): T` comes back
+                // empty and its declared hint has to be read directly.
+                let mut callable_types: Vec<PhpType> = callee_resolved
+                    .iter()
+                    .map(|rt| rt.type_string.clone())
+                    .collect();
+                if callable_types.is_empty()
+                    && let SubjectExpr::PropertyChain { base, property } = callee
+                {
+                    let owners = ResolvedType::into_arced_classes(
+                        crate::type_engine::resolver::resolve_target_classes_expr(
+                            base,
+                            AccessKind::Arrow,
+                            ctx,
+                        ),
+                    );
+                    for owner in &owners {
+                        if let Some(hint) = crate::inheritance::resolve_property_type_hint(
+                            owner,
+                            property,
+                            ctx.class_loader,
+                        ) {
+                            callable_types.push(hint);
+                        }
+                    }
+                }
+                for ty in &callable_types {
+                    if let Some(ret_type) = ty.callable_return_type() {
+                        let classes: Vec<Arc<ClassInfo>> =
+                            crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                                ret_type,
+                                "",
+                                ctx.all_classes,
+                                ctx.class_loader,
+                            );
+                        if !classes.is_empty() {
+                            if let Some(ref mut hint_out) = return_type_hint_out {
+                                **hint_out = Some(ret_type.clone());
+                            }
+                            return classes;
+                        }
+                    }
+                }
+
+                let callee_classes = ResolvedType::into_arced_classes(callee_resolved);
 
                 // When the callee resolves to an object with __invoke(),
                 // the call returns __invoke()'s return type, not the

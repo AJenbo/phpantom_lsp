@@ -60,6 +60,30 @@ feeds a `string`-typed parameter or return raises a false
 
 ## Narrowing
 
+### B259. `instanceof` on an array element with a computed key never narrows
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+/** @param NodeStmt[] $statements */
+function probe(array $statements, int $count): void
+{
+    if (!$statements[$count - 2] instanceof IfStmt) {
+        return;
+    }
+    $if = $statements[$count - 2];
+    $if->elseifs;                       // false unknown_member
+    $statements[$count - 2]->elseifs;   // same, read directly
+}
+```
+
+A literal key (`$statements[2]`) narrows correctly, so the subject key
+built for a computed index expression is what the proof is missed on.
+Real-world hits are `src/Parser/LastConditionVisitor.php:86,91`, where
+the unresolved element also breaks the `@template TValue` binding of the
+`array_last()` call it is passed to, so the same line additionally
+reports "subject type 'TValue' could not be resolved".
+
 ### B258. Two variables assigned in the same branch lose their correlated nullability at the merge
 
 **Impact: Medium · Complexity: High**
@@ -153,95 +177,32 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B251. A closure's by-reference `use` mutation isn't tracked when the closure is invoked indirectly
+### B260. A conditional return type whose winning arm is an intersection comes back as a union
 
-**Impact: Medium · Complexity: Medium-High**
+**Impact: Low-Medium · Complexity: Medium**
 
-```php
-$constructorResult = null;
-$nodeScopeResolver->processStmtNode($expr->class, $scope, $storage, new GatheringNodeCallback(
-    static function (Node $node, ...) use (&$constructorResult): void {
-        $constructorResult = $node;
-    },
-    $nodeCallback,
-), ...);
-if ($constructorResult !== null) {
-    $constructorResult->getStatementResult(); // still typed null past the guard
-```
-
-(`src/Analyser/ExprHandler/NewHandler.php:153,154`.) A directly-invoked
-`use (&$x)` closure (`$callback($arg)`) is tracked fine; wrapping the
-same closure in an object and invoking it through a separate method
-call (mirroring `GatheringNodeCallback`'s `invoke()`) loses the
-reference mutation entirely, so `$constructorResult`'s type never
-updates and stays "null" even past the `!== null` guard.
-
-### B252. `??=` doesn't route its RHS through the callable-property-invocation resolution path
-
-**Impact: Medium · Complexity: Medium**
+A test helper that mocks a container binding is declared
 
 ```php
-/** @var callable(): MutatingScope $leftTruthyScope */
-private $leftTruthyScope;
-
-$leftTruthyScope = null;
-$leftTruthyScope ??= ($this->leftTruthyScope)();
-$leftTruthyScope->getType($targetExpr); // false: method call on null
+/**
+ * @template TInstance of object
+ * @param string|class-string<TInstance> $abstract
+ * @return ($abstract is class-string<TInstance> ? TInstance&MockLike : MockLike)
+ */
+protected function mock($abstract) {}
 ```
 
-(`src/Analyser/DisjunctionHolderProjectionAugment.php:78,84`.) Isolated
-down to the exact failing ingredient: a direct call `($this->prop)()`
-alone resolves fine, `$x ??= new Foo()` alone resolves fine, only
-`$x ??= ($this->callableProp)()` fails — the `??=` handler doesn't
-reuse the same resolution path a bare invocation of a callable-typed
-property already gets right.
+and returning its result from a method declared `Widget&MockLike` is
+reported as returning `Widget|MockLike` — the two members of the winning
+arm's intersection, joined the wrong way. Same family as B227 (a
+conditional return type that never collapses to one arm), except here
+the discriminant is `is class-string<T>`.
 
-### B253. A closure parameter's type isn't inferred from a `@template`-parameterized `callable(T): X` signature
-
-**Impact: Medium-High · Complexity: High**
-
-```php
-/** @template T @param T $node @param callable(T): void $fn */
-function fixNode($node, callable $fn): void { $fn($node); }
-
-fixNode($property, function ($property) {
-    $property->isReadOnly(); // $property's inferred type is unresolved/mismatched, not the bound T
-});
-```
-
-When a closure is passed to a method whose docblock is
-`@param callable(T): X $fn` with `T` bound from the call-site argument,
-real PHPStan infers the closure's own parameter type from `T` (even
-overriding a wider explicit hint); PHPantom leaves it as the literal
-template name or the declared hint. Explains every `unknown_member`
-"subject type 'TNode'/'TValue' could not be resolved" hit:
-`src/Parser/LastConditionVisitor.php:91`,
-`src/Rules/Properties/OverridingPropertyRule.php:68,104`,
-`build/PHPStan/Build/NamedArgumentsRule.php:183,232`,
-`build/PHPStan/Build/FinalClassRule.php:77`,
-`src/Reflection/Type/IntersectionTypeMethodReflection.php:240`. Likely
-home: `type_engine/`'s generic/template substitution for
-callable-type parameters.
-
-### B254. Unused-variable check doesn't account for a closure's `use()` capture feeding a `require`d file's scope
-
-**Impact: Low · Complexity: Medium**
-
-```php
-(static function (string $file) use ($container): void {
-    require_once $file; // the required file executes in this closure's own variable scope
-})($file);
-```
-
-(`src/Command/CommandHelper.php:642`,
-`src/Testing/PHPStanTestCaseTrait.php:49` — both flag `$container` as
-unused.) `$container` is never referenced *by name* inside the closure
-body, but `require_once` runs the target file's code inside the
-closure's own scope, so the required file can legitimately read
-`$container` as a local variable — a known idiom for exposing a
-variable to dynamically-included code without leaking the rest of the
-enclosing scope. The `unused_variable` check has no notion of "used via
-a same-scope `require`/`include`" at all. (Neither bundled bootstrap
-file in phpstan-src currently reads `$container` back, so these two
-specific instances may or may not be live in practice — but the
-checker's blind spot is real regardless of this instance's outcome.)
+Not reduced: an isolated class, and a trait whose using class inherits
+the helper, both resolve the intersection correctly, so something in the
+real stack (the framework's own trait chain, or the mock interface being
+reached through several `use` levels) is needed to trigger it. Reproduces
+on a Laravel test trait that wraps `$this->mock(SomeInterface::class)`
+and hands the result back, and only when the whole project is analysed —
+analysing the single file reports nothing, so a cache primed by an
+earlier file is part of it.

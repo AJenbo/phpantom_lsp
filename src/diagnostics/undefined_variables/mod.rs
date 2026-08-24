@@ -67,7 +67,9 @@ use super::helpers::make_diagnostic;
 mod feature_guards;
 mod offset_guards;
 
-pub(crate) use feature_guards::{collect_compact_vars, has_get_defined_vars};
+pub(crate) use feature_guards::{
+    collect_compact_vars, collect_import_offsets, has_get_defined_vars,
+};
 use feature_guards::{has_dynamic_variables, has_extract_call};
 use offset_guards::{
     collect_error_suppressed_offsets, collect_guarded_offsets, collect_isset_guarded_regions,

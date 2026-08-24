@@ -819,3 +819,125 @@ function handle(): void {
         "the superseded type must not still answer for the variable, got: {diags:?}"
     );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// By-reference `use` captures reached through a wrapper object
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A `use (&$x)` closure handed to a constructor still writes back to `$x`:
+/// the object invokes it later, so the captured type is unioned into the
+/// outer variable and the `!== null` guard can narrow it.
+#[test]
+fn by_ref_capture_inside_new_argument_writes_back() {
+    let backend = create_test_backend();
+    let uri = "file:///ByRefNew.php";
+    let text = r#"<?php
+class Node {
+    public function getStatementResult(): string { return ''; }
+}
+class GatheringNodeCallback {
+    /** @param callable(Node): void $inner */
+    public function __construct(private $inner) {}
+    public function invoke(Node $node): void { ($this->inner)($node); }
+}
+class Resolver {
+    public function processStmtNode(GatheringNodeCallback $cb): void {}
+}
+class Handler {
+    public function run(Resolver $resolver): void {
+        $constructorResult = null;
+        $resolver->processStmtNode(new GatheringNodeCallback(
+            static function (Node $node) use (&$constructorResult): void {
+                $constructorResult = $node;
+            },
+        ));
+        if ($constructorResult !== null) {
+            $constructorResult->getStatementResult();
+        }
+    }
+}
+"#;
+    backend.update_ast(uri, text);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    assert!(
+        diags.is_empty(),
+        "got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+/// Same for a closure stored in an array literal — the array may be handed
+/// to anything, so the capture has to be seen.
+#[test]
+fn by_ref_capture_inside_array_literal_writes_back() {
+    let backend = create_test_backend();
+    let uri = "file:///ByRefArray.php";
+    let text = r#"<?php
+class Node {
+    public function getStatementResult(): string { return ''; }
+}
+class Handler {
+    /** @param array<callable> $callbacks */
+    public function register(array $callbacks): void {}
+
+    public function run(): void {
+        $result = null;
+        $this->register([
+            static function (Node $node) use (&$result): void {
+                $result = $node;
+            },
+        ]);
+        if ($result !== null) {
+            $result->getStatementResult();
+        }
+    }
+}
+"#;
+    backend.update_ast(uri, text);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    assert!(
+        diags.is_empty(),
+        "got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Closure parameter typed by a method-level @template bound at the call site
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// `@param callable(TNode): void` hands the closure whatever `TNode` was
+/// bound to at the call site, so a member of that type is not unknown.
+#[test]
+fn closure_param_from_method_template_resolves_members() {
+    let backend = create_test_backend();
+    let uri = "file:///TemplateClosureParam.php";
+    let text = r#"<?php
+class PropertyNode {
+    public function isReadOnly(): bool { return true; }
+}
+class Fixer {
+    /**
+     * @template TNode
+     * @param TNode $node
+     * @param callable(TNode): void $cb
+     */
+    public function fixNode($node, callable $cb): void {}
+
+    public function run(PropertyNode $property): void
+    {
+        $this->fixNode($property, function ($node) {
+            $node->isReadOnly();
+        });
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}

@@ -459,6 +459,32 @@ pub(crate) fn process_by_ref_closure_captures<'b>(
         Expression::Closure(closure) => {
             process_by_ref_closure_capture(closure, scope, ctx, false);
         }
+        // `new Wrapper(function () use (&$x) { … })` hands the closure to an
+        // object that invokes it later (or never), which is the
+        // widen-don't-replace case the `Closure` arm handles — the point is
+        // that the capture is seen at all instead of the mutation going
+        // missing.  Same for a closure inside an array literal.
+        Expression::Instantiation(instantiation) => {
+            if let Some(ref args) = instantiation.argument_list {
+                for arg in args.arguments.iter() {
+                    process_by_ref_closure_captures(arg.value(), scope, ctx);
+                }
+            }
+        }
+        Expression::Array(arr) => {
+            for elem in arr.elements.iter() {
+                if let Some(value) = array_element_value(elem) {
+                    process_by_ref_closure_captures(value, scope, ctx);
+                }
+            }
+        }
+        Expression::LegacyArray(arr) => {
+            for elem in arr.elements.iter() {
+                if let Some(value) = array_element_value(elem) {
+                    process_by_ref_closure_captures(value, scope, ctx);
+                }
+            }
+        }
         Expression::Parenthesized(inner) => {
             process_by_ref_closure_captures(inner.expression, scope, ctx);
         }
@@ -466,6 +492,16 @@ pub(crate) fn process_by_ref_closure_captures<'b>(
             process_by_ref_closure_captures(assignment.rhs, scope, ctx);
         }
         _ => {}
+    }
+}
+
+/// The value expression of an array element, ignoring its key.
+fn array_element_value<'b>(elem: &'b ArrayElement<'b>) -> Option<&'b Expression<'b>> {
+    match elem {
+        ArrayElement::KeyValue(kv) => Some(kv.value),
+        ArrayElement::Value(v) => Some(v.value),
+        ArrayElement::Variadic(v) => Some(v.value),
+        ArrayElement::Missing(_) => None,
     }
 }
 

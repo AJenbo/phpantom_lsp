@@ -749,3 +749,31 @@ async fn test_invoke_parenthesized_property() {
         "Expected write from ($this->invoker)() __invoke(), got: {methods:?}"
     );
 }
+
+/// `($this->prop)()->` on a property annotated `@var callable(): T` reads
+/// the return type out of the callable type itself — there is no class with
+/// an `__invoke()` method to go through.
+#[tokio::test]
+async fn test_invoke_callable_typed_property() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/invoke_callable_prop.php").unwrap();
+
+    let src = concat!(
+        "<?php\n",
+        "class InvScope5 { public function getType(): string {} }\n",
+        "class InvApp5 {\n",
+        "    /** @var callable(): InvScope5 */\n",
+        "    private $factory;\n",
+        "    public function demo(): void {\n",
+        "        ($this->factory)()->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let items = complete_at(&backend, &uri, src, 6, 28).await;
+    let methods = method_names(&items);
+    assert!(
+        methods.contains(&"getType"),
+        "Expected getType from ($this->factory)() callable return type, got: {methods:?}"
+    );
+}
