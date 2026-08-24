@@ -950,17 +950,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b218-new-reflectionpropertyfooclass-bar-forgets-what-it-reflects" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B218. <code>new ReflectionProperty(Foo::class, 'bar')</code> forgets what it reflects
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1589,17 +1578,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b218-new-reflectionpropertyfooclass-bar-forgets-what-it-reflects" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B218. <code>new ReflectionProperty(Foo::class, 'bar')</code> forgets what it reflects
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1770,27 +1748,6 @@ explaining the silence was found, and running PHPStan on itself to settle
 it needs a <code>composer install</code> in the checkout. Filed as a confirmed false
 positive whose cause is still unaccounted for; the eight call sites are
 the only ones seen anywhere.</p>
-<h3 id="b218-new-reflectionpropertyfooclass-bar-forgets-what-it-reflects">B218. <code>new ReflectionProperty(Foo::class, 'bar')</code> forgets what it reflects<a class="headerlink" href="#b218-new-reflectionpropertyfooclass-bar-forgets-what-it-reflects" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<p>A reflection value built by <code>ReflectionClass::getProperty('bar')</code> carries
-the class and the property name, so reading it types as the property
-declares. Constructing the same value directly does not:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">$viaClass = (new \ReflectionClass(Configuration::class))-&gt;getProperty(&#39;shell&#39;);</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">$viaClass-&gt;getValue($config);   // ?Shell</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">$direct = new \ReflectionProperty(Configuration::class, &#39;shell&#39;);</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">$direct-&gt;getValue($config);     // mixed</span>
-</code></pre></div>
-<p>The two spellings are interchangeable in real code, so the second should
-resolve like the first. The binding cannot come from the constructor's
-docblock: <code>class-string&lt;T&gt;|T $class</code> would bind the class through the
-existing machinery, but the <code>$property</code> name is a string literal, and a
-literal only binds to a <code>@template</code> whose bound is a type operator
-(<code>key-of&lt;…&gt;</code> and friends). Either the two <code>new</code>-expression resolution
-paths need the same rule the two call paths got, or literal binding has
-to be widened to a <code>@template TName of string</code>, which is what PHPStan
-does for literal string types and would want measuring against the whole
-corpus first.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
