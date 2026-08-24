@@ -11290,3 +11290,68 @@ function render(Rule|string $rule): void {
     backend.collect_slow_diagnostics(uri, php, &mut diags);
     assert_eq!(type_error_messages(&diags), Vec::<String>::new());
 }
+
+/// A `@return static` method called on an intersection-typed receiver
+/// returns the whole intersection: late static binding names the runtime
+/// class, which satisfies every member of the intersection, not only the
+/// interface that happened to declare the method.
+#[test]
+fn static_return_keeps_the_receivers_whole_intersection() {
+    let php = r#"<?php
+interface IfaceA
+{
+    /** @return static */
+    public function filter(): self;
+}
+
+interface IfaceB
+{
+    public function ifaceBMethod(): void;
+}
+
+function needsBoth(IfaceA&IfaceB $x): void {}
+
+function test(IfaceA&IfaceB $scope): void
+{
+    $filtered = $scope->filter();
+    needsBoth($filtered);
+}
+"#;
+    let msgs = type_error_messages(&collect(php));
+    assert!(
+        msgs.is_empty(),
+        "static on an IfaceA&IfaceB receiver should stay IfaceA&IfaceB, got: {msgs:?}"
+    );
+}
+
+/// `new self(…)` names the enclosing class, and has to keep naming it when
+/// its short name is also a global class's: the constructor whose arguments
+/// get checked must be the namespaced class's, not `\Error`'s.
+#[test]
+fn new_self_checks_the_namespaced_classs_own_constructor() {
+    let php = r#"<?php
+namespace {
+    class Error
+    {
+        public function __construct(string $message = '', int $code = 0) {}
+    }
+}
+
+namespace App {
+    class Error
+    {
+        public function __construct(private string $message, private ?int $line = null) {}
+
+        public function changeLine(?int $line): self
+        {
+            return new self($this->message, $line);
+        }
+    }
+}
+"#;
+    let msgs = type_error_messages(&collect(php));
+    assert!(
+        msgs.is_empty(),
+        "new self() must check App\\Error::__construct, not \\Error's, got: {msgs:?}"
+    );
+}

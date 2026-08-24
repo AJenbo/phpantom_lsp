@@ -98,156 +98,23 @@ No outstanding items.
 
 ## Symbol resolution
 
-### B238. `new self(...)`/`new static(...)` resolves by short name, colliding with a same-named global class
-
-**Impact: High · Complexity: Medium**
-
-```php
-namespace PHPStan\Analyser;
-
-final class Error implements JsonSerializable
-{
-    public function __construct(private string $message, private ?int $line = null) {}
-
-    public function changeFilePath(string $newFilePath): self
-    {
-        return new self($this->message, $this->line); // resolves to the built-in \Error!
-    }
-}
-```
-
-`type_engine/variable/rhs_resolution/instantiation.rs`
-(`resolve_rhs_instantiation`, around line 26-33) resolves `self`/`static`
-via `ctx.current_class.name.to_string()` — the class's *short* name —
-instead of `ctx.current_class.fqn()`. Every other branch of the same
-match resolves a written class name through
-`crate::util::resolve_source_class_name` (namespace-aware). Since
-`PHPStan\Analyser\Error` shares its short name with the built-in
-`\Error`, `new self(...)` inside it misresolves to the global class,
-producing false `type_mismatch_argument`/`type_mismatch_return` on
-every constructor call and every method that returns `new self(...)`
-(confirmed at `src/Analyser/Error.php` — 8 call sites × 2 argument
-positions, plus 10 `type_mismatch_return` hits across its fluent
-`changeXxx()` methods). Any user class whose short name collides with a
-PHP built-in (or any other loaded class) is affected, not just this one.
-
-### B239. `$this` inside a trait method resolves to the trait itself, not the using class
-
-**Impact: High · Complexity: Medium-High**
-
-```php
-trait TemplateTypeTrait
-{
-    public function getTypeWithoutSubtractedType(): Type
-    {
-        // ...
-        return $this; // Return type <TheTrait> is incompatible with declared return type Type
-    }
-}
-```
-
-(`src/Type/Generic/TemplateTypeTrait.php:140` and 20+ similar sites
-across `src/Type/Traits/*.php`.) `$this` inside a trait method that
-returns `$this` typed as an interface/abstract type the trait doesn't
-itself implement should resolve to the class the trait is mixed into
-(late static binding through traits), not to the trait as a
-pseudo-class. This is the classic "trait `$this` not resolved" gap;
-minimal repro confirms it reproduces with a bare `trait`/`use`/`return
-$this` with no other machinery involved.
-
-### B240. `static` return type on an intersection-typed receiver drops the non-declaring interface members
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-interface IfaceA { /** @return static */ public function filter(): self; }
-interface IfaceB { public function ifaceBMethod(): void; }
-
-function needsBoth(IfaceA&IfaceB $x): void {}
-
-function test(IfaceA&IfaceB $scope): void
-{
-    $filtered = $scope->filter();
-    needsBoth($filtered); // false: expects IfaceA&IfaceB, got IfaceA
-}
-```
-
-Confirmed minimal repro, and live in phpstan-src at
-`src/Rules/Methods/CallMethodsRule.php:55` /
-`CallStaticMethodsRule.php:56` (`Scope&NodeCallbackInvoker&CollectedDataEmitter`,
-narrowed via `$scope->filterByTruthyValue(...)` which is `@return
-static`). `static` should resolve to the receiver's full statically-known
-type — here the whole intersection — but instead resolves only to
-whichever single interface declares the called method.
-
-### B241. An abstract class isn't accepted where a union of exactly its known subclasses is declared
-
-**Impact: Low · Complexity: High**
-
-```php
-// PhpParser\Node\Stmt\ClassLike is abstract; Class_/Interface_/Trait_/Enum_
-// are its only subclasses in the known universe.
-private function createAstClassReflection(Node\Stmt\ClassLike $stmt, ...): ClassReflection
-{
-    // ...
-    $nodeToReflection->__invoke($this->reflector, $stmt, ...);
-    // $node param declared: Class_|Interface_|Trait_|Enum_|Function_|Closure|ArrowFunction|Const_|FuncCall
-    // false: ClassLike does not satisfy that union
-}
-```
-
-(`src/Analyser/NodeScopeResolver.php:2794` and three
-`BetterReflection/SourceLocator/*.php` sites.) Real PHPStan is silent —
-it appears to reason that `ClassLike`'s only subclasses are exactly the
-four named in the union, so a `ClassLike`-typed value is exhaustively
-covered. Reproducing this "sealed hierarchy" exhaustiveness check would
-need enumerating every known subclass of an abstract type across the
-whole project + vendor at check time; rare enough in practice
-(`PhpParser\Node\Stmt\ClassLike` may be the only real-world instance
-seen so far) that it's filed for completeness rather than urgency.
-
-### B242. `Composer\Autoload\ClassLoader` is invisible to class resolution
-
-**Impact: Medium · Complexity: Medium**
-
-Every Composer-managed project has this class available via
-`vendor/composer/ClassLoader.php`, but it's loaded through a
-hand-written `spl_autoload_register` bootstrap in
-`vendor/composer/autoload_real.php` (`loadClassLoader()` →
-`require __DIR__ . '/ClassLoader.php'`), not through
-`autoload_classmap.php` or any package's `psr-4`/`psr-0` map. The vendor
-classmap scanner (`classmap_scanner/`, `composer.rs`) has no special
-case for this universal bootstrap file, so `Composer\Autoload\ClassLoader`
-resolves as `unknown_class` on any project that references it directly
-— a fairly common pattern for code that introspects its own autoloader,
-as phpstan-src does at `src/Testing/TestCaseSourceLocatorFactory.php:55,56`
-and `src/autoloadFunctions.php:62,73`. Since `vendor/composer/ClassLoader.php`
-is present verbatim in every Composer install regardless of declared
-dependencies, this would recur on any Composer project, not just this
-one.
-
-### B243. Two more confirmed `unknown_member` false positives with an unidentified mechanism
+### B243. `PHPStan\Analyser\Scope::mergeWith()` is a confirmed false positive with no explanation on the PHPStan side
 
 **Impact: Low-Medium · Complexity: Unknown**
 
-Two additional confirmed-real false positives surfaced during the
-`unknown_member` sweep whose exact cause wasn't pinned down:
-
-- `Nette\Neon\Exception::getMessage()` not found
-  (`src/DependencyInjection/NeonAdapter.php:57`,
-  `NeonCachedFileReader.php:45`), despite the class extending
-  `\Exception` — an identical hand-written class in isolation resolves
-  fine, so it's specific to something about this vendor path (possibly
-  a classmap/PSR-4 interaction in a monorepo with many nested
-  `composer.json` files), not `extends \Exception` in general.
-- `PHPStan\Analyser\Scope::mergeWith()` not found
-  (`src/Analyser/NodeScopeResolver.php:5404,5412` and 6 similar lines).
-  `Scope` genuinely has no `mergeWith` (only `MutatingScope` does), and
-  PHPantom's own `dumpType`-equivalent confirms it believes the
-  expression's static type is bare `Scope` — yet real PHPStan raises no
-  error on the call. No stub, mixin, or reflection extension explaining
-  why real PHPStan accepts this was found; filed as a confirmed false
-  positive without a full explanation of the real-PHPStan side.
+`Scope` genuinely has no `mergeWith` (only `MutatingScope` does), and the
+expression `NodeScopeResolver.php:5404,5412` calls it on is
+`StatementResult::getScope()`, declared `: Scope`. PHPantom's own
+`dumpType`-equivalent agrees, and the same file spells the conversion out
+explicitly 4,000 lines earlier
+(`$statement->getScope()->toMutatingScope()` at line 1112), so reading the
+source alone says the call is an error and the diagnostic is right. Yet
+real PHPStan raises nothing, and no entry for it exists in
+`phpstan-baseline.neon`. No stub, mixin, or reflection extension
+explaining the silence was found, and running PHPStan on itself to settle
+it needs a `composer install` in the checkout. Filed as a confirmed false
+positive whose cause is still unaccounted for; the eight call sites are
+the only ones seen anywhere.
 
 ### B218. `new ReflectionProperty(Foo::class, 'bar')` forgets what it reflects
 
@@ -275,54 +142,6 @@ paths need the same rule the two call paths got, or literal binding has
 to be widened to a `@template TName of string`, which is what PHPStan
 does for literal string types and would want measuring against the whole
 corpus first.
-
-### B226. A function-`static` variable's type is not tracked across its own reads
-
-**Impact: Low-Medium · Complexity: Medium-High**
-
-`type_engine/variable/forward_walk/` has no handling at all for a
-`static $var;` declaration (there is no `StaticVariable` case anywhere
-under it); the walker treats the name as an ordinary, unassigned local
-until it sees an assignment to it in the same top-to-bottom pass. That
-loses the one thing a `static` local actually means: its value can carry
-over from an *earlier call* that assigned it in a branch the current
-call never reaches.
-
-```php
-function info(?Configuration $config = null) {
-    static $lastConfig;
-    if ($config !== null) {
-        $lastConfig = $config;
-        return null;
-    }
-    $config = $lastConfig ?: new Configuration();
-    // $shell::VERSION below needs $config resolved to Configuration for
-    // Sudo::fetchProperty($config, 'shell') to type as ?Shell (the
-    // pass-through accessor inference already handles that part).
-    $shell = Sudo::fetchProperty($config, 'shell');
-    if ($shell) {
-        $shellInfo = ['PsySH version' => $shell::VERSION];
-    }
-}
-```
-
-On the call that falls through to the second half, `$lastConfig` is read
-without ever having been assigned within *this* walk, so `$config`
-resolves too conservatively for the accessor pass-through (see the
-`ReflectionProperty`/`Sudo::fetchProperty` inference above) to carry
-`Configuration::$shell`'s declared type through to `$shell`, and
-`$shell::VERSION` cannot be resolved. Found via
-`php-typing-conformance`'s LSP navigation probe against psysh
-(`Psy\Shell::VERSION`, `src/functions.php:383`): find-references reports
-20 of 21 known references, missing exactly this one; Intelephense and
-Phpactor miss the same reference, but DEVSENSE resolves it, which is
-worth chasing. The same gap also degrades hover and inferred types
-wherever code narrows on a `static` local this way, not just
-find-references. A correct fix needs to seed a
-`static $var`'s type from the union of every assignment reachable
-anywhere in the enclosing function body (not only the ones preceding the
-read in this pass), since the assignment that matters can sit in a
-branch this call never takes.
 
 ## Array types
 

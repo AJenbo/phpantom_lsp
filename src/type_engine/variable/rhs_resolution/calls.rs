@@ -1647,10 +1647,17 @@ pub(super) fn resolve_method_call_on_receiver<'b>(
         // substitution so the generics are preserved; otherwise fall
         // back to a plain FQN swap.
         let owner_key = owner.fqn();
+        let receiver_intersection = receiver_intersection_for_owner(&receiver_resolved, &owner_key);
         let self_replace =
             |ty: &PhpType| match receiver_type_for_owner(&receiver_resolved, &owner_key) {
                 Some(rt) => ty.replace_self_with_type(&rt),
-                None => ty.replace_self_bound(&owner_key, lsb_class.as_deref()),
+                // An intersection receiver keeps every member: whichever
+                // class late static binding lands on satisfies all of them,
+                // not only the one that declared the method.
+                None => match receiver_intersection {
+                    Some(ref inter) => ty.replace_self_over_type(&owner_key, inter),
+                    None => ty.replace_self_bound(&owner_key, lsb_class.as_deref()),
+                },
             };
 
         let mut owner_results = resolve_owner_method_call(
@@ -1806,6 +1813,31 @@ pub(super) fn receiver_type_for_owner(
         }
     }
     short_match
+}
+
+/// The receiver's intersection type string, when `owner_name` is one of the
+/// classes it intersects.
+///
+/// A receiver typed `IfaceA&IfaceB` resolves to one entry per member, each
+/// carrying the whole intersection as its type string (see
+/// [`ResolvedType::tag_as_intersection`](crate::types::ResolvedType::tag_as_intersection)).
+/// Calling a method `IfaceA` declares walks the members one at a time, and
+/// without this the `static` it returns would come back as bare `IfaceA` —
+/// dropping a half of the type the caller already proved.
+pub(super) fn receiver_intersection_for_owner(
+    receiver_resolved: &[ResolvedType],
+    owner_name: &str,
+) -> Option<PhpType> {
+    let owner_short = crate::util::short_name(owner_name);
+    receiver_resolved
+        .iter()
+        .find(|rt| {
+            matches!(rt.type_string.kind(), TypeKind::Intersection(_))
+                && rt.class_info.as_ref().is_some_and(|ci| {
+                    ci.fqn().as_str() == owner_name || ci.name.as_str() == owner_short
+                })
+        })
+        .map(|rt| rt.type_string.clone())
 }
 
 /// Resolve a method's PHPStan conditional return type against the call-site

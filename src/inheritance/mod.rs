@@ -195,7 +195,9 @@ pub(crate) fn resolve_class_with_inheritance(
             break;
         }
 
-        let parent = if let Some(p) = class_loader(parent_name) {
+        let parent = if let Some(p) =
+            crate::class_lookup::load_ancestor(&current.fqn(), parent_name, class_loader)
+        {
             p
         } else {
             break;
@@ -455,8 +457,10 @@ pub(crate) fn resolve_class_with_inheritance(
     //    When a class overrides an interface method without a return type,
     //    propagate the interface method's return type (with template
     //    substitution from `@implements` generics).
+    let class_fqn = class.fqn();
     for iface_name in &class.interfaces {
-        let Some(iface) = class_loader(iface_name) else {
+        let Some(iface) = crate::class_lookup::load_ancestor(&class_fqn, iface_name, class_loader)
+        else {
             continue;
         };
 

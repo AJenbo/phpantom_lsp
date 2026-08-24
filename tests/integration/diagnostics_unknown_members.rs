@@ -13450,3 +13450,47 @@ class Provider
         diags,
     );
 }
+
+/// A namespaced class named `Exception` that extends the global `\Exception`
+/// still inherits its members.
+///
+/// The parent reference is written `\Exception`, but the leading backslash
+/// is not part of the name that gets stored, so resolving the stored
+/// `Exception` from inside `Nette\Neon` can land back on the class itself.
+/// The cycle-breaker then cuts the chain and every inherited member goes
+/// missing — `Nette\Neon\Exception::getMessage()` reported as unknown.
+#[tokio::test]
+async fn namespaced_exception_subclass_inherits_global_exception_members() {
+    let backend = create_test_backend_with_exception_stubs();
+
+    let parent = r#"<?php
+
+namespace Nette\Neon;
+
+class Exception extends \Exception
+{
+}
+"#;
+    backend.update_ast("file:///vendor/nette/neon/src/Neon/Exception.php", parent);
+
+    let php = r#"<?php
+
+namespace PHPStan\DependencyInjection;
+
+use Nette\Neon\Exception;
+
+class NeonAdapter
+{
+    public function load(Exception $e): string
+    {
+        return $e->getMessage();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, "file:///src/NeonAdapter.php", php);
+    let msgs: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+    assert!(
+        msgs.is_empty(),
+        "getMessage() is inherited from the global \\Exception, got: {msgs:?}"
+    );
+}

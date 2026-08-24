@@ -494,14 +494,24 @@ pub(crate) fn extract_first_arg_string_fw(
 /// invoke this only for non-static class methods; the scope-based
 /// variable resolver then serves `$this` lookups from this entry
 /// instead of leaving them unresolved.
-pub(crate) fn seed_this(scope: &mut ScopeState, current_class: &ClassInfo) {
+///
+/// Inside a trait, `$this` is an instance of a class using the trait, so
+/// the seed carries the bounds those classes are known to satisfy as well
+/// (see [`crate::type_engine::trait_context`]).
+pub(crate) fn seed_this(scope: &mut ScopeState, ctx: &ForwardWalkCtx<'_>) {
+    let current_class = ctx.current_class;
     if current_class.name.is_empty() {
         return;
     }
-    scope.set(
-        "$this",
-        vec![ResolvedType::from_class(current_class.clone())],
+    let mut this_types = vec![ResolvedType::from_class(current_class.clone())];
+    crate::type_engine::trait_context::extend_this_with_trait_bounds(
+        &mut this_types,
+        current_class,
+        ctx.all_classes,
+        ctx.class_loader,
+        ctx.backend,
     );
+    scope.set("$this", this_types);
 }
 
 /// Infer callable parameter types for a specific argument index of a

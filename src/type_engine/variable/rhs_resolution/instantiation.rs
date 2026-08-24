@@ -30,7 +30,11 @@ pub(super) fn resolve_rhs_instantiation(
     };
     if let Some(ref name) = class_name {
         let fqn = match name.as_str() {
-            "self" | "static" => ctx.current_class.name.to_string(),
+            // The enclosing class's *fully qualified* name, not its short
+            // one: a namespaced class whose short name collides with a
+            // global class (`App\Error` vs the built-in `\Error`) would
+            // otherwise have every `new self(…)` resolve to the global one.
+            "self" | "static" => ctx.current_class.fqn().to_string(),
             other => crate::util::resolve_source_class_name(
                 other,
                 ctx.current_class.file_namespace.as_deref(),

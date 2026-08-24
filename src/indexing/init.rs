@@ -284,6 +284,22 @@ impl Backend {
             tracing::info!("PSR-0: {} classes from autoload_namespaces.php", count);
         }
 
+        // ── Composer's own bootstrap classes ────────────────────────
+        // `Composer\Autoload\ClassLoader` and `Composer\InstalledVersions`
+        // are `require`d by `vendor/composer/autoload_real.php` before any
+        // autoloader exists, so no autoload map lists them and no package
+        // scan reaches them.  Code that introspects its own autoloader
+        // names them directly.
+        let bootstrap_cm = composer::scan_composer_bootstrap_classes(root, &vendor_dir);
+        if !bootstrap_cm.is_empty() {
+            let count = bootstrap_cm.len();
+            let mut idx = self.symbols.fqn_uri_index.write();
+            for (fqn, path) in bootstrap_cm {
+                idx.or_insert_with(fqn, || crate::util::path_to_uri(&path));
+            }
+            tracing::info!("Composer bootstrap: {count} classes from vendor/composer");
+        }
+
         // ── Autoload files ──────────────────────────────────────────
         if let Some(p) = progress {
             p.set_scope(74, 85, "Scanning autoload files");
@@ -423,6 +439,11 @@ impl Backend {
             // Merge PSR-0 classes for this subproject.
             let psr0_cm = composer::parse_autoload_namespaces(sub_root, vendor_dir);
             for (fqn, path) in psr0_cm {
+                sub_cm.entry(fqn).or_insert(path);
+            }
+            // …and the classes Composer's own bootstrap `require`s, which
+            // no autoload map lists.
+            for (fqn, path) in composer::scan_composer_bootstrap_classes(sub_root, vendor_dir) {
                 sub_cm.entry(fqn).or_insert(path);
             }
             let sub_skip: HashSet<PathBuf> = sub_cm.values().cloned().collect();

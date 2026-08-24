@@ -1184,7 +1184,7 @@ pub(crate) fn seed_and_walk_function_body<'b>(
     // resolve from the scope instead of falling through to the backward
     // scanner.
     if !is_static {
-        seed_this(&mut scope, ctx.current_class);
+        seed_this(&mut scope, ctx);
     }
 
     // Seed scope with parameter types.
@@ -1206,12 +1206,17 @@ pub(crate) fn seed_and_walk_function_body<'b>(
     // remain unresolved.
     seed_superglobals(&mut scope);
 
+    // A `static $var;` local holds whatever an earlier call left in it,
+    // which the top-to-bottom walk below cannot see.
+    let body: Vec<&Statement<'_>> = body_statements.collect();
+    super::static_locals::seed_static_locals(&mut scope, &body, ctx);
+
     // Record the scope right at the function body start so that
     // member accesses on parameters before any assignment are covered.
     record_scope_snapshot(fn_span_start, &scope);
 
     // Walk the entire body, recording snapshots at each statement.
-    walk_body_for_diagnostics(body_statements, &mut scope, ctx);
+    walk_body_for_diagnostics(body.iter().copied(), &mut scope, ctx);
 }
 
 /// Walk the method bodies of an anonymous class expression, seeding

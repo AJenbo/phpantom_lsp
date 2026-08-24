@@ -362,32 +362,19 @@ fn resolve_target_classes_expr_inner(
                     .collect()
             };
 
-            // A trait annotated `@phpstan-require-extends Base` or
-            // `@phpstan-require-implements Contract` guarantees that every
-            // class using the trait satisfies that bound, so inside the
-            // trait's own methods `$this` can access those members. PHPStan
-            // only ever analyzes traits in the context of a using class, but
-            // we analyze them standalone, so resolve the required types
-            // alongside the trait itself.
+            // Inside a trait, `$this` is the class using the trait, never
+            // the trait itself — see `trait_context` for what stands in for
+            // it when the using class is not the one being analysed.
             if let Some(cc) = current_class
                 && cc.kind == ClassLikeKind::Trait
             {
-                if let Some(ref required) = cc.require_extends {
-                    let resolved = find_class_by_name(all_classes, required)
-                        .map(|cls| ResolvedType::from_arc(Arc::clone(cls)))
-                        .or_else(|| class_loader(required).map(ResolvedType::from_arc));
-                    if let Some(rt) = resolved {
-                        ResolvedType::extend_unique(&mut this_types, vec![rt]);
-                    }
-                }
-                for required in &cc.require_implements {
-                    let resolved = find_class_by_name(all_classes, required)
-                        .map(|cls| ResolvedType::from_arc(Arc::clone(cls)))
-                        .or_else(|| class_loader(required).map(ResolvedType::from_arc));
-                    if let Some(rt) = resolved {
-                        ResolvedType::extend_unique(&mut this_types, vec![rt]);
-                    }
-                }
+                crate::type_engine::trait_context::extend_this_with_trait_bounds(
+                    &mut this_types,
+                    cc,
+                    all_classes,
+                    class_loader,
+                    ctx.backend,
+                );
             }
 
             this_types

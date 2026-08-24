@@ -133,7 +133,9 @@ pub(crate) fn merge_traits_into(
             if parent_depth > MAX_TRAIT_DEPTH {
                 break;
             }
-            let parent = if let Some(p) = class_loader(parent_name) {
+            let parent = if let Some(p) =
+                crate::class_lookup::load_ancestor(&current.fqn(), parent_name, class_loader)
+            {
                 p
             } else {
                 break;

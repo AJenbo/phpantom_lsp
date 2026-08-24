@@ -54,6 +54,7 @@ mod diagnostic_walk;
 mod loop_control;
 mod scope_state;
 mod snapshot_narrowing;
+mod static_locals;
 
 pub(crate) use assignment::*;
 pub(crate) use callable_inference::*;
@@ -226,7 +227,7 @@ pub(crate) fn resolve_in_method_body<'b>(
     let mut scope = ScopeState::new();
 
     if !is_static {
-        seed_this(&mut scope, ctx.current_class);
+        seed_this(&mut scope, ctx);
     }
 
     let method_name = method_ctx.map(|(n, _)| n);
@@ -245,7 +246,9 @@ pub(crate) fn resolve_in_method_body<'b>(
     // not write into an active diagnostic scope cache.
     {
         let _suspend = suspend_snapshot_recording();
-        walk_body_forward(body_statements, &mut scope, ctx);
+        let body: Vec<&Statement<'_>> = body_statements.collect();
+        static_locals::seed_static_locals(&mut scope, &body, ctx);
+        walk_body_forward(body.iter().copied(), &mut scope, ctx);
     }
 
     // Return `Some(types)` when the variable exists in scope (even if
@@ -328,7 +331,9 @@ pub(crate) fn resolve_in_function_body<'b>(
     // transient lookup must not pollute an active diagnostic scope cache.
     {
         let _suspend = suspend_snapshot_recording();
-        walk_body_forward(func.body.statements.iter(), &mut scope, ctx);
+        let body: Vec<&Statement<'_>> = func.body.statements.iter().collect();
+        static_locals::seed_static_locals(&mut scope, &body, ctx);
+        walk_body_forward(body.iter().copied(), &mut scope, ctx);
     }
 
     // Return `Some` when the variable exists in scope (even with

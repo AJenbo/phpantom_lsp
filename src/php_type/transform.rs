@@ -10,12 +10,22 @@ enum LsbBinding<'a> {
     Inherit,
     /// Bind them over `class`, the class the forwarding call is made from.
     Over(&'a str),
+    /// Bind them to `ty`, the receiver's whole statically known type, when
+    /// that is richer than a single class name.
+    ///
+    /// A receiver typed `IfaceA&IfaceB` has a runtime class that satisfies
+    /// both, so a method `IfaceA` declares `@return static` returns
+    /// something that is still an `IfaceB` as well.  Binding over just the
+    /// declaring interface would drop that half.  `self` is unaffected: it
+    /// names the class the annotation was read from whatever the receiver
+    /// is.
+    OverType(&'a PhpType),
     /// Collapse them: the called class is statically fixed, so late static
     /// binding has nothing left to resolve.
     Fixed,
 }
 
-impl LsbBinding<'_> {
+impl<'a> LsbBinding<'a> {
     /// The class to bind a `static` / `$this` keyword over, or `None` when the
     /// keyword should collapse to the replacement instead.
     ///
@@ -29,7 +39,20 @@ impl LsbBinding<'_> {
                 _ => None,
             },
             LsbBinding::Over(class) => Some(atom(class)),
+            LsbBinding::OverType(ty) => match ty.kind() {
+                TypeKind::Named(name) => Some(*name),
+                _ => None,
+            },
             LsbBinding::Fixed => None,
+        }
+    }
+
+    /// The whole type `static` / `$this` should become, for a binding that
+    /// carries more than a class name to bind over.
+    fn whole_type(self) -> Option<&'a PhpType> {
+        match self {
+            LsbBinding::OverType(ty) if !matches!(ty.kind(), TypeKind::Named(_)) => Some(ty),
+            _ => None,
         }
     }
 }
@@ -842,6 +865,20 @@ impl PhpType {
         self.replace_self_inner(&PhpType::named(atom(self_class)), lsb)
     }
 
+    /// Like [`replace_self_bound`](Self::replace_self_bound), but binds
+    /// `static` / `$this` to a whole type rather than a single class name.
+    ///
+    /// For a receiver typed `IfaceA&IfaceB`, late static binding lands on a
+    /// runtime class that satisfies both halves, so a `@return static`
+    /// declared on `IfaceA` still describes an `IfaceB`.  `self` keeps
+    /// naming `self_class`, the class the annotation was read from.
+    pub fn replace_self_over_type(&self, self_class: &str, lsb_type: &PhpType) -> PhpType {
+        self.replace_self_inner(
+            &PhpType::named(atom(self_class)),
+            LsbBinding::OverType(lsb_type),
+        )
+    }
+
     fn replace_self_inner(&self, replacement: &PhpType, lsb: LsbBinding<'_>) -> PhpType {
         // Extract the base class name from the replacement for use in
         // Generic nodes where only the name part is replaced.
@@ -858,6 +895,11 @@ impl PhpType {
                 PhpType::as_list_shape(inner.replace_self_inner(replacement, lsb))
             }
             TypeKind::Named(s) if self.is_self_ref() => {
+                if !s.eq_ignore_ascii_case("self")
+                    && let Some(whole) = lsb.whole_type()
+                {
+                    return whole.clone();
+                }
                 let Some(bound) = lsb.bound_over(replacement) else {
                     return replacement.clone();
                 };

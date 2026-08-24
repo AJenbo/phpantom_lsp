@@ -974,7 +974,7 @@ pub(crate) fn seed_property_hook_scope(
     ctx: &ForwardWalkCtx<'_>,
 ) -> ScopeState {
     let mut scope = ScopeState::new();
-    seed_this(&mut scope, ctx.current_class);
+    seed_this(&mut scope, ctx);
 
     if let Some(params) = &hook.parameter_list {
         seed_params(

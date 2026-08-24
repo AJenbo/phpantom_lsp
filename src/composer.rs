@@ -882,6 +882,62 @@ pub fn parse_autoload_namespaces(
     classmap
 }
 
+/// Scan `<vendor>/composer/` for the classes Composer's own bootstrap
+/// defines, and return them as a classmap.
+///
+/// `Composer\Autoload\ClassLoader` and `Composer\InstalledVersions` are
+/// present in every Composer install, but no autoload map lists them:
+/// `vendor/composer/autoload_real.php` pulls them in with a hand-written
+/// `require` before any autoloader is registered, and the directory is not
+/// a package, so nothing else indexes it either.  Code that introspects
+/// its own autoloader (`ClassLoader::getPrefixesPsr4()`,
+/// `InstalledVersions::getRootPackage()`) names them directly, so they
+/// have to be indexed for that code to resolve.
+///
+/// The files are scanned rather than hardcoded to a name, so a Composer
+/// release that adds or renames a bootstrap class needs no change here.
+/// Files that only run code (`autoload_real.php`, `platform_check.php`)
+/// declare no class and contribute nothing.
+///
+/// Returns an empty `HashMap` when the directory does not exist.
+pub fn scan_composer_bootstrap_classes(
+    workspace_root: &Path,
+    vendor_dir: &str,
+) -> HashMap<String, PathBuf> {
+    let composer_dir = workspace_root.join(vendor_dir).join("composer");
+    let entries = match fs::read_dir(&composer_dir) {
+        Ok(e) => e,
+        Err(_) => return HashMap::new(),
+    };
+
+    let mut classmap = HashMap::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        // Only the directory's own files: `vendor/composer/` also holds
+        // the installed-package metadata and, for a path repository, the
+        // symlinks into it.
+        if !path.is_file() || path.extension().is_none_or(|ext| ext != "php") {
+            continue;
+        }
+        // The generated autoload maps are data, not declarations, and are
+        // parsed by their own dedicated readers.
+        if path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.starts_with("autoload_"))
+        {
+            continue;
+        }
+        if let Ok(content) = fs::read(&path) {
+            for fqn in crate::classmap_scanner::find_classes(&content) {
+                classmap.entry(fqn).or_insert_with(|| path.clone());
+            }
+        }
+    }
+
+    classmap
+}
+
 /// Recursively scan a directory for PHP files and extract class names
 /// using the lightweight byte-level scanner.
 fn scan_directory_for_classes(dir: &Path, classmap: &mut HashMap<String, PathBuf>) {

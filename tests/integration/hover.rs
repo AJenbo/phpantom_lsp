@@ -14954,3 +14954,60 @@ $outsideAnyClass = __CLASS__;
         );
     }
 }
+
+// ─── `static` locals ────────────────────────────────────────────────────────
+
+/// A `static` local keeps its value between calls, so on the call that
+/// falls through to the second half of `info()` below, `$lastConfig` holds
+/// what the *other* branch stored on an earlier call.  Reading the body top
+/// to bottom sees no assignment at all — the only one sits behind a
+/// `return` — so the declaration is seeded from every assignment the body
+/// makes to the name, wherever it is.
+#[test]
+fn hover_static_local_seeded_from_assignment_in_unreached_branch() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Configuration {}
+
+function info(?Configuration $config = null): void
+{
+    static $lastConfig;
+
+    if ($config !== null) {
+        $lastConfig = $config;
+        return;
+    }
+
+    $held = $lastConfig;
+}
+"#;
+    let hover = hover_at(&backend, uri, content, 12, 5).expect("hover on $held");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Configuration"),
+        "a static local should carry the type assigned to it elsewhere in the body, got: {text}"
+    );
+}
+
+/// The seed is the union of every assignment, and an initialiser counts as
+/// one: `static $count = 0;` is an `int` before anything else touches it.
+#[test]
+fn hover_static_local_seeded_from_its_initialiser() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+function tick(): void
+{
+    static $count = 0;
+
+    $seen = $count;
+}
+"#;
+    let hover = hover_at(&backend, uri, content, 5, 5).expect("hover on $seen");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains('0'),
+        "a static local's initialiser should type it, got: {text}"
+    );
+}

@@ -41,6 +41,7 @@ pub(crate) mod resolver;
 pub mod subject_expr;
 pub(crate) mod subject_extraction;
 pub(crate) mod subject_resolution;
+pub(crate) mod trait_context;
 pub mod types;
 pub(crate) mod variable;
 
