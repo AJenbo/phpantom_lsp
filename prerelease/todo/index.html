@@ -1306,7 +1306,7 @@ contributor even though it's short.</p>
 </tbody>
 </table>
 <h1 id="scheduled-sprints">Scheduled Sprints<a class="headerlink" href="#scheduled-sprints" title="Permanent link">&para;</a></h1>
-<h2 id="sprint-6-0100-release-full-indexing">Sprint 6 — 0.10.0 release, full indexing<a class="headerlink" href="#sprint-6-0100-release-full-indexing" title="Permanent link">&para;</a></h2>
+<h2 id="sprint-7-0110-blade-support">Sprint 7 — 0.11.0 Blade support<a class="headerlink" href="#sprint-7-0110-blade-support" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
@@ -1319,13 +1319,79 @@ contributor even though it's short.</p>
 <tbody>
 <tr>
 <td></td>
-<td><strong>Release 0.10.0</strong></td>
+<td>Clear <a href="../todo/refactor/">refactoring gate</a></td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td>BL11</td>
+<td><a href="../todo/blade/#bl11-custom-directive-discovery">Custom directive discovery</a> (<code>Blade::directive()</code> / <code>Blade::if()</code> registrations)</td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>BL25</td>
+<td><a href="../todo/blade/#bl25-anonymous-component-attribute-completion-from-undeclared-template-reads">Anonymous component attribute completion from undeclared template reads</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>L52</td>
+<td><a href="../todo/laravel/#l52-create-missing-view-quick-fix-for-an-unresolved-view-name">"Create missing view" quick-fix for an unresolved view name</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>BL23</td>
+<td><a href="../todo/blade/#bl23-unbalanced-component-tag-diagnostics">Unbalanced component tag diagnostics</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>BL14</td>
+<td><a href="../todo/blade/#bl14-folding-ranges-for-blade-files">Folding ranges for Blade files</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>BL24</td>
+<td><a href="../todo/blade/#bl24-named-slot-variables-scoped-to-the-component-that-receives-them">Named slot variables scoped to the component that receives them</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>BL17</td>
+<td><a href="../todo/blade/#bl17-format-check-cli-subcommand-for-ci"><code>format --check</code> CLI subcommand for CI</a> (depends on BL16)</td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>BL1</td>
+<td><a href="../todo/blade/#bl1-blade-aware-code-actions">Blade-aware code actions</a></td>
+<td>Medium</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>BL15</td>
+<td><a href="../todo/blade/#bl15-document-outline-symbols-for-blade-files">Document outline (symbols) for Blade files</a></td>
+<td>Low-Medium</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>BL16</td>
+<td><a href="../todo/blade/#bl16-blade-aware-formatting">Blade-aware formatting</a></td>
+<td>Low-Medium</td>
+<td>High</td>
+</tr>
+<tr>
+<td></td>
+<td><strong>Release 0.11.0</strong></td>
 <td></td>
 <td></td>
 </tr>
 </tbody>
 </table>
-<h2 id="sprint-7-10-release-ide-extensions">Sprint 7 — 1.0 release &amp; IDE extensions<a class="headerlink" href="#sprint-7-10-release-ide-extensions" title="Permanent link">&para;</a></h2>
+<h2 id="sprint-8-10-release-ide-extensions">Sprint 8 — 1.0 release &amp; IDE extensions<a class="headerlink" href="#sprint-8-10-release-ide-extensions" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
@@ -1401,67 +1467,6 @@ contributor even though it's short.</p>
 <td><strong>Release 1.0.0 + IDE extensions</strong></td>
 <td></td>
 <td></td>
-</tr>
-</tbody>
-</table>
-<h2 id="sprint-8-blade-support">Sprint 8 — Blade support<a class="headerlink" href="#sprint-8-blade-support" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>#</th>
-<th>Item</th>
-<th>Impact</th>
-<th>Complexity</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td></td>
-<td>Clear <a href="../todo/refactor/">refactoring gate</a></td>
-<td>—</td>
-<td>—</td>
-</tr>
-<tr>
-<td>BL23</td>
-<td><a href="../todo/blade/#bl23-unbalanced-component-tag-diagnostics">Unbalanced component tag diagnostics</a></td>
-<td>Low-Medium</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>BL14</td>
-<td><a href="../todo/blade/#bl14-folding-ranges-for-blade-files">Folding ranges for Blade files</a></td>
-<td>Low-Medium</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>BL24</td>
-<td><a href="../todo/blade/#bl24-named-slot-variables-scoped-to-the-component-that-receives-them">Named slot variables scoped to the component that receives them</a></td>
-<td>Low-Medium</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>BL17</td>
-<td><a href="../todo/blade/#bl17-format-check-cli-subcommand-for-ci"><code>format --check</code> CLI subcommand for CI</a> (depends on BL16)</td>
-<td>Low-Medium</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>BL1</td>
-<td><a href="../todo/blade/#bl1-blade-aware-code-actions">Blade-aware code actions</a></td>
-<td>Medium</td>
-<td>Medium-High</td>
-</tr>
-<tr>
-<td>BL15</td>
-<td><a href="../todo/blade/#bl15-document-outline-symbols-for-blade-files">Document outline (symbols) for Blade files</a></td>
-<td>Low-Medium</td>
-<td>Medium-High</td>
-</tr>
-<tr>
-<td>BL16</td>
-<td><a href="../todo/blade/#bl16-blade-aware-formatting">Blade-aware formatting</a></td>
-<td>Low-Medium</td>
-<td>High</td>
 </tr>
 </tbody>
 </table>
@@ -1659,18 +1664,6 @@ unlikely to move the needle for most users.</p>
 <td></td>
 </tr>
 <tr>
-<td>B227</td>
-<td><a href="../todo/bugs/#b227-the-replace-function-familys-conditional-return-type-never-collapses">The replace function family's conditional return type never collapses</a></td>
-<td>Medium-High</td>
-<td>Low-Medium</td>
-</tr>
-<tr>
-<td>B259</td>
-<td><a href="../todo/bugs/#b259-instanceof-on-an-array-element-with-a-computed-key-never-narrows"><code>instanceof</code> on an array element with a computed key never narrows</a></td>
-<td>Medium</td>
-<td>Medium</td>
-</tr>
-<tr>
 <td>B258</td>
 <td><a href="../todo/bugs/#b258-two-variables-assigned-in-the-same-branch-lose-their-correlated-nullability-at-the-merge">Two variables assigned in the same branch lose their correlated nullability at the merge</a></td>
 <td>Medium</td>
@@ -1681,6 +1674,12 @@ unlikely to move the needle for most users.</p>
 <td><a href="../todo/bugs/#b243-phpstananalyserscopemergewith-is-a-confirmed-false-positive-with-no-explanation-on-the-phpstan-side"><code>PHPStan\Analyser\Scope::mergeWith()</code> is a confirmed false positive with no explanation on the PHPStan side</a></td>
 <td>Low-Medium</td>
 <td>Unknown</td>
+</tr>
+<tr>
+<td>B261</td>
+<td><a href="../todo/bugs/#b261-a-property-keeps-its-narrowing-across-a-write-the-resolver-cannot-type">A property keeps its narrowing across a write the resolver cannot type</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
 </tr>
 <tr>
 <td></td>
@@ -2142,18 +2141,6 @@ unlikely to move the needle for most users.</p>
 <td>L51</td>
 <td><a href="../todo/laravel/#l51-convert-facade-call-to-dependency-injection-refactor">"Convert facade call to dependency injection" refactor</a></td>
 <td>Low</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td></td>
-<td><strong><a href="../todo/blade/">Blade</a></strong></td>
-<td></td>
-<td></td>
-</tr>
-<tr>
-<td>BL11</td>
-<td><a href="../todo/blade/#bl11-custom-directive-discovery">Custom directive discovery</a> (<code>Blade::directive()</code> / <code>Blade::if()</code> registrations)</td>
-<td>Medium</td>
 <td>Medium</td>
 </tr>
 <tr>
