@@ -1982,7 +1982,7 @@ highlighting remains in charge of ordinary PHP syntax.</p>
 <td><code>command</code></td>
 <td>string</td>
 <td>unset</td>
-<td>Command or path for PHPStan. Unset: auto-detect via <code>vendor/bin/phpstan</code> (only when the project has a PHPStan config file or <code>composer.json</code> requires <code>phpstan/phpstan</code> or Larastan directly) then <code>$PATH</code>. A Laravel application with neither Larastan nor a config file is left alone entirely, since plain PHPStan misreads the framework. <code>""</code>: disable.</td>
+<td>Command or path for PHPStan. Unset: auto-detect via <code>vendor/bin/phpstan</code> (only when the project has a PHPStan config file or <code>composer.json</code> requires <code>phpstan/phpstan</code>, or a Laravel-aware PHPStan extension such as <code>larastan/larastan</code> or <code>calebdw/phpstan-laravel</code>, directly) then <code>$PATH</code>. A Laravel application with neither such an extension nor a config file is left alone entirely, since plain PHPStan misreads the framework. <code>""</code>: disable.</td>
 </tr>
 <tr>
 <td><code>memory-limit</code></td>
