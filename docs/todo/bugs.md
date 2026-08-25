@@ -105,30 +105,4 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B268. `deprecated_usage` over-reports two call shapes PHPStan's own deprecation rule exempts
-
-**Impact: Low-Medium · Complexity: Low-Medium**
-
-```php
-// (a) implementing a deprecated interface method by delegating to the same deprecated
-// method on other instances — PHPStan doesn't flag its own required delegation,
-// PHPantom does:
-public function hasProperty(string $propertyName): TrinaryLogic
-{
-    return $this->unionResults(static fn (Type $type): TrinaryLogic => $type->hasProperty($propertyName));
-}
-
-// (b) accessing a constant on a deprecated class — PHPStan's deprecation rule doesn't
-// fire on this either:
-$val[Helpers::PREVENT_MERGING] = true;
-```
-
-(`src/Type/UnionType.php:656-659`, `src/Type/ObjectType.php`,
-`src/Type/IntersectionType.php`, `src/Analyser/MutatingScope.php`,
-`src/Reflection/ClassReflection.php`,
-`src/Reflection/RequireExtension/RequireExtendsPropertiesClassReflectionExtension.php`,
-`src/Type/Traits/LateResolvableTypeTrait.php` for shape (a);
-`src/DependencyInjection/NeonAdapter.php` for shape (b).) All 24 `deprecated_usage`
-diagnostics in this sweep match one of these two shapes, and none of the affected files
-produce a PHPStan deprecation warning when analysed directly (confirmed by running
-`vendor/bin/phpstan analyse` on each file listed above).
+No outstanding items.

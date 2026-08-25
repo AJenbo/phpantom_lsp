@@ -18,6 +18,7 @@
 //! reusing this one's type.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use tower_lsp::lsp_types::*;
 
@@ -26,9 +27,12 @@ use crate::symbol_map::SymbolKind;
 use crate::type_engine::resolver::{ResolutionCtx, SubjectOutcome, resolve_subject_outcome};
 use crate::types::AccessKind;
 use crate::types::ClassInfo;
-use crate::virtual_members::resolve_class_fully_cached;
+use crate::virtual_members::{ResolvedClassCache, resolve_class_fully_cached};
 
-use super::helpers::{FileDiagnosticContext, find_innermost_enclosing_class, resolve_to_fqn};
+use super::helpers::{
+    FileDiagnosticContext, find_enclosing_method_name, find_innermost_enclosing_class,
+    resolve_to_fqn,
+};
 use super::subject_cache::SubjectCacheKey;
 
 impl Backend {
@@ -118,6 +122,13 @@ impl Backend {
 
                     if let Some(cls) = self.find_or_load_class(&resolved_name)
                         && let Some(msg) = &cls.deprecation_message
+                        && !is_within_deprecated_scope(
+                            local_classes,
+                            &class_loader,
+                            cache,
+                            content,
+                            span.start,
+                        )
                         && let Some(range) = self.offset_range_to_lsp_range(
                             uri,
                             content,
@@ -224,6 +235,13 @@ impl Backend {
                             .get_method(member_name)
                             .or_else(|| resolved.get_method(member_name))
                             && let Some(msg) = &method.deprecation_message
+                            && !is_within_deprecated_scope(
+                                local_classes,
+                                &class_loader,
+                                cache,
+                                content,
+                                span.start,
+                            )
                             && let Some(range) = self.offset_range_to_lsp_range(
                                 uri,
                                 content,
@@ -250,6 +268,13 @@ impl Backend {
                             .find(|p| p.name == *member_name)
                             .or_else(|| resolved.properties.iter().find(|p| p.name == *member_name))
                             && let Some(msg) = &prop.deprecation_message
+                            && !is_within_deprecated_scope(
+                                local_classes,
+                                &class_loader,
+                                cache,
+                                content,
+                                span.start,
+                            )
                             && let Some(range) = self.offset_range_to_lsp_range(
                                 uri,
                                 content,
@@ -273,6 +298,13 @@ impl Backend {
                             && let Some(constant) =
                                 resolved.constants.iter().find(|c| c.name == *member_name)
                             && let Some(msg) = &constant.deprecation_message
+                            && !is_within_deprecated_scope(
+                                local_classes,
+                                &class_loader,
+                                cache,
+                                content,
+                                span.start,
+                            )
                             && let Some(range) = self.offset_range_to_lsp_range(
                                 uri,
                                 content,
@@ -309,6 +341,13 @@ impl Backend {
                         file_use_map,
                         ctx.file.namespace_at(span.start),
                     ) && let Some(msg) = &func_info.deprecation_message
+                        && !is_within_deprecated_scope(
+                            local_classes,
+                            &class_loader,
+                            cache,
+                            content,
+                            span.start,
+                        )
                         && let Some(range) = self.offset_range_to_lsp_range(
                             uri,
                             content,
@@ -379,6 +418,44 @@ fn deprecated_diagnostic(
         tags: Some(vec![DiagnosticTag::DEPRECATED]),
         data: None,
     }
+}
+
+/// Whether `offset` sits inside a scope that PHPStan's own deprecation
+/// rule treats as deprecated: the enclosing class/trait itself, or the
+/// enclosing method.
+///
+/// The method check also covers an override that implements/overrides a
+/// deprecated interface or parent method without a `@deprecated` tag of
+/// its own — inheritance enrichment (`inheritance::enrichment`) already
+/// propagates `deprecation_message` onto such overrides, so a plain
+/// lookup on the resolved class is enough.
+///
+/// Mirrors `DefaultDeprecatedScopeResolver` in
+/// phpstan/phpstan-deprecation-rules: deprecated code calling other
+/// deprecated code isn't worth flagging (e.g. a `Type::hasProperty()`
+/// override delegating to the same deprecated method on other `Type`
+/// instances).
+fn is_within_deprecated_scope(
+    local_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    cache: &ResolvedClassCache,
+    content: &str,
+    offset: u32,
+) -> bool {
+    let Some(enclosing) = find_innermost_enclosing_class(local_classes, offset) else {
+        return false;
+    };
+    if enclosing.deprecation_message.is_some() {
+        return true;
+    }
+
+    let Some(method_name) = find_enclosing_method_name(content, offset) else {
+        return false;
+    };
+    let resolved = resolve_class_fully_cached(enclosing, class_loader, cache);
+    resolved
+        .get_method(&method_name)
+        .is_some_and(|m| m.deprecation_message.is_some())
 }
 
 /// Resolve a member access subject text to a class FQN.

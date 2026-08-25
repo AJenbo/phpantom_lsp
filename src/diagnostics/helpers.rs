@@ -779,6 +779,70 @@ pub(crate) fn find_innermost_enclosing_class(
         .map(|(c, _)| c.as_ref())
 }
 
+/// Find the name of the method whose body contains `offset`, if any.
+///
+/// Used by the `@deprecated` usage pass to tell whether a call site sits
+/// inside a method that itself overrides/implements the deprecated
+/// member being referenced there — PHPStan's own deprecation rule
+/// (`DefaultDeprecatedScopeResolver` in phpstan/phpstan-deprecation-rules)
+/// exempts that pattern instead of flagging legacy code for calling
+/// other legacy code.
+///
+/// Offset containment is checked against the method body's braces only,
+/// so a call inside a nested closure or arrow function is still
+/// attributed to the enclosing method — matching PHPStan, which resolves
+/// `Scope::getFunction()` to the same enclosing method from inside an
+/// arrow function body.
+pub(crate) fn find_enclosing_method_name(content: &str, offset: u32) -> Option<String> {
+    crate::parser::with_parsed_program(content, "find_enclosing_method_name", |program, _| {
+        find_enclosing_method_name_in_statements(&program.statements, offset)
+    })
+}
+
+fn find_enclosing_method_name_in_statements<'a>(
+    statements: &mago_syntax::cst::Sequence<'a, mago_syntax::cst::Statement<'a>>,
+    offset: u32,
+) -> Option<String> {
+    use mago_syntax::cst::Statement;
+
+    for stmt in statements.iter() {
+        let found = match stmt {
+            Statement::Class(class) => find_method_name_in_members(class.members.iter(), offset),
+            Statement::Trait(tr) => find_method_name_in_members(tr.members.iter(), offset),
+            Statement::Enum(en) => find_method_name_in_members(en.members.iter(), offset),
+            Statement::Namespace(ns) => {
+                return find_enclosing_method_name_in_statements(ns.statements(), offset);
+            }
+            _ => None,
+        };
+        if let Some(name) = found {
+            return Some(name.to_string());
+        }
+    }
+    None
+}
+
+fn find_method_name_in_members<'a>(
+    members: impl Iterator<Item = &'a mago_syntax::cst::class_like::member::ClassLikeMember<'a>>,
+    offset: u32,
+) -> Option<&'a str> {
+    use mago_syntax::cst::class_like::member::ClassLikeMember;
+    use mago_syntax::cst::class_like::method::MethodBody;
+
+    for member in members {
+        if let ClassLikeMember::Method(method) = member
+            && let MethodBody::Concrete(block) = &method.body
+        {
+            let body_start = block.left_brace.start.offset;
+            let body_end = block.right_brace.end.offset;
+            if offset >= body_start && offset <= body_end {
+                return Some(crate::atom::bytes_to_str(method.name.value));
+            }
+        }
+    }
+    None
+}
+
 /// Returns `true` when a call expression's `resolve_callable_target*`
 /// result is guaranteed to be the same at every call site in a file, so
 /// it is safe to memoize by expression text alone in a per-file cache.

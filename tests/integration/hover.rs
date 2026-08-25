@@ -1856,6 +1856,41 @@ class Legacy {
 }
 
 #[test]
+fn hover_shows_deprecation_inherited_from_interface_override() {
+    // An override with no docblock of its own inherits the interface
+    // method's `@deprecated` tag, the same way it already inherits a
+    // richer `@return` type from the interface.
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+interface Shape {
+    /** @deprecated Use hasArea() instead. */
+    public function hasProperty(string $name): bool;
+}
+
+class Delegator implements Shape {
+    public function hasProperty(string $name): bool
+    {
+        return true;
+    }
+
+    public function run(): void {
+        $this->hasProperty('x');
+    }
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 13, 16).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("🪦 **deprecated** Use hasArea() instead."),
+        "override with no own docblock should inherit the interface's \
+         deprecation message: {}",
+        text
+    );
+}
+
+#[test]
 fn hover_deprecated_class() {
     let backend = create_test_backend();
     let uri = "file:///test.php";
