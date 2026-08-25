@@ -2069,6 +2069,51 @@ class Marker extends Pen
     public function highlight(): void {}
 }
 
+// ─── Loop Fold / Pre-Validation Support Classes ─────────────────────────────
+// A tally that folds together, and the branch ends a loop folds tallies out
+// of. The pre-validation classes below are the same shape a parser walks: a
+// base node, one subtype that carries the extra members, and a holder of a
+// list of them.
+
+class InkTally
+{
+    public function __construct(public int $strokes = 0) {}
+
+    public function mergeWith(InkTally $other): InkTally
+    {
+        return new InkTally($this->strokes + $other->strokes);
+    }
+
+    public function total(): int { return $this->strokes; }
+}
+
+class DrawingStep
+{
+    public function __construct(private readonly int $strokes = 1) {}
+
+    public function tally(): InkTally { return new InkTally($this->strokes); }
+}
+
+class SketchNode
+{
+    public function kind(): string { return 'node'; }
+}
+
+class LabelledSketchNode extends SketchNode
+{
+    public function __construct(public string $caption = 'untitled') {}
+
+    public function kind(): string { return 'labelled'; }
+
+    public function caption(): string { return $this->caption; }
+}
+
+class SketchGroup
+{
+    /** @param list<SketchNode> $nodes */
+    public function __construct(public array $nodes = []) {}
+}
+
 // ─── Chaining Demo Support Classes ──────────────────────────────────────────
 
 class Brush

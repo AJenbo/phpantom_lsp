@@ -1319,8 +1319,24 @@ pub(crate) fn condition_narrowing_overrides<'b>(
     truthy: bool,
     ctx: &VarResolutionCtx<'_>,
 ) -> HashMap<String, Vec<ResolvedType>> {
+    condition_arm_narrowing(condition, truthy, ctx).0
+}
+
+/// [`condition_narrowing_overrides`] plus whether the arm can run at all.
+///
+/// The flag is `true` when the condition rules out every value one of its
+/// subjects could hold, which makes the arm dead code: the else of
+/// `$acc === null ? seed($x) : $acc->merge($x)` on the run where `$acc` is
+/// still exactly `null`. An arm that cannot run contributes no type, so a
+/// caller that unions the arms must leave it out rather than fold in the
+/// unresolvable receiver it would have had.
+pub(crate) fn condition_arm_narrowing<'b>(
+    condition: &'b Expression<'b>,
+    truthy: bool,
+    ctx: &VarResolutionCtx<'_>,
+) -> (HashMap<String, Vec<ResolvedType>>, bool) {
     let Some(resolver) = ctx.scope_var_resolver else {
-        return HashMap::new();
+        return (HashMap::new(), false);
     };
 
     let mut subjects: Vec<String> = Vec::new();
@@ -1331,7 +1347,7 @@ pub(crate) fn condition_narrowing_overrides<'b>(
         }
     }
     if subjects.is_empty() {
-        return HashMap::new();
+        return (HashMap::new(), false);
     }
 
     let mut scope = ScopeState::new();
@@ -1342,7 +1358,7 @@ pub(crate) fn condition_narrowing_overrides<'b>(
         }
     }
     if scope.locals.is_empty() {
-        return HashMap::new();
+        return (HashMap::new(), false);
     }
 
     let seeded = scope.locals.clone();
@@ -1353,7 +1369,8 @@ pub(crate) fn condition_narrowing_overrides<'b>(
         apply_condition_narrowing_inverse(condition, &mut scope, &walk_ctx);
     }
 
-    scope
+    let impossible = scope.unreachable;
+    let overrides = scope
         .locals
         .into_iter()
         .filter(|(name, types)| {
@@ -1363,7 +1380,8 @@ pub(crate) fn condition_narrowing_overrides<'b>(
                     .is_none_or(|before| narrowing_changed_types(before, types))
         })
         .map(|(name, types)| (name.to_string(), types))
-        .collect()
+        .collect();
+    (overrides, impossible)
 }
 
 /// Apply every inverse narrowing rule to a condition that is no longer a
@@ -3788,6 +3806,14 @@ pub(crate) fn strip_null_from_scope(var_name: &str, scope: &mut ScopeState) {
 
     if !stripped.is_empty() {
         scope.set(var_name, stripped);
+    } else {
+        // Everything the variable could hold was `null`, so a path that
+        // proves it is not null cannot run.  Saying so keeps the dead
+        // path's end state out of the join instead of letting the
+        // impossible `null` receiver there erase what the live paths
+        // knew — which is what a first-iteration `if ($acc === null)`
+        // seed/merge accumulator depends on.
+        scope.unreachable = true;
     }
 }
 

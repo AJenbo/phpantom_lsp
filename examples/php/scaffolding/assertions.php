@@ -108,6 +108,12 @@ function runDemoAssertions(): void
         'a name the shelf does not carry yields null, so nothing is proved about that call',
     );
 
+    // ── A repeated call checked by a ternary condition ───────────────────
+    assert(
+        is_string((new CompoundNarrowingDemo())->repeatedCallInTernary(new Scaffolding\SpecimenHolder())),
+        'both ternary arms re-evaluate the checked call, and the check rules out its null',
+    );
+
     // ── A pair of `!` cancels ───────────────────────────────────────────
     $bare = new Scaffolding\Rock();
     assert((!(!$bare)) === (bool) $bare, 'double negation is the bare truthiness test');
@@ -1728,6 +1734,50 @@ function runDemoAssertions(): void
     assert(
         (new ConditionAssignmentDemo())->firstPen() instanceof Scaffolding\Pen,
         'a sentinel check beside an assignment leaves the success type behind'
+    );
+
+    // ── Folding a variable number of values into one accumulator ─────────
+    $foldDemo = new LoopCarriedAssignmentDemo();
+    $foldSteps = [new Scaffolding\DrawingStep(2), new Scaffolding\DrawingStep(3), new Scaffolding\DrawingStep(4)];
+    assert(
+        $foldDemo->foldAccumulator($foldSteps) === 9,
+        'the fold seeds on the first pass and merges on the rest, so every step counts once'
+    );
+    assert(
+        $foldDemo->foldAccumulator([]) === 0,
+        'a loop that never runs leaves the accumulator null, which is what the `?->` reads'
+    );
+    assert(
+        $foldDemo->foldAccumulatorTernary($foldSteps) === 18,
+        'the if/else and ternary spellings of the fold add up to the same total each'
+    );
+
+    // ── Pre-validation loops ─────────────────────────────────────────────
+    $preValidation = new PreValidationLoopDemo();
+    $labelled = new Scaffolding\SketchGroup([
+        new Scaffolding\LabelledSketchNode('alpha'),
+        new Scaffolding\LabelledSketchNode('beta'),
+    ]);
+    $mixed = new Scaffolding\SketchGroup([new Scaffolding\LabelledSketchNode('alpha'), new Scaffolding\SketchNode()]);
+    assert(
+        $preValidation->captions([$labelled]) === 'alphabeta',
+        'every node passed the pre-validation loop, so the second loop reads all of them'
+    );
+    assert(
+        $preValidation->captions([$mixed]) === '',
+        'one failing node makes the `break 2` skip the second loop entirely'
+    );
+    assert(
+        $preValidation->firstCaption($labelled) === 'alpha',
+        'a return guard rejects the whole group, so reaching the second loop proves every node'
+    );
+    assert(
+        $preValidation->firstCaption($mixed) === '',
+        'the return guard fires on the unlabelled node before the second loop runs'
+    );
+    assert(
+        $preValidation->unproven($mixed) === 'labellednode',
+        'a plain break leaves the unchecked nodes in the list the second loop walks'
     );
 
     // ── Loops over an array that cannot be empty ─────────────────────────

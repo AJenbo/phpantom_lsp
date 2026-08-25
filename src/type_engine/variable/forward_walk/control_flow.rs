@@ -333,6 +333,14 @@ pub(crate) fn process_if_statement_body<'b>(
     // the post-if scope.
     retain_synthetic_keys_common_to_all(scope, &surviving_scopes);
 
+    // Impossibility is a property of one branch's path conditions, not of
+    // the join: the statement after the `if` is reached by whichever branch
+    // *was* possible.  Restoring the pre-if reachability keeps a dropped
+    // branch from erasing the rest of the walk.  The guard clause narrowing
+    // below runs after the restore because what *it* proves impossible is a
+    // property of the continuation, not of a branch that was dropped.
+    scope.unreachable = pre_if_unreachable;
+
     // Guard clause narrowing: when the if body unconditionally exits
     // and there are no elseif/else branches, apply inverse narrowing.
     // This applies to ALL exit types (return, throw, break, continue)
@@ -346,12 +354,6 @@ pub(crate) fn process_if_statement_body<'b>(
         apply_condition_narrowing_inverse(if_stmt.condition, scope, ctx);
         apply_guard_clause_null_narrowing(if_stmt, scope, ctx);
     }
-
-    // Impossibility is a property of one branch's path conditions, not of
-    // the join: the statement after the `if` is reached by whichever branch
-    // *was* possible.  Restoring the pre-if reachability keeps a dropped
-    // branch from erasing the rest of the walk.
-    scope.unreachable = pre_if_unreachable;
 }
 
 /// Process if with colon-delimited body.
@@ -565,6 +567,14 @@ pub(crate) fn process_if_colon_body<'b>(
 
     retain_synthetic_keys_common_to_all(scope, &surviving_scopes);
 
+    // Impossibility is a property of one branch's path conditions, not of
+    // the join: the statement after the `if` is reached by whichever branch
+    // *was* possible.  Restoring the pre-if reachability keeps a dropped
+    // branch from erasing the rest of the walk.  The guard clause narrowing
+    // below runs after the restore because what *it* proves impossible is a
+    // property of the continuation, not of a branch that was dropped.
+    scope.unreachable = pre_if_unreachable;
+
     // Guard clause narrowing: when the if body unconditionally exits and
     // there are no elseif/else branches, apply inverse narrowing.
     if enclosing_stmt.span().end.offset < ctx.cursor_offset
@@ -575,12 +585,6 @@ pub(crate) fn process_if_colon_body<'b>(
         apply_condition_narrowing_inverse(if_stmt.condition, scope, ctx);
         apply_guard_clause_null_narrowing(if_stmt, scope, ctx);
     }
-
-    // Impossibility is a property of one branch's path conditions, not of
-    // the join: the statement after the `if` is reached by whichever branch
-    // *was* possible.  Restoring the pre-if reachability keeps a dropped
-    // branch from erasing the rest of the walk.
-    scope.unreachable = pre_if_unreachable;
 }
 
 /// Check whether an if/elseif/else branch terminates, so its
@@ -1289,6 +1293,11 @@ pub(crate) fn process_foreach<'b>(
         scope.set(vn, vec![ResolvedType::from_type_string(PhpType::mixed())]);
     }
 
+    // What one entry looks like before the body has said anything about
+    // it, which is the baseline the loop's own guards narrow.
+    let entry_value_types: Option<Vec<ResolvedType>> =
+        value_var_name.as_ref().map(|vn| scope.get(vn).to_vec());
+
     // ── Assignment-depth-bounded loop iteration ─────────────────
     //
     // Walk the body once (always needed).  Then check whether any
@@ -1375,9 +1384,150 @@ pub(crate) fn process_foreach<'b>(
     // fall-through alone does not describe it.
     if !cursor_in_body {
         merge_exit_edges(scope, &exits.breaks);
+        let _ = narrow_iterated_collection(
+            foreach,
+            &body_stmts,
+            iter_type.as_ref(),
+            entry_value_types.as_deref(),
+            scope,
+            ctx,
+        );
     }
 
     leave_loop(loop_depth);
+}
+
+/// Narrow the collection a loop iterated to what the loop proved about
+/// every one of its entries.
+///
+/// `foreach ($conds as $cond) { if (!$cond instanceof C) { break 2; } … }`
+/// only falls out of its own bottom once every entry has passed the guard,
+/// so the code after it may treat the whole collection as `C[]` — which is
+/// what a second loop over the same expression, the idiom this exists for,
+/// then reads its own variable from.  An empty collection makes the claim
+/// vacuously true, so whether the body ran does not matter.
+///
+/// A `break` or `continue` naming only this loop proves nothing: the first
+/// jumps straight to the code being narrowed, and the second skips the
+/// entry rather than the rest of the program.
+fn narrow_iterated_collection<'b>(
+    foreach: &'b Foreach<'b>,
+    body_stmts: &[&'b Statement<'b>],
+    iter_type: Option<&PhpType>,
+    entry_value_types: Option<&[ResolvedType]>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Option<()> {
+    // A braced body arrives as a single `Block` statement, and the guards
+    // are its children rather than the body's.  Checked before anything is
+    // allocated: a loop that does not open with a guard is the common case
+    // and there is nothing here for it.
+    let leading = match body_stmts {
+        [Statement::Block(block)] => block.statements.first(),
+        _ => body_stmts.first().copied(),
+    };
+    guard_past_loop_condition(leading?)?;
+
+    let entry_value_types = entry_value_types.filter(|types| !types.is_empty())?;
+    let iter_type = iter_type?;
+    let value_expr = match &foreach.target {
+        ForeachTarget::Value(val) => val.value,
+        ForeachTarget::KeyValue(kv) => kv.value,
+    };
+    // A by-reference loop writes through the entries it visits, so what a
+    // guard proved about one need not still hold afterwards.
+    if let Expression::UnaryPrefix(up) = value_expr
+        && matches!(up.operator, UnaryPrefixOperator::Reference(_))
+    {
+        return None;
+    }
+    let Expression::Variable(Variable::Direct(dv)) = value_expr else {
+        return None;
+    };
+    let var_name = bytes_to_str(dv.name).to_string();
+    let collection_key = narrowing::expr_to_subject_key(foreach.expression)?;
+
+    // Replay the leading guards against the entry binding alone: what
+    // survives all of them is what every entry had to be to get here.
+    let mut guard_scope = ScopeState::new();
+    guard_scope.set(&var_name, entry_value_types.to_vec());
+    let unwrapped: Vec<&Statement<'_>> = match body_stmts {
+        [Statement::Block(block)] => block.statements.iter().collect(),
+        _ => body_stmts.to_vec(),
+    };
+    for stmt in &unwrapped {
+        let Some(condition) = guard_past_loop_condition(stmt) else {
+            break;
+        };
+        apply_condition_narrowing_inverse(condition, &mut guard_scope, ctx);
+        if guard_scope.unreachable {
+            return None;
+        }
+    }
+
+    let narrowed = guard_scope.get(&var_name);
+    if narrowed.is_empty() || !narrowing_changed_types(entry_value_types, narrowed) {
+        return None;
+    }
+    let element = ResolvedType::types_joined(narrowed);
+    let collection_type =
+        crate::type_engine::variable::array_func_rules::with_element_type(iter_type, element)?;
+    // Keep whatever class backs the container itself (a `Collection` object
+    // rather than a plain array); only its element type changed.
+    let mut entry = scope
+        .get(&collection_key)
+        .first()
+        .cloned()
+        .unwrap_or_else(|| ResolvedType::from_type_string(collection_type.clone()));
+    entry.type_string = collection_type;
+    scope.set(&collection_key, vec![entry]);
+    Some(())
+}
+
+/// The condition of a leading `if (…) { <jump past the loop> }` guard.
+///
+/// An `elseif` or `else` means the `if` is a branch rather than a guard, so
+/// falling out of its bottom proves nothing about the condition.
+fn guard_past_loop_condition<'b>(stmt: &'b Statement<'b>) -> Option<&'b Expression<'b>> {
+    let Statement::If(if_stmt) = stmt else {
+        return None;
+    };
+    let IfBody::Statement(body) = &if_stmt.body else {
+        return None;
+    };
+    if !body.else_if_clauses.is_empty() || body.else_clause.is_some() {
+        return None;
+    }
+    // A condition that assigns changes the entry the guard then talks
+    // about, so what it proves is not a claim about what the collection
+    // holds.
+    let mut writes = HashMap::new();
+    collect_expr_assignment_deps(if_stmt.condition, &mut writes);
+    if !writes.is_empty() {
+        return None;
+    }
+    statement_leaves_loop(body.statement).then_some(if_stmt.condition)
+}
+
+/// Whether a statement jumps somewhere that the code right after the
+/// enclosing loop cannot be reached from.
+///
+/// Any `break`/`continue` level above 1 qualifies: it leaves the loop plus
+/// at least one structure the code after the loop is itself inside.
+fn statement_leaves_loop(stmt: &Statement<'_>) -> bool {
+    match stmt {
+        Statement::Return(_) => true,
+        Statement::Break(brk) => exit_level(brk.level).is_some_and(|level| level >= 2),
+        Statement::Continue(cont) => exit_level(cont.level).is_some_and(|level| level >= 2),
+        Statement::Expression(es) => matches!(
+            es.expression,
+            Expression::Throw(_)
+                | Expression::Construct(mago_syntax::cst::Construct::Exit(_))
+                | Expression::Construct(mago_syntax::cst::Construct::Die(_))
+        ),
+        Statement::Block(block) => block.statements.iter().any(statement_leaves_loop),
+        _ => false,
+    }
 }
 
 /// Resolve the iterable expression's type for a foreach.

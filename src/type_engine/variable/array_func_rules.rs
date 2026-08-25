@@ -438,7 +438,7 @@ fn filter_element_type(raw: &PhpType) -> Option<PhpType> {
 
 /// Rebuild an iterable type around a new element type, keeping the
 /// container it already names.
-fn with_element_type(raw: &PhpType, element: PhpType) -> Option<PhpType> {
+pub(crate) fn with_element_type(raw: &PhpType, element: PhpType) -> Option<PhpType> {
     match raw.kind() {
         TypeKind::Array(_) => Some(PhpType::array_of(element)),
         TypeKind::Generic(g) if !g.args.is_empty() => {

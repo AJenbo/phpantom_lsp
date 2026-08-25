@@ -623,6 +623,53 @@ function show(): void
     ));
 }
 
+/// A ternary condition proves the same thing an `if` condition does, and
+/// its arms are where the repeated call is written: the
+/// "re-check-and-reuse" idiom for a function that signals failure with a
+/// value rather than an exception.
+#[test]
+fn a_ternary_condition_narrows_the_call_repeated_in_its_own_arm() {
+    assert_no_type_errors(&format!(
+        r#"{REPEATED_CALL_SCAFFOLD}
+function show(): void
+{{
+    $user = currentUser() !== null ? currentUser() : null;
+    if ($user !== null) {{
+        render($user);
+    }}
+}}
+"#
+    ));
+}
+
+/// The else arm carries the inverse proof, so the negated spelling of the
+/// same idiom narrows there instead.
+#[test]
+fn a_negated_ternary_condition_narrows_the_call_in_its_else_arm() {
+    assert_no_type_errors(&format!(
+        r#"{REPEATED_CALL_SCAFFOLD}
+function show(User $fallback): void
+{{
+    render(currentUser() === null ? $fallback : currentUser());
+}}
+"#
+    ));
+}
+
+/// Negative control for the ternary form: a check on one call leaves a
+/// different call in the arm alone.
+#[test]
+fn a_ternary_condition_on_one_call_leaves_another_alone() {
+    assert_type_error(&format!(
+        r#"{REPEATED_CALL_SCAFFOLD}
+function show(User $fallback): void
+{{
+    render(currentUser() !== null ? Session::current() : $fallback);
+}}
+"#
+    ));
+}
+
 // ─── A `continue` guard reaches the copy the loop body makes of it ──────────
 
 const CONTINUE_GUARD_SCAFFOLD: &str = r#"<?php
@@ -1673,6 +1720,162 @@ function f(Scope $scope, string $name): void
         useClass($scope->getClassReflection());
     }} elseif ($name === 'parent' && $scope->isInClass()) {{
         useClass($scope->getClassReflection());
+    }}
+}}
+"#
+    ));
+}
+
+// ─── A loop that bails on a bad entry proves the whole collection ───────────
+
+const PRE_VALIDATION_SCAFFOLD: &str = r#"<?php
+namespace Repro;
+
+class Name {}
+class Expr
+{
+    public function name(): ?Name { return null; }
+}
+class ClassConstFetch extends Expr
+{
+    public function name(): Name { return new Name(); }
+}
+class Arm
+{
+    /** @var Expr[] */
+    public array $conds = [];
+}
+function useName(Name $name): void {}
+"#;
+
+/// The pre-validation idiom: one loop rejects the whole collection the
+/// moment an entry fails the check, so reaching the code after it means
+/// every entry passed.  A second loop over the same expression is what the
+/// idiom exists for, and it may read the proven member without checking
+/// again.
+#[test]
+fn a_loop_that_bails_out_past_itself_narrows_the_collection_it_iterated() {
+    assert_no_type_errors(&format!(
+        r#"{PRE_VALIDATION_SCAFFOLD}
+/** @param Arm[] $arms */
+function f(array $arms): void
+{{
+    foreach ($arms as $arm) {{
+        foreach ($arm->conds as $cond) {{
+            if (!$cond instanceof ClassConstFetch) {{
+                break 2;
+            }}
+        }}
+        foreach ($arm->conds as $other) {{
+            useName($other->name());
+        }}
+    }}
+}}
+"#
+    ));
+}
+
+/// A `return` guard proves it for the rest of the function the same way.
+#[test]
+fn a_loop_that_returns_on_a_bad_entry_narrows_the_collection_it_iterated() {
+    assert_no_type_errors(&format!(
+        r#"{PRE_VALIDATION_SCAFFOLD}
+function f(Arm $arm): void
+{{
+    foreach ($arm->conds as $cond) {{
+        if (!$cond instanceof ClassConstFetch) {{
+            return;
+        }}
+    }}
+    foreach ($arm->conds as $other) {{
+        useName($other->name());
+    }}
+}}
+"#
+    ));
+}
+
+/// Negative control: a plain `break` jumps to exactly the code the claim
+/// would be made about, so the entries after it were never checked.
+#[test]
+fn a_loop_that_only_breaks_itself_proves_nothing_about_the_collection() {
+    assert_type_error(&format!(
+        r#"{PRE_VALIDATION_SCAFFOLD}
+function f(Arm $arm): void
+{{
+    foreach ($arm->conds as $cond) {{
+        if (!$cond instanceof ClassConstFetch) {{
+            break;
+        }}
+    }}
+    foreach ($arm->conds as $other) {{
+        useName($other->name());
+    }}
+}}
+"#
+    ));
+}
+
+/// Negative control: `continue` skips the entry, not the rest of the
+/// program, so the collection still holds the entries it skipped.
+#[test]
+fn a_loop_that_continues_past_a_bad_entry_proves_nothing_about_the_collection() {
+    assert_type_error(&format!(
+        r#"{PRE_VALIDATION_SCAFFOLD}
+function f(Arm $arm): void
+{{
+    foreach ($arm->conds as $cond) {{
+        if (!$cond instanceof ClassConstFetch) {{
+            continue;
+        }}
+    }}
+    foreach ($arm->conds as $other) {{
+        useName($other->name());
+    }}
+}}
+"#
+    ));
+}
+
+/// Negative control: an `else` makes the `if` a branch rather than a
+/// guard, so falling out of its bottom says nothing about the condition.
+#[test]
+fn a_loop_whose_check_has_an_else_branch_proves_nothing_about_the_collection() {
+    assert_type_error(&format!(
+        r#"{PRE_VALIDATION_SCAFFOLD}
+function f(Arm $arm): void
+{{
+    foreach ($arm->conds as $cond) {{
+        if (!$cond instanceof ClassConstFetch) {{
+            return;
+        }} else {{
+            echo 'ok';
+        }}
+    }}
+    foreach ($arm->conds as $other) {{
+        useName($other->name());
+    }}
+}}
+"#
+    ));
+}
+
+/// The proof is about the collection, so writing to it afterwards drops it.
+#[test]
+fn writing_to_the_collection_drops_what_the_loop_proved_about_it() {
+    assert_type_error(&format!(
+        r#"{PRE_VALIDATION_SCAFFOLD}
+/** @param Expr[] $fresh */
+function f(Arm $arm, array $fresh): void
+{{
+    foreach ($arm->conds as $cond) {{
+        if (!$cond instanceof ClassConstFetch) {{
+            return;
+        }}
+    }}
+    $arm->conds = $fresh;
+    foreach ($arm->conds as $other) {{
+        useName($other->name());
     }}
 }}
 "#

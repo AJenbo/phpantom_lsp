@@ -411,6 +411,29 @@ class CompoundNarrowingDemo
     }
 
     /**
+     * A ternary condition proves the same thing an `if` condition does,
+     * and its arms are where the repeated call gets written: the
+     * re-check-and-reuse idiom for a call that reports "nothing here"
+     * with a value rather than an exception.
+     */
+    public function repeatedCallInTernary(Scaffolding\SpecimenHolder $holder): string
+    {
+        // The true arm re-evaluates the same call, and the check has
+        // already ruled out the `null` it could have answered, so the
+        // result satisfies a parameter that does not accept `null`.
+        $found = $holder->lookUp('rock') !== null
+            ? $holder->lookUp('rock')             // narrowed to Scaffolding\Rock|Banana
+            : new Scaffolding\Rock();
+
+        // The else arm of the negated spelling carries the same proof.
+        $weight = $holder->lookUp('rock') === null
+            ? 0.0
+            : $holder->lookUp('rock')->weigh();   // narrowed, so `weigh()` resolves
+
+        return $holder->labelFor($found)->render() . $weight;
+    }
+
+    /**
      * A proof lasts as long as the state it was made about.  A call on the
      * same receiver can change what the checked call answers, so it drops
      * the proof; a callee declared `@phpstan-pure` cannot, so it keeps it.
@@ -2106,6 +2129,61 @@ class LoopCarriedAssignmentDemo
 
         return $joined;
     }
+
+    /**
+     * The fold-into-an-accumulator loop: seed on the pass where the
+     * variable is still `null`, merge into it on every pass after. On the
+     * first pass the merge branch cannot be entered at all, so the
+     * impossible `null->mergeWith()` it would perform is not an
+     * alternative to what the seed branch produced.
+     *
+     * @param list<Scaffolding\DrawingStep> $steps
+     */
+    public function foldAccumulator(array $steps): int
+    {
+        $tally = null;
+        foreach ($steps as $step) {
+            if ($tally === null) {
+                $tally = $step->tally();
+                continue;
+            }
+            $tally = $tally->mergeWith($step->tally());   // Scaffolding\InkTally
+        }
+
+        // Try: put the cursor after the `?->` below. The loop may not have
+        // run at all, so `$tally` is `Scaffolding\InkTally|null` here.
+        // $tally?->
+
+        return $tally?->total() ?? 0;
+    }
+
+    /**
+     * The same fold written as an `if`/`else`, and as the ternary the
+     * idiom is usually compressed into. Both branches of the check are
+     * the same two the guard-clause form above spells out.
+     *
+     * @param list<Scaffolding\DrawingStep> $steps
+     */
+    public function foldAccumulatorTernary(array $steps): int
+    {
+        $viaElse = null;
+        foreach ($steps as $step) {
+            if ($viaElse === null) {
+                $viaElse = $step->tally();
+            } else {
+                $viaElse = $viaElse->mergeWith($step->tally());   // Scaffolding\InkTally
+            }
+        }
+
+        $viaTernary = null;
+        foreach ($steps as $step) {
+            $viaTernary = $viaTernary === null
+                ? $step->tally()
+                : $viaTernary->mergeWith($step->tally());         // Scaffolding\InkTally
+        }
+
+        return ($viaElse?->total() ?? 0) + ($viaTernary?->total() ?? 0);
+    }
 }
 
 
@@ -2178,6 +2256,83 @@ class NonEmptyLoopDemo
         }
 
         return $last;                             // Scaffolding\Pen|null
+    }
+}
+
+
+// ── Pre-Validation Loops ────────────────────────────────────────────────────
+// A loop that rejects the whole collection the moment one entry fails a
+// check only falls out of its own bottom once every entry has passed, so
+// the code after it may treat the collection as holding the checked type.
+// Whether the collection was empty does not matter: the claim is vacuously
+// true when the body never ran.
+
+class PreValidationLoopDemo
+{
+    /**
+     * Validate every node up front, then walk the list again to use them.
+     * The second loop reads members the first loop proved are there
+     * without checking a second time.
+     *
+     * @param list<Scaffolding\SketchGroup> $groups
+     */
+    public function captions(array $groups): string
+    {
+        $out = '';
+        foreach ($groups as $group) {
+            foreach ($group->nodes as $node) {
+                // `break 2` skips the second loop entirely, so reaching it
+                // means every node passed.
+                if (!$node instanceof Scaffolding\LabelledSketchNode) {
+                    break 2;
+                }
+            }
+
+            foreach ($group->nodes as $checked) {
+                $out .= $checked->caption();      // Scaffolding\LabelledSketchNode
+            }
+        }
+
+        return $out;
+    }
+
+    /** A `return` guard proves it for the rest of the function the same way. */
+    public function firstCaption(Scaffolding\SketchGroup $group): string
+    {
+        foreach ($group->nodes as $node) {
+            if (!$node instanceof Scaffolding\LabelledSketchNode) {
+                return '';
+            }
+        }
+
+        foreach ($group->nodes as $checked) {
+            return $checked->caption();           // Scaffolding\LabelledSketchNode
+        }
+
+        return '';
+    }
+
+    /**
+     * A plain `break` jumps to exactly the code the claim would be about,
+     * and a `continue` skips the entry rather than the rest of the
+     * program, so neither proves anything about the collection.
+     */
+    public function unproven(Scaffolding\SketchGroup $group): string
+    {
+        $out = '';
+        foreach ($group->nodes as $node) {
+            if (!$node instanceof Scaffolding\LabelledSketchNode) {
+                break;
+            }
+        }
+
+        // Try: put the cursor after the `->` below. The list is still
+        // `Scaffolding\SketchNode`, so only `kind()` is offered.
+        foreach ($group->nodes as $unchecked) {
+            $out .= $unchecked->kind();           // Scaffolding\SketchNode
+        }
+
+        return $out;
     }
 }
 

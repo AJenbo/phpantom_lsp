@@ -1879,3 +1879,120 @@ function f(array $types, int $i, int $j): void {{
         "a different index proves nothing, got: {text}"
     );
 }
+
+// ─── A check no value can pass leaves no state behind ────────────────────────
+
+const ACCUMULATOR_SCAFFOLD: &str = r#"
+class Scope {
+    public function mergeWith(?Scope $other): Scope { return $this; }
+}
+class BranchEnd {
+    public function getScope(): Scope { return new Scope(); }
+}
+"#;
+
+/// The loop-fold accumulator: seed on the run where the variable is still
+/// `null`, merge on every run after it.  On the first pass the merge arm
+/// cannot be entered at all — `$acc` is exactly `null` there — so the
+/// unresolvable `null->mergeWith()` it would perform must not join back
+/// and erase the seed the other arm produced.
+#[test]
+fn a_loop_fold_accumulator_keeps_the_type_its_seed_branch_established() {
+    let backend = create_test_backend();
+    let uri = "file:///accumulator_guard.php";
+    let content = format!(
+        r#"<?php
+{ACCUMULATOR_SCAFFOLD}
+/** @param BranchEnd[] $ends */
+function f(array $ends): void {{
+    $acc = null;
+    foreach ($ends as $end) {{
+        if ($acc === null) {{
+            $acc = $end->getScope();
+            continue;
+        }}
+        $acc = $acc->mergeWith($end->getScope());
+    }}
+    $acc; // <-- here
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(text.contains("Scope"), "expected Scope, got: {text}");
+}
+
+/// The same fold written as an `if`/`else` rather than a guard clause.
+#[test]
+fn a_loop_fold_accumulator_written_as_if_else_keeps_its_seed_type() {
+    let backend = create_test_backend();
+    let uri = "file:///accumulator_if_else.php";
+    let content = format!(
+        r#"<?php
+{ACCUMULATOR_SCAFFOLD}
+/** @param BranchEnd[] $ends */
+function f(array $ends): void {{
+    $acc = null;
+    foreach ($ends as $end) {{
+        if ($acc === null) {{
+            $acc = $end->getScope();
+        }} else {{
+            $acc = $acc->mergeWith($end->getScope());
+        }}
+    }}
+    $acc; // <-- here
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(text.contains("Scope"), "expected Scope, got: {text}");
+}
+
+/// And as a ternary, where the dead arm is pruned by the expression
+/// resolver rather than by the statement walker.
+#[test]
+fn a_ternary_fold_accumulator_drops_the_arm_its_condition_rules_out() {
+    let backend = create_test_backend();
+    let uri = "file:///accumulator_ternary.php";
+    let content = format!(
+        r#"<?php
+{ACCUMULATOR_SCAFFOLD}
+/** @param BranchEnd[] $ends */
+function f(array $ends): void {{
+    $acc = null;
+    foreach ($ends as $end) {{
+        $acc = $acc === null ? $end->getScope() : $acc->mergeWith($end->getScope());
+    }}
+    $acc; // <-- here
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(text.contains("Scope"), "expected Scope, got: {text}");
+}
+
+/// The pruning is a statement about the *path*, not about the variable: a
+/// guard whose subject really can be non-null still leaves the rest of the
+/// body reachable.
+#[test]
+fn a_guard_that_rules_out_null_leaves_the_rest_of_the_body_reachable() {
+    let backend = create_test_backend();
+    let uri = "file:///accumulator_live_guard.php";
+    let content = format!(
+        r#"<?php
+{ACCUMULATOR_SCAFFOLD}
+function f(?Scope $acc, BranchEnd $end): void {{
+    if ($acc === null) {{
+        return;
+    }}
+    $acc = $acc->mergeWith($end->getScope());
+    $acc; // <-- here
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(text.contains("Scope"), "expected Scope, got: {text}");
+}
