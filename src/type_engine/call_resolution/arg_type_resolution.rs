@@ -100,6 +100,11 @@ impl ArrayFuncArgs for TextArrayFuncArgs<'_, '_> {
         self.arg_text(index).is_some_and(|arg| !arg.is_empty())
     }
 
+    fn is_spread(&self, index: usize) -> bool {
+        self.arg_text(index)
+            .is_some_and(|arg| arg.trim_start().starts_with("..."))
+    }
+
     fn callback_declared_return_type(&self, index: usize) -> Option<PhpType> {
         let text = self.arg_text(index)?;
         crate::completion::source::helpers::extract_closure_return_type_from_text(text).or_else(

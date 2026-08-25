@@ -287,6 +287,13 @@ function runDemoAssertions(): void
     assert(count($writers) === 2 && $writers[0] instanceof Scaffolding\Pen, 'array_filter() with an instanceof callback keeps only that class');
     $sparse = array_filter([3, 4, 5], fn($v) => $v > 3);
     assert(array_keys($sparse) === [1, 2], 'array_filter() keeps the key of every entry it keeps, so filtering a list leaves gaps rather than another list');
+    $collected = [];
+    foreach ([['ink'], ['gel']] as $batch) {
+        $collected = array_merge($collected, $batch);
+    }
+    assert($collected === ['ink', 'gel'], 'array_merge() into an accumulator that started as [] holds everything that was merged in');
+    $merged = array_merge([0 => 'nib'], ['ink' => 'gel', 3 => 'lead']);
+    assert($merged === [0 => 'nib', 'ink' => 'gel', 1 => 'lead'], 'array_merge() renumbers integer keys as it appends and carries string keys over');
 
     // ── array<T>|false keeps its element type after a false check ────────
     $pens = Scaffolding\loadPensOrFail();

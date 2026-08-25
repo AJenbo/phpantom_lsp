@@ -33,37 +33,42 @@ No outstanding items.
 
 ## Symbol resolution
 
-No outstanding items.
+### B269. An unqualified class name in an inline `@var` resolves to a same-named stub class instead of the current namespace
 
-## Array types
-
-### B266. A variable-indexed array element doesn't inherit the array's value type even behind an `array_key_exists` guard
-
-**Impact: Medium-High · Complexity: Medium-High**
+**Impact: Medium · Complexity: Medium**
 
 ```php
-/** @var array<int, ConstantArrayType> $arraysToProcess */
-foreach ($eligibleCombinations as $i => $other) {
-    if (!array_key_exists($i, $arraysToProcess)) {
-        continue;
-    }
-    foreach ($other as $j => $count) {
-        if (!array_key_exists($j, $arraysToProcess)) {
-            continue;
-        }
-        $arraysToProcess[$i]->getKeyTypes(); // "type of '$arraysToProcess[$i]' could not be resolved"
+<?php
+namespace App\Sub;
+
+class Error {}
+
+class Probe
+{
+    public function run(Take $t): void
+    {
+        /** @var list<Error> $errors */
+        $errors = [];
+        $t->take($errors); // "expects list<App\Sub\Error>, got list<Error>"
     }
 }
 ```
 
-(`src/Type/TypeCombinator.php:1339-1471`, 20 occurrences in this loop alone.)
-`$arraysToProcess[$i]` should resolve to the array's declared/inferred value type
-(`ConstantArrayType`) the moment the key is known to exist, exactly as a literal-index
-access like `$arraysToProcess[0]` would. PHPantom instead reports the subject as fully
-unresolved for a variable key, even one just proven present by `array_key_exists()`.
-Real-world hits: any loop that pairs off elements of an array by index (`$arr[$i]`,
-`$arr[$j]`) after checking presence — a common pattern for building combinations,
-diffs, or lookup tables.
+`Take::take()` declares `@param list<Error> $e`, and that one resolves to
+`App\Sub\Error` correctly. The inline `@var` on the assignment does not: it keeps
+the name unresolved, so the two spellings compare unequal and every call that
+passes the variable is reported as a type mismatch. Renaming the class to
+anything the stubs don't also declare makes the diagnostic go away, which is the
+tell: PHP resolves an unqualified name against the current namespace before the
+global one, and the inline `@var` path is doing it the other way round.
+
+Real-world hit: `phpstan-src` `src/Analyser/Analyser.php:133-136`, where
+`/** @var list<Error> $errors */` inside `namespace PHPStan\Analyser` is matched
+against the global `\Error` rather than `PHPStan\Analyser\Error`. Names that
+collide with a stub class (`Error`, `Exception`, `Attribute`, `Directory`) are
+common enough that this shows up on any project with one.
+
+## Array types
 
 ### B267. An array populated inside a closure via an `instanceof`-narrowed push isn't typed once the closure has run
 

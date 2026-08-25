@@ -3668,6 +3668,25 @@ class ArrayFuncDemo
         // An all-int array cannot sum to a float.
         $total = array_sum($src->weights());
         intdiv($total, 1);                // int
+
+        // array_merge is the one member of the family that concatenates
+        // rather than rearranges, so every argument contributes to the
+        // element type. The [] an accumulator starts as contributes nothing,
+        // which is what keeps the loop's result typed.
+        $collected = [];
+        foreach ([$src->roster(), $src->roster()] as $batch) {
+            $collected = array_merge($collected, $batch);
+        }
+        $collected[0]->write();           // list<Scaffolding\Pen>
+
+        // Two different element types union, so only what they share is here.
+        $writers = array_merge($src->roster(), $src->mixedWriters());
+        $writers[0]->label();             // list<Scaffolding\Pen|Scaffolding\Pencil>
+
+        // PHP renumbers integer keys as it appends and carries string keys
+        // over, so merging a list into a string-keyed array holds both.
+        $everyone = array_merge($src->roster(), $src->byName());
+        $everyone['blue']->write();       // array<int|string, Scaffolding\Pen>
     }
 
     /** @return array{names: list<string>, first: string, total: int} */

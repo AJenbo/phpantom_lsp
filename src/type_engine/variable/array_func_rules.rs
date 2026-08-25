@@ -40,6 +40,15 @@ pub(in crate::type_engine) trait ArrayFuncArgs {
     /// `array_filter($a, $cb)` differ only in this.
     fn has_arg(&self, index: usize) -> bool;
 
+    /// Whether the argument at `index` is unpacked with `...`.
+    ///
+    /// A spread holds the values for *several* parameters rather than one,
+    /// so its own type describes a different level of nesting than the rules
+    /// expect: `array_merge(...$arrays)` passes a `list<list<T>>` where the
+    /// rule reads a `list<T>`. A rule that walks the argument list has to
+    /// decline as soon as it sees one.
+    fn is_spread(&self, index: usize) -> bool;
+
     /// The return type the callback at `index` declares: the `: T` hint of
     /// an inline closure or arrow function, or the declared return of the
     /// function a callable string names (`'intval'`).  `None` when the
@@ -81,6 +90,12 @@ pub(in crate::type_engine) fn array_func_raw_type(
     // the bare name.  Normalising here covers both the AST and the
     // text-driven caller at once.
     let func_name = func_name.trim_start_matches('\\');
+
+    // `array_merge` appends every argument instead of rearranging one, so
+    // the result describes all of them together rather than just the first.
+    if func_name.eq_ignore_ascii_case("array_merge") {
+        return array_merge_type(args);
+    }
 
     // Type-preserving functions: output array has same element type.
     if ARRAY_PRESERVING_FUNCS
@@ -280,6 +295,72 @@ pub(in crate::type_engine) fn callable_string_function_name(text: &str) -> Optio
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '\\');
     is_name.then_some(name)
+}
+
+/// The type `array_merge` builds from its arguments.
+///
+/// PHP appends each argument in turn, so the values are the union of every
+/// argument's. This is the whole point of the rule: `array_merge` is the
+/// one member of the array family that concatenates rather than rearranges,
+/// and reading only the first argument left the accumulator idiom
+/// (`$out = []; … $out = array_merge($out, $more);`) permanently typed as
+/// the empty array it started as.
+///
+/// An empty array shape adds neither a key nor a value and is skipped,
+/// which is what lets `array_merge([], $items)` answer `list<Item>`.  Any
+/// other argument that cannot be typed could contribute anything, so the
+/// rule declines rather than claim a union that is missing a member.
+///
+/// The keys follow two different rules: an integer key is renumbered as the
+/// entry is appended, while a string key is carried over (a later argument
+/// overwriting an earlier one). So the result is a `list` exactly when
+/// every argument promises integer keys, and keeps only the string half
+/// when none of them does.
+///
+/// An argument that names just its value type (`array<T>`, `T[]`, bare
+/// `array`) promises nothing about its keys, and neither can the result:
+/// those merge to `array<V>`, the same open domain that went in. Spelling
+/// the domain out as `int|string` instead would be the honest reading of
+/// what PHP allows, but it collides with every consumer that reads the
+/// implicit `int` of a `T[]`, and turns a `T[]` a signature accepts today
+/// into an argument it rejects.
+fn array_merge_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
+    let int_ty = PhpType::int();
+    let mut values: Vec<PhpType> = Vec::new();
+    let mut keys: Vec<PhpType> = Vec::new();
+    let mut open_keys = false;
+    let mut index = 0;
+    while args.has_arg(index) {
+        if args.is_spread(index) {
+            return None;
+        }
+        let raw = args.arg_raw_type(index)?;
+        if raw.is_empty_array_shape() {
+            index += 1;
+            continue;
+        }
+        let container = raw.generalized_array();
+        values.push(container.iterable_element_type()?);
+        match array_key_domain(&container) {
+            Some(key) => keys.push(key),
+            None => open_keys = true,
+        }
+        index += 1;
+    }
+
+    // Every argument was an empty shape, so there is nothing to name.
+    if values.is_empty() {
+        return None;
+    }
+    let value = PhpType::join_runtime_value_types(values);
+    if open_keys {
+        return Some(PhpType::generic_array_val(value));
+    }
+    let key = PhpType::join_runtime_value_types(keys);
+    if key.is_subtype_of(&int_ty) {
+        return Some(PhpType::list(value));
+    }
+    Some(PhpType::generic_array(key, value))
 }
 
 /// The type of `max()`/`min()`'s result.

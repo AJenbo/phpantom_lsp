@@ -407,6 +407,13 @@ impl ArrayFuncArgs for AstArrayFuncArgs<'_, '_, '_> {
         super::resolution::nth_arg_expr(self.args, index).is_some()
     }
 
+    fn is_spread(&self, index: usize) -> bool {
+        matches!(
+            self.args.arguments.iter().nth(index),
+            Some(Argument::Positional(pos)) if pos.ellipsis.is_some()
+        )
+    }
+
     fn callback_declared_return_type(&self, index: usize) -> Option<PhpType> {
         match super::resolution::nth_arg_expr(self.args, index)? {
             Expression::Closure(closure) => closure

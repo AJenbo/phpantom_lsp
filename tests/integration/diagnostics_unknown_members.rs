@@ -13609,3 +13609,74 @@ class Holder
         "the write drops the stale `A` narrowing, got: {msgs:?}"
     );
 }
+
+/// An array filled through the `array_merge` accumulator idiom keeps the
+/// element type of what was merged into it, so reading one entry back out by
+/// a variable index resolves to that element.
+///
+/// The `[]` the accumulator starts as is the whole difficulty: reading only
+/// `array_merge`'s first argument answered "the empty array" for every
+/// following pass through the loop, which left `$arraysToProcess[$i]` — and
+/// the `foreach` over the array itself — with no type at all.
+#[test]
+fn array_merge_accumulator_types_its_entries_for_a_variable_index() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///merge_accumulator.php";
+    let text = r#"<?php
+
+class ConstantArrayType
+{
+    /** @return list<string> */
+    public function getKeyTypes(): array { return []; }
+}
+
+interface TypeNode
+{
+    /** @return list<ConstantArrayType> */
+    public function getConstantArrays(): array;
+}
+
+class Combinator
+{
+    /**
+     * @param list<TypeNode> $constantArrays
+     * @param array<int, array<int, int>> $eligibleCombinations
+     */
+    public function reduce(array $constantArrays, array $eligibleCombinations): void
+    {
+        $arraysToProcess = [];
+        foreach ($constantArrays as $constantArray) {
+            $arraysToProcess = array_merge($arraysToProcess, $constantArray->getConstantArrays());
+        }
+
+        foreach ($arraysToProcess as $arrayToProcess) {
+            $arrayToProcess->getKeyTypes();
+        }
+
+        foreach ($eligibleCombinations as $i => $other) {
+            if (!array_key_exists($i, $arraysToProcess)) {
+                continue;
+            }
+            foreach ($other as $j => $count) {
+                if (!array_key_exists($j, $arraysToProcess)) {
+                    continue;
+                }
+                $arraysToProcess[$i]->getKeyTypes();
+                $arraysToProcess[$j]->getKeyTypes();
+            }
+        }
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    let msgs: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+    assert!(
+        msgs.is_empty(),
+        "every read off the accumulator is a ConstantArrayType, got: {msgs:?}"
+    );
+}
