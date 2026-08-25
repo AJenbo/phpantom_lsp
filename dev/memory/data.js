@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787677962110,
+  "lastUpdate": 1787679068204,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -24785,6 +24785,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 76.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "fe41071c85f2b81264331061e1d485e69ba7d7e5",
+          "message": "`array_merge` describes everything it was handed\n\n`array_merge` sat in `ARRAY_PRESERVING_FUNCS` alongside `array_filter`\nand friends, so its result took the element type of its *first* argument.\nIt is the one member of that family that concatenates rather than\nrearranges, and the difference matters for the accumulator idiom:\n\n    $out = [];\n    foreach ($items as $item) {\n        $out = array_merge($out, $item->getParts());\n    }\n\nArg 0 is the empty `array{}` the accumulator started as, which names no\nelement type at all, so the rule declined and the stub's bare `array`\nstood. Every read off `$out` from there on had nothing to go by --\niterating it, and reading one entry back out by a variable index\n(`$out[$i]->method()`) behind an `array_key_exists()` check, both\nreported that the type could not be resolved.\n\n`array_merge` now has its own rule, matching PHPStan's own extension:\nthe value type is the union of every argument's, and the key type the\nunion of their key domains, with the result a `list` when every argument\npromises integer keys. An empty shape contributes neither and is\nskipped; an argument that names only its value type (`array<T>`, `T[]`)\nkeeps the result's key domain open rather than spelling it out as\n`int|string`, which would turn a `T[]` that signatures accept today into\none they reject. A spread, or an argument that cannot be typed at all,\ndeclines rather than claim a union missing a member -- which needed a\nnew `is_spread` on `ArrayFuncArgs`, since the rule now walks the whole\nlist instead of reading arg 0.\n\nAcross the reference corpora this clears 13 diagnostics on phpstan-src\n(11 of them the reported `$arraysToProcess[$i]` case) and 20 on psalm,\nand leaves the `projects/` corpus byte-identical.\n\nFiled B269 while confirming the one changed message that remains: an\nunqualified class name in an inline `@var` resolves to a same-named stub\nclass instead of the current namespace, so `@var list<Error>` inside\n`namespace PHPStan\\Analyser` compares unequal to `list<PHPStan\\Analyser\\Error>`.\n\nCo-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>",
+          "timestamp": "2026-08-25T19:18:26+02:00",
+          "tree_id": "fbcadf1ebc50d174009976a4788723ebcfd9f43a",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/fe41071c85f2b81264331061e1d485e69ba7d7e5"
+        },
+        "date": 1787679057048,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 36.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 70,
             "unit": "MiB"
           }
         ]
