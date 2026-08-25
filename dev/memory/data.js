@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787679068204,
+  "lastUpdate": 1787680381995,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -24819,6 +24819,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 70,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "fe54fcc105c14d08d1d5a6396d95f38d817aad66",
+          "message": "`deprecated_usage` no longer flags a deprecated method delegating to\nitself on another instance",
+          "timestamp": "2026-08-25T19:21:24+02:00",
+          "tree_id": "c987377ab41d1c47a1d62e7cc03fbd2231887029",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/fe54fcc105c14d08d1d5a6396d95f38d817aad66"
+        },
+        "date": 1787680374057,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 36.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 73.5,
             "unit": "MiB"
           }
         ]
