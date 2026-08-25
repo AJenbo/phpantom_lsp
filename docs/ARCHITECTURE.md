@@ -98,6 +98,7 @@ src/
 │   # LSP features (one module each)
 ├── hover/                  # Hover: symbol-map dispatch, type/signature/docblock formatting
 ├── definition/             # Go-to-definition (resolve, member, variable/, implementation, type_definition)
+├── resource_navigation.rs  # Schema-free PHP class/member navigation in YAML/XML
 ├── references/, rename/, highlight/
 ├── signature_help.rs, semantic_tokens.rs, inlay_hints.rs, folding.rs, code_lens.rs
 ├── document_symbols.rs, document_links.rs, workspace_symbols.rs, formatting.rs

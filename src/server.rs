@@ -707,6 +707,14 @@ impl LanguageServer for Backend {
             .write()
             .insert(uri.clone(), Arc::clone(&text));
 
+        // Resource documents are not PHP source. Their schema-free symbol
+        // navigation reads the open buffer directly when requested.
+        if crate::resource_navigation::is_resource_document(&uri) {
+            self.log(MessageType::INFO, format!("Opened resource file: {}", uri))
+                .await;
+            return;
+        }
+
         // Parse and update AST map, use map, and namespace map
         self.update_ast(&uri, &text);
 
@@ -785,6 +793,10 @@ impl LanguageServer for Backend {
         self.open_files
             .write()
             .insert(uri.clone(), Arc::clone(&text));
+
+        if crate::resource_navigation::is_resource_document(&uri) {
+            return;
+        }
 
         // Re-parse in a blocking background task so typing does not
         // monopolize the LSP service loop and delay completion requests.
@@ -902,13 +914,20 @@ impl LanguageServer for Backend {
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
         let uri = params.text_document.uri.to_string();
+        let is_resource = crate::resource_navigation::is_resource_document(&uri);
 
         if let Some(text) = params.text {
             let text = Arc::new(text);
             self.open_files
                 .write()
                 .insert(uri.clone(), Arc::clone(&text));
-            self.update_ast(&uri, &text);
+            if !is_resource {
+                self.update_ast(&uri, &text);
+            }
+        }
+
+        if is_resource {
+            return;
         }
 
         // A save is a reliable sync point: re-diagnose the saved file
@@ -1015,6 +1034,22 @@ impl LanguageServer for Backend {
         let backend = self.clone_for_blocking();
         let uri_clone = uri.clone();
         run_blocking_cancel_safe("goto_definition", move || {
+            // YAML and XML may name PHP classes under any schema. Resolve
+            // fully-qualified class and Class::member tokens before entering
+            // the PHP-only symbol-map path below.
+            if crate::resource_navigation::is_resource_document(&uri_clone) {
+                let location = backend.get_file_content(&uri_clone).and_then(|content| {
+                    crate::util::catch_panic_unwind_safe(
+                        "goto_definition",
+                        &uri_clone,
+                        Some(position),
+                        || backend.resolve_resource_definition(&content, position),
+                    )
+                    .flatten()
+                });
+                return Ok(location.map(GotoDefinitionResponse::Scalar));
+            }
+
             // A component tag is HTML, so it has no position in the virtual
             // PHP `handle_with_position` would swap in below; it is resolved
             // from the template's own source instead.
@@ -2238,7 +2273,9 @@ impl Backend {
         // map, so a file passes through here once; a file the parser panics
         // on publishes nothing and is retried, which is the same work its
         // next keystroke would do anyway.
-        if !self.symbol_maps.read().contains_key(uri) {
+        if !crate::resource_navigation::is_resource_document(uri)
+            && !self.symbol_maps.read().contains_key(uri)
+        {
             self.update_ast(uri, &content);
         }
 
