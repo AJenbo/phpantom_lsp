@@ -6,6 +6,98 @@ use mago_syntax::cst::argument::Argument;
 use crate::atom::bytes_to_str;
 use crate::php_type::PhpType;
 
+// ─── Closure return edges ───────────────────────────────────────────────────
+
+/// What one entry of the [`RETURN_EDGES`] stack is doing.
+enum ReturnFrame {
+    /// Accumulates the states that `return` out of the body being walked.
+    /// `None` until the first `return` is seen.
+    Open(Option<ScopeState>),
+    /// A nested body's returns say nothing about the body outside it.
+    Barrier,
+}
+
+thread_local! {
+    /// One frame per body being walked for the types it writes to its
+    /// `use (&$x)` captures, innermost last.
+    ///
+    /// The branch merge drops a branch that returns, because such a branch
+    /// does not reach the statement after the `if`.  The end of a closure
+    /// body is not that statement: a by-reference capture written on a
+    /// path that returns early is visible to the caller all the same.  So
+    /// a `return` records the state it leaves with here, and the walk that
+    /// opened the frame folds those states into the body's exit state.
+    ///
+    /// Set and cleared within a single synchronous walk, like the loop
+    /// exit edges in `loop_control`.
+    static RETURN_EDGES: RefCell<Vec<ReturnFrame>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Open a frame for a closure body about to be walked for its by-reference
+/// captures.
+pub(crate) fn push_return_frame() {
+    RETURN_EDGES.with(|frames| frames.borrow_mut().push(ReturnFrame::Open(None)));
+}
+
+/// Close the innermost frame and return the state its `return`s carried
+/// out, or `None` when the body has no reachable `return`.
+pub(crate) fn pop_return_frame() -> Option<ScopeState> {
+    RETURN_EDGES.with(|frames| match frames.borrow_mut().pop() {
+        Some(ReturnFrame::Open(state)) => state,
+        _ => None,
+    })
+}
+
+/// Lifts the barrier [`suspend_return_edges`] put in place.
+pub(crate) struct ReturnEdgeBarrierGuard {
+    pushed: bool,
+}
+
+impl Drop for ReturnEdgeBarrierGuard {
+    fn drop(&mut self) {
+        if self.pushed {
+            RETURN_EDGES.with(|frames| {
+                frames.borrow_mut().pop();
+            });
+        }
+    }
+}
+
+/// Stop `return`s from reaching the enclosing closure's frame for the
+/// lifetime of the returned guard.
+///
+/// A nested body — another closure, an anonymous class method, or a callee
+/// whose return type is being inferred — is walked by the same
+/// [`walk_body_forward`] machinery, and its `return`s belong to it rather
+/// than to whatever closure is being walked further out.
+pub(crate) fn suspend_return_edges() -> ReturnEdgeBarrierGuard {
+    let pushed = RETURN_EDGES.with(|frames| {
+        let mut frames = frames.borrow_mut();
+        // Nothing to shield when no frame is collecting.
+        if frames.is_empty() {
+            return false;
+        }
+        frames.push(ReturnFrame::Barrier);
+        true
+    });
+    ReturnEdgeBarrierGuard { pushed }
+}
+
+/// Record the state a `return` carries out of the body being walked.
+pub(crate) fn record_return_edge(scope: &ScopeState) {
+    if scope.unreachable {
+        return;
+    }
+    RETURN_EDGES.with(|frames| {
+        if let Some(ReturnFrame::Open(state)) = frames.borrow_mut().last_mut() {
+            match state {
+                Some(accumulated) => accumulated.merge_branch(scope),
+                None => *state = Some(scope.clone()),
+            }
+        }
+    });
+}
+
 // ─── Closure handling ───────────────────────────────────────────────────────
 
 /// Try to enter a closure or arrow function if the cursor is inside one.
@@ -126,7 +218,10 @@ pub(crate) fn try_enter_closure_expr<'b>(
                     ctx,
                 );
 
-                walk_body_forward(closure.body.statements.iter(), &mut closure_scope, ctx);
+                {
+                    let _barrier = suspend_return_edges();
+                    walk_body_forward(closure.body.statements.iter(), &mut closure_scope, ctx);
+                }
 
                 *scope = closure_scope;
                 return true;

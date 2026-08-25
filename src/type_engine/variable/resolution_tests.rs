@@ -2284,6 +2284,96 @@ $foo;
     assert_eq!(ts, "null|1");
 }
 
+#[test]
+fn by_ref_closure_capture_sees_an_assignment_on_a_returning_path() {
+    // The assignment sits in a branch that `return`s, so it never reaches
+    // the end of the closure body.  The caller still sees it: a
+    // by-reference capture written before the closure returns is written.
+    let content = r#"<?php
+$foo = null;
+
+\Some\Unknown\Helper::run(function (bool $b) use (&$foo) {
+    if ($b) {
+        $foo = 'string';
+        return;
+    }
+});
+
+$foo;
+"#;
+    let cursor_offset = content.rfind("$foo;").unwrap() as u32;
+
+    let results = super::resolve_variable_types(
+        "$foo",
+        &ClassInfo::default(),
+        &[],
+        content,
+        cursor_offset,
+        &|_| None,
+        None,
+        Loaders::default(),
+    );
+
+    assert!(!results.is_empty(), "Should resolve $foo to a type");
+    let ts = ResolvedType::types_joined(&results).to_string();
+    assert_eq!(ts, "null|'string'");
+}
+
+#[test]
+fn by_ref_closure_capture_sees_a_narrowed_push_on_a_returning_path() {
+    // The gather-into-an-array idiom: the closure narrows its parameter
+    // with `instanceof`, pushes it onto a captured array and returns.  The
+    // array's element type has to reach the enclosing `foreach`.
+    let content = r#"<?php
+class Node {}
+class ExecutionEndNode extends Node {}
+
+function run() {
+    $executionEnds = [];
+    \Some\Unknown\Runner::process(static function (Node $node) use (&$executionEnds): void {
+        if ($node instanceof ExecutionEndNode) {
+            $executionEnds[] = $node;
+            return;
+        }
+    });
+
+    foreach ($executionEnds as $executionEnd) {
+        $executionEnd;
+    }
+}
+"#;
+    let node = make_class("Node");
+    let mut end_node = make_class("ExecutionEndNode");
+    end_node.parent_class = Some(atom("Node"));
+    let all_classes: Vec<Arc<ClassInfo>> = vec![Arc::new(node.clone()), Arc::new(end_node.clone())];
+    let class_loader = move |name: &str| -> Option<Arc<ClassInfo>> {
+        match name {
+            "Node" => Some(Arc::new(node.clone())),
+            "ExecutionEndNode" => Some(Arc::new(end_node.clone())),
+            _ => None,
+        }
+    };
+    let cursor_offset = content.rfind("$executionEnd;").unwrap() as u32;
+
+    let results = super::resolve_variable_types(
+        "$executionEnd",
+        &ClassInfo::default(),
+        &all_classes,
+        content,
+        cursor_offset,
+        &class_loader,
+        None,
+        Loaders::default(),
+    );
+
+    assert!(
+        !results.is_empty(),
+        "Should resolve $executionEnd to a type"
+    );
+    let ts = ResolvedType::types_joined(&results).to_string();
+    assert_eq!(ts, "ExecutionEndNode");
+}
+
 /// `array_reduce` with a class initial value should resolve to that class.
 #[test]
 fn resolve_var_array_reduce_initial_value() {

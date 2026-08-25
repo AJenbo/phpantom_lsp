@@ -2337,6 +2337,52 @@ class PreValidationLoopDemo
 }
 
 
+// ── By-Reference Capture Written on the Way Out ─────────────────────────────
+// A callback that gathers what it is looking for into a `use (&$x)` capture
+// pushes and returns in the same branch. Returning out of a closure ends it
+// just as falling off the bottom does, so what the capture was handed on the
+// way out still reaches the caller.
+
+class ByRefCaptureGatherDemo
+{
+    /** Gather every labelled node, then read the captions off the pile. */
+    public function captions(Scaffolding\SketchGroup $group): string
+    {
+        $labelled = [];
+        $group->walk(static function (Scaffolding\SketchNode $node) use (&$labelled): void {
+            if ($node instanceof Scaffolding\LabelledSketchNode) {
+                $labelled[] = $node;
+                return;
+            }
+        });
+
+        $out = '';
+        // Try: put the cursor after the `->` below. The pushed element type
+        // outlives the closure's `return`, so `caption()` is offered.
+        foreach ($labelled as $node) {
+            $out .= $node->caption();             // Scaffolding\LabelledSketchNode
+        }
+
+        return $out;
+    }
+
+    /** A plain variable written in a guard clause carries the same way. */
+    public function firstCaption(Scaffolding\SketchGroup $group): string
+    {
+        $found = null;
+        $group->walk(static function (Scaffolding\SketchNode $node) use (&$found): void {
+            if ($found === null && $node instanceof Scaffolding\LabelledSketchNode) {
+                $found = $node;
+                return;
+            }
+        });
+
+        // The callback may never have run, so the capture is still nullable.
+        return $found?->caption() ?? '';          // Scaffolding\LabelledSketchNode|null
+    }
+}
+
+
 // ── Assignment Inside a Condition ───────────────────────────────────────────
 // A variable assigned in an `if`/`while` condition is a definition site,
 // including the bare negated guard and the call-wrapped form.

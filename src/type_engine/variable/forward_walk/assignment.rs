@@ -154,6 +154,12 @@ pub(crate) fn process_statement<'b>(
                     record_match_ternary_snapshots(val, scope, ctx);
                 }
             }
+
+            // A `return` leaves the body with the types it holds *here*.
+            // For a closure walked to see what it writes to its `use (&$x)`
+            // captures, that state is part of the exit state even though
+            // the branch merge drops the branch it sits in.
+            record_return_edge(scope);
         }
         // An echoed expression narrows exactly the way a returned one
         // does: `echo $s ? strtoupper($s) : '';` proves `$s` a string
@@ -871,11 +877,19 @@ pub(crate) fn process_by_ref_closure_capture<'b>(
         &full_ctx,
     );
 
+    push_return_frame();
     walk_body_forward(
         closure.body.statements.iter(),
         &mut closure_scope,
         &full_ctx,
     );
+    // Every `return` in the body is an exit of the closure just as much as
+    // falling off its end is, and a capture written on a returning path is
+    // still written.  `walk_body_forward` leaves only the fall-through
+    // state behind, so the returning paths are folded back in here.
+    if let Some(returned) = pop_return_frame() {
+        closure_scope.merge_branch(&returned);
+    }
 
     for var_name in captured {
         scope.invalidate_dependent_keys(&var_name);

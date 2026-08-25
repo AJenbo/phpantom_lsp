@@ -2112,6 +2112,14 @@ class SketchGroup
 {
     /** @param list<SketchNode> $nodes */
     public function __construct(public array $nodes = []) {}
+
+    /** @param callable(SketchNode): void $visit */
+    public function walk(callable $visit): void
+    {
+        foreach ($this->nodes as $node) {
+            $visit($node);
+        }
+    }
 }
 
 // ─── Chaining Demo Support Classes ──────────────────────────────────────────

@@ -941,3 +941,101 @@ class Fixer {
         diags.iter().map(|d| &d.message).collect::<Vec<_>>()
     );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// By-reference captures written on a path that returns out of the closure
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// The gather-into-an-array idiom: a callback narrows its parameter with
+/// `instanceof`, pushes it onto a `use (&$…)` array and returns.  The
+/// branch merge drops a returning branch, but the caller still sees what
+/// the capture was given, so the enclosing `foreach` knows its element
+/// type.
+#[test]
+fn by_ref_capture_pushed_on_a_returning_path_types_the_foreach() {
+    let backend = create_test_backend();
+    let uri = "file:///GatherExecutionEnds.php";
+    let text = r#"<?php
+class Node {}
+class StatementResult
+{
+    public function isAlwaysTerminating(): bool { return true; }
+}
+class ExecutionEndNode extends Node
+{
+    public function getStatementResult(): StatementResult { return new StatementResult(); }
+}
+class ReturnNode extends Node {}
+
+class NodeScopeResolver
+{
+    public function processStmtNodes(array $stmts, callable $cb): void {}
+
+    public function run(array $stmts): void
+    {
+        $gatheredReturnStatements = [];
+        $executionEnds = [];
+        $this->processStmtNodes($stmts, static function (Node $node) use (&$gatheredReturnStatements, &$executionEnds): void {
+            if ($node instanceof ExecutionEndNode) {
+                $executionEnds[] = $node;
+                return;
+            }
+            if (!$node instanceof ReturnNode) {
+                return;
+            }
+            $gatheredReturnStatements[] = $node;
+        });
+
+        foreach ($executionEnds as $executionEnd) {
+            $executionEnd->getStatementResult()->isAlwaysTerminating();
+        }
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+/// A nested closure's `return` carries its own locals out of *itself*.
+/// Attributing it to the closure outside would hand the outer capture a
+/// type it never holds, so the probe below has to see `Alpha` alone.
+#[test]
+fn nested_closure_return_does_not_widen_the_outer_by_ref_capture() {
+    let backend = create_test_backend();
+    let uri = "file:///NestedClosureReturn.php";
+    let text = r#"<?php
+class Alpha {}
+class Beta {}
+
+class Runner
+{
+    public function run(callable $cb): void {}
+
+    public function go(): void
+    {
+        $node = new Alpha();
+        $this->run(function () use (&$node): void {
+            $inner = function (): void {
+                // A fresh local of *this* closure, not the capture one
+                // scope out.
+                $node = new Beta();
+                return;
+            };
+            $inner();
+        });
+        $node->probe();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    let messages: Vec<&String> = diags.iter().map(|d| &d.message).collect();
+    assert_eq!(messages.len(), 1, "got: {messages:?}");
+    assert!(
+        !messages[0].contains("Beta"),
+        "`$node` must stay Alpha, got: {messages:?}"
+    );
+}

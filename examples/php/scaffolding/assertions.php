@@ -1787,6 +1787,25 @@ function runDemoAssertions(): void
         'a plain break leaves the unchecked nodes in the list the second loop walks'
     );
 
+    // ── By-reference captures written on the way out ─────────────────────
+    $gather = new ByRefCaptureGatherDemo();
+    assert(
+        $gather->captions($labelled) === 'alphabeta',
+        'the callback pushes and returns in the same branch, and both pushes stick'
+    );
+    assert(
+        $gather->captions($mixed) === 'alpha',
+        'the unlabelled node fails the instanceof check, so nothing is pushed for it'
+    );
+    assert(
+        $gather->firstCaption($labelled) === 'alpha',
+        'the guard clause writes the capture once and returns, keeping the first match'
+    );
+    assert(
+        $gather->firstCaption(new Scaffolding\SketchGroup()) === '',
+        'an empty group never runs the callback, so the capture is still null'
+    );
+
     // ── Loops over an array that cannot be empty ─────────────────────────
     $nonEmptyLoop = new NonEmptyLoopDemo();
     $shortest = new Scaffolding\Pen();

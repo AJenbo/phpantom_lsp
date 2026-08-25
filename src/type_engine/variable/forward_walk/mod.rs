@@ -243,9 +243,12 @@ pub(crate) fn resolve_in_method_body<'b>(
 
     // Suspend snapshot recording: this is a transient lookup of
     // `var_name`'s type, not the authoritative scope build, so it must
-    // not write into an active diagnostic scope cache.
+    // not write into an active diagnostic scope cache.  This body's
+    // `return`s likewise belong to it, not to any closure being walked
+    // for its by-reference captures further out.
     {
         let _suspend = suspend_snapshot_recording();
+        let _barrier = suspend_return_edges();
         let body: Vec<&Statement<'_>> = body_statements.collect();
         static_locals::seed_static_locals(&mut scope, &body, ctx);
         walk_body_forward(body.iter().copied(), &mut scope, ctx);
@@ -331,6 +334,7 @@ pub(crate) fn resolve_in_function_body<'b>(
     // transient lookup must not pollute an active diagnostic scope cache.
     {
         let _suspend = suspend_snapshot_recording();
+        let _barrier = suspend_return_edges();
         let body: Vec<&Statement<'_>> = func.body.statements.iter().collect();
         static_locals::seed_static_locals(&mut scope, &body, ctx);
         walk_body_forward(body.iter().copied(), &mut scope, ctx);
@@ -376,6 +380,7 @@ pub(crate) fn resolve_in_top_level<'b>(
     // collide with the outer file's.
     {
         let _suspend = suspend_snapshot_recording();
+        let _barrier = suspend_return_edges();
         walk_body_forward(statements, &mut scope, ctx);
     }
 
@@ -402,6 +407,7 @@ pub(crate) fn walk_top_level_for_globals<'b>(
     // transient `global`-resolution walk must not pollute an active
     // diagnostic scope cache.
     let _suspend = suspend_snapshot_recording();
+    let _barrier = suspend_return_edges();
     walk_body_forward(statements, scope, ctx);
 }
 

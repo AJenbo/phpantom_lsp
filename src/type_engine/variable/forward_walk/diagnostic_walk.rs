@@ -194,7 +194,10 @@ pub(crate) fn walk_closures_in_expr<'b>(
             record_scope_snapshot(body_span.start.offset, &closure_scope);
 
             // Walk the closure body.
-            walk_body_for_diagnostics(closure.body.statements.iter(), &mut closure_scope, ctx);
+            {
+                let _barrier = suspend_return_edges();
+                walk_body_for_diagnostics(closure.body.statements.iter(), &mut closure_scope, ctx);
+            }
 
             // Record at body end (closure scope).
             record_scope_snapshot(body_span.end.offset, &closure_scope);
@@ -328,7 +331,10 @@ pub(crate) fn walk_closures_in_expr<'b>(
             }
             // The anonymous class's own method bodies have their own
             // `$this` (the anonymous class), so walk them separately.
-            walk_anonymous_class_member_bodies(anon, ctx);
+            {
+                let _barrier = suspend_return_edges();
+                walk_anonymous_class_member_bodies(anon, ctx);
+            }
 
             // Restore the outer scope immediately after the anonymous
             // class body so that code following it in the same expression

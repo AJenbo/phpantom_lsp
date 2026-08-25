@@ -1441,6 +1441,7 @@ fn resolve_variable_in_property_hooks(
             // `resolve_in_method_body` does: this is a transient lookup,
             // not the authoritative scope build.
             let _suspend = super::forward_walk::suspend_snapshot_recording();
+            let _barrier = super::forward_walk::suspend_return_edges();
             super::forward_walk::walk_body_forward(block.statements.iter(), &mut scope, &fw_ctx);
         }
 
