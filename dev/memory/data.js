@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787680381995,
+  "lastUpdate": 1787688874235,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -24853,6 +24853,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 73.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "f864284ff100c33332ea751ece0a9d8b71beaff5",
+          "message": "An inline `@var` reads a class name the way PHP reads it: from the\ncurrent namespace outwards",
+          "timestamp": "2026-08-25T19:44:59+02:00",
+          "tree_id": "b9b7e3d0cf5ce164b35e01a2bccd707cf1768894",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/f864284ff100c33332ea751ece0a9d8b71beaff5"
+        },
+        "date": 1787688867465,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 36,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 71.7,
             "unit": "MiB"
           }
         ]
