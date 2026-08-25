@@ -607,6 +607,64 @@ class NullsafeComparisonDemo
 }
 
 
+// ── Variables Filled Together in One Branch Share Their Null ────────────────
+// `$label` is written on exactly the path that leaves `$specimen` holding a
+// value, so the two are null together or not at all.  The merge at the end of
+// the branch records that, which is what lets a later check on one of them
+// settle the other, even though the check never names it.
+
+class CorrelatedNullDemo
+{
+    public function describe(Scaffolding\SpecimenHolder $holder, string $name): string
+    {
+        $label = null;
+        $specimen = null;
+
+        if ($name !== '') {
+            $specimen = $holder->lookUp($name);
+            if ($specimen !== null) {
+                $label = $holder->labelFor($specimen);
+            }
+        }
+
+        if ($specimen !== null) {
+            // Try: put the cursor after the `->` below.  `$label` is a
+            // `Scaffolding\SpecimenLabel` here rather than a nullable one:
+            // the only path that leaves `$specimen` holding a value is the
+            // one that filled `$label` too.
+            return $label->render();
+        }
+
+        return 'nothing on the shelf';
+    }
+
+    /**
+     * Two variables filled under conditions of their own are not a pair,
+     * however alike the branches look, so `$label` keeps its `null` here.
+     */
+    public function unrelated(bool $wantSpecimen, bool $wantLabel): string
+    {
+        $label = null;
+        $specimen = null;
+
+        if ($wantSpecimen) {
+            $specimen = new Scaffolding\Rock();
+        }
+        if ($wantLabel) {
+            $label = new Scaffolding\SpecimenLabel('1kg');
+        }
+
+        if ($specimen !== null) {
+            // `$label` is still `Scaffolding\SpecimenLabel|null` here, which
+            // is why the `?->` is the only safe way to read it.
+            return $label?->render() ?? 'unlabelled';
+        }
+
+        return 'nothing on the shelf';
+    }
+}
+
+
 // ── Scalar Guards in Compound Conditions and Ternaries ──────────────────────
 // The `is_*` family, null checks, and comparisons narrow wherever they are
 // written: each operand of a negated `||` guard, both arms of a ternary in any

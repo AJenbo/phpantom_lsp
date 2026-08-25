@@ -1916,6 +1916,14 @@ class Banana
     public function weigh(): float { return 0.2; }
 }
 
+/** The printed tag a specimen on the shelf gets. */
+class SpecimenLabel
+{
+    public function __construct(private readonly string $text) {}
+
+    public function render(): string { return $this->text; }
+}
+
 final class TextTag
 {
     public string $tag = 'granite';
@@ -1974,6 +1982,12 @@ class SpecimenHolder
     public function lookUp(string $name): Rock|Banana|null
     {
         return $name === 'rock' ? new Rock() : null;
+    }
+
+    /** Prints a label for a specimen that is definitely on the shelf. */
+    public function labelFor(Rock|Banana $specimen): SpecimenLabel
+    {
+        return new SpecimenLabel($specimen->weigh() . 'kg');
     }
 
     /** Restocks the shelf, so what `lookUp()` answers afterwards may differ. */

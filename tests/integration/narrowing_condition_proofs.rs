@@ -201,6 +201,122 @@ function f(): void {{
     );
 }
 
+// ─── Variables a branch writes together share one null ─────────────────────
+
+const REGISTRY: &str = r#"
+class Reflection {}
+class Acceptor {}
+class Registry {
+    public function find(string $name): ?Reflection { return null; }
+    public function select(Reflection $r): Acceptor { return new Acceptor(); }
+}
+"#;
+
+/// `$acceptor` is written on exactly the path that leaves `$reflection`
+/// holding a value, so the two are null together or not at all.  Testing
+/// one of them therefore settles the other, even though the branch that
+/// correlated them is long over and the test never names `$acceptor`.
+#[test]
+fn variables_written_on_the_same_path_share_their_null() {
+    let backend = create_test_backend();
+    let uri = "file:///correlated_null.php";
+    let content = format!(
+        r#"<?php
+{REGISTRY}
+function f(Registry $registry, string $name): void {{
+    $acceptor = null;
+    $reflection = null;
+    if ($name !== '') {{
+        $reflection = $registry->find($name);
+        if ($reflection !== null) {{
+            $acceptor = $registry->select($reflection);
+        }}
+    }}
+
+    if ($reflection !== null) {{
+        $acceptor; // <-- here
+    }}
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(text.contains("Acceptor"), "expected Acceptor, got: {text}");
+    assert!(
+        !text.contains("null"),
+        "the check on $reflection rules out $acceptor's null too, got: {text}"
+    );
+}
+
+/// Two variables written under conditions of their own are not
+/// correlated, however alike the two branches look.  Proving one is not
+/// null says nothing about whether the other's branch ran.
+#[test]
+fn variables_written_in_separate_branches_stay_independent() {
+    let backend = create_test_backend();
+    let uri = "file:///independent_null.php";
+    let content = format!(
+        r#"<?php
+{REGISTRY}
+function f(bool $a, bool $b): void {{
+    $acceptor = null;
+    $reflection = null;
+    if ($a) {{
+        $reflection = new Reflection();
+    }}
+    if ($b) {{
+        $acceptor = new Acceptor();
+    }}
+
+    if ($reflection !== null) {{
+        $acceptor; // <-- here
+    }}
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(
+        text.contains("null"),
+        "$acceptor's branch may not have run, got: {text}"
+    );
+}
+
+/// Writing to one of the pair on a path that leaves the other alone
+/// breaks the correlation: past that branch, a value in `$reflection` no
+/// longer means the branch that filled `$acceptor` is the one that ran.
+#[test]
+fn a_later_write_breaks_the_correlation() {
+    let backend = create_test_backend();
+    let uri = "file:///broken_correlation.php";
+    let content = format!(
+        r#"<?php
+{REGISTRY}
+function f(bool $a, bool $b): void {{
+    $acceptor = null;
+    $reflection = null;
+    if ($a) {{
+        $reflection = new Reflection();
+        $acceptor = new Acceptor();
+    }}
+    if ($b) {{
+        $reflection = new Reflection();
+    }}
+
+    if ($reflection !== null) {{
+        $acceptor; // <-- here
+    }}
+}}
+"#
+    );
+
+    let text = hover_marked(&backend, uri, &content);
+    assert!(
+        text.contains("null"),
+        "the second branch fills only $reflection, got: {text}"
+    );
+}
+
 // ─── A type guard on a value of unknown type establishes it ────────────────
 
 /// `$row->version` on a bare `stdClass` resolves to nothing, and the

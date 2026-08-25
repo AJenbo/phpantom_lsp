@@ -57,38 +57,6 @@ than blanked. Narrower than the variable case: it only misreports when
 the declared type is wider than what the check narrowed it to, since
 otherwise the declared type answers the same way.
 
-### B258. Two variables assigned in the same branch lose their correlated nullability at the merge
-
-**Impact: Medium · Complexity: High**
-
-```php
-$acceptor = null;
-$reflection = null;
-if ($name !== '') {
-    $reflection = $this->find($name);
-    if ($reflection !== null) {
-        $acceptor = $this->select($reflection);   // non-null exactly when $reflection is
-    }
-}
-
-if ($reflection !== null) {
-    $this->useBoth($reflection, $acceptor);       // false type_mismatch_argument on $acceptor
-}
-```
-
-The merge keeps each variable's own union (`?Reflection`, `?Acceptor`)
-and forgets that the two were written on the same path, so the later
-`$reflection !== null` check cannot recover what it implies about
-`$acceptor`. Real PHPStan is silent on the shape as its own source
-writes it, and it is not in its baseline, so it tracks the correlation
-somehow — the mechanism is not root-caused here.
-
-Reproduced standalone. Real-world hits are the `$parametersAcceptor`
-cluster in `src/Analyser/ExprHandler/` (`FuncCallHandler.php:977,1042`,
-`MethodCallHandler.php:169,350`, `StaticCallHandler.php:240,455`), where
-the acceptor is built in the same branch that resolves the method
-reflection the later check tests.
-
 ## Arithmetic
 
 No outstanding items.
@@ -123,4 +91,24 @@ No outstanding items.
 
 ## Miscellaneous
 
-No outstanding items.
+### B262. `analyze` orders two diagnostics on the same line differently from run to run
+
+**Impact: Low · Complexity: Low**
+
+Running `phpantom_lsp analyze` twice over an unchanged checkout produces
+reports that differ in the order of diagnostics sharing a line. On
+`references/phpactor` one run prints
+
+```
+    99   Unused variable '$offset'
+         🪪  unused_variable
+```
+
+and the next prints the two lines the other way round relative to the
+neighbouring diagnostic on the same line. The counts and the diagnostics
+themselves are identical, so nothing is lost, but a report that is not
+byte-identical between runs cannot be diffed, which is the natural way to
+check a change introduced no new findings. Reproduced on `phpactor`,
+`laravel-framework`, and `php-lsp`; the sort that emits the report needs
+a total order (line, then column, then code) rather than one that leaves
+same-line entries to whatever order the parallel walk finished in.

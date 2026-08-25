@@ -170,6 +170,26 @@ function runDemoAssertions(): void
         "lookUp('banana') is null, so the two chains are not identical",
     );
 
+    // ── Variables filled together in one branch ─────────────────────────
+    $correlated = new CorrelatedNullDemo();
+    $shelfForPair = new Scaffolding\SpecimenHolder();
+    assert(
+        $correlated->describe($shelfForPair, 'rock') === '5kg',
+        'the branch that finds the specimen is the one that labels it',
+    );
+    assert(
+        $correlated->describe($shelfForPair, 'banana') === 'nothing on the shelf',
+        'a name the shelf has none of leaves both variables null',
+    );
+    assert(
+        $correlated->unrelated(true, false) === 'unlabelled',
+        'the specimen can be there without the label being there too',
+    );
+    assert(
+        $correlated->unrelated(true, true) === '1kg',
+        'both conditions holding fills both variables',
+    );
+
     // ── Discriminating-property narrowing ───────────────────────────────
     $discriminant = new PropertyDiscriminantDemo();
     assert(

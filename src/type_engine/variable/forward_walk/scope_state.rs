@@ -74,17 +74,19 @@ pub(crate) struct ScopeState {
     /// narrows the original subject.
     pub assertions: AtomMap<Vec<VarAssertion>>,
 
-    /// Scope key → the receivers a `?->` chain stored under it would have
-    /// short-circuited on.
+    /// Scope key → the keys that proving it non-null also proves non-null.
     ///
-    /// `$period = $agreement?->latestPeriod();` records `$agreement` under
-    /// `$period`.  The chain yields `null` for a null receiver, so a guard
-    /// that later rules out `$period`'s null rules out `$agreement`'s with
-    /// it — a proof the guard's own condition never names.
+    /// Two sources feed this.  A `?->` chain records its receivers under
+    /// the key it was stored in: `$period = $agreement?->latestPeriod();`
+    /// records `$agreement` under `$period`, because the chain yields
+    /// `null` for a null receiver, so a guard that later rules out
+    /// `$period`'s null rules out `$agreement`'s with it.  A branch join
+    /// records the variables it saw flip from `null` to a value together
+    /// (see [`ScopeState::merge_branch`]), which is what lets a later
+    /// check on one of them recover what it implies about the others.
     ///
-    /// Only recorded when the stored value is nullable to begin with:
-    /// "not null now" is evidence of a narrowing only if null was in play.
-    pub nullsafe_origins: AtomMap<Vec<Atom>>,
+    /// Either way the proof is one the guard's own condition never names.
+    pub non_null_implications: AtomMap<Vec<Atom>>,
 
     /// Variable name → the `preg_match` outcome its value is.
     ///
@@ -108,7 +110,7 @@ impl ScopeState {
         Self {
             locals: AtomMap::default(),
             assertions: AtomMap::default(),
-            nullsafe_origins: AtomMap::default(),
+            non_null_implications: AtomMap::default(),
             preg_outcomes: AtomMap::default(),
             unreachable: false,
         }
@@ -213,8 +215,8 @@ impl ScopeState {
                 && crate::type_engine::types::narrowing::key_reads_variable(key, receiver)
         };
         self.locals.retain(|key, _| !reads_receiver(key));
-        self.nullsafe_origins
-            .retain(|_, receivers| !receivers.iter().any(|r| reads_receiver(r)));
+        self.non_null_implications
+            .retain(|_, implied| !implied.iter().any(|k| reads_receiver(k)));
         if self.assertions.is_empty() {
             return;
         }
@@ -227,8 +229,9 @@ impl ScopeState {
     /// Drop the proofs that writing to `var_name` invalidates: whatever
     /// the variable itself stood for, plus every proof whose subject
     /// reads it.  A boolean only describes the value its subject held
-    /// when the check ran, and a `?->` chain only describes the receiver
-    /// it was evaluated against.
+    /// when the check ran, a `?->` chain only describes the receiver it
+    /// was evaluated against, and two variables a branch filled together
+    /// stop being a pair the moment one of them is written on its own.
     pub fn invalidate_proofs(&mut self, var_name: &str) {
         let key = atom(var_name);
         let stale = |subject: &Atom| {
@@ -242,10 +245,10 @@ impl ScopeState {
                 !checks.is_empty()
             });
         }
-        if !self.nullsafe_origins.is_empty() {
-            self.nullsafe_origins.remove(&key);
-            self.nullsafe_origins
-                .retain(|holder, receivers| !stale(holder) && !receivers.iter().any(stale));
+        if !self.non_null_implications.is_empty() {
+            self.non_null_implications.remove(&key);
+            self.non_null_implications
+                .retain(|holder, implied| !stale(holder) && !implied.iter().any(stale));
         }
         if !self.preg_outcomes.is_empty() {
             self.preg_outcomes.remove(&key);
@@ -254,14 +257,13 @@ impl ScopeState {
         }
     }
 
-    /// Record that the value stored under `holder` came from a `?->` chain
-    /// evaluated against `receivers`, so proving the value non-null proves
-    /// each receiver non-null too.
-    pub fn record_nullsafe_origin(&mut self, holder: &str, receivers: Vec<Atom>) {
-        if receivers.is_empty() {
+    /// Record that proving `holder` non-null proves each of `implied`
+    /// non-null too.
+    pub fn record_non_null_implication(&mut self, holder: &str, implied: Vec<Atom>) {
+        if implied.is_empty() {
             return;
         }
-        self.nullsafe_origins.insert(atom(holder), receivers);
+        self.non_null_implications.insert(atom(holder), implied);
     }
 
     /// Whether two scopes say the same thing about every name they hold.
@@ -272,7 +274,7 @@ impl ScopeState {
     fn describes_same_state_as(&self, other: &ScopeState) -> bool {
         if self.locals.len() != other.locals.len()
             || self.assertions != other.assertions
-            || self.nullsafe_origins != other.nullsafe_origins
+            || self.non_null_implications != other.non_null_implications
             || self.preg_outcomes != other.preg_outcomes
         {
             return false;
@@ -343,13 +345,10 @@ impl ScopeState {
                 .retain(|name, checks| other.assertions.get(name) == Some(checks));
         }
 
-        // A chain proof survives a join only when both paths recorded the
-        // same one: a path that reassigned the holder, or never ran the
-        // assignment at all, says nothing about the receivers.
-        if !self.nullsafe_origins.is_empty() {
-            self.nullsafe_origins
-                .retain(|name, receivers| other.nullsafe_origins.get(name) == Some(receivers));
-        }
+        // Which non-null proofs the join keeps, and which ones it learns
+        // from the two paths disagreeing.  Computed before the locals are
+        // unioned below, because both answers read the per-path types.
+        let implications = join_non_null_implications(self, other);
 
         // Likewise for a stored match outcome: a path that never ran the
         // call, or reassigned either half of it, leaves the boolean
@@ -474,7 +473,125 @@ impl ScopeState {
                 });
             }
         }
+
+        self.non_null_implications = implications;
     }
+}
+
+/// Whether a scope's entry for `key` holds exactly `null` and nothing else.
+fn is_definitely_null(scope: &ScopeState, key: &Atom) -> bool {
+    scope
+        .locals
+        .get(key)
+        .is_some_and(|types| !types.is_empty() && types.iter().all(|rt| rt.type_string.is_null()))
+}
+
+/// Whether a scope's entry for `key` rules `null` out.
+///
+/// An absent or untyped entry does not: an unknown value could be
+/// anything, `null` included.
+fn is_definitely_non_null(scope: &ScopeState, key: &Atom) -> bool {
+    scope.locals.get(key).is_some_and(|types| {
+        !types.is_empty() && !types.iter().any(|rt| type_admits_null(&rt.type_string))
+    })
+}
+
+/// Whether `null` is one of the values this type spans.
+fn type_admits_null(ty: &PhpType) -> bool {
+    match ty.kind() {
+        crate::php_type::TypeKind::Nullable(_) => true,
+        crate::php_type::TypeKind::Union(members) => members.iter().any(type_admits_null),
+        _ => ty.is_null() || ty.is_mixed(),
+    }
+}
+
+/// Whether "`holder` non-null proves `implied` non-null" is true of the
+/// values a single path carries.
+///
+/// Three ways it can be: the path recorded the proof itself, the path
+/// leaves `holder` null so the claim is vacuous there, or the path leaves
+/// `implied` non-null so the claim holds whatever `holder` is.
+fn implication_holds(scope: &ScopeState, holder: &Atom, implied: &Atom) -> bool {
+    scope
+        .non_null_implications
+        .get(holder)
+        .is_some_and(|implieds| implieds.contains(implied))
+        || is_definitely_null(scope, holder)
+        || is_definitely_non_null(scope, implied)
+}
+
+/// The non-null proofs that hold at the join of two paths.
+///
+/// A proof either path carries survives when it is true of both — the
+/// vacuity above is what lets a `?->` chain proof recorded inside a branch
+/// outlive the join with a path that never ran the assignment and left the
+/// holder null.
+///
+/// The join also *learns* proofs the two paths never wrote down. Variables
+/// that one path leaves null and the other leaves non-null were written
+/// together, so each one's null stands for the other's:
+///
+/// ```php
+/// $acceptor = null;
+/// $reflection = null;
+/// if ($name !== '') {
+///     $reflection = $this->find($name);
+///     if ($reflection !== null) {
+///         $acceptor = $this->select($reflection);
+///     }
+/// }
+/// // Either both are null or neither is, so a later `$reflection !== null`
+/// // rules out `$acceptor`'s null as well.
+/// ```
+///
+/// Only a variable each path pins down either way takes part. One that is
+/// nullable on either side was not written by the branch as a whole (a
+/// loop that assigns it under its own condition, say), and says nothing
+/// about what the other variables did.
+fn join_non_null_implications(a: &ScopeState, b: &ScopeState) -> AtomMap<Vec<Atom>> {
+    let mut joined: AtomMap<Vec<Atom>> = AtomMap::default();
+    let mut record = |holder: Atom, implied: Atom| {
+        let entry: &mut Vec<Atom> = joined.entry(holder).or_default();
+        if !entry.contains(&implied) {
+            entry.push(implied);
+        }
+    };
+
+    for (holder, implieds) in a
+        .non_null_implications
+        .iter()
+        .chain(b.non_null_implications.iter())
+    {
+        for implied in implieds {
+            if implication_holds(a, holder, implied) && implication_holds(b, holder, implied) {
+                record(*holder, *implied);
+            }
+        }
+    }
+
+    // The variables the two paths disagree about the nullness of, split by
+    // which path is the one that left them holding a value.
+    let mut non_null_in_a: Vec<Atom> = Vec::new();
+    let mut non_null_in_b: Vec<Atom> = Vec::new();
+    for key in a.locals.keys() {
+        if is_definitely_null(a, key) {
+            if is_definitely_non_null(b, key) {
+                non_null_in_b.push(*key);
+            }
+        } else if is_definitely_null(b, key) && is_definitely_non_null(a, key) {
+            non_null_in_a.push(*key);
+        }
+    }
+
+    for group in [&non_null_in_a, &non_null_in_b] {
+        for holder in group.iter() {
+            for implied in group.iter().filter(|k| *k != holder) {
+                record(*holder, *implied);
+            }
+        }
+    }
+
+    joined
 }
 
 /// Whether one array-typed branch snapshot is fully covered by another.

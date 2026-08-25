@@ -653,10 +653,10 @@ pub(crate) fn apply_condition_narrowing<'b>(
     // so `$matches` has the keys the pattern describes.
     apply_preg_match_narrowing(condition, scope, ctx, true);
 
-    // Whatever the passes above proved about a value read out of a `?->`
-    // chain, they proved about the chain's receivers too.  Last, so it
+    // Whatever the passes above proved about one value's null, they
+    // proved about every value whose null it stands for.  Last, so it
     // sees the narrowed state rather than the state on the way in.
-    apply_nullsafe_origin_narrowing(scope, ctx);
+    apply_non_null_implication_narrowing(scope, ctx);
 }
 
 /// Narrow the `$matches` out-parameter of a `preg_match`/`preg_match_all`
@@ -1403,10 +1403,10 @@ fn apply_condition_narrowing_inverse_operand<'b>(
     // outcome of the one the condition tests for.
     apply_preg_match_narrowing(condition, scope, ctx, false);
 
-    // Whatever the passes above proved about a value read out of a `?->`
-    // chain, they proved about the chain's receivers too.  Last, so it
+    // Whatever the passes above proved about one value's null, they
+    // proved about every value whose null it stands for.  Last, so it
     // sees the narrowed state rather than the state on the way in.
-    apply_nullsafe_origin_narrowing(scope, ctx);
+    apply_non_null_implication_narrowing(scope, ctx);
 }
 
 /// Report whether `condition` contains a member-existence proof for any
@@ -3153,29 +3153,30 @@ pub(crate) fn record_nullsafe_origin<'b>(
         .filter(|key| key.as_str() != lhs_name)
         .map(|key| atom(key))
         .collect();
-    scope.record_nullsafe_origin(lhs_name, receivers);
+    scope.record_non_null_implication(lhs_name, receivers);
 }
 
-/// Carry a proof about a `?->` chain's result back to the receivers the
-/// chain would have short-circuited on.
+/// Carry a proof about one value's null back to every value whose null it
+/// stands for: the receivers a `?->` chain would have short-circuited on,
+/// and the variables a branch wrote alongside it.
 ///
 /// Runs after the condition's own narrowing has landed, so what it reads
 /// is the guarded state: a holder that is no longer nullable is one the
 /// condition ruled the null out of, whichever shape the guard was written
 /// in (`instanceof`, `!== null`, a bare truthy test, an assertion helper).
-fn apply_nullsafe_origin_narrowing(scope: &mut ScopeState, ctx: &ForwardWalkCtx<'_>) {
-    if scope.nullsafe_origins.is_empty() {
+fn apply_non_null_implication_narrowing(scope: &mut ScopeState, ctx: &ForwardWalkCtx<'_>) {
+    if scope.non_null_implications.is_empty() {
         return;
     }
     let proven: Vec<Atom> = scope
-        .nullsafe_origins
+        .non_null_implications
         .iter()
         .filter(|(holder, _)| !scope_value_is_nullable(holder, scope))
-        .flat_map(|(_, receivers)| receivers.iter().copied())
+        .flat_map(|(_, implieds)| implieds.iter().copied())
         .collect();
-    for receiver in proven {
-        seed_synthetic_key_if_needed(&receiver, scope, ctx);
-        strip_null_from_scope(&receiver, scope);
+    for implied in proven {
+        seed_synthetic_key_if_needed(&implied, scope, ctx);
+        strip_null_from_scope(&implied, scope);
     }
 }
 
