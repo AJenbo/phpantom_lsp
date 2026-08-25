@@ -908,23 +908,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Symbol resolution">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b243-phpstananalyserscopemergewith-is-a-confirmed-false-positive-with-no-explanation-on-the-phpstan-side" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B243. <code>PHPStan\Analyser\Scope::mergeWith()</code> is a confirmed false positive with no explanation on the PHPStan side
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -957,23 +940,6 @@
       </span>
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b262-analyze-orders-two-diagnostics-on-the-same-line-differently-from-run-to-run" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B262. <code>analyze</code> orders two diagnostics on the same line differently from run to run
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -1525,23 +1491,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Symbol resolution">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b243-phpstananalyserscopemergewith-is-a-confirmed-false-positive-with-no-explanation-on-the-phpstan-side" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B243. <code>PHPStan\Analyser\Scope::mergeWith()</code> is a confirmed false positive with no explanation on the PHPStan side
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1574,23 +1523,6 @@
       </span>
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b262-analyze-orders-two-diagnostics-on-the-same-line-differently-from-run-to-run" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B262. <code>analyze</code> orders two diagnostics on the same line differently from run to run
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -1664,42 +1596,13 @@ otherwise the declared type answers the same way.</p>
 <h2 id="arithmetic">Arithmetic<a class="headerlink" href="#arithmetic" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
-<h3 id="b243-phpstananalyserscopemergewith-is-a-confirmed-false-positive-with-no-explanation-on-the-phpstan-side">B243. <code>PHPStan\Analyser\Scope::mergeWith()</code> is a confirmed false positive with no explanation on the PHPStan side<a class="headerlink" href="#b243-phpstananalyserscopemergewith-is-a-confirmed-false-positive-with-no-explanation-on-the-phpstan-side" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Complexity: Unknown</strong></p>
-<p><code>Scope</code> genuinely has no <code>mergeWith</code> (only <code>MutatingScope</code> does), and the
-expression <code>NodeScopeResolver.php:5404,5412</code> calls it on is
-<code>StatementResult::getScope()</code>, declared <code>: Scope</code>. PHPantom's own
-<code>dumpType</code>-equivalent agrees, and the same file spells the conversion out
-explicitly 4,000 lines earlier
-(<code>$statement-&gt;getScope()-&gt;toMutatingScope()</code> at line 1112), so reading the
-source alone says the call is an error and the diagnostic is right. Yet
-real PHPStan raises nothing, and no entry for it exists in
-<code>phpstan-baseline.neon</code>. No stub, mixin, or reflection extension
-explaining the silence was found, and running PHPStan on itself to settle
-it needs a <code>composer install</code> in the checkout. Filed as a confirmed false
-positive whose cause is still unaccounted for; the eight call sites are
-the only ones seen anywhere.</p>
+<p>No outstanding items.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b262-analyze-orders-two-diagnostics-on-the-same-line-differently-from-run-to-run">B262. <code>analyze</code> orders two diagnostics on the same line differently from run to run<a class="headerlink" href="#b262-analyze-orders-two-diagnostics-on-the-same-line-differently-from-run-to-run" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<p>Running <code>phpantom_lsp analyze</code> twice over an unchanged checkout produces
-reports that differ in the order of diagnostics sharing a line. On
-<code>references/phpactor</code> one run prints</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>    99   Unused variable &#39;$offset&#39;
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>         🪪  unused_variable
-</code></pre></div>
-<p>and the next prints the two lines the other way round relative to the
-neighbouring diagnostic on the same line. The counts and the diagnostics
-themselves are identical, so nothing is lost, but a report that is not
-byte-identical between runs cannot be diffed, which is the natural way to
-check a change introduced no new findings. Reproduced on <code>phpactor</code>,
-<code>laravel-framework</code>, and <code>php-lsp</code>; the sort that emits the report needs
-a total order (line, then column, then code) rather than one that leaves
-same-line entries to whatever order the parallel walk finished in.</p>
+<p>No outstanding items.</p>
 
 
 
