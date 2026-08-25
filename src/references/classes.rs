@@ -46,7 +46,13 @@ impl Backend {
             let file_namespace = self.first_file_namespace(file_uri);
             let file_use_map = std::cell::OnceCell::new();
             let class_matches = |resolved: &str| {
-                class_names_match(strip_fqn_prefix(resolved), target, target_short)
+                if crate::resource_navigation::is_resource_document(file_uri) {
+                    self.metadata_class_family(resolved)
+                        .iter()
+                        .any(|name| name.eq_ignore_ascii_case(target))
+                } else {
+                    class_names_match(strip_fqn_prefix(resolved), target, target_short)
+                }
             };
 
             // First pass: resolved-name check to avoid unnecessary content work.

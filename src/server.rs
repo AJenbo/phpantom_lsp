@@ -417,6 +417,21 @@ impl LanguageServer for Backend {
                 }
             }
 
+            // Generated transparent proxies live in opt-in cache/build paths
+            // that normal project indexing may ignore. Read their declarations
+            // into the metadata relation index; they do not enter the type
+            // engine or the workspace class map.
+            let proxy_backend = self.clone_for_blocking();
+            let proxy_root = root.clone();
+            let proxy_count = run_blocking_cancel_safe("index_php_proxies", move || {
+                proxy_backend.rebuild_configured_proxy_index(&proxy_root)
+            })
+            .await
+            .unwrap_or(0);
+            if proxy_count > 0 {
+                tracing::info!("PHPantom: indexed {} transparent proxies", proxy_count);
+            }
+
             // Laravel-only startup work.  The project classification is
             // set by the init pass above from composer.json, so it has to
             // run after it: a Symfony workspace must never pay for the

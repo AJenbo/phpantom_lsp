@@ -67,6 +67,7 @@ src/
 │
 │   # Class & type resolution
 ├── resolution.rs           # Multi-phase class/function lookup across files (find_or_load_class)
+├── proxy_metadata.rs       # Transparent proxy → real-class relations for metadata consumers
 ├── class_lookup.rs         # Subtype checks (is_subtype_of_typed) and class-lookup helpers
 ├── inheritance/            # Parent/trait/mixin member merging, generics substitution
 ├── virtual_members/        # Synthesized members: phpdoc.rs (@method/@property/@mixin) + laravel/ (one file per Eloquent/framework feature)

@@ -261,6 +261,7 @@ mod phpstan;
 pub(crate) mod phpstan_ignore;
 pub(crate) mod process;
 pub mod progress;
+mod proxy_metadata;
 mod reference_counts;
 mod reference_index;
 mod references;
@@ -568,6 +569,12 @@ pub struct Backend {
     /// candidate files, then run their existing semantic checks for aliases,
     /// inheritance, Laravel declarations, and `self/static/parent`.
     pub(crate) reference_index: reference_index::ReferenceIndex,
+    /// Transparent proxy-to-real-class relations for metadata consumers.
+    ///
+    /// Generated proxies remain valid PHP subclasses in the type engine,
+    /// while events, external references, and lenses can be attributed to the
+    /// class the proxy represents at runtime.
+    pub(crate) proxy_index: Arc<RwLock<proxy_metadata::ProxyIndex>>,
     /// Skip building [`reference_index`] from `update_ast`.
     ///
     /// Set by [`Backend::new_headless`] for the `analyze`/`fix` CLI
@@ -1083,6 +1090,7 @@ impl Backend {
             open_files: Arc::new(RwLock::new(HashMap::new())),
             symbol_maps: Arc::new(RwLock::new(HashMap::new())),
             reference_index: reference_index::new_reference_index(),
+            proxy_index: Arc::new(RwLock::new(proxy_metadata::ProxyIndex::default())),
             skip_reference_index: false,
             symbols: SymbolIndex::new(),
             workspace: WorkspaceEnv::new(),
@@ -1194,6 +1202,7 @@ impl Backend {
             open_files: Arc::new(RwLock::new(HashMap::new())),
             symbol_maps: Arc::new(RwLock::new(HashMap::new())),
             reference_index: reference_index::new_reference_index(),
+            proxy_index: Arc::new(RwLock::new(proxy_metadata::ProxyIndex::default())),
             skip_reference_index: false,
             symbols: SymbolIndex::new(),
             workspace: WorkspaceEnv::new_isolated(),
@@ -1848,6 +1857,7 @@ impl Backend {
             open_files: Arc::clone(&self.open_files),
             symbol_maps: Arc::clone(&self.symbol_maps),
             reference_index: Arc::clone(&self.reference_index),
+            proxy_index: Arc::clone(&self.proxy_index),
             skip_reference_index: self.skip_reference_index,
             symbols: self.symbols.clone(),
             parse_errors: Arc::clone(&self.parse_errors),
