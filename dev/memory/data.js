@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787647906473,
+  "lastUpdate": 1787648498764,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -24683,6 +24683,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 72.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "07471582ad39cb61498abfd0fe17cc37646fa240",
+          "message": "A property keeps its narrowing across a write the resolver cannot type",
+          "timestamp": "2026-08-25T10:48:29+02:00",
+          "tree_id": "8073c0c02733f8b4a57044f92b4231d453086a98",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/07471582ad39cb61498abfd0fe17cc37646fa240"
+        },
+        "date": 1787648491602,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 36.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 73.6,
             "unit": "MiB"
           }
         ]
