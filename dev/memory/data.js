@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787675712177,
+  "lastUpdate": 1787677962110,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -24751,6 +24751,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 71.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "4173661aceb558ce993586c10e4d0036406230f1",
+          "message": "fix: PHPStan auto-detection recognises any Laravel-aware extension\n\nPHPantom will not auto-run plain PHPStan at a Laravel application,\nsince it misreads Eloquent, the facades, and the container and reports\ncorrect code as broken. Installing a PHPStan extension that teaches it\nthe framework lifts that refusal, and also certifies vendor/bin/phpstan\non a project that pulls phpstan/phpstan in transitively.\n\nThat check matched only package names ending in /larastan, so a project\nanalysed by calebdw/phpstan-laravel was refused PHPStan entirely unless\nit had also hand-authored a phpstan.neon. What the gate is really\nasking is whether anything is installed that can explain the framework\nto PHPStan, not which package does the explaining, so it now reads a\nlist of extension name suffixes -- /larastan and /phpstan-laravel --\nthat covers both and forks of either.\n\nThe rest is vocabulary. Comments crediting shared behaviour to Larastan\nby name now say \"the Laravel PHPStan extensions\", and the ones naming a\nspecific upstream class describe the behaviour instead: two extensions\nthat disagree make such a reference rot. References that are genuinely\nabout Larastan, such as ported test fixtures and pointers for\nunimplemented work, are left alone.\n\nFiles L53 (collection key types resolved from the column for keyBy,\ngroupBy and pluck) and L54 (audit custom-builder and relation-closure\ninference) for the places where the extensions have moved past what we\nmirror.",
+          "timestamp": "2026-08-25T11:59:15-05:00",
+          "tree_id": "2fa9d42f772eef35bccd0cf229a418db5e9b2e8b",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/4173661aceb558ce993586c10e4d0036406230f1"
+        },
+        "date": 1787677956243,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 76.3,
             "unit": "MiB"
           }
         ]
