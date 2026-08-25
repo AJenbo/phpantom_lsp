@@ -902,23 +902,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Array types">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b267-an-array-populated-inside-a-closure-via-an-instanceof-narrowed-push-isnt-typed-once-the-closure-has-run" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B267. An array populated inside a closure via an <code>instanceof</code>-narrowed push isn't typed once the closure has run
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1485,23 +1468,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Array types">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b267-an-array-populated-inside-a-closure-via-an-instanceof-narrowed-push-isnt-typed-once-the-closure-has-run" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B267. An array populated inside a closure via an <code>instanceof</code>-narrowed push isn't typed once the closure has run
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1572,30 +1538,7 @@ each bug's row lives in the current sprint/backlog.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
-<h3 id="b267-an-array-populated-inside-a-closure-via-an-instanceof-narrowed-push-isnt-typed-once-the-closure-has-run">B267. An array populated inside a closure via an <code>instanceof</code>-narrowed push isn't typed once the closure has run<a class="headerlink" href="#b267-an-array-populated-inside-a-closure-via-an-instanceof-narrowed-push-isnt-typed-once-the-closure-has-run" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium-High · Complexity: High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">$executionEnds = [];</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">$this-&gt;processStmtNodesInternal($stmt, $stmt-&gt;stmts, $scope, $storage, new GatheringNodeCallback(</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    static function (Node $node, Scope $scope) use (&amp;$executionEnds): void {</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">        if ($node instanceof ExecutionEndNode) {</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">            $executionEnds[] = $node; // $node is narrowed to ExecutionEndNode right here</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">        }</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">    },</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">), StatementContext::createTopLevel());</span>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">foreach ($executionEnds as $executionEnd) {</span>
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="x">    $executionEnd-&gt;getStatementResult(); // &quot;type of &#39;$executionEnd&#39; could not be resolved&quot;</span>
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="x">}</span>
-</code></pre></div>
-<p>(<code>src/Analyser/NodeScopeResolver.php:1031-1093</code>.) <code>$executionEnds</code> is captured
-<code>use (&amp;$executionEnds)</code> and mutated only after the closure's own <code>$node</code> parameter is
-narrowed via <code>instanceof ExecutionEndNode</code>. Once the call that invoked the closure
-returns, PHPantom has no record that the array's element type is <code>ExecutionEndNode</code>
-rather than the closure parameter's declared <code>Node</code> — the enclosing <code>foreach</code> sees an
-unresolved element type. The damage carries onward: <code>$endScope =
-$executionEnd-&gt;getStatementResult()-&gt;getScope()</code> is unresolved in turn, so the
-<code>$finalScope</code> accumulator the loop folds out of it never has anything to resolve
-either, and every use of it down to <code>rememberConstructorScope()</code> is reported.</p>
+<p>No outstanding items.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
