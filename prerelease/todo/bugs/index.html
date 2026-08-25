@@ -891,6 +891,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Symbol resolution">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b269-an-unqualified-class-name-in-an-inline-var-resolves-to-a-same-named-stub-class-instead-of-the-current-namespace" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B269. An unqualified class name in an inline <code>@var</code> resolves to a same-named stub class instead of the current namespace
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -904,17 +921,6 @@
   
     <nav class="md-nav" aria-label="Array types">
       <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b266-a-variable-indexed-array-element-doesnt-inherit-the-arrays-value-type-even-behind-an-array_key_exists-guard" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B266. A variable-indexed array element doesn't inherit the array's value type even behind an <code>array_key_exists</code> guard
-      </span>
-    </span>
-  </a>
-  
-</li>
         
           <li class="md-nav__item">
   <a href="#b267-an-array-populated-inside-a-closure-via-an-instanceof-narrowed-push-isnt-typed-once-the-closure-has-run" class="md-nav__link">
@@ -1502,6 +1508,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Symbol resolution">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b269-an-unqualified-class-name-in-an-inline-var-resolves-to-a-same-named-stub-class-instead-of-the-current-namespace" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B269. An unqualified class name in an inline <code>@var</code> resolves to a same-named stub class instead of the current namespace
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1515,17 +1538,6 @@
   
     <nav class="md-nav" aria-label="Array types">
       <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b266-a-variable-indexed-array-element-doesnt-inherit-the-arrays-value-type-even-behind-an-array_key_exists-guard" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B266. A variable-indexed array element doesn't inherit the array's value type even behind an <code>array_key_exists</code> guard
-      </span>
-    </span>
-  </a>
-  
-</li>
         
           <li class="md-nav__item">
   <a href="#b267-an-array-populated-inside-a-closure-via-an-instanceof-narrowed-push-isnt-typed-once-the-closure-has-run" class="md-nav__link">
@@ -1626,31 +1638,36 @@ each bug's row lives in the current sprint/backlog.</p>
 <h2 id="arithmetic">Arithmetic<a class="headerlink" href="#arithmetic" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
-<h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
-<h3 id="b266-a-variable-indexed-array-element-doesnt-inherit-the-arrays-value-type-even-behind-an-array_key_exists-guard">B266. A variable-indexed array element doesn't inherit the array's value type even behind an <code>array_key_exists</code> guard<a class="headerlink" href="#b266-a-variable-indexed-array-element-doesnt-inherit-the-arrays-value-type-even-behind-an-array_key_exists-guard" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium-High · Complexity: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/** @var array&lt;int, ConstantArrayType&gt; $arraysToProcess */</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">foreach ($eligibleCombinations as $i =&gt; $other) {</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    if (!array_key_exists($i, $arraysToProcess)) {</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">        continue;</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">    }</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">    foreach ($other as $j =&gt; $count) {</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">        if (!array_key_exists($j, $arraysToProcess)) {</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">            continue;</span>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">        }</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">        $arraysToProcess[$i]-&gt;getKeyTypes(); // &quot;type of &#39;$arraysToProcess[$i]&#39; could not be resolved&quot;</span>
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="x">    }</span>
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="x">}</span>
+<h3 id="b269-an-unqualified-class-name-in-an-inline-var-resolves-to-a-same-named-stub-class-instead-of-the-current-namespace">B269. An unqualified class name in an inline <code>@var</code> resolves to a same-named stub class instead of the current namespace<a class="headerlink" href="#b269-an-unqualified-class-name-in-an-inline-var-resolves-to-a-same-named-stub-class-instead-of-the-current-namespace" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="cp">&lt;?php</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="k">namespace</span> <span class="nx">App\Sub</span><span class="p">;</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="k">class</span> <span class="nc">Error</span> <span class="p">{}</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="k">class</span> <span class="nc">Probe</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="p">{</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="k">public</span> <span class="k">function</span> <span class="nf">run</span><span class="p">(</span><span class="nx">Take</span> <span class="nv">$t</span><span class="p">)</span><span class="o">:</span> <span class="nx">void</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    <span class="p">{</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>        <span class="sd">/** @var list&lt;Error&gt; $errors */</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>        <span class="nv">$errors</span> <span class="o">=</span> <span class="p">[];</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>        <span class="nv">$t</span><span class="o">-&gt;</span><span class="na">take</span><span class="p">(</span><span class="nv">$errors</span><span class="p">);</span> <span class="c1">// &quot;expects list&lt;App\Sub\Error&gt;, got list&lt;Error&gt;&quot;</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>    <span class="p">}</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="p">}</span>
 </code></pre></div>
-<p>(<code>src/Type/TypeCombinator.php:1339-1471</code>, 20 occurrences in this loop alone.)
-<code>$arraysToProcess[$i]</code> should resolve to the array's declared/inferred value type
-(<code>ConstantArrayType</code>) the moment the key is known to exist, exactly as a literal-index
-access like <code>$arraysToProcess[0]</code> would. PHPantom instead reports the subject as fully
-unresolved for a variable key, even one just proven present by <code>array_key_exists()</code>.
-Real-world hits: any loop that pairs off elements of an array by index (<code>$arr[$i]</code>,
-<code>$arr[$j]</code>) after checking presence — a common pattern for building combinations,
-diffs, or lookup tables.</p>
+<p><code>Take::take()</code> declares <code>@param list&lt;Error&gt; $e</code>, and that one resolves to
+<code>App\Sub\Error</code> correctly. The inline <code>@var</code> on the assignment does not: it keeps
+the name unresolved, so the two spellings compare unequal and every call that
+passes the variable is reported as a type mismatch. Renaming the class to
+anything the stubs don't also declare makes the diagnostic go away, which is the
+tell: PHP resolves an unqualified name against the current namespace before the
+global one, and the inline <code>@var</code> path is doing it the other way round.</p>
+<p>Real-world hit: <code>phpstan-src</code> <code>src/Analyser/Analyser.php:133-136</code>, where
+<code>/** @var list&lt;Error&gt; $errors */</code> inside <code>namespace PHPStan\Analyser</code> is matched
+against the global <code>\Error</code> rather than <code>PHPStan\Analyser\Error</code>. Names that
+collide with a stub class (<code>Error</code>, <code>Exception</code>, <code>Attribute</code>, <code>Directory</code>) are
+common enough that this shows up on any project with one.</p>
+<h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <h3 id="b267-an-array-populated-inside-a-closure-via-an-instanceof-narrowed-push-isnt-typed-once-the-closure-has-run">B267. An array populated inside a closure via an <code>instanceof</code>-narrowed push isn't typed once the closure has run<a class="headerlink" href="#b267-an-array-populated-inside-a-closure-via-an-instanceof-narrowed-push-isnt-typed-once-the-closure-has-run" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium-High · Complexity: High</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">$executionEnds = [];</span>
