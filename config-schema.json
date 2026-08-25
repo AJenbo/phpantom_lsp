@@ -343,6 +343,93 @@
               }
             }
           }
+        },
+        "expression-language": {
+          "type": "object",
+          "description": "Maps configured PHP attribute and constructor arguments to Symfony ExpressionLanguage strings and their PHP type contracts.",
+          "properties": {
+            "attributes": {
+              "type": "array",
+              "description": "Method-attribute arguments that contain an expression string or an array of expression strings.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "attribute": {
+                    "type": "string",
+                    "description": "Fully-qualified PHP method attribute class."
+                  },
+                  "argument": {
+                    "type": "string",
+                    "description": "Named argument containing expressions."
+                  },
+                  "position": {
+                    "type": "integer",
+                    "description": "Zero-based positional fallback for the expression argument.",
+                    "minimum": 0
+                  },
+                  "method-parameters": {
+                    "type": "boolean",
+                    "description": "Bind expression roots to method parameters with the same name.",
+                    "default": false
+                  },
+                  "bindings": {
+                    "type": "object",
+                    "description": "Map expression roots to return, parameter:<name-or-index>, or class:<FQN> type sources.",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "attribute"
+                ]
+              }
+            },
+            "constructors": {
+              "type": "array",
+              "description": "Expression object constructors nested inside PHP method attributes.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "class": {
+                    "type": "string",
+                    "description": "Fully-qualified expression object class."
+                  },
+                  "argument": {
+                    "type": "string",
+                    "description": "Named constructor argument containing the expression."
+                  },
+                  "position": {
+                    "type": "integer",
+                    "description": "Zero-based positional fallback for the constructor argument.",
+                    "minimum": 0
+                  },
+                  "inside-attribute-prefixes": {
+                    "type": "array",
+                    "description": "Only match constructors nested in attributes whose FQN starts with one of these prefixes. An empty list matches any attribute.",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "method-parameters": {
+                    "type": "boolean",
+                    "description": "Bind expression roots to method parameters with the same name.",
+                    "default": false
+                  },
+                  "bindings": {
+                    "type": "object",
+                    "description": "Map expression roots to return, parameter:<name-or-index>, or class:<FQN> type sources.",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "class"
+                ]
+              }
+            }
+          }
         }
       }
     },

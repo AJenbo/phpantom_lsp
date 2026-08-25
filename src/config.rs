@@ -52,6 +52,9 @@ pub struct SymfonyConfig {
     pub container: SymfonyContainerConfig,
     /// Event publisher and name-matching rules.
     pub events: SymfonyEventsConfig,
+    /// ExpressionLanguage arguments and their PHP type contracts.
+    #[serde(rename = "expression-language")]
+    pub expression_language: SymfonyExpressionLanguageConfig,
 }
 
 /// `[symfony.container]` section.
@@ -162,6 +165,53 @@ pub struct SymfonyEventSubscriberConfig {
     /// Enum case to event-name suffix mapping.
     #[serde(rename = "transport-cases")]
     pub transport_cases: std::collections::HashMap<String, String>,
+}
+
+/// `[symfony.expression-language]` section.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct SymfonyExpressionLanguageConfig {
+    /// Attribute arguments that contain ExpressionLanguage strings.
+    pub attributes: Vec<SymfonyExpressionAttributeConfig>,
+    /// Expression object constructors nested inside PHP attributes.
+    pub constructors: Vec<SymfonyExpressionConstructorConfig>,
+}
+
+/// One `[[symfony.expression-language.attributes]]` argument rule.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct SymfonyExpressionAttributeConfig {
+    /// Fully-qualified PHP attribute class.
+    pub attribute: String,
+    /// Named argument containing the expression string or string array.
+    pub argument: Option<String>,
+    /// Zero-based positional fallback for the argument.
+    pub position: Option<usize>,
+    /// Bind expression roots to method parameters with the same name.
+    #[serde(rename = "method-parameters")]
+    pub method_parameters: bool,
+    /// Expression root to PHP type-source mapping.
+    pub bindings: std::collections::HashMap<String, String>,
+}
+
+/// One `[[symfony.expression-language.constructors]]` object rule.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct SymfonyExpressionConstructorConfig {
+    /// Fully-qualified PHP class instantiated for the expression object.
+    pub class: String,
+    /// Named constructor argument containing the expression string.
+    pub argument: Option<String>,
+    /// Zero-based positional fallback for the constructor argument.
+    pub position: Option<usize>,
+    /// Only match constructors nested in these attribute FQN prefixes.
+    #[serde(rename = "inside-attribute-prefixes")]
+    pub inside_attribute_prefixes: Vec<String>,
+    /// Bind expression roots to method parameters with the same name.
+    #[serde(rename = "method-parameters")]
+    pub method_parameters: bool,
+    /// Expression root to PHP type-source mapping.
+    pub bindings: std::collections::HashMap<String, String>,
 }
 
 /// `[semantic_tokens]` section — controls LSP semantic highlighting.
@@ -1115,6 +1165,44 @@ marker-interface = 'Acme\Proxy\TransparentProxy'
                 paths: vec!["var/cache/*/proxies/*.php".to_string()],
                 marker_interface: "Acme\\Proxy\\TransparentProxy".to_string(),
             }]
+        );
+    }
+
+    #[test]
+    fn parses_symfony_expression_language_rules() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE_NAME);
+        std::fs::write(
+            &path,
+            r#"
+[[symfony.expression-language.attributes]]
+attribute = 'Acme\Attribute\Cache'
+argument = "tags"
+position = 3
+method-parameters = true
+
+[[symfony.expression-language.constructors]]
+class = 'Symfony\Component\ExpressionLanguage\Expression'
+position = 0
+inside-attribute-prefixes = ['Acme\Attribute\']
+bindings = { request = "parameter:0", response = "return", subject = 'class:App\Model\Subject' }
+"#,
+        )
+        .unwrap();
+
+        let config = load_config(dir.path()).unwrap();
+        let expression = config.symfony.expression_language;
+        assert_eq!(expression.attributes.len(), 1);
+        assert!(expression.attributes[0].method_parameters);
+        assert_eq!(expression.attributes[0].argument.as_deref(), Some("tags"));
+        assert_eq!(expression.constructors.len(), 1);
+        assert_eq!(
+            expression.constructors[0].bindings["request"],
+            "parameter:0"
+        );
+        assert_eq!(
+            expression.constructors[0].bindings["subject"],
+            "class:App\\Model\\Subject"
         );
     }
 

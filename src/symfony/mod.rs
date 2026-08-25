@@ -6,5 +6,7 @@
 
 pub(crate) mod container;
 mod events;
+mod expressions;
+mod php_attributes;
 
 pub(crate) use events::SymfonyEventIndex;

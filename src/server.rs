@@ -1165,6 +1165,16 @@ impl LanguageServer for Backend {
             }
 
             if let Some(locations) = backend.get_file_content(&uri_clone).and_then(|content| {
+                backend.symfony_expression_definitions_at(&uri_clone, &content, position)
+            }) {
+                return Ok(match locations.as_slice() {
+                    [] => None,
+                    [location] => Some(GotoDefinitionResponse::Scalar(location.clone())),
+                    _ => Some(GotoDefinitionResponse::Array(locations)),
+                });
+            }
+
+            if let Some(locations) = backend.get_file_content(&uri_clone).and_then(|content| {
                 backend.symfony_event_definitions_at(&uri_clone, &content, position)
             }) {
                 return Ok(match locations.as_slice() {

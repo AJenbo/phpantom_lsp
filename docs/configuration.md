@@ -138,6 +138,36 @@ code lenses between publisher and listener methods. Listener classes that are
 configured transparent proxies use the shared `[[php.proxies]]` relation, so
 the links land on the real class.
 
+#### `[symfony.expression-language]`
+
+Declare which attribute or constructor arguments contain ExpressionLanguage
+strings. PHPantom then uses the normal PHP type engine for member navigation and
+`unknown_member` diagnostics.
+
+```toml
+[[symfony.expression-language.attributes]]
+attribute = 'Acme\Expression\Attribute\Rule'
+argument = "tags"
+position = 3
+method-parameters = true
+
+[[symfony.expression-language.constructors]]
+class = 'Symfony\Component\ExpressionLanguage\Expression'
+position = 0
+inside-attribute-prefixes = [
+  'Acme\Expression\Attribute\',
+  'Vendor\Policy\Attribute\',
+]
+bindings = { request = "parameter:0", response = "return" }
+```
+
+An attribute rule accepts one string or an array of strings. Named arguments
+win over the zero-based positional fallback. `method-parameters = true` maps
+each expression root to a same-named method parameter. Explicit `bindings` can
+map a root to `parameter:0`, `parameter:name`, `return`, or `class:FQN`.
+Constructor prefixes keep a shared expression class scoped to attributes that
+use the declared variable contract; an empty prefix list matches any attribute.
+
 ### `[diagnostics]`
 
 | Key                        | Type   | Default | Description |

@@ -113,6 +113,7 @@ mod definition_phpunit_covers;
 mod definition_resource_files;
 mod definition_self_static;
 mod definition_symfony_events;
+mod definition_symfony_expressions;
 mod definition_type_hints;
 mod definition_unions;
 mod definition_variables;
