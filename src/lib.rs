@@ -282,6 +282,7 @@ pub mod stub_patches;
 pub mod stubs;
 mod symbol_index;
 pub(crate) mod symbol_map;
+mod symfony;
 pub(crate) mod text_position;
 pub(crate) mod text_scan;
 pub(crate) mod toposort;
@@ -591,6 +592,9 @@ pub struct Backend {
     /// while events, external references, and lenses can be attributed to the
     /// class the proxy represents at runtime.
     pub(crate) proxy_index: Arc<RwLock<proxy_metadata::ProxyIndex>>,
+    /// Symfony event wiring recovered from compiled containers and configured
+    /// PHP attributes.
+    pub(crate) symfony_events: Arc<RwLock<symfony::SymfonyEventIndex>>,
     /// Skip building [`reference_index`] from `update_ast`.
     ///
     /// Set by [`Backend::new_headless`] for the `analyze`/`fix` CLI
@@ -1110,6 +1114,7 @@ impl Backend {
             framework_doctrine_repositories: framework::new_doctrine_repository_index(),
             reference_index: reference_index::new_reference_index(),
             proxy_index: Arc::new(RwLock::new(proxy_metadata::ProxyIndex::default())),
+            symfony_events: Arc::new(RwLock::new(symfony::SymfonyEventIndex::default())),
             skip_reference_index: false,
             symbols: SymbolIndex::new(),
             workspace: WorkspaceEnv::new(),
@@ -1225,6 +1230,7 @@ impl Backend {
             framework_doctrine_repositories: framework::new_doctrine_repository_index(),
             reference_index: reference_index::new_reference_index(),
             proxy_index: Arc::new(RwLock::new(proxy_metadata::ProxyIndex::default())),
+            symfony_events: Arc::new(RwLock::new(symfony::SymfonyEventIndex::default())),
             skip_reference_index: false,
             symbols: SymbolIndex::new(),
             workspace: WorkspaceEnv::new_isolated(),
@@ -1883,6 +1889,7 @@ impl Backend {
             framework_doctrine_repositories: Arc::clone(&self.framework_doctrine_repositories),
             reference_index: Arc::clone(&self.reference_index),
             proxy_index: Arc::clone(&self.proxy_index),
+            symfony_events: Arc::clone(&self.symfony_events),
             skip_reference_index: self.skip_reference_index,
             symbols: self.symbols.clone(),
             parse_errors: Arc::clone(&self.parse_errors),

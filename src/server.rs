@@ -433,6 +433,20 @@ impl LanguageServer for Backend {
                 tracing::info!("PHPantom: indexed {} transparent proxies", proxy_count);
             }
 
+            // Symfony's generated container records the final event-listener
+            // wiring after compiler passes have run. Read it statically; the
+            // container PHP is never loaded or executed.
+            let symfony_backend = self.clone_for_blocking();
+            let symfony_root = root.clone();
+            let event_count = run_blocking_cancel_safe("index_symfony_metadata", move || {
+                symfony_backend.rebuild_symfony_metadata(&symfony_root)
+            })
+            .await
+            .unwrap_or(0);
+            if event_count > 0 {
+                tracing::info!("PHPantom: indexed {} Symfony event links", event_count);
+            }
+
             // Laravel-only startup work.  The project classification is
             // set by the init pass above from composer.json, so it has to
             // run after it: a Symfony workspace must never pay for the
@@ -1150,6 +1164,16 @@ impl LanguageServer for Backend {
                 }
             }
 
+            if let Some(locations) = backend.get_file_content(&uri_clone).and_then(|content| {
+                backend.symfony_event_definitions_at(&uri_clone, &content, position)
+            }) {
+                return Ok(match locations.as_slice() {
+                    [] => None,
+                    [location] => Some(GotoDefinitionResponse::Scalar(location.clone())),
+                    _ => Some(GotoDefinitionResponse::Array(locations)),
+                });
+            }
+
             // A component tag is HTML, so it has no position in the virtual
             // PHP `handle_with_position` would swap in below; it is resolved
             // from the template's own source instead.
@@ -1394,6 +1418,16 @@ impl LanguageServer for Backend {
         });
         let uri_clone = uri.clone();
         let result = run_blocking_cancel_safe("references", move || {
+            if let Some(locations) = backend.get_file_content(&uri_clone).and_then(|content| {
+                backend.symfony_event_references_at(
+                    &uri_clone,
+                    &content,
+                    position,
+                    include_declaration,
+                )
+            }) {
+                return Ok(Some(locations));
+            }
             backend.handle_with_position("references", &uri_clone, position, |content, pos| {
                 backend
                     .find_references(&uri_clone, content, pos, include_declaration)

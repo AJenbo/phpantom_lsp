@@ -287,6 +287,13 @@ impl Backend {
             self.update_ast_inner(&uri_owned, &content_owned)
         });
 
+        // Attribute rules are project configuration, while listener wiring
+        // comes from Symfony's compiled container. Refresh the source side
+        // only after the class/import indexes above have been published.
+        if result.is_some() {
+            self.refresh_symfony_event_sites(uri, content);
+        }
+
         // Keep the Laravel macro index coherent with edits to files that
         // register macros.  Cheap no-op for files without a `macro(` call.
         self.refresh_laravel_macros(uri, content);

@@ -54,7 +54,7 @@ impl Backend {
             map.get(uri).cloned().unwrap_or_default()
         };
 
-        let mut lenses = Vec::new();
+        let mut lenses = self.symfony_event_lenses(&classes, uri, content);
         let mut seen = HashSet::new();
         let ctx = self.file_context(uri);
         let class_loader = self.class_loader(&ctx);
@@ -70,7 +70,6 @@ impl Backend {
             ) {
                 lenses.push(lens);
             }
-
             if let Some(lens) = self.build_covers_lens(class, uri, content) {
                 lenses.push(lens);
             }
