@@ -13569,3 +13569,43 @@ function accumulate(array $ends): ?Scope
         "`$acc` no longer holds the initial null, got: {msgs:?}"
     );
 }
+
+/// The property case of the above: a write through a property path whose
+/// right-hand side resolves to nothing must drop the property's narrowed
+/// key rather than leave the pre-write `instanceof` narrowing in place.
+/// Unlike a plain variable, the correct fallback here is the property's
+/// declared type (`A|C`), so `onlyC()` on the un-narrowed `C` arm must not
+/// be flagged.
+#[test]
+fn an_unresolvable_property_assignment_drops_the_propertys_narrowing() {
+    let backend = create_test_backend();
+
+    let php = r#"<?php
+
+class A {}
+class C
+{
+    public function onlyC(): void {}
+}
+
+class Holder
+{
+    /** @var A|C */
+    public $prop;
+
+    public function f($u): void
+    {
+        if ($this->prop instanceof A) {
+            $this->prop = $u->make();
+            $this->prop->onlyC();
+        }
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, "file:///holder.php", php);
+    let msgs: Vec<&str> = diags.iter().map(|d| d.message.as_str()).collect();
+    assert!(
+        msgs.is_empty(),
+        "the write drops the stale `A` narrowing, got: {msgs:?}"
+    );
+}

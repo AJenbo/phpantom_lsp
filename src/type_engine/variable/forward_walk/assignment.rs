@@ -1578,8 +1578,17 @@ pub(crate) fn process_assignment_expr<'b>(
                     return;
                 }
                 let rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
-                scope.invalidate_proofs(&key);
-                if !rhs_types.is_empty() {
+                if rhs_types.is_empty() {
+                    // The right-hand side did not resolve. Unlike a plain
+                    // variable (`set_unknown`), a property's correct
+                    // fallback is its *declared* type, not "unknown", so
+                    // drop the key entirely rather than blanking it — a
+                    // blank entry would leave the pre-write `instanceof`
+                    // narrowing looking current instead of falling
+                    // through to the declared type.
+                    scope.remove(&key);
+                } else {
+                    scope.invalidate_proofs(&key);
                     scope.set(&key, rhs_types);
                 }
             }

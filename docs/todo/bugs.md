@@ -25,37 +25,7 @@ No outstanding items.
 
 ## Narrowing
 
-### B261. A property keeps its narrowing across a write the resolver cannot type
-
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-class Holder
-{
-    /** @var A|C */
-    public $prop;
-
-    public function f($u): void
-    {
-        if ($this->prop instanceof A) {
-            $this->prop = $u->make();
-            $this->prop->onlyC();   // false unknown_member, "on class 'A'"
-        }
-    }
-}
-```
-
-The property branch of `process_assignment_expr`
-(`forward_walk/assignment.rs`) records the written type under the
-property-path key, but `ScopeState::set` ignores an empty type list, so
-a right-hand side that resolves to nothing leaves the `instanceof`
-narrowing from before the write in place. The same defect on a plain
-variable was fixed by writing "no type known" over the old entry; a
-property cannot use that, because the correct fallback for a property is
-its *declared* type, not unknown, so the key has to be dropped rather
-than blanked. Narrower than the variable case: it only misreports when
-the declared type is wider than what the check narrowed it to, since
-otherwise the declared type answers the same way.
+No outstanding items.
 
 ## Arithmetic
 

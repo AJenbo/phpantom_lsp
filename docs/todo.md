@@ -101,7 +101,6 @@ unlikely to move the needle for most users.
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Medium      |
 |     | **[Bugs](todo/bugs.md)**                                                                                                                                                    |             |             |
 | B243 | [`PHPStan\Analyser\Scope::mergeWith()` is a confirmed false positive with no explanation on the PHPStan side](todo/bugs.md#b243-phpstananalyserscopemergewith-is-a-confirmed-false-positive-with-no-explanation-on-the-phpstan-side) | Low-Medium | Unknown |
-| B261 | [A property keeps its narrowing across a write the resolver cannot type](todo/bugs.md#b261-a-property-keeps-its-narrowing-across-a-write-the-resolver-cannot-type) | Low-Medium | Medium |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |
