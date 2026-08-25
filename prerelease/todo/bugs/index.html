@@ -869,23 +869,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Narrowing">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b261-a-property-keeps-its-narrowing-across-a-write-the-resolver-cannot-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B261. A property keeps its narrowing across a write the resolver cannot type
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1452,23 +1435,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Narrowing">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b261-a-property-keeps-its-narrowing-across-a-write-the-resolver-cannot-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B261. A property keeps its narrowing across a write the resolver cannot type
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1566,33 +1532,7 @@ each bug's row lives in the current sprint/backlog.</p>
 <h2 id="standard-library-return-types">Standard-library return types<a class="headerlink" href="#standard-library-return-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
-<h3 id="b261-a-property-keeps-its-narrowing-across-a-write-the-resolver-cannot-type">B261. A property keeps its narrowing across a write the resolver cannot type<a class="headerlink" href="#b261-a-property-keeps-its-narrowing-across-a-write-the-resolver-cannot-type" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">class Holder</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">{</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    /** @var A|C */</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">    public $prop;</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">    public function f($u): void</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">    {</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">        if ($this-&gt;prop instanceof A) {</span>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">            $this-&gt;prop = $u-&gt;make();</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">            $this-&gt;prop-&gt;onlyC();   // false unknown_member, &quot;on class &#39;A&#39;&quot;</span>
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="x">        }</span>
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="x">    }</span>
-<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="x">}</span>
-</code></pre></div>
-<p>The property branch of <code>process_assignment_expr</code>
-(<code>forward_walk/assignment.rs</code>) records the written type under the
-property-path key, but <code>ScopeState::set</code> ignores an empty type list, so
-a right-hand side that resolves to nothing leaves the <code>instanceof</code>
-narrowing from before the write in place. The same defect on a plain
-variable was fixed by writing "no type known" over the old entry; a
-property cannot use that, because the correct fallback for a property is
-its <em>declared</em> type, not unknown, so the key has to be dropped rather
-than blanked. Narrower than the variable case: it only misreports when
-the declared type is wider than what the check narrowed it to, since
-otherwise the declared type answers the same way.</p>
+<p>No outstanding items.</p>
 <h2 id="arithmetic">Arithmetic<a class="headerlink" href="#arithmetic" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
