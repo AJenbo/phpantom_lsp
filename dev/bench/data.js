@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787677737127,
+  "lastUpdate": 1787678838845,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Benchmarks": [
@@ -140351,6 +140351,198 @@ window.BENCHMARK_DATA = {
             "name": "diagnostics/fixture/method_chain",
             "value": 1.383,
             "range": "± 0.064",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "fe41071c85f2b81264331061e1d485e69ba7d7e5",
+          "message": "`array_merge` describes everything it was handed\n\n`array_merge` sat in `ARRAY_PRESERVING_FUNCS` alongside `array_filter`\nand friends, so its result took the element type of its *first* argument.\nIt is the one member of that family that concatenates rather than\nrearranges, and the difference matters for the accumulator idiom:\n\n    $out = [];\n    foreach ($items as $item) {\n        $out = array_merge($out, $item->getParts());\n    }\n\nArg 0 is the empty `array{}` the accumulator started as, which names no\nelement type at all, so the rule declined and the stub's bare `array`\nstood. Every read off `$out` from there on had nothing to go by --\niterating it, and reading one entry back out by a variable index\n(`$out[$i]->method()`) behind an `array_key_exists()` check, both\nreported that the type could not be resolved.\n\n`array_merge` now has its own rule, matching PHPStan's own extension:\nthe value type is the union of every argument's, and the key type the\nunion of their key domains, with the result a `list` when every argument\npromises integer keys. An empty shape contributes neither and is\nskipped; an argument that names only its value type (`array<T>`, `T[]`)\nkeeps the result's key domain open rather than spelling it out as\n`int|string`, which would turn a `T[]` that signatures accept today into\none they reject. A spread, or an argument that cannot be typed at all,\ndeclines rather than claim a union missing a member -- which needed a\nnew `is_spread` on `ArrayFuncArgs`, since the rule now walks the whole\nlist instead of reading arg 0.\n\nAcross the reference corpora this clears 13 diagnostics on phpstan-src\n(11 of them the reported `$arraysToProcess[$i]` case) and 20 on psalm,\nand leaves the `projects/` corpus byte-identical.\n\nFiled B269 while confirming the one changed message that remains: an\nunqualified class name in an inline `@var` resolves to a same-named stub\nclass instead of the current namespace, so `@var list<Error>` inside\n`namespace PHPStan\\Analyser` compares unequal to `list<PHPStan\\Analyser\\Error>`.\n\nCo-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>",
+          "timestamp": "2026-08-25T19:18:26+02:00",
+          "tree_id": "fbcadf1ebc50d174009976a4788723ebcfd9f43a",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/fe41071c85f2b81264331061e1d485e69ba7d7e5"
+        },
+        "date": 1787678833152,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "cold_start_completion",
+            "value": 3.506,
+            "range": "± 0.132",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_simple_class",
+            "value": 0.03,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_5",
+            "value": 0.08,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_10",
+            "value": 0.118,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_20",
+            "value": 0.193,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/100_classes",
+            "value": 0.229,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/500_classes",
+            "value": 0.98,
+            "range": "± 0.016",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/1000_classes",
+            "value": 1.925,
+            "range": "± 0.02",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_generics_and_mixins",
+            "value": 0.098,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_with_narrowing",
+            "value": 0.04,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_5_method_chain",
+            "value": 0.035,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_cross_file_type_hint",
+            "value": 0.041,
+            "range": "± 0.002",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_carbon_class",
+            "value": 4.916,
+            "range": "± 0.054",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_yii_deep_hierarchy",
+            "value": 0.157,
+            "range": "± 0.006",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_large_file",
+            "value": 0.268,
+            "range": "± 0.007",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_short_file",
+            "value": 0.049,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/short",
+            "value": 0.033,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/long",
+            "value": 0.091,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "hover_method_call",
+            "value": 0.083,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "goto_definition_method",
+            "value": 0.064,
+            "range": "± 0.003",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/100_lines",
+            "value": 0.158,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/500_lines",
+            "value": 0.866,
+            "range": "± 0.004",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/2000_lines",
+            "value": 5.398,
+            "range": "± 0.285",
+            "unit": "ms"
+          },
+          {
+            "name": "reparse_500_line_file",
+            "value": 0.888,
+            "range": "± 0.009",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_generic_objects",
+            "value": 0.028,
+            "range": "± 0",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_objects",
+            "value": 0.027,
+            "range": "± 0",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_missing_methods",
+            "value": 47.741,
+            "range": "± 0.397",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/method_chain",
+            "value": 1.103,
+            "range": "± 0.059",
             "unit": "ms"
           }
         ]
