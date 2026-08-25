@@ -12,7 +12,7 @@ impl PhpType {
     /// This never fails. If the input cannot be parsed by
     /// `mago_phpdoc_syntax`, returns `PhpType::raw(input)`.
     ///
-    /// PHPStan/Larastan variance annotations (`covariant`, `contravariant`)
+    /// PHPStan variance annotations (`covariant`, `contravariant`)
     /// inside generic parameter positions are parsed and discarded, so
     /// types like `BelongsTo<Category, covariant $this>` become
     /// `Generic("BelongsTo", [Named("Category"), Named("$this")])`.
@@ -246,8 +246,9 @@ fn restore_hyphenated_keywords(ty: PhpType) -> PhpType {
 ///
 /// Hyphens are not valid PHP identifier characters, so the Mago parser
 /// rejects them.  Known pseudo-types like `class-string` and
-/// `non-empty-string` have dedicated CST nodes, but Larastan additions
-/// like `model-property` do not.  This function acts as a fallback when
+/// `non-empty-string` have dedicated CST nodes, but the ones the Laravel
+/// PHPStan extensions add, like `model-property`, do not.  This function
+/// acts as a fallback when
 /// the Mago parse fails: it splits the input at the first `<` that
 /// follows a hyphenated base name, parses the inner type(s) recursively,
 /// and returns `TypeKind::Generic` if the base name is a recognised

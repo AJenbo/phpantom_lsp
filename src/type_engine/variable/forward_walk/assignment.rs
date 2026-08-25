@@ -2922,8 +2922,8 @@ pub(crate) fn extract_call_arg_variables<'b>(expr: &'b Expression<'b>) -> Vec<St
 /// `abort_unless()` / `throw_unless()` prove it true by bailing out when
 /// it is false, and `abort_if()` / `throw_if()` prove its *negation* the
 /// same way.  Neither the framework nor any stub annotates these four
-/// with `@phpstan-assert`, so the name is the only signal there is; this
-/// is the same set Larastan special-cases.
+/// with `@phpstan-assert`, so the name is the only signal there is, and
+/// this is the set the Laravel PHPStan extensions special-case too.
 const CONDITION_GUARD_FUNCTIONS: [(&str, &str, bool); 5] = [
     ("assert", "assertion", true),
     ("abort_if", "boolean", false),

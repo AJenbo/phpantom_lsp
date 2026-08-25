@@ -10,8 +10,8 @@
 //! - **Relationship properties.** Methods returning a known Eloquent
 //!   relationship type (e.g. `HasOne`, `HasMany`, `BelongsTo`) produce
 //!   a virtual property with the same name.  The property type is
-//!   inferred from the relationship's generic parameters (Larastan-style
-//!   `@return HasMany<Post, $this>` annotations) or, as a fallback,
+//!   inferred from the relationship's generic parameters (a generic
+//!   `@return HasMany<Post, $this>` annotation) or, as a fallback,
 //!   from the first `::class` argument in the method body text.
 //!
 //! - **Relationship count properties.** For each relationship method, a
@@ -275,8 +275,9 @@ pub const VIEW_FQN: &str = "Illuminate\\View\\View";
 /// the factory always constructs the concrete `Illuminate\View\View`.
 /// Resolving to the contract loses that and reports a mismatch on the
 /// (correct) `render(): View` signature every Blade component writes.
-/// Mapping the named form to the concrete class mirrors Larastan's
-/// `view()` stub, which the ecosystem is written against.
+/// Mapping the named form to the concrete class mirrors the `view()` stub
+/// the Laravel PHPStan extensions ship, which the ecosystem is written
+/// against.
 pub(crate) fn view_helper_returns_view(func_name: &str, text_args: &str) -> bool {
     if func_name.trim_start_matches('\\') != "view" {
         return false;
@@ -391,8 +392,7 @@ fn find_class_in<'a>(all_classes: &'a [Arc<ClassInfo>], name: &str) -> Option<&'
 /// `TModel` alone leaves `Collection<int, Audience>` where the code
 /// (correctly) declares `AudienceCollection`.
 ///
-/// This mirrors Larastan's `CollectionHelper::replaceCollectionsInType()`:
-/// the model is read off the *last* generic argument, so a builder that
+/// The model is therefore read off the *last* generic argument, so a builder that
 /// returns some other model's collection resolves to that model's
 /// collection class rather than the receiver's.
 ///

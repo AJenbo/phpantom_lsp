@@ -992,8 +992,8 @@ pub(super) fn resolve_rhs_function_call<'b>(
         // concrete class.
         //
         // This is not strictly sound (the helpers' declared type is the
-        // interface), but it mirrors Larastan's `NowAndTodayExtension`.
-        // The Laravel/Carbon ecosystem is written against that model, so
+        // interface), but it is what the Laravel PHPStan extensions infer
+        // too.  The Laravel/Carbon ecosystem is written against that model, so
         // real codebases assume the concrete type; matching it avoids a
         // flood of mismatches that only exist because the declared types
         // are looser than reality.
@@ -1008,8 +1008,8 @@ pub(super) fn resolve_rhs_function_call<'b>(
 
         // ── view('name') → concrete Illuminate\View\View ──
         // The helper's conditional return type names the *contract*, but
-        // the factory always builds the concrete view object.  Mirrors
-        // Larastan's `view()` stub.
+        // the factory always builds the concrete view object.  Mirrors the
+        // `view()` stub the Laravel PHPStan extensions ship.
         if normalized_func.trim_start_matches('\\') == "view" {
             let arg_texts =
                 crate::type_engine::variable::raw_type_inference::extract_arg_texts_from_ast(

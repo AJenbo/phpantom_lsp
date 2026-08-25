@@ -656,7 +656,7 @@ pub(crate) fn is_type_compatible(
     }
 
     // ── model-property<Model>: string literal validation ────────
-    // Larastan's `model-property<Model>` is a string subtype
+    // The Laravel PHPStan extensions' `model-property<Model>` is a string subtype
     // representing the property names of an Eloquent model.  When
     // the param is `model-property<Model>`, non-literal string
     // types are accepted (MAYBE — the string might be a valid

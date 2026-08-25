@@ -991,8 +991,8 @@ impl Backend {
                 // when the class is loadable (i.e. inside a Laravel project).
                 //
                 // Not strictly sound (the declared type is the interface),
-                // but it mirrors Larastan's `NowAndTodayExtension`, which the
-                // ecosystem is written against.  See the matching note in
+                // but it is what the Laravel PHPStan extensions infer too, and
+                // the ecosystem is written against it.  See the matching note in
                 // `rhs_resolution.rs`.
                 if matches!(
                     normalized_func,

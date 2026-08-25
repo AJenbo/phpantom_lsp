@@ -2482,8 +2482,7 @@ pub struct ResolvedType {
 /// it (`$factory = User::factory(); … $factory->state([…])->create()`).
 ///
 /// The state therefore travels on the value rather than being re-derived
-/// from the call's syntax, the same way Larastan carries it on its
-/// `ModelFactoryType`: every fluent call passes it along, and a branch
+/// from the call's syntax: every fluent call passes it along, and a branch
 /// join that disagrees about it drops back to [`Unknown`](Self::Unknown).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum FactoryCount {

@@ -113,7 +113,7 @@ highlighting remains in charge of ordinary PHP syntax.
 
 | Key            | Type    | Default  | Description |
 | -------------- | ------- | -------- | ----------- |
-| `command`      | string  | unset    | Command or path for PHPStan. Unset: auto-detect via `vendor/bin/phpstan` (only when the project has a PHPStan config file or `composer.json` requires `phpstan/phpstan` or Larastan directly) then `$PATH`. A Laravel application with neither Larastan nor a config file is left alone entirely, since plain PHPStan misreads the framework. `""`: disable. |
+| `command`      | string  | unset    | Command or path for PHPStan. Unset: auto-detect via `vendor/bin/phpstan` (only when the project has a PHPStan config file or `composer.json` requires `phpstan/phpstan`, or a Laravel-aware PHPStan extension such as `larastan/larastan` or `calebdw/phpstan-laravel`, directly) then `$PATH`. A Laravel application with neither such an extension nor a config file is left alone entirely, since plain PHPStan misreads the framework. `""`: disable. |
 | `memory-limit` | string  | `"1G"`   | Memory limit passed to PHPStan via `--memory-limit`. |
 | `timeout`      | integer | `60000`  | Max runtime in milliseconds before PHPStan is killed. |
 

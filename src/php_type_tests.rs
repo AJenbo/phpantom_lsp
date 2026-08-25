@@ -118,7 +118,7 @@ fn round_trip_generics() {
 
 #[test]
 fn parse_generic_with_covariant_this() {
-    // Laravel/Larastan uses `covariant $this` in generic args, e.g.
+    // Laravel's relation annotations use `covariant $this` in generic args, e.g.
     // `BelongsTo<Category, covariant $this>`.  The parser should
     // still extract the base class name (`BelongsTo`) so that
     // member lookup works on the relationship class.

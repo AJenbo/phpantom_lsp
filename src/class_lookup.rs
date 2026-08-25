@@ -655,7 +655,7 @@ pub(crate) fn is_subtype_of_typed(
     }
 
     // ── String literal <: model-property<Model> ────────────────
-    // Larastan's `model-property<Model>` is a string subtype
+    // The Laravel PHPStan extensions' `model-property<Model>` is a string subtype
     // representing the property names of an Eloquent model.  A
     // string literal is a subtype only if it names a known
     // property.  When the model class cannot be loaded, stay

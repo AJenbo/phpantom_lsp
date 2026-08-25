@@ -1185,19 +1185,34 @@ pub(crate) fn has_dependency(package: &ComposerPackage, dep: &str) -> bool {
     package.require.contains_key(dep) || package.require_dev.contains_key(dep)
 }
 
-/// Check whether the project depends on Larastan or one of its forks.
+/// Package-name suffixes of the PHPStan extensions that teach it Laravel.
 ///
-/// `larastan/larastan` is slow to pick up compatibility fixes, so users
-/// sometimes depend on a fork instead (e.g. `calebdw/larastan`) that
-/// publishes the same `Larastan\Larastan` package under a different
-/// vendor prefix. Matching on the `/larastan` suffix rather than the
-/// exact `larastan/larastan` name catches those forks too.
-pub(crate) fn has_larastan_dependency(package: &ComposerPackage) -> bool {
+/// Suffixes rather than exact names, because either is commonly installed
+/// from a fork published under a different vendor prefix (`calebdw/larastan`
+/// forked `larastan/larastan` when the latter was slow to pick up
+/// compatibility fixes) and a fork supplies the same knowledge as what it
+/// forked.
+const LARAVEL_PHPSTAN_EXTENSIONS: [&str; 2] = ["/larastan", "/phpstan-laravel"];
+
+/// Check whether the project depends on a PHPStan extension that makes
+/// PHPStan understand Laravel.
+///
+/// The question is what the project has installed that can explain Eloquent
+/// magic, the facades, and the container to PHPStan — not which package
+/// does the explaining. Both `larastan/larastan` and
+/// `calebdw/phpstan-laravel` answer it, as does a fork of either; see
+/// [`LARAVEL_PHPSTAN_EXTENSIONS`].
+pub(crate) fn has_laravel_aware_phpstan(package: &ComposerPackage) -> bool {
     package
         .require
         .keys()
         .chain(package.require_dev.keys())
-        .any(|name| name.to_ascii_lowercase().ends_with("/larastan"))
+        .any(|name| {
+            let name = name.to_ascii_lowercase();
+            LARAVEL_PHPSTAN_EXTENSIONS
+                .iter()
+                .any(|suffix| name.ends_with(suffix))
+        })
 }
 
 /// Detect whether the project depends on Laravel or a standalone
@@ -1229,8 +1244,8 @@ pub(crate) fn is_laravel_project(package: &ComposerPackage) -> bool {
 /// The distinction matters wherever the question is "does this project need
 /// a Laravel-aware analyser?": plain PHPStan misreads an application's
 /// Eloquent models, facades, and container bindings, but a library that
-/// requires `illuminate/support` for its collections has nothing for
-/// Larastan to explain. [`is_laravel_project`] deliberately answers the
+/// requires `illuminate/support` for its collections has no framework for
+/// an extension to explain. [`is_laravel_project`] deliberately answers the
 /// wider question of whether Laravel-aware *resolution* is worth doing at
 /// all, which such a library does benefit from.
 pub(crate) fn is_laravel_application(package: &ComposerPackage) -> bool {
