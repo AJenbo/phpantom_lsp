@@ -570,10 +570,15 @@ impl Backend {
         match &span.kind {
             SymbolKind::ClassReference { name, is_fqn, .. } => {
                 if *is_fqn && crate::resource_navigation::is_resource_document(uri) {
-                    return vec![(
-                        ReferenceIndexKey::class_owned(normalize_symbol_name(name)),
-                        true,
-                    )];
+                    let mut seen = HashSet::new();
+                    return self
+                        .metadata_class_family(name)
+                        .into_iter()
+                        .filter_map(|name| {
+                            let key = ReferenceIndexKey::class_owned(name);
+                            seen.insert(key.clone()).then_some((key, true))
+                        })
+                        .collect();
                 }
                 let resolved = if *is_fqn {
                     normalize_symbol_name(name)

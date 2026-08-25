@@ -49,6 +49,7 @@ impl Backend {
     ) -> bool {
         let mut composer_changed = false;
         let mut config_changed = false;
+        let mut proxy_index_rebuild = false;
         let mut schema_full_rebuild = false;
         let mut migration_changes: Vec<(PathBuf, FileChangeType)> = Vec::new();
         let mut php_changes: Vec<(String, PathBuf, FileChangeType)> = Vec::new();
@@ -56,6 +57,7 @@ impl Backend {
         let mut migration_discovery =
             crate::virtual_members::laravel::database_schema::MigrationDiscovery::default();
         let is_laravel = self.resolved_class_cache.read().is_laravel();
+        let proxy_rules = self.config().php.proxies;
         let config_path = root.join(crate::config::CONFIG_FILE_NAME);
         let mut framework_changes: Vec<(String, PathBuf, FileChangeType)> = Vec::new();
         {
@@ -150,6 +152,14 @@ impl Backend {
                     continue;
                 };
 
+                // Generated proxies are opt-in metadata inputs, not ordinary
+                // project classes. Rebuild their small relation index rather
+                // than parsing them into the workspace symbol maps.
+                if crate::proxy_metadata::is_configured_proxy_path(root, &file_path, &proxy_rules) {
+                    proxy_index_rebuild = true;
+                    continue;
+                }
+
                 if crate::framework::is_framework_php_config_path(&file_path) {
                     framework_changes.push((uri_str.clone(), file_path.clone(), change.typ));
                 }
@@ -181,6 +191,7 @@ impl Backend {
             && resource_changes.is_empty()
             && !composer_changed
             && !config_changed
+            && !proxy_index_rebuild
             && !schema_full_rebuild
             && migration_changes.is_empty()
             && framework_changes.is_empty()
@@ -191,6 +202,7 @@ impl Backend {
         if config_changed {
             tracing::info!("PHPantom: .phpantom.toml changed, reloading configuration");
             self.reload_config(root);
+            proxy_index_rebuild = true;
             // Schema/migration settings live in the same file, and the
             // cheapest correct response to "something in here changed" is
             // the same full rebuild a config/database.php or schema file
@@ -220,6 +232,12 @@ impl Backend {
         if composer_changed {
             tracing::info!("PHPantom: composer files changed, rescanning vendor");
             self.rescan_composer_indexes(root);
+        }
+
+        if proxy_index_rebuild {
+            let count = self.rebuild_configured_proxy_index(root);
+            tracing::info!("PHPantom: indexed {} transparent proxies", count);
+            self.refresh_indexed_resource_symbols();
         }
 
         if !resource_changes.is_empty() {
@@ -330,6 +348,14 @@ impl Backend {
             last_modified = modified;
             tracing::info!("PHPantom: global config changed, reloading configuration");
             self.reload_config(&root);
+            let proxy_backend = self.clone_for_blocking();
+            let proxy_root = root.clone();
+            crate::server::run_blocking_cancel_safe("reload_php_proxies", move || {
+                let count = proxy_backend.rebuild_configured_proxy_index(&proxy_root);
+                proxy_backend.refresh_indexed_resource_symbols();
+                count
+            })
+            .await;
         }
     }
 }

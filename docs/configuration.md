@@ -52,6 +52,24 @@ The full schema is at [`config-schema.json`](https://github.com/PHPantom-dev/php
 | --------- | ------ | --------------------------- | ----------- |
 | `version` | string | Inferred from composer.json | Override the detected PHP version (e.g. `"8.3"`). |
 
+#### `[[php.proxies]]`
+
+Declare generated transparent-proxy subclasses so metadata found on the
+generated class is attributed to its real parent class. PHPantom scans only
+the listed workspace-relative files, directories, or globs. A class must
+directly implement `marker-interface`; an ordinary subclass in the same path
+is left alone.
+
+```toml
+[[php.proxies]]
+paths = ["var/cache/*/generated-proxies/*.php"]
+marker-interface = 'ProxyManager\Proxy\AccessInterceptorValueHolderInterface'
+```
+
+This does not replace the proxy class in PHP type resolution. It gives project
+metadata features one shared relation to the parent class; YAML/XML navigation
+uses that relation directly.
+
 ### `[diagnostics]`
 
 | Key                        | Type   | Default | Description |
