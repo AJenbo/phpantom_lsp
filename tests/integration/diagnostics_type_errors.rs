@@ -11374,3 +11374,111 @@ namespace App {
         "new self() must check App\\Error::__construct, not \\Error's, got: {msgs:?}"
     );
 }
+
+/// An unqualified class name in an inline `/** @var */` resolves against the
+/// current namespace first, exactly like the same name in a `@param` tag.  A
+/// name that also exists globally (`Error`, `Exception`, …) must not silently
+/// switch meaning between the two spellings.
+#[test]
+fn inline_var_resolves_an_unqualified_name_against_the_current_namespace() {
+    let php = r#"<?php
+namespace {
+    class Error {}
+}
+
+namespace App\Sub {
+    class Error {}
+
+    class Take
+    {
+        /** @param list<Error> $e */
+        public function take(array $e): void {}
+    }
+
+    class Probe
+    {
+        public function run(Take $t): void
+        {
+            /** @var list<Error> $errors */
+            $errors = [];
+            $t->take($errors);
+        }
+    }
+}
+"#;
+    let msgs = type_error_messages(&collect(php));
+    assert!(
+        msgs.is_empty(),
+        "inline @var list<Error> must mean App\\Sub\\Error, got: {msgs:?}"
+    );
+}
+
+/// The cross-file shape of the same thing, from `phpstan-src`: the
+/// namespace's own `Error` lives in another file and the colliding one is a
+/// stub, so neither is among the classes parsed out of the file being
+/// analysed.
+#[test]
+fn inline_var_prefers_the_namespaces_own_class_over_a_stub_of_that_name() {
+    use phpantom_lsp::Backend;
+    use std::collections::HashMap;
+
+    let files = [
+        (
+            "src/Analyser/Error.php",
+            r#"<?php
+namespace PHPStan\Analyser;
+
+class Error {}
+"#,
+        ),
+        (
+            "src/Analyser/Analyser.php",
+            r#"<?php
+namespace PHPStan\Analyser;
+
+class Analyser
+{
+    /** @param list<Error> $errors */
+    public function report(array $errors): void {}
+
+    public function run(): void
+    {
+        /** @var list<Error> $errors */
+        $errors = [];
+        $this->report($errors);
+    }
+}
+"#,
+        ),
+    ];
+
+    let dir = tempfile::tempdir().expect("failed to create temp dir");
+    std::fs::write(
+        dir.path().join("composer.json"),
+        r#"{"autoload":{"psr-4":{"PHPStan\\":"src/"}}}"#,
+    )
+    .expect("failed to write composer.json");
+    for (rel_path, content) in &files {
+        let full = dir.path().join(rel_path);
+        std::fs::create_dir_all(full.parent().unwrap()).expect("failed to create dirs");
+        std::fs::write(&full, content).expect("failed to write PHP file");
+    }
+
+    let mut stubs: HashMap<&'static str, &'static str> = HashMap::new();
+    stubs.insert("Error", "<?php\nclass Error {}\n");
+    let backend = Backend::new_test_with_stubs(stubs);
+    let (mappings, _vendor_dir) = phpantom_lsp::composer::parse_composer_json(dir.path());
+    *backend.workspace_root().write() = Some(dir.path().to_path_buf());
+    *backend.psr4_mappings().write() = mappings;
+
+    let uri = format!("file://{}/src/Analyser/Analyser.php", dir.path().display());
+    let content = files[1].1;
+    backend.update_ast(&uri, content);
+    let mut diags = Vec::new();
+    backend.collect_argument_type_diagnostics(&uri, content, &mut diags);
+    let msgs = type_error_messages(&diags);
+    assert!(
+        msgs.is_empty(),
+        "inline @var list<Error> must mean PHPStan\\Analyser\\Error, got: {msgs:?}"
+    );
+}

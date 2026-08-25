@@ -1359,20 +1359,31 @@ pub(crate) fn find_preceding_nameless_var_cast(
 /// Resolve a [`PhpType`] to a complete `Vec<ResolvedType>` with
 /// `class_info` populated when possible.  Falls back to a
 /// type-string-only entry for scalars and unresolvable types.
+///
+/// The type comes from a docblock the walker just read out of the source,
+/// so its class names are still spelled the way the author wrote them.
+/// They are qualified against the enclosing namespace first, matching how
+/// PHP reads the same spelling and how the parser already resolved the
+/// `@param`/`@return` tags these types get compared against.
 pub(crate) fn resolve_type_to_resolved_types(
     php_type: &PhpType,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Vec<ResolvedType> {
-    let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+    let php_type = crate::util::resolve_source_php_type_names(
         php_type,
+        ctx.current_class.file_namespace.as_deref(),
+        ctx.class_loader,
+    );
+    let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+        &php_type,
         &ctx.current_class.name,
         ctx.all_classes,
         ctx.class_loader,
     );
     if !classes.is_empty() {
-        ResolvedType::from_classes_with_hint(classes, php_type.clone())
+        ResolvedType::from_classes_with_hint(classes, php_type)
     } else {
-        vec![ResolvedType::from_type_string(php_type.clone())]
+        vec![ResolvedType::from_type_string(php_type)]
     }
 }
 

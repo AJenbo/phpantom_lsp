@@ -33,40 +33,7 @@ No outstanding items.
 
 ## Symbol resolution
 
-### B269. An unqualified class name in an inline `@var` resolves to a same-named stub class instead of the current namespace
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-<?php
-namespace App\Sub;
-
-class Error {}
-
-class Probe
-{
-    public function run(Take $t): void
-    {
-        /** @var list<Error> $errors */
-        $errors = [];
-        $t->take($errors); // "expects list<App\Sub\Error>, got list<Error>"
-    }
-}
-```
-
-`Take::take()` declares `@param list<Error> $e`, and that one resolves to
-`App\Sub\Error` correctly. The inline `@var` on the assignment does not: it keeps
-the name unresolved, so the two spellings compare unequal and every call that
-passes the variable is reported as a type mismatch. Renaming the class to
-anything the stubs don't also declare makes the diagnostic go away, which is the
-tell: PHP resolves an unqualified name against the current namespace before the
-global one, and the inline `@var` path is doing it the other way round.
-
-Real-world hit: `phpstan-src` `src/Analyser/Analyser.php:133-136`, where
-`/** @var list<Error> $errors */` inside `namespace PHPStan\Analyser` is matched
-against the global `\Error` rather than `PHPStan\Analyser\Error`. Names that
-collide with a stub class (`Error`, `Exception`, `Attribute`, `Directory`) are
-common enough that this shows up on any project with one.
+No outstanding items.
 
 ## Array types
 

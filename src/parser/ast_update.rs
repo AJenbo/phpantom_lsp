@@ -1697,6 +1697,30 @@ impl Backend {
                         *throw = resolved;
                     }
                 }
+                // `@psalm-if-this-is` and `@psalm-this-out` are matched
+                // against the receiver's type, and the method's own
+                // `@template T of Bound` bounds are matched against the
+                // concrete types filling them.  Both sides of those
+                // comparisons have to be spelled the same way, and the
+                // receiver arrives fully qualified.
+                if let Some(ref pattern) = method.if_this_is {
+                    let resolved = pattern.resolve_names(method_resolver);
+                    if resolved != *pattern {
+                        method.if_this_is = Some(resolved);
+                    }
+                }
+                if let Some(ref self_out) = method.self_out {
+                    let resolved = self_out.resolve_names(method_resolver);
+                    if resolved != *self_out {
+                        method.self_out = Some(resolved);
+                    }
+                }
+                for bound in method.template_param_bounds.values_mut() {
+                    let resolved = bound.resolve_names(method_resolver);
+                    if resolved != *bound {
+                        *bound = resolved;
+                    }
+                }
             }
             for prop in class.properties.make_mut() {
                 let Some(hint) = prop.type_hint.as_ref() else {

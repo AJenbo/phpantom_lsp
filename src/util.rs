@@ -191,6 +191,38 @@ pub(crate) fn resolve_php_type_names(
     ty.resolve_names(&|name| resolve_name_via_loader(name, class_loader))
 }
 
+/// [`resolve_php_type_names`] for a type written as source the reader
+/// resolves relative to where it stands: a docblock annotation inside a
+/// namespace.
+///
+/// The difference is which class an unqualified name lands on. PHP looks in
+/// the current namespace before the global one, so `@var list<Error>` inside
+/// `namespace App` means `App\Error` whenever that class exists, and only
+/// falls back to `\Error`. The loader-only [`resolve_php_type_names`] is
+/// global-first and would pick the stub, leaving the annotation naming a
+/// different class than the same spelling in a `@param` tag (which the parser
+/// resolves through the file's use-map and namespace).
+///
+/// A name that resolves to the class it already spells keeps the spelling it
+/// was written with, leading `\` included. That backslash is the only mark
+/// distinguishing an explicit global reference from a relative one, and a
+/// global class's FQN carries no namespace to encode it in, so dropping it
+/// would let a later lookup of the bare name land on a same-named class in
+/// another namespace of the file.
+pub(crate) fn resolve_source_php_type_names(
+    ty: &crate::php_type::PhpType,
+    namespace: Option<&str>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
+) -> crate::php_type::PhpType {
+    ty.resolve_names(&|name| {
+        let resolved = resolve_source_class_name(name, namespace, class_loader);
+        if resolved == name.trim_start_matches('\\') {
+            return name.to_string();
+        }
+        resolved
+    })
+}
+
 /// Run `f` inside [`panic::catch_unwind`], logging and swallowing any
 /// panic.
 ///
