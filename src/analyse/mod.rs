@@ -111,6 +111,9 @@ pub struct AnalyseOptions {
 struct FileDiagnostic {
     /// 1-based line number.
     line: u32,
+    /// 0-based column, used only to order same-line diagnostics
+    /// deterministically.
+    column: u32,
     /// The diagnostic message.
     message: String,
     /// The diagnostic code (e.g. "unknown_class").

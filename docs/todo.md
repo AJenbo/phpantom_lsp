@@ -102,7 +102,6 @@ unlikely to move the needle for most users.
 |     | **[Bugs](todo/bugs.md)**                                                                                                                                                    |             |             |
 | B243 | [`PHPStan\Analyser\Scope::mergeWith()` is a confirmed false positive with no explanation on the PHPStan side](todo/bugs.md#b243-phpstananalyserscopemergewith-is-a-confirmed-false-positive-with-no-explanation-on-the-phpstan-side) | Low-Medium | Unknown |
 | B261 | [A property keeps its narrowing across a write the resolver cannot type](todo/bugs.md#b261-a-property-keeps-its-narrowing-across-a-write-the-resolver-cannot-type) | Low-Medium | Medium |
-| B262 | [`analyze` orders two diagnostics on the same line differently from run to run](todo/bugs.md#b262-analyze-orders-two-diagnostics-on-the-same-line-differently-from-run-to-run) | Low | Low |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |

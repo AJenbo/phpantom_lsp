@@ -502,6 +502,7 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                                 };
                                 Some(FileDiagnostic {
                                     line: d.range.start.line + 1,
+                                    column: d.range.start.character,
                                     message: d.message,
                                     identifier,
                                     severity: sev,
@@ -538,7 +539,13 @@ pub async fn run(options: AnalyseOptions) -> i32 {
                         }
 
                         if !filtered.is_empty() {
-                            filtered.sort_by_key(|d| d.line);
+                            filtered.sort_by(|a, b| {
+                                a.line
+                                    .cmp(&b.line)
+                                    .then(a.column.cmp(&b.column))
+                                    .then(a.identifier.cmp(&b.identifier))
+                                    .then(a.message.cmp(&b.message))
+                            });
                             let display_path = files[i]
                                 .strip_prefix(root)
                                 .unwrap_or(&files[i])
