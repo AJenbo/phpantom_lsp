@@ -1831,7 +1831,12 @@ last segment of the resolved FQN (<code>ReturnTypeContract</code>).</p>
 <a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">    #[TypeContract(exists: &quot;int|null&quot;, notExists: &quot;array|null&quot;)] mixed &amp;...$vars</span>
 <a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">): array|int|null {}</span>
 </code></pre></div>
-<p>Affected functions: <code>microtime</code>, <code>gettimeofday</code>, <code>sscanf</code>, <code>fscanf</code>.</p>
+<p>Affected functions: <code>microtime</code>, <code>gettimeofday</code>, <code>sscanf</code>, <code>fscanf</code>.
+Three of the four already carry a hand-written conditional return type in
+<code>stub_patches</code>, which is what makes them resolve today; <code>gettimeofday</code> is
+the one still on its declared union. Reading the attribute would replace
+all four hand-written patches with one rule, and cover any function
+phpstorm-stubs annotates next.</p>
 <p><strong>Implementation:</strong> When resolving a call to one of these functions,
 check whether the annotated parameter was passed (for <code>exists</code>/
 <code>notExists</code>) or matches a literal boolean (for <code>true</code>/<code>false</code>). Use the
