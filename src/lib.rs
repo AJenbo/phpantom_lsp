@@ -920,6 +920,12 @@ pub struct Backend {
     /// this, editors keep showing tokens computed from the pre-edit
     /// symbol map until the next unrelated request.
     pub(crate) supports_semantic_tokens_refresh: Arc<std::sync::atomic::AtomicBool>,
+    /// Whether the client supports `workspace/codeLens/refresh`.
+    ///
+    /// Exact member-reference locations are computed outside the CodeLens
+    /// request.  Supporting clients re-pull once that bounded cache is warm,
+    /// avoiding a burst of lazy resolve requests for every declaration.
+    pub(crate) supports_code_lens_refresh: Arc<std::sync::atomic::AtomicBool>,
     /// Whether the client supports `workspace/inlayHint/refresh`.
     ///
     /// Set during `initialize` from the client's
@@ -928,7 +934,7 @@ pub struct Backend {
     /// without a refresh the editor keeps the hints it pulled before they
     /// were ready.
     pub(crate) supports_inlay_hint_refresh: Arc<std::sync::atomic::AtomicBool>,
-    /// Reference counts for member declarations, feeding the inlay hints.
+    /// Exact member references shared by declaration inlay hints and lenses.
     pub(crate) member_ref_counts: Arc<reference_counts::MemberRefCounts>,
     /// Set to `true` once `initialized` finishes indexing (PSR-4,
     /// classmap, stubs, vendor).  Background workers and the pull
@@ -1194,6 +1200,7 @@ impl Backend {
             registered_watcher_state: Arc::new(RwLock::new(None)),
             supports_show_document: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_semantic_tokens_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            supports_code_lens_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_inlay_hint_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             member_ref_counts: reference_counts::new_member_ref_counts(),
             init_complete: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -1307,6 +1314,7 @@ impl Backend {
             registered_watcher_state: Arc::new(RwLock::new(None)),
             supports_show_document: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_semantic_tokens_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            supports_code_lens_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_inlay_hint_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             member_ref_counts: reference_counts::new_member_ref_counts(),
             init_complete: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -1962,6 +1970,7 @@ impl Backend {
             registered_watcher_state: Arc::clone(&self.registered_watcher_state),
             supports_show_document: Arc::clone(&self.supports_show_document),
             supports_semantic_tokens_refresh: Arc::clone(&self.supports_semantic_tokens_refresh),
+            supports_code_lens_refresh: Arc::clone(&self.supports_code_lens_refresh),
             supports_inlay_hint_refresh: Arc::clone(&self.supports_inlay_hint_refresh),
             member_ref_counts: Arc::clone(&self.member_ref_counts),
             init_complete: Arc::clone(&self.init_complete),

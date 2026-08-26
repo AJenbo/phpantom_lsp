@@ -154,6 +154,9 @@ impl Backend {
         };
         evict_reference_index_uri_locked(&mut index, uri);
         drop(index);
+        if track_members {
+            self.member_ref_counts.invalidate_locations_all();
+        }
         for name in dropped.into_keys() {
             self.member_ref_counts.invalidate_member(name);
         }
@@ -176,6 +179,26 @@ impl Backend {
             }
         }
         Some(uris)
+    }
+
+    /// Number of indexed reference occurrences for `key`.
+    ///
+    /// `None` means the workspace index cannot answer yet.  A returned zero
+    /// is conclusive even for the deliberately coarse member keys: semantic
+    /// filtering can remove name matches, but it cannot create a reference
+    /// that the symbol map did not index.
+    pub(crate) fn indexed_reference_count(&self, key: &ReferenceIndexKey) -> Option<usize> {
+        if self.skip_reference_index || !self.workspace_indexed.load(Ordering::Acquire) {
+            return None;
+        }
+
+        Some(
+            self.reference_index
+                .read()
+                .get(key)
+                .map(|entries| entries.values().map(|&count| count as usize).sum())
+                .unwrap_or(0),
+        )
     }
 
     /// Narrow `uris` to the files that reference one of `keys`.
@@ -250,6 +273,10 @@ impl Backend {
             .enumerate()
             .filter_map(|(idx, item)| keep[idx].then_some(item))
             .collect();
+
+        if track_members && !rebuilt.is_empty() {
+            self.member_ref_counts.invalidate_locations_all();
+        }
 
         // Which member names each file contributed a reference to, so the
         // counts cached for those members can be marked stale.  Only the

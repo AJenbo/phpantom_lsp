@@ -217,6 +217,8 @@ fn variant_name(t: &PhpType) -> &'static str {
         TypeKind::IndexAccess(..) => "IndexAccess",
         TypeKind::Literal(_) => "Literal",
         TypeKind::Raw(_) => "Raw",
+        TypeKind::Benevolent(_) => "Benevolent",
+        TypeKind::ListShape(_) => "ListShape",
     }
 }
 
@@ -248,7 +250,12 @@ fn ty(t: &PhpType) -> Sz {
 
     match t.kind() {
         TypeKind::Named(_) | TypeKind::StaticType(_) | TypeKind::ThisType(_) => {}
-        TypeKind::Nullable(b) | TypeKind::Array(b) | TypeKind::KeyOf(b) | TypeKind::ValueOf(b) => {
+        TypeKind::Nullable(b)
+        | TypeKind::Array(b)
+        | TypeKind::KeyOf(b)
+        | TypeKind::ValueOf(b)
+        | TypeKind::Benevolent(b)
+        | TypeKind::ListShape(b) => {
             z.slot(1);
             z += ty(b);
         }
@@ -1379,6 +1386,17 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
         refs.allocs,
     );
 
+    let (member_names, member_entries, member_locations, member_bytes, member_allocations) =
+        backend.member_ref_counts.audit_heap();
+    eprintln!(
+        "── member_reference_cache: {} names, {} declarations, {} locations, {:.1} MB ({} allocs)",
+        member_names,
+        member_entries,
+        member_locations,
+        mb(member_bytes),
+        member_allocations,
+    );
+
     // ── 7. Remaining session stores ─────────────────────────────────
     let mut open = Sz::default();
     {
@@ -1627,6 +1645,9 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
     });
     probe("member_completion_cache", &mut || {
         backend.member_completion_cache.lock().clear()
+    });
+    probe("member_reference_cache", &mut || {
+        backend.member_ref_counts.clear_cached()
     });
     probe("auth_user_type_cache", &mut || {
         backend.auth_user_type_cache.write().clear()
