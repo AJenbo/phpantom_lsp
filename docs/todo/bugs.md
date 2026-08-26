@@ -214,19 +214,6 @@ Sites: `src/Analyser/ExprHandler/FuncCallHandler.php:977, 1042`,
 `src/Analyser/NodeScopeResolver.php:693, 707, 727, 732`,
 `src/Type/TypeCombinator.php:1994`.
 
-### B273. `===` against non-null literals and negated `in_array(..., true)` don't narrow
-
-**Impact: Medium-High · Complexity: Medium-High**
-
-8 sites. `=== null` and `=== false` narrow correctly, but `=== 0`,
-`=== 0.0`, `=== []` neither narrow their branch nor subtract from later
-`elseif` branches (`src/Analyser/ExprHandler/AssignHandler.php:935, 937, 941`
-— a `foreach ([null, false, 0, 0.0, '', '0', []] as $falseyScalar)`
-dispatch chain). The negative branch of
-`in_array($docComment, [null, ''], true)` must drop `null` (and `''`)
-— `src/Type/FileTypeMapper.php:120, 137 (×2), 147, 149`. Positive
-`in_array` narrowing already works.
-
 ### B284. `class_exists()` / `method_exists()` guards don't inform diagnostics
 
 **Impact: Medium-High · Complexity: Medium-High**
@@ -326,59 +313,6 @@ if ($this instanceof GenericObjectType) {
 Regular and promoted properties both trigger it; same-file and
 cross-file subclasses both fail. Site: `src/Type/ObjectType.php:744`.
 
-### B275. A do-while condition doesn't narrow the loop body on iterations after the first
-
-**Impact: Medium · Complexity: Medium-High**
-
-1 site, reproduced minimally. In
-`do { $deps[] = $c; $c = $c->getParentClass(); } while ($c !== null);`
-the body's `$c` on iteration 2+ must be narrowed by the `!== null`
-that allowed re-entry; we union in the un-narrowed `?ClassReflection`
-and report `list<ClassReflection|null>`.
-Site: `src/Dependency/DependencyResolver.php:691`.
-
-### B282. Narrowing a variable copied from a property doesn't narrow the property
-
-**Impact: Medium · Complexity: Medium-High**
-
-1 site, reproduced minimally. After `$cacheKey = $this->cacheKey;`,
-a `$cacheKey !== null` check must also narrow `$this->cacheKey` —
-PHPStan propagates narrowing through direct assignment aliases:
-
-```php
-$cacheKey = $this->cacheKey;
-if ($cacheKey !== null) {
-    return $this->cacheKey;   // string, not ?string
-}
-```
-
-Site: `src/Reflection/ClassReflection.php:304`.
-
-### B283. A property's impossible literal value survives a guarded reassignment
-
-**Impact: Medium · Complexity: Medium**
-
-1 site, reproduced minimally. With
-`/** @var bool|'notLoaded'|null */ $this->isPure`, after
-`if ($this->isPure === 'notLoaded') { /* every path reassigns bool|null */ }`
-the read below the `if` must not contain `'notLoaded'`: the true branch
-reassigned it, the false branch excluded it.
-Site: `src/PhpDoc/ResolvedPhpDocBlock.php:846`.
-
-### B280. `instanceof` in a ternary condition inside a foreach expression doesn't narrow the true arm
-
-**Impact: Medium · Complexity: Medium**
-
-1 site, reproduced minimally — an interface-typed subject makes it fail
-(a docblock-union subject works):
-
-```php
-foreach ($paramType instanceof UnionType ? $paramType->getTypes() : [$paramType] as $inner) { ... }
-// "Method 'getTypes' not found on class 'PHPStan\Type\Type'"
-```
-
-Site: `src/Reflection/GenericParametersAcceptorResolver.php:176`.
-
 ### B281. `instanceof self` in a trait narrows to the trait instead of the using class
 
 **Impact: Medium · Complexity: Medium-High**
@@ -389,22 +323,6 @@ must resolve `$value` against that class. We narrow to an intersection
 with the *trait* and report "Property 'value' not found on any of the 2
 possible types (PHPStan\Type\Type, ...ConstantScalarTypeTrait)".
 Site: `src/Type/Traits/ConstantScalarTypeTrait.php:74`.
-
-### B285. An inline `@var` above an assignment retypes the variable before the RHS is evaluated
-
-**Impact: Medium · Complexity: Medium**
-
-1 site, reproduced minimally. The `@var` describes the variable *after*
-the assignment; the RHS must still see the old type:
-
-```php
-while ($b instanceof Wrap) {
-    /** @var Base $b */
-    $b = $b->inner;    // RHS read of $b must still be Wrap; we see Base
-}
-```
-
-Site: `src/Analyser/ExprHandler/IssetHandler.php:261`.
 
 ### B286. Key-existence narrowing gaps: static-property offsets, nullable value types, and the key itself
 
@@ -471,27 +389,6 @@ produces a `Scalar` that isn't recognised as a subtype of
   instead of selecting one: `$alternatives[$exprString][1]` on
   `array<string, array{Expr, list<...>}>` returns `Expr|list<...>`
   (`src/Analyser/SpecifiedTypes.php:587`).
-
-### B293. `??=` has no value type, doesn't narrow properties, and renders an empty variable name
-
-**Impact: Medium · Complexity: Medium**
-
-6 sites. The value of `$x = $cache[$k] ??= expensive();` is the
-assigned expression's type (`src/Analyser/ScopeOps.php:500, 504, 509, 511`);
-`$this->regexp ??= $this->generateRegexp();` must leave the nullable
-property `string` (`src/Analyser/Ignore/IgnoreLexer.php:46`). Site 511
-additionally shows a cosmetic bug: a parenthesised `??=` used as a call
-receiver reports "type of '' could not be resolved" with an empty
-subject name.
-
-### B294. `new parent(...)` doesn't resolve
-
-**Impact: Low-Medium · Complexity: Low**
-
-2 sites. `$parent = new parent($this->getClassName(), ...);` leaves the
-variable unresolved; `parent`/`self`/`static` in `new` must resolve the
-same way they do in static calls.
-Sites: `src/Type/Enum/EnumCaseObjectType.php:100`, `src/Type/ThisType.php:49`.
 
 ## Docblock handling
 
@@ -647,25 +544,6 @@ Sites: `build/PHPStan/Build/TurboAttributeCollector.php:162, 165, 169`,
 should be a numeric (decimal integer) string so that
 `$placeholder['position'] - 1` is `int`, not `int|float`.
 Site: `src/Rules/Functions/PrintfHelper.php:113`.
-
-### B305. Arrow functions inside a subscripted array literal lose their parameter bindings
-
-**Impact: Low-Medium · Complexity: Medium**
-
-2 sites. Parameters with explicit native types resolve to nothing when
-the arrow function is a value in an array literal that is immediately
-indexed:
-
-```php
-$checker = [
-    'isNotNull' => static fn (Type $type) => $type->isNull()->no(),   // $type unresolved
-    'isTruthy'  => static fn (Type $type) => $type->toBoolean()->isTrue()->yes(),
-][$testName];
-```
-
-Likely a traversal bug (the closure body analysed without its parameter
-scope) rather than an inference gap.
-Sites: `src/Reflection/Callables/SimpleImpurePoint.php:88, 89`.
 
 ## Miscellaneous
 

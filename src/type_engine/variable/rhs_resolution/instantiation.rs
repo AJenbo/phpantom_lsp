@@ -25,6 +25,7 @@ pub(super) fn resolve_rhs_instantiation(
     let class_name = match inst.class {
         Expression::Self_(_) => Some("self".to_string()),
         Expression::Static(_) => Some("static".to_string()),
+        Expression::Parent(_) => Some("parent".to_string()),
         Expression::Identifier(ident) => Some(bytes_to_str(ident.value()).to_string()),
         _ => None,
     };
@@ -35,6 +36,19 @@ pub(super) fn resolve_rhs_instantiation(
             // global class (`App\Error` vs the built-in `\Error`) would
             // otherwise have every `new self(…)` resolve to the global one.
             "self" | "static" => ctx.current_class.fqn().to_string(),
+            // `parent` names the class the enclosing one extends, written
+            // however the `extends` clause spelled it, so it resolves
+            // through the same import table a written name does.
+            "parent" => {
+                let Some(parent) = ctx.current_class.parent_class else {
+                    return vec![];
+                };
+                crate::util::resolve_source_class_name(
+                    parent.as_str(),
+                    ctx.current_class.file_namespace.as_deref(),
+                    ctx.class_loader,
+                )
+            }
             other => crate::util::resolve_source_class_name(
                 other,
                 ctx.current_class.file_namespace.as_deref(),

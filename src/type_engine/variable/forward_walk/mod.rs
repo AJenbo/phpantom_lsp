@@ -177,6 +177,14 @@ pub(crate) fn walk_body_forward<'b>(
                         apply_cursor_ternary_narrowing(dw.condition, scope, ctx);
                     }
                 }
+                Statement::Foreach(foreach) => {
+                    let expr_span = foreach.expression.span();
+                    if ctx.cursor_offset >= expr_span.start.offset
+                        && ctx.cursor_offset <= expr_span.end.offset
+                    {
+                        apply_cursor_ternary_narrowing(foreach.expression, scope, ctx);
+                    }
+                }
                 // A `for` header holds a comma-separated condition list, so
                 // each entry needs its own containment check.
                 Statement::For(for_stmt) => {

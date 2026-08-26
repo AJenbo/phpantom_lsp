@@ -1198,6 +1198,16 @@ pub(crate) fn process_foreach<'b>(
         }
     }
 
+    // The iterable expression is an expression position like any other,
+    // so the narrowing its own short-circuit chains, ternary branches and
+    // `match (true)` arms prove has to reach the code inside them.
+    // `foreach ($t instanceof UnionType ? $t->getTypes() : [$t] as $inner)`
+    // reads `getTypes()` off the narrowed subject, not the declared one.
+    record_short_circuit_snapshots(foreach.expression, scope, ctx);
+    if is_diagnostic_scope_active() {
+        record_match_ternary_snapshots(foreach.expression, scope, ctx);
+    }
+
     // Resolve the iterable expression's type.
     let iter_type = resolve_foreach_iterable_type(foreach, scope, ctx);
 
@@ -2426,12 +2436,21 @@ pub(crate) fn process_do_while<'b>(
             ctx,
             discovery_ctx: ctx,
         },
-        |next_scope, point| {
-            if point != LoopSeedPoint::Entry {
-                return;
+        |next_scope, point| match point {
+            // The condition is tested after the body and the loop only
+            // re-enters when it held, so every iteration past the first
+            // starts from a body-exit state the condition has narrowed:
+            // `do { … $c = $c->getParent(); } while ($c !== null);` reads
+            // a non-null `$c` at the top of iteration two onwards. This
+            // narrows the body-exit state alone, before it is merged with
+            // the pre-loop state the first iteration ran on.
+            LoopSeedPoint::AfterBody => {
+                apply_condition_narrowing(dw.condition, next_scope, ctx);
             }
-            process_condition_assignment(dw.condition, next_scope, ctx);
-            seed_pass_by_ref_in_condition(dw.condition, next_scope, ctx);
+            LoopSeedPoint::Entry => {
+                process_condition_assignment(dw.condition, next_scope, ctx);
+                seed_pass_by_ref_in_condition(dw.condition, next_scope, ctx);
+            }
         },
     );
     let exits = pop_exit_frame();

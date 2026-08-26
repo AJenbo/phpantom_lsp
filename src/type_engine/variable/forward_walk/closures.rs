@@ -326,6 +326,15 @@ pub(crate) fn try_enter_closure_expr<'b>(
                 }
             }
         }
+        // The immediately indexed dispatch table
+        // (`['a' => fn (X $x) => …][$name]`) writes its closures inside
+        // the subscripted expression, so both halves are searched.
+        Expression::ArrayAccess(aa) => {
+            if try_enter_closure_expr(aa.array, scope, ctx, None) {
+                return true;
+            }
+            return try_enter_closure_expr(aa.index, scope, ctx, None);
+        }
         _ => {}
     }
     false

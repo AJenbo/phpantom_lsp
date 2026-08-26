@@ -220,6 +220,23 @@ pub(crate) fn process_expression_statement<'b>(
     // `takesString($m->virtual ? $m->virtual : $m->title)` under a
     // preceding `/** @var Model $m */` with no branch snapshots at all, so
     // the truthy arm read the property's declared nullable type.
+    // What the assignment target held before the docblock retyped it. A
+    // `@var` above an assignment describes the variable *after* it runs,
+    // so the right-hand side still reads the old value:
+    // `/** @var Base $b */ $b = $b->inner;` resolves `$b->inner` against
+    // whatever `$b` was on the way in, not against `Base`.
+    let assigned_var = match expr {
+        Expression::Assignment(assignment) => match assignment.lhs {
+            Expression::Variable(Variable::Direct(dv)) => {
+                let name = bytes_to_str(dv.name).to_string();
+                let before = scope.get(&name).to_vec();
+                Some((name, before))
+            }
+            _ => None,
+        },
+        _ => None,
+    };
+
     let skip_assignment =
         match try_process_inline_var_override(expr, stmt_offset(outer), scope, ctx) {
             VarOverrideResult::NamedVar => {
@@ -229,8 +246,17 @@ pub(crate) fn process_expression_statement<'b>(
                 // `@var` block declared `$app`) see the updated types.
                 // The snapshot recorded by `walk_body_for_diagnostics` at
                 // the statement start was taken *before* the `@var`
-                // override was applied.
-                record_scope_snapshot(stmt_offset(outer), scope);
+                // override was applied.  The assignment target is put back
+                // to its incoming type for that snapshot alone, so the
+                // right-hand side is read the way it was written.
+                match assigned_var {
+                    Some((ref name, ref before)) if !before.is_empty() => {
+                        let mut rhs_scope = scope.clone();
+                        rhs_scope.set(name, before.clone());
+                        record_scope_snapshot(stmt_offset(outer), &rhs_scope);
+                    }
+                    _ => record_scope_snapshot(stmt_offset(outer), scope),
+                }
                 true
             }
             // A `@var Type` (no variable name) was applied to the assignment
@@ -1721,6 +1747,43 @@ fn property_write_dispatches_to_magic_set(
         .any(is_magic)
 }
 
+/// What a `??=` leaves behind, given what its target and its fallback
+/// resolve to.
+///
+/// `??=` keeps the target when it is not null and assigns the fallback
+/// otherwise, so the value is the target's non-null half unioned with the
+/// fallback. The resolved types are combined as they are, rather than
+/// joined into one union *type string*, so the `class_info` already
+/// attached to each operand survives: a rebuilt string carries none, and
+/// a member access on the result would have nothing to resolve against.
+///
+/// Where both sides name the same type (commonly the target's declared
+/// element type, which resolved no class, alongside an argument that did)
+/// the class-backed entry speaks for the pair.
+fn coalesce_assign_value(
+    lhs_types: Vec<ResolvedType>,
+    rhs_types: Vec<ResolvedType>,
+) -> Vec<ResolvedType> {
+    let mut combined: Vec<ResolvedType> = lhs_types
+        .into_iter()
+        .filter(|rt| !rt.type_string.is_null())
+        .map(|mut rt| {
+            if let Some(non_null) = rt.type_string.non_null_type() {
+                rt.type_string = non_null;
+            }
+            rt
+        })
+        .collect();
+    ResolvedType::extend_unique(&mut combined, rhs_types);
+    let class_backed: Vec<PhpType> = combined
+        .iter()
+        .filter(|rt| rt.class_info.is_some())
+        .map(|rt| rt.type_string.clone())
+        .collect();
+    combined.retain(|rt| rt.class_info.is_some() || !class_backed.contains(&rt.type_string));
+    combined
+}
+
 /// Process compound assignment operators (`+=`, `-=`, `/=`, `*=`, etc.).
 ///
 /// The result type depends on the operator kind:
@@ -1738,40 +1801,31 @@ pub(crate) fn process_compound_assignment<'b>(
 
     let var_name = match assignment.lhs {
         Expression::Variable(Variable::Direct(dv)) => bytes_to_str(dv.name).to_string(),
+        // `$this->regexp ??= $this->generate();` leaves the property
+        // non-null just as surely as the same operator leaves a local
+        // non-null, and the scope names a member path the same way it
+        // names a local.  Only `??=` is routed this way: the arithmetic
+        // operators below read the target's current type, which a member
+        // path the scope has never seen does not have.
+        _ if matches!(assignment.operator, AssignmentOperator::Coalesce(_)) => {
+            match crate::type_engine::types::narrowing::expr_to_subject_key(assignment.lhs) {
+                Some(key) => key,
+                None => return,
+            }
+        }
         _ => return,
     };
-    // `??=` is handled separately: its result is the union of the LHS
-    // (with `null` stripped) and the RHS.  We combine the resolved types
-    // directly so the `class_info` already attached to each operand is
-    // preserved — collapsing to a freshly built union *type string* would
-    // discard it and force a re-resolution that fails for some subjects.
     if matches!(assignment.operator, AssignmentOperator::Coalesce(_)) {
+        // A member path the scope has not narrowed yet still has a
+        // declared type, and `??=` only keeps that type's non-null half —
+        // reading nothing there would drop every alternative the
+        // declaration allows besides the fallback's.
+        let lhs_types = match scope.get(&var_name) {
+            [] => resolve_rhs_with_scope(assignment.lhs, scope, ctx),
+            existing => existing.to_vec(),
+        };
         let rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
-        let mut combined: Vec<ResolvedType> = Vec::new();
-        for lt in scope.get(&var_name) {
-            // Drop a bare `null` member — `??=` only keeps the LHS when it
-            // is non-null.
-            if lt.type_string.is_null() {
-                continue;
-            }
-            let mut kept = lt.clone();
-            if let Some(non_null) = kept.type_string.non_null_type() {
-                kept.type_string = non_null;
-            }
-            combined.push(kept);
-        }
-        combined.extend(rhs_types);
-        // Deduplicate by type string so an identical LHS/RHS type (e.g.
-        // `Foo|null ??= new Foo()`) does not produce a redundant union.
-        let mut seen: Vec<PhpType> = Vec::new();
-        combined.retain(|rt| {
-            if seen.contains(&rt.type_string) {
-                false
-            } else {
-                seen.push(rt.type_string.clone());
-                true
-            }
-        });
+        let combined = coalesce_assign_value(lhs_types, rhs_types);
         if !combined.is_empty() {
             scope.set(&var_name, combined);
         } else if !scope.contains(&var_name) {
@@ -1889,14 +1943,17 @@ pub(crate) fn resolve_rhs_with_scope<'b>(
                     &lhs_types, &rhs_types, op_kind,
                 ))
             }
+            // `$x = $cache[$k] ??= expensive();` — the value is whichever
+            // side survives: the target's non-null half, or the fallback
+            // that replaced it.
             AssignmentOperator::Coalesce(_) => {
+                let lhs_types = resolve_rhs_with_scope(assignment.lhs, scope, ctx);
                 let rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
-                let rhs_type = if rhs_types.is_empty() {
-                    PhpType::mixed()
-                } else {
-                    ResolvedType::types_joined(&rhs_types)
-                };
-                Some(rhs_type)
+                let combined = coalesce_assign_value(lhs_types, rhs_types);
+                if combined.is_empty() {
+                    return vec![ResolvedType::from_type_string(PhpType::mixed())];
+                }
+                return combined;
             }
             AssignmentOperator::Assign(_) => None,
         };

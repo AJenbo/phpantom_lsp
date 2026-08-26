@@ -305,6 +305,14 @@ pub(crate) fn walk_closures_in_expr<'b>(
         Expression::UnaryPrefix(prefix) => {
             walk_closures_in_expr(prefix.operand, outer_scope, ctx, None);
         }
+        // A subscript evaluates both halves, so a closure written in
+        // either one still needs its parameter scope — the immediately
+        // indexed dispatch table (`['a' => fn (X $x) => …][$name]`)
+        // writes it in the subscripted expression.
+        Expression::ArrayAccess(aa) => {
+            walk_closures_in_expr(aa.array, outer_scope, ctx, None);
+            walk_closures_in_expr(aa.index, outer_scope, ctx, None);
+        }
         Expression::Conditional(cond) => {
             walk_closures_in_expr(cond.condition, outer_scope, ctx, None);
             if let Some(then_expr) = cond.then {

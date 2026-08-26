@@ -1724,6 +1724,28 @@ pub(crate) fn apply_in_array_narrowing<'b>(
                         narrowing::apply_instanceof_exclusion(&element_type, &var_ctx, classes)
                     });
                 }
+                // `apply_narrowing` only reaches the class layer, so a
+                // needle with no class behind it comes back untouched.
+                // Strict equality is a proof about the value, so failing
+                // it rules out every alternative the haystack's elements
+                // account for: `!in_array($doc, [null, ''], true)` leaves
+                // a `?string` needle holding `string`.
+                for rt in results.iter_mut() {
+                    if rt.class_info.is_some() {
+                        continue;
+                    }
+                    let mut narrowed = rt.type_string.clone();
+                    for member in element_type.union_members() {
+                        match strip_literal_from_type(&narrowed, member) {
+                            Some(kept) => narrowed = kept,
+                            // Excluding everything would leave the needle
+                            // with no type at all, which says less than
+                            // the type it came in with.
+                            None => continue,
+                        }
+                    }
+                    rt.type_string = narrowed;
+                }
             } else {
                 ResolvedType::apply_narrowing(&mut results, |classes| {
                     narrowing::apply_instanceof_inclusion(&element_type, false, &var_ctx, classes)
@@ -2837,6 +2859,10 @@ pub(crate) fn apply_null_narrowing_truthy<'b>(
         seed_synthetic_key_if_needed(&var_name, scope, ctx);
         refine_non_empty_in_scope(&var_name, empty, scope);
     }
+    // `$x === 0` / `$x !== []` and the rest of the strict comparisons
+    // against a written-out value: the equal branch holds that value, the
+    // unequal one holds everything else the subject could be.
+    apply_literal_identity_narrowing(condition, scope, ctx, true);
     // `$x === Land::Be` — the subject holds whatever the constant holds,
     // so a constant that cannot be null leaves no null in the subject.
     if let Some((var_name, constant)) = extract_class_constant_identity(condition, true) {
@@ -2929,6 +2955,9 @@ pub(crate) fn apply_null_narrowing_inverse<'b>(
         seed_synthetic_key_if_needed(&var_name, scope, ctx);
         narrow_to_false_in_scope(&var_name, scope);
     }
+    // The else branch of a strict comparison against a written-out value
+    // establishes the opposite of what the body did.
+    apply_literal_identity_narrowing(condition, scope, ctx, false);
     // When the condition is `$x !== Land::Be`, the inverse (else/guard)
     // means the subject is that constant, so it holds whatever the
     // constant holds.
@@ -3147,14 +3176,19 @@ fn nullsafe_receiver_keys(expr: &Expression<'_>) -> Vec<String> {
     keys
 }
 
-/// Record what a `?->` chain assigned to `lhs_name` proves about its own
-/// receivers, for a guard that arrives later and only names the result.
+/// Record what the expression assigned to `lhs_name` proves about the
+/// other keys it read, for a guard that arrives later and only names the
+/// result.
 ///
-/// `$period = $agreement?->latestPeriod();` followed by
+/// Two shapes carry such a proof. A `?->` chain's null stands for its
+/// receivers': `$period = $agreement?->latestPeriod();` followed by
 /// `if (!$period instanceof Period) { return; }` proves `$agreement` is
 /// not null past the guard — the chain would have short-circuited to
-/// `null` otherwise — but the guard's condition never mentions
-/// `$agreement`, so the link has to be recorded where it is written.
+/// `null` otherwise. And a plain copy of a member path holds the very
+/// same value, so `$cacheKey = $this->cacheKey;` makes a later
+/// `$cacheKey !== null` a proof about `$this->cacheKey` too. Either way
+/// the guard's condition never names the other key, so the link has to be
+/// recorded where it is written.
 ///
 /// Nothing is recorded when the assigned value is not nullable: without a
 /// `null` to rule out, "not null" is not evidence that any guard ran.
@@ -3166,12 +3200,26 @@ pub(crate) fn record_nullsafe_origin<'b>(
     if !scope_value_is_nullable(lhs_name, scope) {
         return;
     }
-    let receivers: Vec<Atom> = nullsafe_receiver_keys(rhs)
+    let mut implied = nullsafe_receiver_keys(rhs);
+    // A copy reads the value; a call only reads the receiver, and what it
+    // returns is its own value, not the receiver's.
+    if let Some(key) = narrowing::expr_to_subject_key(rhs)
+        && narrowing::is_member_path_key(&key)
+        && !narrowing::is_call_key(&key)
+    {
+        implied.push(key);
+    }
+    // A path rooted at the variable being written names a different value
+    // after the write than it did before it: `$a = $a->a;` leaves `$a->a`
+    // meaning the *new* `$a`'s property, which the assignment proves
+    // nothing about. Recording it would undo the invalidation the write
+    // just performed.
+    let implied: Vec<Atom> = implied
         .iter()
-        .filter(|key| key.as_str() != lhs_name)
+        .filter(|key| key.as_str() != lhs_name && !narrowing::key_reads_variable(key, lhs_name))
         .map(|key| atom(key))
         .collect();
-    scope.record_non_null_implication(lhs_name, receivers);
+    scope.record_non_null_implication(lhs_name, implied);
 }
 
 /// Carry a proof about one value's null back to every value whose null it
@@ -3620,6 +3668,168 @@ pub(crate) fn extract_empty_value_check(
     };
     let name = expr_to_var_name(subject).or_else(|| narrowing::expr_to_subject_key(subject))?;
     Some((name, empty, non_empty))
+}
+
+/// Extract the subject of a strict comparison against a literal value:
+/// `$x === 0`, `0.0 === $x`, `$x !== []`, and their negations.
+///
+/// Returns the subject key, the literal's own type, and whether the
+/// branch being narrowed is the one where the two were equal.
+///
+/// Only `===`/`!==` are read. The loose operators compare across types
+/// (`0 == ''` changed meaning in PHP 8), so they do not pin the subject
+/// to the literal's type the way strict identity does.
+pub(crate) fn extract_literal_identity_check(
+    expr: &Expression<'_>,
+) -> Option<(String, PhpType, bool)> {
+    let (inner, negated) = narrowing::unwrap_condition_negation(expr);
+    let Expression::Binary(bin) = inner else {
+        return None;
+    };
+    let equal = match bin.operator {
+        BinaryOperator::Identical(_) => !negated,
+        BinaryOperator::NotIdentical(_) => negated,
+        _ => return None,
+    };
+    let (subject, literal) = match (
+        literal_comparand_type(bin.rhs),
+        literal_comparand_type(bin.lhs),
+    ) {
+        (Some(ty), _) => (bin.lhs, ty),
+        (_, Some(ty)) => (bin.rhs, ty),
+        _ => return None,
+    };
+    let name = expr_to_var_name(subject).or_else(|| narrowing::expr_to_subject_key(subject))?;
+    Some((name, literal, equal))
+}
+
+/// The type of the literal an expression writes, for the comparands that
+/// pin a subject to one exact value.
+///
+/// A `-1` is a unary minus over a literal rather than a literal of its
+/// own, so the sign is folded back in; anything else that is not written
+/// out as a value in the source has no literal type.
+fn literal_comparand_type(expr: &Expression<'_>) -> Option<PhpType> {
+    match expr {
+        Expression::Parenthesized(paren) => literal_comparand_type(paren.expression),
+        Expression::UnaryPrefix(prefix) => {
+            let negated = match prefix.operator {
+                UnaryPrefixOperator::Negation(_) => true,
+                UnaryPrefixOperator::Plus(_) => false,
+                _ => return None,
+            };
+            let inner = literal_comparand_type(prefix.operand)?;
+            if !negated {
+                return Some(inner);
+            }
+            match inner.as_literal()? {
+                LiteralValue::Int(raw) => Some(PhpType::literal_int(format!("-{raw}"))),
+                LiteralValue::Float(raw) => Some(PhpType::literal_float(format!("-{raw}"))),
+                _ => None,
+            }
+        }
+        Expression::Literal(Literal::Integer(int)) => int
+            .value
+            .map(|value| PhpType::literal_int(value.to_string())),
+        Expression::Literal(Literal::Float(float)) => {
+            Some(PhpType::literal_float(float.value.into_inner().to_string()))
+        }
+        Expression::Literal(Literal::String(string)) => string
+            .value
+            .and_then(|bytes| std::str::from_utf8(bytes).ok())
+            .map(PhpType::literal_string_value),
+        Expression::Literal(Literal::True(_)) => Some(PhpType::true_()),
+        Expression::Literal(Literal::False(_)) => Some(PhpType::false_()),
+        _ if is_null_expr(expr) => Some(PhpType::null()),
+        Expression::Array(array) => array.elements.is_empty().then(|| PhpType::parse("array{}")),
+        Expression::LegacyArray(array) => {
+            array.elements.is_empty().then(|| PhpType::parse("array{}"))
+        }
+        _ => None,
+    }
+}
+
+/// Apply what a strict comparison against a literal proves about the
+/// subject, in whichever direction the branch establishes.
+///
+/// The equal branch pins the subject to the literal, but only when the
+/// type it carries has room for it: a comparison no alternative could
+/// satisfy describes a branch that cannot run, which is not this
+/// function's business to decide. The unequal branch drops every
+/// alternative the literal covers, which is what lets a discriminant
+/// (`if ($this->state === 'notLoaded') { … }`) leave its sentinel behind
+/// in the branch that ruled it out.
+fn apply_literal_identity_narrowing(
+    condition: &Expression<'_>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+    truthy: bool,
+) {
+    let Some((var_name, literal, equal)) = extract_literal_identity_check(condition) else {
+        return;
+    };
+    let equal = equal == truthy;
+    seed_synthetic_key_if_needed(&var_name, scope, ctx);
+    let types = scope.get(&var_name).to_vec();
+    if types.is_empty() {
+        return;
+    }
+
+    if equal {
+        let admits = types.iter().any(|rt| {
+            rt.type_string
+                .union_members()
+                .iter()
+                .any(|member| literal.is_subtype_of(member))
+        });
+        if admits {
+            scope.set(&var_name, vec![ResolvedType::from_type_string(literal)]);
+        }
+        return;
+    }
+
+    let kept: Vec<ResolvedType> = types
+        .into_iter()
+        .filter_map(|mut rt| {
+            rt.type_string = strip_literal_from_type(&rt.type_string, &literal)?;
+            Some(rt)
+        })
+        .collect();
+    // Nothing is recorded when the subtraction empties the type: the
+    // remaining alternatives are what the branch runs on, and "no type at
+    // all" is not one of them.
+    if !kept.is_empty() {
+        scope.set(&var_name, kept);
+    }
+}
+
+/// Remove every alternative of `ty` that the literal `excluded` covers,
+/// returning `None` when that leaves nothing.
+///
+/// Only alternatives the literal fully accounts for go: `'notLoaded'`
+/// drops out of `bool|'notLoaded'|null`, while a bare `string` stays put
+/// in `string|null` — ruling out one of its values does not rule out the
+/// type.
+fn strip_literal_from_type(ty: &PhpType, excluded: &PhpType) -> Option<PhpType> {
+    if let TypeKind::Union(members) = ty.kind() {
+        let kept: Vec<PhpType> = members
+            .iter()
+            .filter_map(|member| strip_literal_from_type(member, excluded))
+            .collect();
+        return match kept.len() {
+            0 => None,
+            1 => kept.into_iter().next(),
+            _ => Some(PhpType::union(kept)),
+        };
+    }
+    if let TypeKind::Nullable(inner) = ty.kind() {
+        if excluded.is_null() {
+            return Some(inner.clone());
+        }
+        let kept = strip_literal_from_type(inner, excluded)?;
+        return Some(PhpType::nullable(kept));
+    }
+    (!ty.is_subtype_of(excluded)).then(|| ty.clone())
 }
 
 /// Which empty literal an expression is, if any: `''`/`""` or `[]`/`array()`.
