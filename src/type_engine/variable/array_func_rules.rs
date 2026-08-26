@@ -155,6 +155,14 @@ pub(in crate::type_engine) fn array_func_raw_type(
         return Some(PhpType::list(chunk));
     }
 
+    // `range` builds its elements from the bounds rather than from an array
+    // it was handed, and a single fractional bound makes the whole range
+    // fractional. That is a question about every argument at once, which the
+    // conditional return type in `stub_patches` cannot ask.
+    if func_name.eq_ignore_ascii_case("range") {
+        return range_type(args);
+    }
+
     // array_map: callback is first arg, array is second.
     // The callback's return type determines the output element type.
     if func_name.eq_ignore_ascii_case("array_map") {
@@ -295,6 +303,37 @@ pub(in crate::type_engine) fn callable_string_function_name(text: &str) -> Optio
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '\\');
     is_name.then_some(name)
+}
+
+/// The list a numeric `range()` builds.
+///
+/// PHP walks from `$start` to `$end` in `$step`s, and the result is integral
+/// only when all three are: one fractional bound (or step) makes every element
+/// a float. So the answer is decided by the bounds *together*, and a single
+/// argument that cannot be typed leaves the whole call undecided.
+///
+/// Declining hands the call back to the stub's own
+/// `($start is string ? list<string> : list<int|float>)`, which is the right
+/// answer both for a character range and for a numeric one whose bounds are
+/// not known — so this rule only has to recognise the two it can prove.
+///
+/// `int` is a subtype of `float` here (PHP widens it silently), so the
+/// integral case has to be tested first: `list<int>` would otherwise read as
+/// an all-float range.
+fn range_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
+    let mut bounds = vec![args.arg_raw_type(0)?, args.arg_raw_type(1)?];
+    if args.has_arg(2) {
+        bounds.push(args.arg_raw_type(2)?);
+    }
+    let int_ty = PhpType::int();
+    if bounds.iter().all(|b| b.is_subtype_of(&int_ty)) {
+        return Some(PhpType::list(int_ty));
+    }
+    let float_ty = PhpType::float();
+    bounds
+        .iter()
+        .all(|b| b.is_subtype_of(&float_ty))
+        .then(|| PhpType::list(float_ty))
 }
 
 /// The type `array_merge` builds from its arguments.

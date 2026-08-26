@@ -358,3 +358,191 @@ final class Excerpt {
         "expected to check both the function and the method"
     );
 }
+
+/// `var_export()` renders to a string only for the `$return = true` form; the
+/// default prints and hands back nothing at all.
+#[test]
+fn var_export_returns_a_string_only_when_asked_to() {
+    let content = r#"<?php
+function probe(mixed $value, bool $capture): void {
+    $printed = var_export($value);
+    $rendered = var_export($value, true);
+    $notRendered = var_export($value, false);
+    $unknown = var_export($value, $capture);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$printed", "null"),
+            ("$rendered", "string"),
+            ("$notRendered", "null"),
+            ("$unknown", "string|null"),
+        ],
+    );
+}
+
+/// `mb_internal_encoding()` and `version_compare()` are both two functions
+/// wearing one name: the reader and the writer, and the comparator and the
+/// predicate. Which one a call gets is decided by the optional argument.
+#[test]
+fn getter_setter_builtins_follow_their_optional_argument() {
+    let content = r#"<?php
+function probe(string $a, string $b, ?string $op, ?string $enc): void {
+    $current = mb_internal_encoding();
+    $changed = mb_internal_encoding('UTF-8');
+    $eitherEncoding = mb_internal_encoding($enc);
+    $ordering = version_compare($a, $b);
+    $satisfied = version_compare($a, $b, '>=');
+    $eitherCompare = version_compare($a, $b, $op);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$current", "string"),
+            ("$changed", "bool"),
+            ("$eitherEncoding", "string|bool"),
+            ("$ordering", "int"),
+            ("$satisfied", "bool"),
+            ("$eitherCompare", "int|bool"),
+        ],
+    );
+}
+
+/// The `scanf` family collects into an array or reports how many
+/// by-reference targets it filled, decided by whether any were passed. The
+/// deciding parameter is the variadic itself, so presence is the whole
+/// question — the first target's own type says nothing.
+#[test]
+fn scanf_family_follows_its_out_parameters() {
+    let content = r#"<?php
+function probe(string $text, string $format, $stream): void {
+    $collected = sscanf($text, $format);
+    $assigned = sscanf($text, $format, $day, $month);
+    $collectedFromFile = fscanf($stream, $format);
+    $assignedFromFile = fscanf($stream, $format, $field);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$collected", "array|null"),
+            ("$assigned", "int"),
+            ("$collectedFromFile", "array|false|null"),
+            ("$assignedFromFile", "int|false"),
+        ],
+    );
+}
+
+/// A `range()` of integers stays integral, and one fractional bound makes
+/// every element a float. A bound that cannot be typed keeps the union both
+/// answers live in, and a string bound still walks the character range.
+#[test]
+fn range_elements_follow_all_of_its_bounds() {
+    let content = r#"<?php
+function probe(string $text, mixed $unknown): void {
+    $ints = range(1, 10);
+    $steppedInts = range(0, 10, 2);
+    $floats = range(1.0, 2.0);
+    $fractionalStep = range(0, 1, 0.25);
+    $chars = range('a', 'z');
+    $either = range($unknown, $unknown);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$ints", "list<int>"),
+            ("$steppedInts", "list<int>"),
+            ("$floats", "list<float>"),
+            ("$fractionalStep", "list<float>"),
+            ("$chars", "list<string>"),
+            ("$either", "list<string>|list<int|float>"),
+        ],
+    );
+}
+
+/// `array_reduce()` only answers `null` for the one case that produces it: an
+/// empty array with no initial value. Seeding the accumulator rules it out.
+#[test]
+fn array_reduce_drops_null_when_it_is_seeded() {
+    let content = r#"<?php
+/** @param list<int> $numbers */
+function probe(array $numbers): void {
+    $seeded = array_reduce($numbers, static fn (int $carry, int $n): int => $carry + $n, 0);
+    $unseeded = array_reduce($numbers, static fn (?int $carry, int $n): int => (int) $carry + $n);
+}
+"#;
+    assert_assigned_types(content, &[("$seeded", "int"), ("$unseeded", "int|null")]);
+}
+
+/// `pow()`'s `object` branch belongs to the operator-overloading extensions;
+/// two numbers can only produce a number. An operand that might be an object
+/// keeps it.
+#[test]
+fn pow_drops_the_object_branch_for_numeric_operands() {
+    let content = r#"<?php
+function probe(int $n, float $f, mixed $anything): void {
+    $ints = pow(2, 3);
+    $mixedNumeric = pow($n, $f);
+    $either = pow($anything, 2);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$ints", "int|float"),
+            ("$mixedNumeric", "int|float"),
+            ("$either", "object|int|float"),
+        ],
+    );
+}
+
+/// `ini_get()` reports `false` for a directive that is not set, which the
+/// core directives always are. Anything outside that list keeps the union.
+#[test]
+fn ini_get_drops_false_for_directives_php_always_defines() {
+    let content = r#"<?php
+function probe(string $option): void {
+    $limit = ini_get('memory_limit');
+    $timezone = ini_get('date.timezone');
+    $precision = ini_get('precision');
+    $extensionOption = ini_get('xdebug.mode');
+    $either = ini_get($option);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$limit", "string"),
+            ("$timezone", "string"),
+            ("$precision", "string"),
+            ("$extensionOption", "string|false"),
+            ("$either", "string|false"),
+        ],
+    );
+}
+
+/// `get_class()` names the class of the object it was handed, and
+/// `ReflectionClass::getInterfaceNames()` names classes too. Both are
+/// declared as plain strings, which loses the one thing the call establishes.
+#[test]
+fn class_naming_builtins_keep_their_class_string() {
+    let content = r#"<?php
+class Widget {}
+function probe(Widget $widget, object $anything, \ReflectionClass $reflection): void {
+    $exact = get_class($widget);
+    $any = get_class($anything);
+    $interfaces = $reflection->getInterfaceNames();
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$exact", "class-string<Widget>"),
+            ("$any", "class-string<object>"),
+            ("$interfaces", "list<class-string>"),
+        ],
+    );
+}

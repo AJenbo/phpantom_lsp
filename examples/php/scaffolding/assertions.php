@@ -866,6 +866,21 @@ function runDemoAssertions(): void
     assert(is_string(getenv('PATH')), 'naming a variable returns its value');
     assert(abs(-7) === 7, 'abs of an int is an int');
     assert(abs(-7.5) === 7.5, 'abs of a float is a float');
+    assert(is_string(var_export(['a' => 1], true)), 'var_export renders to a string when asked to');
+    assert(var_export('x') === null, 'var_export returns nothing when it prints');
+    assert(is_string(mb_internal_encoding()), 'mb_internal_encoding with no argument reads the encoding');
+    assert(is_bool(mb_internal_encoding('UTF-8')), 'naming an encoding reports whether the write took');
+    assert(is_int(version_compare('8.2.0', '8.1.0')), 'version_compare with no operator orders the versions');
+    assert(is_bool(version_compare('8.2.0', '8.1.0', '>')), 'naming an operator asks a yes/no question');
+    assert(sscanf('12 apples', '%d %s') === [12, 'apples'], 'sscanf with no targets collects into an array');
+    assert(sscanf('12 apples', '%d %s', $scanCount, $scanFruit) === 2, 'passing targets reports how many were filled');
+    assert(range(0, 10, 2) === [0, 2, 4, 6, 8, 10], 'an all-integer range stays integral');
+    assert(range(0, 1, 0.25) === [0.0, 0.25, 0.5, 0.75, 1.0], 'a fractional step makes every element a float');
+    assert(array_reduce([1, 2, 3], static fn (int $carry, int $n): int => $carry + $n, 0) === 6, 'a seeded reduce is never null');
+    assert(array_reduce([], static fn ($carry, $n) => $carry) === null, 'an empty array with no initial value is the one null case');
+    assert(pow(2, 10) === 1024, 'two numbers raise to a number');
+    assert(is_string(ini_get('memory_limit')), 'a core directive is always set');
+    assert(get_class(new Scaffolding\Pen()) === Scaffolding\Pen::class, 'get_class names the class of the object it was handed');
 
     // ── Closure / arrow function return types ───────────────────────────
     $makePenClosure = function(): Scaffolding\Pen { return new Scaffolding\Pen(); };

@@ -1782,6 +1782,53 @@ class ConditionalReturnDemo
         // `abs()` returns the type it was given.
         $magnitude = abs(-7);
         echo $magnitude << 1;                     // int argument → int, not int|float
+
+        // `var_export()` renders to a string only for the `$return = true`
+        // form; the default prints and hands back nothing at all.
+        $exported = var_export(['a' => 1], true);
+        strtoupper($exported);                    // captured → string
+
+        // One name, two functions: without an argument each of these reads,
+        // with one it writes and reports whether the write took.
+        $encoding = mb_internal_encoding();
+        strtoupper($encoding);                    // getter form → string
+        $ordering = version_compare(PHP_VERSION, '8.2.0');
+        echo $ordering << 1;                      // no operator → int, not int|bool
+
+        // The `scanf` family collects into an array, or fills by-reference
+        // targets and reports how many it filled.
+        $collected = sscanf('12 apples', '%d %s');
+        echo count($collected ?? []);             // no targets → array|null
+        $filled = sscanf('12 apples', '%d %s', $count, $fruit);
+        echo $filled << 1;                        // targets passed → int
+
+        // A `range()` of integers stays integral; one fractional bound makes
+        // every element a float.
+        $steps = range(0, 10, 2);
+        echo $steps[0] << 1;                      // all-int bounds → list<int>
+        $fractions = range(0, 1, 0.25);
+        echo $fractions[0] + 0.5;                 // fractional step → list<float>
+
+        // `array_reduce()` only answers null for the one case that produces
+        // it: an empty array with no initial value.
+        $total = array_reduce([1, 2, 3], static fn (int $carry, int $n): int => $carry + $n, 0);
+        echo $total << 1;                         // seeded → int, never null
+
+        // `pow()`'s `object` branch belongs to the operator-overloading
+        // extensions; two numbers can only produce a number.
+        $raised = pow(2, 10);
+        echo $raised + 1;                         // numeric operands → int|float
+
+        // `ini_get()` reports false for a directive that is not set, which
+        // the core ones always are.
+        $limit = ini_get('memory_limit');
+        strtoupper($limit);                       // core directive → string
+
+        // `get_class()` names the class of the object it was handed, so the
+        // result can be instantiated or passed on as a class-string.
+        $pen = new Scaffolding\Pen();
+        $penClass = get_class($pen);
+        (new $penClass())->write();               // class-string<Scaffolding\Pen>
     }
 }
 
