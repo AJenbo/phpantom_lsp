@@ -575,6 +575,14 @@ impl LanguageServer for Backend {
                 kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
             },
             FileSystemWatcher {
+                glob_pattern: GlobPattern::String("**/*.{yaml,yml,xml}".to_string()),
+                kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
+            },
+            FileSystemWatcher {
+                glob_pattern: GlobPattern::String("**/*.{yaml,yml,xml}.dist".to_string()),
+                kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
+            },
+            FileSystemWatcher {
                 glob_pattern: GlobPattern::String("**/composer.json".to_string()),
                 kind: Some(WatchKind::Change),
             },
@@ -740,9 +748,11 @@ impl LanguageServer for Backend {
             .write()
             .insert(uri.clone(), Arc::clone(&text));
 
-        // Resource documents are not PHP source. Their schema-free symbol
-        // navigation reads the open buffer directly when requested.
+        // Resource documents are not PHP source. Build a lightweight symbol
+        // map so navigation, references, rename, and PHP declaration lenses
+        // all consume the same indexed occurrences.
         if crate::resource_navigation::is_resource_document(&uri) {
+            self.update_resource_symbol_index(&uri, &text);
             self.log(MessageType::INFO, format!("Opened resource file: {}", uri))
                 .await;
             return;
@@ -828,6 +838,12 @@ impl LanguageServer for Backend {
             .insert(uri.clone(), Arc::clone(&text));
 
         if crate::resource_navigation::is_resource_document(&uri) {
+            self.update_resource_symbol_index(&uri, &text);
+            if self.supports_code_lens_refresh.load(Ordering::Acquire)
+                && let Some(ref client) = self.client
+            {
+                let _ = client.code_lens_refresh().await;
+            }
             return;
         }
 
@@ -936,7 +952,15 @@ impl LanguageServer for Backend {
             self.blade_injected_vars.write().remove(&uri);
         }
 
-        self.clear_file_maps(&uri);
+        if crate::resource_navigation::is_resource_document(&uri) {
+            if let Some(content) = self.get_file_content(&uri) {
+                self.update_resource_symbol_index(&uri, &content);
+            } else {
+                self.clear_file_maps(&uri);
+            }
+        } else {
+            self.clear_file_maps(&uri);
+        }
 
         // Clear diagnostics so stale warnings don't linger after the file is closed
         self.clear_diagnostics_for_file(&uri).await;
@@ -954,7 +978,9 @@ impl LanguageServer for Backend {
             self.open_files
                 .write()
                 .insert(uri.clone(), Arc::clone(&text));
-            if !is_resource {
+            if is_resource {
+                self.update_resource_symbol_index(&uri, &text);
+            } else {
                 self.update_ast(&uri, &text);
             }
         }
@@ -1014,6 +1040,11 @@ impl LanguageServer for Backend {
         // (or missing ones) are corrected.
         if did_work {
             self.request_diagnostic_refresh().await;
+            if self.supports_code_lens_refresh.load(Ordering::Acquire)
+                && let Some(ref client) = self.client
+            {
+                let _ = client.code_lens_refresh().await;
+            }
         }
     }
 

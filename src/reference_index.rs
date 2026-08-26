@@ -319,16 +319,25 @@ impl Backend {
     /// filtering can remove name matches, but it cannot create a reference
     /// that the symbol map did not index.
     pub(crate) fn indexed_reference_count(&self, key: &ReferenceIndexKey) -> Option<usize> {
+        self.indexed_reference_count_for_keys(std::slice::from_ref(key))
+    }
+
+    /// Number of indexed occurrences across several alternative keys.
+    pub(crate) fn indexed_reference_count_for_keys(
+        &self,
+        keys: &[ReferenceIndexKey],
+    ) -> Option<usize> {
         if self.skip_reference_index || !self.workspace_indexed.load(Ordering::Acquire) {
             return None;
         }
 
+        let index = self.reference_index.read();
         Some(
-            self.reference_index
-                .read()
-                .get(key)
-                .map(|entries| entries.values().map(|&count| count as usize).sum())
-                .unwrap_or(0),
+            keys.iter()
+                .filter_map(|key| index.get(key))
+                .flat_map(HashMap::values)
+                .map(|&count| count as usize)
+                .sum(),
         )
     }
 
@@ -560,6 +569,12 @@ impl Backend {
     ) -> Vec<(ReferenceIndexKey, bool)> {
         match &span.kind {
             SymbolKind::ClassReference { name, is_fqn, .. } => {
+                if *is_fqn && crate::resource_navigation::is_resource_document(uri) {
+                    return vec![(
+                        ReferenceIndexKey::class_owned(normalize_symbol_name(name)),
+                        true,
+                    )];
+                }
                 let resolved = if *is_fqn {
                     normalize_symbol_name(name)
                 } else if let Some(fqn) = self.resolved_name_at(uri, span.start) {

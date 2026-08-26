@@ -327,9 +327,40 @@ pub(crate) fn collect_php_files_gitignore(
     root: &Path,
     vendor_dir_paths: &[PathBuf],
 ) -> Vec<PathBuf> {
+    let mut result = Vec::new();
+    visit_workspace_files_gitignore(root, vendor_dir_paths, |path| {
+        if path.extension().is_some_and(|extension| extension == "php") {
+            result.push(path.to_path_buf());
+        }
+    });
+    result
+}
+
+/// Collect the PHP and schema-free YAML/XML inputs used by the full workspace
+/// index in one `.gitignore`-aware walk.
+pub(crate) fn collect_workspace_index_files_gitignore(
+    root: &Path,
+    vendor_dir_paths: &[PathBuf],
+) -> (Vec<PathBuf>, Vec<PathBuf>) {
+    let mut php_files = Vec::new();
+    let mut resource_files = Vec::new();
+    visit_workspace_files_gitignore(root, vendor_dir_paths, |path| {
+        if path.extension().is_some_and(|extension| extension == "php") {
+            php_files.push(path.to_path_buf());
+        } else if crate::resource_navigation::is_resource_path(path) {
+            resource_files.push(path.to_path_buf());
+        }
+    });
+    (php_files, resource_files)
+}
+
+fn visit_workspace_files_gitignore(
+    root: &Path,
+    vendor_dir_paths: &[PathBuf],
+    mut visit: impl FnMut(&Path),
+) {
     use ignore::WalkBuilder;
 
-    let mut result = Vec::new();
     let vendor_paths_owned: Vec<PathBuf> = vendor_dir_paths.to_vec();
 
     let walker = WalkBuilder::new(root)
@@ -357,12 +388,10 @@ pub(crate) fn collect_php_files_gitignore(
 
     for entry in walker.flatten() {
         let path = entry.path();
-        if path.is_file() && path.extension().is_some_and(|ext| ext == "php") {
-            result.push(path.to_path_buf());
+        if path.is_file() {
+            visit(path);
         }
     }
-
-    result
 }
 
 /// Push a location only if it is not already present (deduplication).

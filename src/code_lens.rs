@@ -242,11 +242,17 @@ impl Backend {
         if declaration_offset == 0 {
             return None;
         }
-        let key = ReferenceIndexKey::Member {
-            name: member.to_string(),
-            is_static,
-        };
-        let candidate_count = self.indexed_reference_count(&key)?;
+        let member_name = member.to_string();
+        let candidate_count = self.indexed_reference_count_for_keys(&[
+            ReferenceIndexKey::Member {
+                name: member_name.clone(),
+                is_static,
+            },
+            ReferenceIndexKey::Member {
+                name: member_name,
+                is_static: !is_static,
+            },
+        ])?;
         let origin_url = Url::parse(origin_uri).ok()?;
         let position = offset_to_position(content, declaration_offset as usize);
         let range = Range::new(
