@@ -847,23 +847,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Type comparison">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b287-argument-acceptance-misses-phps-implicit-widenings-and-benevolent-unions" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B287. Argument acceptance misses PHP's implicit widenings and benevolent unions
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -929,21 +912,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b284-guards-over-a-names-existence-or-its-identity-dont-inform-the-branch-they-guard" class="md-nav__link">
+  <a href="#b276-a-phpstan-assert-bool-doesnt-rule-out-null" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B284. Guards over a name's existence or its identity don't inform the branch they guard
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b276-phpstan-assert-on-properties-and-method-call-results-is-ignored" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B276. <code>@phpstan-assert</code> on properties and method-call results is ignored
+        B276. A <code>@phpstan-assert bool</code> doesn't rule out <code>null</code>
       </span>
     </span>
   </a>
@@ -1113,23 +1085,6 @@
       </span>
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b304-deprecated_usage-over-reports-two-more-shapes-phpstans-deprecation-rules-exempt" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B304. <code>deprecated_usage</code> over-reports two more shapes PHPStan's deprecation rules exempt
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -1620,23 +1575,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Type comparison">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b287-argument-acceptance-misses-phps-implicit-widenings-and-benevolent-unions" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B287. Argument acceptance misses PHP's implicit widenings and benevolent unions
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1702,21 +1640,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b284-guards-over-a-names-existence-or-its-identity-dont-inform-the-branch-they-guard" class="md-nav__link">
+  <a href="#b276-a-phpstan-assert-bool-doesnt-rule-out-null" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B284. Guards over a name's existence or its identity don't inform the branch they guard
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b276-phpstan-assert-on-properties-and-method-call-results-is-ignored" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B276. <code>@phpstan-assert</code> on properties and method-call results is ignored
+        B276. A <code>@phpstan-assert bool</code> doesn't rule out <code>null</code>
       </span>
     </span>
   </a>
@@ -1887,23 +1814,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b304-deprecated_usage-over-reports-two-more-shapes-phpstans-deprecation-rules-exempt" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B304. <code>deprecated_usage</code> over-reports two more shapes PHPStan's deprecation rules exempt
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1943,7 +1853,9 @@ each bug's row lives in the current sprint/backlog.</p>
 sample project (242 confirmed false positives after the genuine findings
 were patched in the sample). Site counts refer to that sweep; every
 mechanism was either reproduced in a minimal project or confirmed by
-reading the guard construct PHPStan honours.</p>
+reading the guard construct PHPStan honours. The sweep is a snapshot, so
+a site named here may already read differently: re-run the analyser
+before working an entry, and trim the shapes that no longer reproduce.</p>
 <p>Entries are grouped by the mechanism that has to change, not by the
 symptom that surfaced: one entry is one root cause, however many shapes
 it shows up in. Splitting a shape out into its own entry because it
@@ -1953,29 +1865,7 @@ one entry.</p>
 <h2 id="crashes">Crashes<a class="headerlink" href="#crashes" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="type-comparison">Type comparison<a class="headerlink" href="#type-comparison" title="Permanent link">&para;</a></h2>
-<h3 id="b287-argument-acceptance-misses-phps-implicit-widenings-and-benevolent-unions">B287. Argument acceptance misses PHP's implicit widenings and benevolent unions<a class="headerlink" href="#b287-argument-acceptance-misses-phps-implicit-widenings-and-benevolent-unions" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium-High · Complexity: Medium-High</strong></p>
-<p>Four acceptance rules PHPStan applies that we don't, 8 sites:</p>
-<ul>
-<li><code>int</code> satisfies a <code>float</code> parameter (<code>log($count, 2)</code> with
-  <code>int&lt;0, max&gt;</code> — <code>src/Command/Bisect/BinarySearch.php:32</code>).</li>
-<li><code>class-string</code> satisfies <code>non-empty-string</code>
-  (<code>src/Analyser/MutatingScope.php:2056</code>).</li>
-<li>The key type of an implicit <code>array&lt;V&gt;</code> / <code>V[]</code> is PHPStan's
-  <em>benevolent</em> <code>(int|string)</code>, accepted where either <code>int</code> or <code>string</code>
-  is expected (<code>src/DependencyInjection/ConditionalTagsExtension.php:45</code>,
-  <code>src/Rules/PhpDoc/WrongVariableNameInVarTagRule.php:376</code>, and the
-  <code>type_mismatch_return</code> at
-  <code>src/Analyser/ResultCache/ResultCacheManager.php:727</code> where a foreach
-  key over <code>array&lt;string, X&gt;</code> comes back as <code>int|string</code>).</li>
-<li>Bitwise ops on <code>mixed</code> operands produce a benevolent <code>(int|string)</code>,
-  accepted where <code>string</code> is expected — phpstan-src's own
-  <code>InitializerExprTypeResolver</code> models it exactly that way
-  (<code>src/Reflection/InitializerExprTypeResolver.php:1063, 1123, 1183</code>,
-  where we infer the closure <code>static fn ($a, $b) =&gt; $a &amp; $b</code> as
-  <code>Closure(mixed, mixed): int</code> and reject it against
-  <code>callable(...): string</code>).</li>
-</ul>
+<p>No outstanding items.</p>
 <h2 id="standard-library-return-types">Standard-library return types<a class="headerlink" href="#standard-library-return-types" title="Permanent link">&para;</a></h2>
 <h3 id="b290-standard-library-results-stay-wider-than-their-arguments-justify">B290. Standard-library results stay wider than their arguments justify<a class="headerlink" href="#b290-standard-library-results-stay-wider-than-their-arguments-justify" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
@@ -2126,41 +2016,24 @@ array that every branch pushed into (reproduced minimally; also
 <code>src/Rules/TooWideTypehints/TooWideParameterOutTypeCheck.php:47, 56</code>,
 <code>src/Reflection/BetterReflection/SourceLocator/OptimizedDirectorySourceLocator.php:149, 150</code>,
 <code>src/Analyser/TypeSpecifier.php:542</code>.</p>
-<h3 id="b284-guards-over-a-names-existence-or-its-identity-dont-inform-the-branch-they-guard">B284. Guards over a name's existence or its identity don't inform the branch they guard<a class="headerlink" href="#b284-guards-over-a-names-existence-or-its-identity-dont-inform-the-branch-they-guard" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium-High · Complexity: Medium-High</strong></p>
-<p>6 sites, two mechanisms. Both are conditions whose subject is a <em>name</em>
-rather than a value, which is why neither reaches the narrowing rules
-that read types.</p>
-<ul>
-<li>Inside <code>if (class_exists('PHPStan\ExtensionInstaller\GeneratedConfig'))</code>,
-  member access on that class is reported even though the guard is the
-  documented PHP idiom for optional dependencies (the class genuinely
-  isn't installed in the sample). PHPStan suppresses unknown-class
-  errors under such guards. Sites: <code>src/Command/CommandHelper.php:309, 608</code>
-  <em>(609 via the closure)</em>, <code>src/Diagnose/PHPStanDiagnoseExtension.php:132, 142</code>.</li>
-<li><code>get_class($x) === Foo::class</code> narrows <code>$x</code> to exactly <code>Foo</code>
-  (<code>src/Type/TypeCombinator.php:1646</code>, twice). <code>get_class()</code> now returns
-  <code>class-string&lt;T&gt;</code>, so the comparison already has the type it needs;
-  what is missing is the narrowing rule that reads it.</li>
-</ul>
-<h3 id="b276-phpstan-assert-on-properties-and-method-call-results-is-ignored">B276. <code>@phpstan-assert</code> on properties and method-call results is ignored<a class="headerlink" href="#b276-phpstan-assert-on-properties-and-method-call-results-is-ignored" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium-High · Complexity: High</strong></p>
-<p>5 sites, reproduced minimally. Two shapes:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">/** @phpstan-assert bool $this-&gt;isDeprecated */</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">private function resolveDeprecation(): void { ... }</span>
+<h3 id="b276-a-phpstan-assert-bool-doesnt-rule-out-null">B276. A <code>@phpstan-assert bool</code> doesn't rule out <code>null</code><a class="headerlink" href="#b276-a-phpstan-assert-bool-doesnt-rule-out-null" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>1 site, reproduced minimally, and the last of what this entry used to
+cover — the assert tag itself, on a property or on a method result, and
+inherited two interfaces up, all narrow correctly now. What is left is
+the single combination of asserted type and subject type that does not:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">/** @phpstan-assert bool $v */</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">private function assertBool(mixed $v): void {}</span>
 <a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">// and assert-if-true on a method result, declared on a grandparent interface:</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">// ClassMemberAccessAnswerer::isInClass() carries</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x">//   @phpstan-assert-if-true !null $this-&gt;getClassReflection()</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="x">if (!$scope-&gt;isInClass()) { throw new ShouldNotHappenException(); }</span>
-<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="x">$scope-&gt;getClassReflection()-&gt;getName();   // non-null</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">$this-&gt;assertBool($v);   // $v is ?bool</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">return $v;               // reported as bool|null</span>
 </code></pre></div>
-<p>The second shape must survive interface inheritance (the tag lives two
-interfaces up from <code>MutatingScope</code>). Sites:
-<code>src/Analyser/MutatingScope.php:1778</code>,
-<code>src/Analyser/NodeScopeResolver.php:1121, 5319</code>,
-<code>src/Reflection/ClassReflection.php:1524</code>,
-<code>src/Rules/Properties/ExistingClassesInPropertyHookTypehintsRule.php:41</code>.</p>
+<p>The neighbouring cases all work, which is what makes this a narrow
+defect rather than a missing feature: <code>@phpstan-assert bool</code> over
+<code>bool|string</code> narrows, <code>@phpstan-assert string</code> over <code>?string</code> narrows,
+and the equivalent <code>if (is_bool($v))</code> guard over <code>?bool</code> narrows. Only
+the assert-<code>bool</code>-over-<code>null</code> pairing leaves the <code>null</code> behind.
+Site: <code>src/Reflection/ClassReflection.php:1524</code>.</p>
 <h3 id="b277-is_float-branches-dont-eliminate-float-from-intfloat">B277. <code>is_float()</code> branches don't eliminate <code>float</code> from <code>int|float</code><a class="headerlink" href="#b277-is_float-branches-dont-eliminate-float-from-intfloat" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <p>3 sites. The plain shape resolves correctly — an <code>int|float</code> subject
@@ -2363,19 +2236,7 @@ value through the expressions that read it.</p>
   <code>src/Cache/FileCacheStorage.php:151</code>.</li>
 </ul>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b304-deprecated_usage-over-reports-two-more-shapes-phpstans-deprecation-rules-exempt">B304. <code>deprecated_usage</code> over-reports two more shapes PHPStan's deprecation rules exempt<a class="headerlink" href="#b304-deprecated_usage-over-reports-two-more-shapes-phpstans-deprecation-rules-exempt" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
-<p>4 sites (one patched in the sample), both reproduced minimally:</p>
-<ul>
-<li>A <code>use Some\Deprecated\ClassName;</code> import line is flagged.
-  phpstan-deprecation-rules only flags actual usages (the constant
-  fetch, call, or instantiation), never the import.</li>
-<li>The existing "deprecated method delegating to itself on another
-  instance" exemption doesn't apply when the delegating method lives in
-  a <em>trait</em> (<code>LateResolvableTypeTrait::hasProperty()</code> calling
-  <code>$this-&gt;resolve()-&gt;hasProperty()</code> where <code>Type::hasProperty()</code> is
-  deprecated). Sites: <code>src/Type/Traits/LateResolvableTypeTrait.php:111, 116, 121</code>.</li>
-</ul>
+<p>No outstanding items.</p>
 
 
 
