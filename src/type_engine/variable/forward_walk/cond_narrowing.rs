@@ -4749,6 +4749,27 @@ pub(crate) fn collect_condition_property_keys_inner(expr: &Expression<'_>, keys:
                 keys.push(key);
             }
         }
+        // Class identity: `get_class($a->foo) === Foo::class`, and the
+        // `$a->foo::class` spelling of the same question, on either side
+        // of the comparison.
+        Expression::Binary(bin)
+            if matches!(
+                bin.operator,
+                BinaryOperator::Identical(_)
+                    | BinaryOperator::Equal(_)
+                    | BinaryOperator::NotIdentical(_)
+                    | BinaryOperator::NotEqual(_)
+            ) =>
+        {
+            for side in [bin.lhs, bin.rhs] {
+                if let Some(key) = narrowing::class_identity_subject_key(side)
+                    && narrowing::is_member_path_key(&key)
+                    && !keys.contains(&key)
+                {
+                    keys.push(key);
+                }
+            }
+        }
         // Negation: `!is_string($a->foo)`, `!($a->foo instanceof Foo)`
         Expression::UnaryPrefix(prefix) if prefix.operator.is_not() => {
             collect_condition_property_keys_inner(prefix.operand, keys);
@@ -5109,7 +5130,9 @@ pub(crate) fn collect_condition_var_names_inner(expr: &Expression<'_>, names: &m
                 _ => return,
             };
             if matches!(
-                func_name,
+                crate::util::strip_fqn_prefix(func_name)
+                    .to_ascii_lowercase()
+                    .as_str(),
                 "is_a"
                     | "get_class"
                     | "class_exists"

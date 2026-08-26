@@ -13680,3 +13680,64 @@ class Combinator
         "every read off the accumulator is a ConstantArrayType, got: {msgs:?}"
     );
 }
+
+// ─── get_class() identity checks accept the subjects instanceof does ────────
+
+/// `get_class($x) === C::class` asks the same question `$x instanceof C`
+/// does, only more strictly, so it has to narrow the same subjects: a
+/// property fetch and an array dim, not just a plain variable.
+#[test]
+fn get_class_identity_narrows_a_property_fetch() {
+    let backend = create_test_backend();
+    let uri = "file:///get_class_property.php";
+    let text = r#"<?php
+class Base {}
+class Sub extends Base {
+    public function only(): int { return 1; }
+}
+class Holder {
+    public ?Base $held = null;
+
+    public function f(): int {
+        if (get_class($this->held) === Sub::class) {
+            return $this->held->only();
+        }
+        return 0;
+    }
+}
+"#;
+
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "the identity check pins the property to Sub, got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn get_class_identity_narrows_an_array_element() {
+    let backend = create_test_backend();
+    let uri = "file:///get_class_dim.php";
+    let text = r#"<?php
+class Base {}
+class Sub extends Base {
+    public function only(): int { return 1; }
+}
+
+/** @param array<Base> $types */
+function f(array $types): int {
+    if (get_class($types[0]) === Sub::class) {
+        return $types[0]->only();
+    }
+    return 0;
+}
+"#;
+
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "the identity check pins the element to Sub, got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}

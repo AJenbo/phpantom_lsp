@@ -325,8 +325,16 @@ pub(crate) fn compute_existence_guards(content: &str) -> ExistenceGuards {
 
 /// Check if the existence call at position `start` is negated by a `!`.
 fn is_negated(bytes: &[u8], start: usize) -> bool {
-    // Scan backward from start, skipping whitespace, looking for `!`.
+    // A global function written the explicit way (`!\class_exists(…)`)
+    // carries a `\` between the `!` and the name, with no room for
+    // whitespace in between. Step over it first, or the scan below reads
+    // it as the character that ends the search and calls the check
+    // un-negated.
     let mut j = start;
+    if j > 0 && bytes[j - 1] == b'\\' {
+        j -= 1;
+    }
+    // Scan backward, skipping whitespace, looking for `!`.
     while j > 0 {
         j -= 1;
         match bytes[j] {
@@ -575,7 +583,13 @@ fn extract_string_literal(bytes: &[u8], pos: usize) -> Option<(String, usize)> {
     if end >= len {
         return None;
     }
-    let name = String::from_utf8_lossy(&bytes[start..end]).to_string();
+    // The runtime value, not the source text: a class named in a guard is
+    // written `'Vendor\\Optional\\Config'` as often as `'Vendor\Optional\Config'`,
+    // and only one of those matches the reference it guards unless the
+    // escapes are resolved first.
+    let raw = String::from_utf8_lossy(&bytes[pos..=end]);
+    let name = crate::util::unescape_php_string_literal(&raw)
+        .unwrap_or_else(|| String::from_utf8_lossy(&bytes[start..end]).to_string());
     Some((name, end + 1))
 }
 

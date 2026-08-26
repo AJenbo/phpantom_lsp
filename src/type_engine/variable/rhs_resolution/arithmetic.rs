@@ -84,6 +84,16 @@ pub(super) fn resolve_binary_result_type<'b>(
             if both_strings {
                 return Some(vec![ResolvedType::from_type_string(PhpType::string())]);
             }
+            // Two operands nobody typed decide nothing: the same operator
+            // produces a string from two strings and an int from two
+            // numbers, and a `mixed` could be either. The honest answer is
+            // the pair — benevolent, because it is a gap in what the code
+            // said rather than a value measured to be two things.
+            if operand_is_undecided(&lhs_types) && operand_is_undecided(&rhs_types) {
+                return Some(vec![ResolvedType::from_type_string(PhpType::benevolent(
+                    PhpType::union(vec![PhpType::int(), PhpType::string()]),
+                ))]);
+            }
         }
         // A mask built from constants (`$flags = JSON_PRETTY_PRINT |
         // JSON_THROW_ON_ERROR`) keeps its value, so a call that is handed it
@@ -295,6 +305,13 @@ fn bitwise_op(operator: &BinaryOperator<'_>) -> Option<BitwiseOp> {
         BinaryOperator::RightShift(_) => BitwiseOp::RightShift,
         _ => return None,
     })
+}
+
+/// Whether an operand says nothing about which of PHP's two bitwise
+/// overloads applies — either it resolved to nothing at all, or every
+/// branch it resolved to is `mixed`.
+fn operand_is_undecided(types: &[ResolvedType]) -> bool {
+    types.is_empty() || types.iter().all(|rt| rt.type_string.is_mixed())
 }
 
 /// The integer an operand holds, when it resolved to exactly one literal

@@ -1299,4 +1299,37 @@ class Widget
             diags.iter().map(|d| &d.message).collect::<Vec<_>>()
         );
     }
+
+    /// A global function written the explicit way carries a backslash
+    /// between the `!` and the name. The negated-guard scan has to step
+    /// over it, or an early-return guard reads as an un-negated one and
+    /// protects the `return;` instead of everything after it.
+    #[test]
+    fn a_negated_fully_qualified_class_exists_guard_protects_the_code_after_it() {
+        let backend = Backend::new_test();
+
+        let uri = "file:///test.php";
+        let content = r#"<?php
+namespace App;
+
+class Consumer
+{
+    public function run(): void
+    {
+        if (!\class_exists('Vendor\\Optional\\GeneratedConfig')) {
+            return;
+        }
+
+        echo \Vendor\Optional\GeneratedConfig::$configDir;
+    }
+}
+"#;
+
+        let diags = collect(&backend, uri, content);
+        assert!(
+            diags.is_empty(),
+            "the guarded use must not be flagged, got: {:?}",
+            diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
 }

@@ -3617,3 +3617,82 @@ class Legacy {
         deprecated
     );
 }
+
+#[test]
+fn import_of_a_deprecated_class_is_not_flagged() {
+    let backend = create_test_backend();
+    let uri = "file:///test_deprecated_import.php";
+    let text = r#"<?php
+namespace App;
+
+/** @deprecated Use NewThing instead */
+class OldThing {
+    public function go(): void {}
+}
+
+namespace App\Consumer;
+
+use App\OldThing;
+
+class Consumer {
+    public function f(): void {
+        $t = new OldThing();
+        $t->go();
+    }
+}
+"#;
+
+    let diags = deprecated_diagnostics(&backend, uri, text);
+    let deprecated: Vec<_> = diags.iter().filter(|d| has_deprecated_tag(d)).collect();
+
+    assert_eq!(
+        deprecated.len(),
+        1,
+        "Only the instantiation is a usage; the `use` line just says which \
+         OldThing is meant. Got: {:?}",
+        deprecated
+    );
+    assert_eq!(
+        deprecated[0].range.start.line, 14,
+        "The one report should sit on `new OldThing()`, got: {:?}",
+        deprecated
+    );
+}
+
+#[test]
+fn trait_method_delegating_to_the_deprecated_method_it_implements_is_not_flagged() {
+    let backend = create_test_backend();
+    let uri = "file:///test_deprecated_trait_delegate.php";
+    let text = r#"<?php
+namespace App;
+
+interface Ty {
+    /** @deprecated Use getProperty() instead */
+    public function hasProperty(string $n): bool;
+
+    public function resolve(): Ty;
+}
+
+trait LateResolvableTypeTrait {
+    public function hasProperty(string $n): bool {
+        return $this->resolve()->hasProperty($n);
+    }
+}
+
+class LateType implements Ty {
+    use LateResolvableTypeTrait;
+
+    public function resolve(): Ty { return $this; }
+}
+"#;
+
+    let diags = deprecated_diagnostics(&backend, uri, text);
+    let deprecated: Vec<_> = diags.iter().filter(|d| has_deprecated_tag(d)).collect();
+
+    assert!(
+        deprecated.is_empty(),
+        "The trait method *is* the deprecated implementation once flattened \
+         into LateType, so delegating to it is not a fresh usage, got: {:?}",
+        deprecated
+    );
+}

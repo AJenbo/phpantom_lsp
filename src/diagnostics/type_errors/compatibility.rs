@@ -276,10 +276,19 @@ pub(crate) fn is_type_compatible(
     // rule below that reasons about a union member (including the
     // int-to-string coercion PHP performs outside `strict_types`) would
     // pass it over. `is_subtype_of` expands it for the same reason.
+    //
+    // The union it expands to is *benevolent*, which is what PHPStan
+    // resolves the name to as well. `array-key` is never something a
+    // value was measured to be: it is the key type of an array nobody
+    // said the keys of, so demanding that both halves fit reports a call
+    // on the strength of a type the engine admits it does not know. One
+    // half fitting is the whole bargain — and only here, in the
+    // diagnostic, since the type itself keeps both halves everywhere
+    // else.
     if arg_type.is_array_key() || param_type.is_array_key() {
         let expand = |ty: &PhpType| {
             if ty.is_array_key() {
-                PhpType::union(vec![PhpType::int(), PhpType::string()])
+                PhpType::benevolent(PhpType::union(vec![PhpType::int(), PhpType::string()]))
             } else {
                 ty.clone()
             }

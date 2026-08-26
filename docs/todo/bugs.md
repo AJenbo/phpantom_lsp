@@ -15,7 +15,9 @@ All entries below come from the 2026-08-25 triage of the PHPStan Source
 sample project (242 confirmed false positives after the genuine findings
 were patched in the sample). Site counts refer to that sweep; every
 mechanism was either reproduced in a minimal project or confirmed by
-reading the guard construct PHPStan honours.
+reading the guard construct PHPStan honours. The sweep is a snapshot, so
+a site named here may already read differently: re-run the analyser
+before working an entry, and trim the shapes that no longer reproduce.
 
 Entries are grouped by the mechanism that has to change, not by the
 symptom that surfaced: one entry is one root cause, however many shapes
@@ -30,30 +32,7 @@ No outstanding items.
 
 ## Type comparison
 
-### B287. Argument acceptance misses PHP's implicit widenings and benevolent unions
-
-**Impact: Medium-High · Complexity: Medium-High**
-
-Four acceptance rules PHPStan applies that we don't, 8 sites:
-
-- `int` satisfies a `float` parameter (`log($count, 2)` with
-  `int<0, max>` — `src/Command/Bisect/BinarySearch.php:32`).
-- `class-string` satisfies `non-empty-string`
-  (`src/Analyser/MutatingScope.php:2056`).
-- The key type of an implicit `array<V>` / `V[]` is PHPStan's
-  *benevolent* `(int|string)`, accepted where either `int` or `string`
-  is expected (`src/DependencyInjection/ConditionalTagsExtension.php:45`,
-  `src/Rules/PhpDoc/WrongVariableNameInVarTagRule.php:376`, and the
-  `type_mismatch_return` at
-  `src/Analyser/ResultCache/ResultCacheManager.php:727` where a foreach
-  key over `array<string, X>` comes back as `int|string`).
-- Bitwise ops on `mixed` operands produce a benevolent `(int|string)`,
-  accepted where `string` is expected — phpstan-src's own
-  `InitializerExprTypeResolver` models it exactly that way
-  (`src/Reflection/InitializerExprTypeResolver.php:1063, 1123, 1183`,
-  where we infer the closure `static fn ($a, $b) => $a & $b` as
-  `Closure(mixed, mixed): int` and reject it against
-  `callable(...): string`).
+No outstanding items.
 
 ## Standard-library return types
 
@@ -235,48 +214,29 @@ Sites: `src/Analyser/NodeScopeResolver.php:1103, 1112, 1116, 1903, 2001, 2153, 5
 `src/Reflection/BetterReflection/SourceLocator/OptimizedDirectorySourceLocator.php:149, 150`,
 `src/Analyser/TypeSpecifier.php:542`.
 
-### B284. Guards over a name's existence or its identity don't inform the branch they guard
+### B276. A `@phpstan-assert bool` doesn't rule out `null`
 
-**Impact: Medium-High · Complexity: Medium-High**
+**Impact: Low-Medium · Complexity: Medium**
 
-6 sites, two mechanisms. Both are conditions whose subject is a *name*
-rather than a value, which is why neither reaches the narrowing rules
-that read types.
-
-- Inside `if (class_exists('PHPStan\ExtensionInstaller\GeneratedConfig'))`,
-  member access on that class is reported even though the guard is the
-  documented PHP idiom for optional dependencies (the class genuinely
-  isn't installed in the sample). PHPStan suppresses unknown-class
-  errors under such guards. Sites: `src/Command/CommandHelper.php:309, 608`
-  *(609 via the closure)*, `src/Diagnose/PHPStanDiagnoseExtension.php:132, 142`.
-- `get_class($x) === Foo::class` narrows `$x` to exactly `Foo`
-  (`src/Type/TypeCombinator.php:1646`, twice). `get_class()` now returns
-  `class-string<T>`, so the comparison already has the type it needs;
-  what is missing is the narrowing rule that reads it.
-
-### B276. `@phpstan-assert` on properties and method-call results is ignored
-
-**Impact: Medium-High · Complexity: High**
-
-5 sites, reproduced minimally. Two shapes:
+1 site, reproduced minimally, and the last of what this entry used to
+cover — the assert tag itself, on a property or on a method result, and
+inherited two interfaces up, all narrow correctly now. What is left is
+the single combination of asserted type and subject type that does not:
 
 ```php
-/** @phpstan-assert bool $this->isDeprecated */
-private function resolveDeprecation(): void { ... }
+/** @phpstan-assert bool $v */
+private function assertBool(mixed $v): void {}
 
-// and assert-if-true on a method result, declared on a grandparent interface:
-// ClassMemberAccessAnswerer::isInClass() carries
-//   @phpstan-assert-if-true !null $this->getClassReflection()
-if (!$scope->isInClass()) { throw new ShouldNotHappenException(); }
-$scope->getClassReflection()->getName();   // non-null
+$this->assertBool($v);   // $v is ?bool
+return $v;               // reported as bool|null
 ```
 
-The second shape must survive interface inheritance (the tag lives two
-interfaces up from `MutatingScope`). Sites:
-`src/Analyser/MutatingScope.php:1778`,
-`src/Analyser/NodeScopeResolver.php:1121, 5319`,
-`src/Reflection/ClassReflection.php:1524`,
-`src/Rules/Properties/ExistingClassesInPropertyHookTypehintsRule.php:41`.
+The neighbouring cases all work, which is what makes this a narrow
+defect rather than a missing feature: `@phpstan-assert bool` over
+`bool|string` narrows, `@phpstan-assert string` over `?string` narrows,
+and the equivalent `if (is_bool($v))` guard over `?bool` narrows. Only
+the assert-`bool`-over-`null` pairing leaves the `null` behind.
+Site: `src/Reflection/ClassReflection.php:1524`.
 
 ### B277. `is_float()` branches don't eliminate `float` from `int|float`
 
@@ -516,17 +476,4 @@ value through the expressions that read it.
 
 ## Miscellaneous
 
-### B304. `deprecated_usage` over-reports two more shapes PHPStan's deprecation rules exempt
-
-**Impact: Low-Medium · Complexity: Low-Medium**
-
-4 sites (one patched in the sample), both reproduced minimally:
-
-- A `use Some\Deprecated\ClassName;` import line is flagged.
-  phpstan-deprecation-rules only flags actual usages (the constant
-  fetch, call, or instantiation), never the import.
-- The existing "deprecated method delegating to itself on another
-  instance" exemption doesn't apply when the delegating method lives in
-  a *trait* (`LateResolvableTypeTrait::hasProperty()` calling
-  `$this->resolve()->hasProperty()` where `Type::hasProperty()` is
-  deprecated). Sites: `src/Type/Traits/LateResolvableTypeTrait.php:111, 116, 121`.
+No outstanding items.

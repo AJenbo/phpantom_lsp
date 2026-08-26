@@ -1996,3 +1996,31 @@ function f(?Scope $acc, BranchEnd $end): void {{
     let text = hover_marked(&backend, uri, &content);
     assert!(text.contains("Scope"), "expected Scope, got: {text}");
 }
+
+// ─── get_class() identity narrows whatever instanceof would ─────────────────
+
+/// A global function is as often written `\get_class(…)` as `get_class(…)`,
+/// and the two spellings name the same function.
+#[test]
+fn a_fully_qualified_get_class_narrows_too() {
+    let backend = create_test_backend();
+    let uri = "file:///get_class_fqn.php";
+    let content = r#"<?php
+namespace App;
+
+class Base {}
+class Sub extends Base {}
+
+function f(Base $x): void {
+    if (\get_class($x) === Sub::class) {
+        $x; // <-- here
+    }
+}
+"#;
+
+    let hover = hover_marked(&backend, uri, content);
+    assert!(
+        hover.contains("Sub"),
+        "a leading backslash does not make it a different function, got: {hover}"
+    );
+}

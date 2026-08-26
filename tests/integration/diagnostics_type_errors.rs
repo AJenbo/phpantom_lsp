@@ -11482,3 +11482,78 @@ class Analyser
         "inline @var list<Error> must mean PHPStan\\Analyser\\Error, got: {msgs:?}"
     );
 }
+
+// ─── PHP's implicit widenings and imprecise types ───────────────────────────
+
+#[test]
+fn a_bounded_int_satisfies_a_float_parameter() {
+    let php = r#"<?php
+function wantsFloat(float $n): void {}
+
+/** @param int<0, max> $count */
+function f(int $count): void {
+    wantsFloat($count);
+}
+"#;
+    assert!(
+        !has_type_error(&collect(php)),
+        "PHP widens an int to a float on the way in, bounds and all: {:?}",
+        type_error_messages(&collect(php))
+    );
+}
+
+#[test]
+fn a_class_string_satisfies_a_non_empty_string_parameter() {
+    let php = r#"<?php
+/** @param non-empty-string $s */
+function wantsNonEmpty(string $s): void {}
+
+/** @param class-string $c */
+function f(string $c): void {
+    wantsNonEmpty($c);
+}
+"#;
+    assert!(
+        !has_type_error(&collect(php)),
+        "A string that names a class always has content: {:?}",
+        type_error_messages(&collect(php))
+    );
+}
+
+#[test]
+fn an_array_key_satisfies_either_half_of_itself() {
+    let php = r#"<?php
+function wantsInt(int $i): void {}
+function wantsString(string $s): void {}
+
+/** @param array-key $k */
+function f($k): void {
+    wantsInt($k);
+    wantsString($k);
+}
+"#;
+    assert!(
+        !has_type_error(&collect(php)),
+        "`array-key` is the key type of an array nobody described, so one \
+         half fitting is the whole bargain: {:?}",
+        type_error_messages(&collect(php))
+    );
+}
+
+#[test]
+fn a_bitwise_op_on_untyped_operands_satisfies_a_string_return() {
+    let php = r#"<?php
+/** @param callable(mixed, mixed): string $cb */
+function wantsStringCallback(callable $cb): void {}
+
+function f(): void {
+    wantsStringCallback(static fn ($a, $b) => $a & $b);
+}
+"#;
+    assert!(
+        !has_type_error(&collect(php)),
+        "`&` over two strings produces a string, and neither operand rules \
+         that out: {:?}",
+        type_error_messages(&collect(php))
+    );
+}

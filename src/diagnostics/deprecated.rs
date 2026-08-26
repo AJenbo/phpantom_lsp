@@ -23,10 +23,10 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::symbol_map::SymbolKind;
+use crate::symbol_map::{ClassRefContext, SymbolKind};
 use crate::type_engine::resolver::{ResolutionCtx, SubjectOutcome, resolve_subject_outcome};
 use crate::types::AccessKind;
-use crate::types::ClassInfo;
+use crate::types::{ClassInfo, ClassLikeKind};
 use crate::virtual_members::{ResolvedClassCache, resolve_class_fully_cached};
 
 use super::helpers::{
@@ -106,7 +106,20 @@ impl Backend {
         for span in &symbol_map.spans {
             match &span.kind {
                 // ── Class references (type hints, new Foo, extends, etc.) ─
-                SymbolKind::ClassReference { name, is_fqn, .. } => {
+                SymbolKind::ClassReference {
+                    name,
+                    is_fqn,
+                    context,
+                    ..
+                } => {
+                    // An import is not a usage: it only says which `Foo`
+                    // the names below mean.  Whatever the file does with
+                    // the class is flagged where it does it, and flagging
+                    // the import as well puts a second marker on code the
+                    // developer has already been told about.
+                    if matches!(context, ClassRefContext::UseImport) {
+                        continue;
+                    }
                     // Prefer mago-names byte-offset lookup when available —
                     // it applies PHP's full name resolution rules.  Fall
                     // back to the legacy resolve_to_fqn helper otherwise.
@@ -123,6 +136,7 @@ impl Backend {
                     if let Some(cls) = self.find_or_load_class(&resolved_name)
                         && let Some(msg) = &cls.deprecation_message
                         && !is_within_deprecated_scope(
+                            self,
                             local_classes,
                             &class_loader,
                             cache,
@@ -236,6 +250,7 @@ impl Backend {
                             .or_else(|| resolved.get_method(member_name))
                             && let Some(msg) = &method.deprecation_message
                             && !is_within_deprecated_scope(
+                                self,
                                 local_classes,
                                 &class_loader,
                                 cache,
@@ -269,6 +284,7 @@ impl Backend {
                             .or_else(|| resolved.properties.iter().find(|p| p.name == *member_name))
                             && let Some(msg) = &prop.deprecation_message
                             && !is_within_deprecated_scope(
+                                self,
                                 local_classes,
                                 &class_loader,
                                 cache,
@@ -299,6 +315,7 @@ impl Backend {
                                 resolved.constants.iter().find(|c| c.name == *member_name)
                             && let Some(msg) = &constant.deprecation_message
                             && !is_within_deprecated_scope(
+                                self,
                                 local_classes,
                                 &class_loader,
                                 cache,
@@ -342,6 +359,7 @@ impl Backend {
                         ctx.file.namespace_at(span.start),
                     ) && let Some(msg) = &func_info.deprecation_message
                         && !is_within_deprecated_scope(
+                            self,
                             local_classes,
                             &class_loader,
                             cache,
@@ -436,6 +454,7 @@ fn deprecated_diagnostic(
 /// override delegating to the same deprecated method on other `Type`
 /// instances).
 fn is_within_deprecated_scope(
+    backend: &Backend,
     local_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     cache: &ResolvedClassCache,
@@ -453,9 +472,33 @@ fn is_within_deprecated_scope(
         return false;
     };
     let resolved = resolve_class_fully_cached(enclosing, class_loader, cache);
-    resolved
+    if resolved
         .get_method(&method_name)
         .is_some_and(|m| m.deprecation_message.is_some())
+    {
+        return true;
+    }
+
+    // A trait method never runs on the trait: PHP flattens it into every
+    // class that uses it, so whether it is the deprecated implementation
+    // of something is decided over there.  Read the bound all of its
+    // users satisfy — the same view of `$this` the type engine takes
+    // inside a trait body — and ask the question there.
+    if enclosing.kind != ClassLikeKind::Trait {
+        return false;
+    }
+    crate::type_engine::trait_context::trait_this_bounds(
+        enclosing,
+        local_classes,
+        class_loader,
+        Some(backend),
+    )
+    .iter()
+    .any(|bound| {
+        resolve_class_fully_cached(bound, class_loader, cache)
+            .get_method(&method_name)
+            .is_some_and(|m| m.deprecation_message.is_some())
+    })
 }
 
 /// Resolve a member access subject text to a class FQN.
