@@ -318,6 +318,12 @@ pub(in crate::type_engine) fn apply_instanceof_inclusion(
 
 /// Remove the resolved classes for `ty` from `results`.
 ///
+/// A failed check rules out the class it names *and every subtype of it*:
+/// a value that is not an `Identifier` cannot be a `VarLikeIdentifier`
+/// either, so the else branch of `instanceof Identifier` must drop both.
+/// Comparing names alone left the subclass behind and reported the union
+/// as still holding it.
+///
 /// Always returns `false`: exclusion only rules out one possibility and
 /// never concludes the variable's full type, so leftover non-class
 /// entries (e.g. `mixed`) that [`ResolvedType::apply_narrowing`] tracks
@@ -337,7 +343,16 @@ pub(in crate::type_engine) fn apply_instanceof_exclusion(
     .map(Arc::unwrap_or_clone)
     .collect();
     if !excluded.is_empty() {
-        results.retain(|r| !excluded.iter().any(|e| e.name == r.name));
+        results.retain(|r| {
+            !excluded.iter().any(|e| {
+                e.name == r.name
+                    || crate::class_lookup::is_subtype_of_names(
+                        &r.fqn(),
+                        &e.fqn(),
+                        ctx.class_loader,
+                    )
+            })
+        });
     }
     false
 }

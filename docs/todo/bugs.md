@@ -17,6 +17,13 @@ were patched in the sample). Site counts refer to that sweep; every
 mechanism was either reproduced in a minimal project or confirmed by
 reading the guard construct PHPStan honours.
 
+Entries are grouped by the mechanism that has to change, not by the
+symptom that surfaced: one entry is one root cause, however many shapes
+it shows up in. Splitting a shape out into its own entry because it
+reads differently in the source is how this list grew past forty in the
+first place. If two entries would be fixed by the same change, they are
+one entry.
+
 ## Crashes
 
 No outstanding items.
@@ -50,13 +57,15 @@ Four acceptance rules PHPStan applies that we don't, 8 sites:
 
 ## Standard-library return types
 
-### B290. Values that are provably literal strings erode to plain `string`
+### B290. Standard-library results stay wider than their arguments justify
 
-**Impact: Medium · Complexity: Medium**
+**Impact: Medium · Complexity: Medium-High**
 
-3 sites, two mechanisms:
+6 sites, four shapes of one missing capability: reading the arguments a
+builtin was actually handed and computing the answer from them, instead
+of falling back on the widest type the signature allows.
 
-- `strtolower()` of a literal union constant-folds
+- `strtolower()` of a literal union must constant-fold
   (`'Interface'|'Trait'|'Enum'|'Class'` →
   `'interface'|'trait'|'enum'|'class'`;
   `src/Rules/Classes/DuplicateDeclarationRule.php:37`). There is no
@@ -65,40 +74,49 @@ Four acceptance rules PHPStan applies that we don't, 8 sites:
   is the Laravel route-name one in
   `virtual_members::laravel::const_eval`, which is not on the shared
   resolution path.
-- `get_class($x) === Foo::class` narrows `$x` to exactly `Foo`
-  (`src/Type/TypeCombinator.php:1646`, twice). `get_class()` now returns
-  `class-string<T>`, so the comparison has the type it needs; what is
-  missing is the narrowing rule that reads it.
-
-### B306. `pow()` keeps its `object` branch for an operand nobody can type
-
-**Impact: Low · Complexity: Medium**
-
-1 site. `pow()`'s `object` return belongs to the operator-overloading
-extensions (GMP, BCMath), so two operands that are provably numeric
-produce `int|float` and an operand that is provably an object produces
-`object`. An operand typed `mixed` decides neither, and a conditional
-return type that cannot be decided answers with the union of both
-branches — which is honest (a `mixed` really could hold a `GMP`) but
-reports what PHPStan does not: `private static function pow(mixed $base,
-mixed $exp): float|int|null` returning `pow($base, $exp)` is flagged as
-returning an `object` its signature does not allow.
-Site: `src/Type/ExponentiateHelper.php:128`.
-
-Fixing it needs a way to say "prefer the narrow branch when the argument
-cannot be pinned down" for a specific conditional, which
-`type_engine::types::conditional` has no vocabulary for today: the
-undecided case always unions.
+- `method_exists(TestCase::class, 'assertFileDoesNotExist')` with a
+  statically known class and a literal method name folds to a constant
+  `true`, so the `!method_exists(...)` branch is dead — yet we report
+  the removed PHPUnit 9 method called inside it
+  (`src/Testing/LevelsTestCase.php:201`). PHPStan even flags the guard
+  itself as `function.alreadyNarrowedType` (it's in the sample's
+  baseline) and reports nothing inside the dead branch.
+- A `(?<position>\d+)` group in `Strings::matchAll()` results should be
+  a numeric (decimal integer) string, so that
+  `$placeholder['position'] - 1` is `int` rather than `int|float`
+  (`src/Rules/Functions/PrintfHelper.php:113`).
+- `pow()`'s `object` return belongs to the operator-overloading
+  extensions (GMP, BCMath), so two operands that are provably numeric
+  produce `int|float` and an operand that is provably an object
+  produces `object`. An operand typed `mixed` decides neither, and a
+  conditional return type that cannot be decided answers with the union
+  of both branches — which is honest (a `mixed` really could hold a
+  `GMP`) but reports what PHPStan does not: `private static function
+  pow(mixed $base, mixed $exp): float|int|null` returning
+  `pow($base, $exp)` is flagged as returning an `object` its signature
+  does not allow (`src/Type/ExponentiateHelper.php:128`). Fixing this
+  one needs a way to say "prefer the narrow branch when the argument
+  cannot be pinned down" for a specific conditional, which
+  `type_engine::types::conditional` has no vocabulary for today: the
+  undecided case always unions.
 
 ## Narrowing
 
-### B270. A guard on a method call's result doesn't narrow the same call repeated afterwards
+### B270. Narrowing a repeated or non-variable subject doesn't survive
 
-**Impact: High · Complexity: High**
+**Impact: High · Complexity: Very High**
 
-The single biggest cluster: 18 sites. PHPStan remembers the narrowed
-type of a *call expression* (keyed by expression string) until
-something invalidates it, so this ubiquitous idiom is clean:
+44 sites — by far the largest cluster here, and one root cause: what the
+narrowing store keys a proof against, and what invalidates it. PHPStan
+keys specified types by expression string and keeps them until something
+writes to that expression. We handle plain variables reliably and
+everything else fragilely, which surfaces as four shapes. Related to the
+reconciliation engine planned as
+[T20](type-inference.md#t20-type-narrowing-reconciliation-engine).
+
+**a. A guard on a call's result doesn't narrow the same call afterwards**
+(18 sites). This ubiquitous idiom is clean under PHPStan and re-resolved
+from the declaration by us, which hands back the wide type:
 
 ```php
 if ($analyserResult->getDependencies() !== null) {
@@ -108,8 +126,7 @@ if ($analyserResult->getDependencies() !== null) {
 $f = $r->getFileName() !== false ? $r->getFileName() : null;      // string|null
 ```
 
-We re-resolve the second call from the declaration and get the wide
-type back. Concentrated around reflection accessors (`getFileName()`,
+Concentrated around reflection accessors (`getFileName()`,
 `getDocComment()`, `getResolvedPhpDoc()`, `getDependencies()`).
 Sites: `src/Analyser/NodeScopeResolver.php:5365`,
 `src/Analyser/ResultCache/ResultCacheManager.php:858`,
@@ -119,13 +136,9 @@ Sites: `src/Analyser/NodeScopeResolver.php:5365`,
 `src/Reflection/Php/PhpClassReflectionExtension.php:299, 313, 678, 682, 823, 866`,
 `src/Rules/Exceptions/TooWidePropertyHookThrowTypeRule.php:61`.
 
-### B271. Narrowing keyed on property fetches, array dims, and call chains is fragile
-
-**Impact: High · Complexity: High**
-
-16 sites. `instanceof` / `!== null` / `is_string()` guards whose
-subject is not a plain variable lose their narrowing in specific,
-reproduced shapes:
+**b. Property fetches, array dims and call chains lose their narrowing**
+(16 sites). `instanceof` / `!== null` / `is_string()` guards whose
+subject is not a plain variable, in specific reproduced shapes:
 
 ```php
 // 1. Member use inside the condition breaks the narrowing for the body:
@@ -137,8 +150,6 @@ if ($h->getExpr()->getExpr() instanceof Vari && is_string($h->getExpr()->getExpr
 // 3. Plain property fetch behind an elseif-continue:
 if ($tag->value === null) { continue; } elseif (!($tag->value instanceof Sub)) { continue; }
 $tag->value->n;               // lost
-// 4. Negated instanceof on a property in an && chain:
-if ($expr instanceof FuncCall && !$expr->name instanceof Name) { $expr->name /* still Name|Expr */; }
 ```
 
 Notably `src/PhpDoc/TypeNodeResolver.php:1303` shows the engine *does*
@@ -154,6 +165,43 @@ a final `!== null` in an `elseif`. Sites:
 `src/Rules/TooWideTypehints/TooWideTypeCheck.php:214`,
 `src/Type/Constant/ConstantArrayType.php:2567, 3503`,
 `src/Type/ValueOfType.php:59`.
+
+**c. Re-testing a condition, or a boolean flag holding it, doesn't
+re-apply its narrowing** (9 sites). Three shapes PHPStan's
+specified-types machinery handles:
+
+```php
+// 1. The identical condition re-tested later:
+if (count($args) > 0) { $acceptor = Selector::selectFromArgs(...); }
+if (count($args) > 0) { use($acceptor); }                    // non-null
+
+// 2. A boolean flag recording an instanceof disjunction:
+$shouldCheck = $node instanceof Function_ || $node instanceof ClassMethod || ...;
+if ($stmtCount === 0 && $shouldCheck) { $node->getReturnType(); }
+
+// 3. Two variables assigned together; checking one implies the other:
+if ($assertions === null) { return null; } // $acceptor was set iff $assertions was
+```
+
+Sites: `src/Analyser/ExprHandler/FuncCallHandler.php:977, 1042`,
+`src/Analyser/ExprHandler/MethodCallHandler.php:350`,
+`src/Analyser/ExprHandler/StaticCallHandler.php:455`,
+`src/Analyser/NodeScopeResolver.php:693, 707, 727, 732`,
+`src/Type/TypeCombinator.php:1994`.
+
+**d. Reading a property of `$this` before `$this instanceof Subclass`
+kills the narrowing** (1 site, isolated to a two-line repro). The store
+drops the proof it should be keeping:
+
+```php
+$description = $this->className;        // remove this line and the branch resolves
+if ($this instanceof GenericObjectType) {
+    $this->getTypes();                  // "Method 'getTypes' not found on ObjectType"
+}
+```
+
+Regular and promoted properties both trigger it; same-file and
+cross-file subclasses both fail. Site: `src/Type/ObjectType.php:744`.
 
 ### B274. A null-seeded accumulator filled in a loop keeps `null` (or loses its type entirely)
 
@@ -187,38 +235,13 @@ Sites: `src/Analyser/NodeScopeResolver.php:1103, 1112, 1116, 1903, 2001, 2153, 5
 `src/Reflection/BetterReflection/SourceLocator/OptimizedDirectorySourceLocator.php:149, 150`,
 `src/Analyser/TypeSpecifier.php:542`.
 
-### B272. Re-testing a condition (or a boolean flag holding it) doesn't re-apply its narrowing
-
-**Impact: Medium-High · Complexity: Very High**
-
-9 sites. Three shapes PHPStan's specified-types machinery handles:
-
-```php
-// a. The identical condition re-tested later:
-if (count($args) > 0) { $acceptor = Selector::selectFromArgs(...); }
-if (count($args) > 0) { use($acceptor); }                    // non-null
-
-// b. A boolean flag recording an instanceof disjunction:
-$shouldCheck = $node instanceof Function_ || $node instanceof ClassMethod || ...;
-if ($stmtCount === 0 && $shouldCheck) { $node->getReturnType(); }
-
-// c. Two variables assigned together; checking one implies the other:
-if ($assertions === null) { return null; } // $acceptor was set iff $assertions was
-```
-
-Related to the reconciliation engine planned as
-[T20](type-inference.md#t20-type-narrowing-reconciliation-engine).
-Sites: `src/Analyser/ExprHandler/FuncCallHandler.php:977, 1042`,
-`src/Analyser/ExprHandler/MethodCallHandler.php:350`,
-`src/Analyser/ExprHandler/StaticCallHandler.php:455`,
-`src/Analyser/NodeScopeResolver.php:693, 707, 727, 732`,
-`src/Type/TypeCombinator.php:1994`.
-
-### B284. `class_exists()` / `method_exists()` guards don't inform diagnostics
+### B284. Guards over a name's existence or its identity don't inform the branch they guard
 
 **Impact: Medium-High · Complexity: Medium-High**
 
-5 sites, two mechanisms:
+6 sites, two mechanisms. Both are conditions whose subject is a *name*
+rather than a value, which is why neither reaches the narrowing rules
+that read types.
 
 - Inside `if (class_exists('PHPStan\ExtensionInstaller\GeneratedConfig'))`,
   member access on that class is reported even though the guard is the
@@ -226,13 +249,10 @@ Sites: `src/Analyser/ExprHandler/FuncCallHandler.php:977, 1042`,
   isn't installed in the sample). PHPStan suppresses unknown-class
   errors under such guards. Sites: `src/Command/CommandHelper.php:309, 608`
   *(609 via the closure)*, `src/Diagnose/PHPStanDiagnoseExtension.php:132, 142`.
-- `method_exists(TestCase::class, 'assertFileDoesNotExist')` with a
-  statically known class and literal method folds to a constant `true`,
-  so the `!method_exists(...)` branch is dead — yet we report the
-  removed PHPUnit 9 method called inside it
-  (`src/Testing/LevelsTestCase.php:201`). PHPStan even flags the guard
-  itself as `function.alreadyNarrowedType` (it's in the sample's
-  baseline) and reports nothing inside the dead branch.
+- `get_class($x) === Foo::class` narrows `$x` to exactly `Foo`
+  (`src/Type/TypeCombinator.php:1646`, twice). `get_class()` now returns
+  `class-string<T>`, so the comparison already has the type it needs;
+  what is missing is the narrowing rule that reads it.
 
 ### B276. `@phpstan-assert` on properties and method-call results is ignored
 
@@ -258,60 +278,27 @@ interfaces up from `MutatingScope`). Sites:
 `src/Reflection/ClassReflection.php:1524`,
 `src/Rules/Properties/ExistingClassesInPropertyHookTypehintsRule.php:41`.
 
-### B278. Negated `instanceof` misses two shapes: disjunction guards and subclass subtraction
-
-**Impact: Medium · Complexity: Medium-High**
-
-4 sites, reproduced minimally:
-
-```php
-// a. De Morgan: after the early return, $type is CallableType|ClosureType
-if (!($type instanceof CallableType || $type instanceof ClosureType)) { return $traverse($type); }
-$type->getTemplateTags();
-
-// b. The else-branch of `instanceof Identifier` must also subtract
-//    Identifier's subclasses (VarLikeIdentifier) from the union:
-if ($var->name instanceof Node\Identifier) { ... } else { use($var->name); /* Expr */ }
-```
-
-Sites: `src/Rules/PhpDoc/GenericCallableRuleHelper.php:60, 70` (shape a),
-`src/Analyser/ExprHandler/AssignHandler.php:696`,
-`src/Rules/DeadCode/UnusedPrivatePropertyRule.php:160` (shape b).
-
 ### B277. `is_float()` branches don't eliminate `float` from `int|float`
 
 **Impact: Medium · Complexity: Medium**
 
-3 sites, reproduced minimally. Both directions fail: the else/elseif
-branch of `if (is_float($x))` keeps `int|float` (with an inline
-`@var int|float` in play), and a reassignment inside the branch is
-unioned with the pre-assignment type instead of replacing it:
+3 sites. The plain shape resolves correctly — an `int|float` subject
+comes back as `float` in the `is_float()` branch, `int` in the else, and
+`int` after a branch that reassigns it — so what breaks is the shape at
+the sites, where the subject reaches the check through a swap
+destructuring (`[$min, $max] = [$max, $min];`) and starts out
+`int|float|null`:
 
 ```php
+if ($min !== null && $max !== null && $min > $max) { [$min, $max] = [$max, $min]; }
 if (is_float($min)) { $min = (int) ceil($min); }
 IntegerRangeType::fromInterval($min, $max);   // we report null|int|int|float
 ```
 
-Sites: `src/Reflection/InitializerExprTypeResolver.php:2533 (both args)`,
+The duplicated `int` and the surviving `null` in that result say the
+destructuring, not the guard, is where the type is lost. Sites:
+`src/Reflection/InitializerExprTypeResolver.php:2533 (both args)`,
 `src/Type/Constant/ConstantArrayTypeBuilder.php:242`.
-
-### B279. Reading a property of `$this` before `$this instanceof Subclass` kills the narrowing
-
-**Impact: Medium · Complexity: High**
-
-1 site, isolated to a two-line repro. `$this instanceof Subclass`
-narrows correctly — unless any `$this->prop` read precedes it in the
-method body:
-
-```php
-$description = $this->className;        // remove this line and the branch resolves
-if ($this instanceof GenericObjectType) {
-    $this->getTypes();                  // "Method 'getTypes' not found on ObjectType"
-}
-```
-
-Regular and promoted properties both trigger it; same-file and
-cross-file subclasses both fail. Site: `src/Type/ObjectType.php:744`.
 
 ### B281. `instanceof self` in a trait narrows to the trait instead of the using class
 
@@ -324,37 +311,9 @@ with the *trait* and report "Property 'value' not found on any of the 2
 possible types (PHPStan\Type\Type, ...ConstantScalarTypeTrait)".
 Site: `src/Type/Traits/ConstantScalarTypeTrait.php:74`.
 
-### B286. Key-existence narrowing gaps: static-property offsets, nullable value types, and the key itself
-
-**Impact: Low-Medium · Complexity: Medium**
-
-3 sites. `isset(self::$anonymousClasses[$className])` doesn't make the
-subsequent read of that offset resolve (static property with a
-`@var ClassReflection[]` docblock —
-`src/Reflection/BetterReflection/BetterReflectionProvider.php:170`),
-and `isset($options['default'])` over `array<string, ?Type>` must strip
-`null` from the value type
-(`src/Type/Php/FilterFunctionReturnTypeHelper.php:198`).
-
-The third is the mirror image: the *key* is what the check proves
-something about. `array_key_exists($tag, $flippedMapping)` over an
-`array<string, class-string>` proves `$tag` is a `string`, so a `$tag`
-read out of `array_keys()` on a bare `array` (Nette's
-`Definition::getTags()`) stops being `array-key` inside the branch.
-`isset($arr[$k])` says the same thing. Site:
-`src/DependencyInjection/ValidateServiceTagsExtension.php:93`.
-
 ## Arithmetic
 
-### B302. `int` arithmetic with a docblock-`mixed` operand widens to `int|float`
-
-**Impact: Low-Medium · Complexity: Medium**
-
-1 site, reproduced minimally. `strlen($s) + $line - 1` where `$line`
-comes from an untyped method with `@return mixed` (narrowed by
-`!== null`) produces `int|float`; the same code with a *native*
-`mixed` return type produces `int`. The two must agree (and PHPStan
-reports `int` here). Site: `src/Rules/PhpDoc/PhpDocLineHelper.php:25`.
+No outstanding items.
 
 ## Symbol resolution
 
@@ -373,14 +332,16 @@ produces a `Scalar` that isn't recognised as a subtype of
 
 ## Array types
 
-### B292. Array shapes lose element types through accumulation, destructuring, and nested writes
+### B286. Array element types are lost by writes, and key checks don't restore them
 
 **Impact: Medium-High · Complexity: Medium-High**
 
-12 sites, two shapes:
+15 sites. Every shape below is the same gap seen from one side or the
+other: the element type of an array the engine watched being built, or
+the element type a key check proves is there.
 
 - A locally built array of tuples read back by a destructuring foreach:
-  `$offsetTypes[$key] = [$trinary, $type];` … 
+  `$offsetTypes[$key] = [$trinary, $type];` …
   `foreach ($offsetTypes as $key => [$hasOffsetValue, $offsetType])` —
   both variables come back unresolved
   (`src/Type/Php/ArrayMergeFunctionDynamicReturnTypeExtension.php:188, 250, 255, 258, 300, 306`,
@@ -389,14 +350,28 @@ produces a `Scalar` that isn't recognised as a subtype of
   instead of selecting one: `$alternatives[$exprString][1]` on
   `array<string, array{Expr, list<...>}>` returns `Expr|list<...>`
   (`src/Analyser/SpecifiedTypes.php:587`).
+- `isset(self::$anonymousClasses[$className])` doesn't make the
+  subsequent read of that offset resolve (static property with a
+  `@var ClassReflection[]` docblock —
+  `src/Reflection/BetterReflection/BetterReflectionProvider.php:170`),
+  and `isset($options['default'])` over `array<string, ?Type>` must
+  strip `null` from the value type
+  (`src/Type/Php/FilterFunctionReturnTypeHelper.php:198`).
+- The mirror image, where the *key* is what the check proves something
+  about: `array_key_exists($tag, $flippedMapping)` over an
+  `array<string, class-string>` proves `$tag` is a `string`, so a `$tag`
+  read out of `array_keys()` on a bare `array` (Nette's
+  `Definition::getTags()`) stops being `array-key` inside the branch.
+  `isset($arr[$k])` says the same thing. Site:
+  `src/DependencyInjection/ValidateServiceTagsExtension.php:93`.
 
 ## Docblock handling
 
-### B295. Values PHPStan types as implicit `mixed` come back unresolved and get reported
+### B295. Values PHPStan types as `mixed` come back unresolved, or narrower than the docblock says
 
 **Impact: High · Complexity: High**
 
-The biggest cluster left: ~45 sites. The sample analyses clean under
+The biggest cluster left: ~46 sites. The sample analyses clean under
 PHPStan level 8 because these values are `mixed` there, and level 8
 doesn't check members of or arguments from `mixed`. Our own severity
 table in [`todo/diagnostics.md`](diagnostics.md) already classifies
@@ -430,15 +405,28 @@ Conversely, where the docblock *says* `mixed`, we substitute a narrower
 body-inferred type and then flag mismatches PHPStan never sees
 (`src/DependencyInjection/ContainerFactory.php:335, 403`,
 `src/Command/ErrorFormatter/BaselineNeonErrorFormatter.php:100`,
-`src/Testing/TestCaseSourceLocatorFactory.php:75`). The fix direction:
-these sources must uniformly produce `mixed`, and member/argument
-checks on `mixed` must follow the severity policy (hint, not error).
+`src/Testing/TestCaseSourceLocatorFactory.php:75`) — and a docblock
+`mixed` doesn't even agree with a native one: `strlen($s) + $line - 1`
+where `$line` comes from an untyped method with `@return mixed`
+(narrowed by `!== null`) produces `int|float`, while the same code with
+a *native* `mixed` return type produces `int`, which is what PHPStan
+reports (`src/Rules/PhpDoc/PhpDocLineHelper.php:25`).
 
-### B296. Callback parameter types aren't inferred from templated callable parameters
+The fix direction: these sources must uniformly produce `mixed`,
+whichever spelling declares it, and member/argument checks on `mixed`
+must follow the severity policy (hint, not error).
+
+### B296. Closure and arrow-function signatures aren't completed from their context and body
 
 **Impact: High · Complexity: High**
 
-16 sites. The `usort` stub declares `@template T` /
+23 sites, three shapes. A closure's declared signature is only part of
+what its parameters and return type are: the rest comes from the
+parameter it is passed to, from its own body, and from a docblock that
+isn't attached to the closure node.
+
+**a. Callback parameters aren't inferred from templated callable
+parameters** (16 sites). The `usort` stub declares `@template T` /
 `@param TArray $array` / `@param callable(T, T): int $callback`; an
 untyped closure passed as the callback must get its parameters bound
 from the array argument's element type:
@@ -459,14 +447,10 @@ instantiations comes back as the builder itself
 (`build/PHPStan/Build/NamedArgumentsRule.php:238`,
 a `type_mismatch_return`).
 
-### B297. Arrow-function return types ignore the body
-
-**Impact: Medium · Complexity: Medium**
-
-4 sites. PHPStan computes an arrow function's return type as the
-intersection of the declared type and the body's inferred type. We use
-only the declared type, so
-`static fn (X $p): MethodReflection => $p->getTransformedMethod()`
+**b. Arrow-function return types ignore the body** (4 sites). PHPStan
+computes an arrow function's return type as the intersection of the
+declared type and the body's inferred type. We use only the declared
+type, so `static fn (X $p): MethodReflection => $p->getTransformedMethod()`
 (body returns `ExtendedMethodReflection`) fails against an
 `ExtendedMethodReflection[]` parameter.
 Sites: `src/Reflection/Type/IntersectionTypeUnresolvedMethodPrototypeReflection.php:48`,
@@ -474,11 +458,8 @@ Sites: `src/Reflection/Type/IntersectionTypeUnresolvedMethodPrototypeReflection.
 `src/Reflection/Type/UnionTypeUnresolvedMethodPrototypeReflection.php:49`,
 `src/Reflection/Type/UnionTypeUnresolvedPropertyPrototypeReflection.php:47`.
 
-### B298. `@param` docblocks aren't applied in two placement shapes
-
-**Impact: Low-Medium · Complexity: Medium**
-
-3 sites:
+**c. `@param` docblocks aren't applied in two placement shapes**
+(3 sites):
 
 - A doc comment above `$closure = static function (...) { ... };`
   attaches to the expression statement, not the closure node; its
@@ -505,45 +486,33 @@ Sites: `src/Reflection/Type/IntersectionTypeUnresolvedMethodPrototypeReflection.
   variable still holds the previous iteration's shape;
   `src/Parser/RichParser.php:183`).
 
-### B300. Template inference through `class-string<TCollector>` and `@implements` doesn't resolve
+### B300. Template arguments aren't recovered from `class-string`, `@implements`, or a constructor argument
 
 **Impact: Medium · Complexity: High**
 
-4 sites. `CollectedDataNode::get()` declares
-`@template TCollector of Collector<Node, TValue>` /
-`@param class-string<TCollector>` /
-`@return array<string, list<TValue>>`; `TValue` must be recovered from
-the collector class's `@implements Collector<..., array{...}>`. The
-value then survives nested array writes and an `array_values(...)[0]`.
-Sites: `src/Rules/Comparison/ConstantConditionInTraitRule.php:68, 80`,
-`src/Rules/Comparison/FunctionCallConstantConditionRule.php:100, 119`.
+8 sites, two shapes. Both need a template argument that is nowhere in
+the call's own type arguments, and both then have to carry the recovered
+value through the expressions that read it.
 
-### B301. Iteration through a templated `@mixin T` stub loses the element type
-
-**Impact: Medium · Complexity: Medium-High**
-
-4 sites. PHPStan's `RecursiveIteratorIterator` stub is
-`@template T of \RecursiveIterator|\IteratorAggregate` with `@mixin T`;
-`foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir)) as $file)`
-must bind `T` from the constructor argument and resolve iteration
-through the mixin to `SplFileInfo`.
-
-Line 169 is downstream of the same unresolved `$file`:
-`str_replace(DIRECTORY_SEPARATOR, '/', $file->getPathname())` has a
-subject nobody can type, so the conditional return keyed on it answers
-with both the array and the string branch.
-
-Sites: `build/PHPStan/Build/TurboAttributeCollector.php:162, 165, 169`,
-`src/Cache/FileCacheStorage.php:151`.
-
-### B303. Regex named groups aren't typed by their pattern
-
-**Impact: Low · Complexity: Medium**
-
-1 site. A `(?<position>\d+)` group in `Strings::matchAll()` results
-should be a numeric (decimal integer) string so that
-`$placeholder['position'] - 1` is `int`, not `int|float`.
-Site: `src/Rules/Functions/PrintfHelper.php:113`.
+- `CollectedDataNode::get()` declares
+  `@template TCollector of Collector<Node, TValue>` /
+  `@param class-string<TCollector>` /
+  `@return array<string, list<TValue>>`; `TValue` must be recovered from
+  the collector class's `@implements Collector<..., array{...}>`. The
+  value then survives nested array writes and an `array_values(...)[0]`.
+  Sites: `src/Rules/Comparison/ConstantConditionInTraitRule.php:68, 80`,
+  `src/Rules/Comparison/FunctionCallConstantConditionRule.php:100, 119`.
+- PHPStan's `RecursiveIteratorIterator` stub is
+  `@template T of \RecursiveIterator|\IteratorAggregate` with `@mixin T`;
+  `foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir)) as $file)`
+  must bind `T` from the constructor argument and resolve iteration
+  through the mixin to `SplFileInfo`. Line 169 is downstream of the same
+  unresolved `$file`:
+  `str_replace(DIRECTORY_SEPARATOR, '/', $file->getPathname())` has a
+  subject nobody can type, so the conditional return keyed on it answers
+  with both the array and the string branch. Sites:
+  `build/PHPStan/Build/TurboAttributeCollector.php:162, 165, 169`,
+  `src/Cache/FileCacheStorage.php:151`.
 
 ## Miscellaneous
 

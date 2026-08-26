@@ -388,6 +388,21 @@ struct Conjuncts {
     /// At least one contributing operand was `is_a($x, C::class, true)` —
     /// a string alternative on the subject must survive the narrowing.
     allow_string: bool,
+    /// At least one contributing operand pinned the class exactly
+    /// (`get_class($x) === C::class`), so a subclass of `C` does not pass.
+    exact: bool,
+}
+
+/// What a condition's `instanceof`-style checks concluded about one
+/// subject, beyond the classes themselves.
+#[derive(Default, Clone, Copy)]
+struct CheckShape {
+    /// The classes describe one value that is all of them at once.
+    intersected: bool,
+    /// A string alternative on the subject must survive the narrowing.
+    allow_string: bool,
+    /// The classes are exact identities rather than subtype bounds.
+    exact: bool,
 }
 
 impl Conjuncts {
@@ -403,6 +418,35 @@ impl Conjuncts {
     }
 }
 
+/// The chain inside a `!` that negates a whole `&&` / `||` expression.
+///
+/// A negation over a chain says the opposite of everything the chain says,
+/// so the pass that reads it is the *other* polarity's: the truthy branch
+/// of `if (!(A || B))` is the inverse of `A || B`, and the fall-through of
+/// `if (!(A || B)) { return; }` is its truthy narrowing.  Handing the
+/// chain over is what lets each operand be examined at all — the negated
+/// disjunction as a whole matches no extractor, so without this the
+/// widest idiom for "one of these two types" narrows nothing.
+///
+/// Only chains delegate.  A `!` over a single check is a shape the
+/// extractors recognise in place, and routing it through the opposite
+/// pass would change which commit path it takes.
+fn negated_logical_chain<'b>(expr: &'b Expression<'b>) -> Option<&'b Expression<'b>> {
+    let (inner, negated) = narrowing::unwrap_condition_negation(expr);
+    let is_chain = matches!(
+        inner,
+        Expression::Binary(bin)
+            if matches!(
+                bin.operator,
+                BinaryOperator::And(_)
+                    | BinaryOperator::LowAnd(_)
+                    | BinaryOperator::Or(_)
+                    | BinaryOperator::LowOr(_)
+            )
+    );
+    (negated && is_chain).then_some(inner)
+}
+
 /// Apply condition-based narrowing (instanceof, null check, type guard)
 /// to the scope.  This narrows types for the "truthy" branch.
 pub(crate) fn apply_condition_narrowing<'b>(
@@ -414,6 +458,13 @@ pub(crate) fn apply_condition_narrowing<'b>(
     // extractor looks at it.  The chain collectors fold each operand of an
     // `&&` / `||` the same way.
     let condition = narrowing::fold_negation_pairs(condition);
+
+    // A `!` over a logical chain proves what the *inverse* pass proves
+    // about the chain itself.
+    if let Some(inner) = negated_logical_chain(condition) {
+        apply_condition_narrowing_inverse(inner, scope, ctx);
+        return;
+    }
 
     // Seed property access keys from conditions into the scope so that
     // narrowing functions can find and narrow them.
@@ -590,6 +641,7 @@ pub(crate) fn apply_condition_narrowing<'b>(
                         let c = conjuncts.entry(var_name.clone()).or_default();
                         c.operands += 1;
                         c.allow_string |= extraction.allow_string;
+                        c.exact |= extraction.exact;
                     } else {
                         // Target class is unresolvable — mark variable
                         // as empty so diagnostics suppress false positives.
@@ -605,19 +657,14 @@ pub(crate) fn apply_condition_narrowing<'b>(
         // `$x instanceof A && $x instanceof B` proves both at once, so the
         // classes gathered across the operands are members of `A&B`
         // rather than alternatives a consumer may pick one of.
-        let intersected = conjuncts
-            .get(&var_name)
-            .is_some_and(Conjuncts::is_intersection);
-        let allow_string = conjuncts.get(&var_name).is_some_and(|c| c.allow_string);
-        commit_instanceof_narrowing(
-            &var_name,
-            narrowed,
-            intersected,
-            allow_string,
-            scope,
-            ctx,
-            &scope_resolver,
-        );
+        let shape = CheckShape {
+            intersected: conjuncts
+                .get(&var_name)
+                .is_some_and(Conjuncts::is_intersection),
+            allow_string: conjuncts.get(&var_name).is_some_and(|c| c.allow_string),
+            exact: conjuncts.get(&var_name).is_some_and(|c| c.exact),
+        };
+        commit_instanceof_narrowing(&var_name, narrowed, shape, scope, ctx, &scope_resolver);
     }
 
     // Type guard narrowing: `is_object($x)`, `is_array($x)`, etc.
@@ -848,12 +895,16 @@ fn dynamic_instanceof_targets(
 fn commit_instanceof_narrowing(
     var_name: &str,
     mut narrowed: Vec<ResolvedType>,
-    intersected: bool,
-    allow_string: bool,
+    shape: CheckShape,
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
     scope_resolver: &dyn Fn(&str) -> Vec<ResolvedType>,
 ) {
+    let CheckShape {
+        intersected,
+        allow_string,
+        exact,
+    } = shape;
     if intersected {
         ResolvedType::tag_as_intersection(&mut narrowed);
     }
@@ -978,25 +1029,36 @@ fn commit_instanceof_narrowing(
         .collect();
 
     // Try filtering: keep existing entries whose class is in the narrowed
-    // set.  A kept entry's own type_string may still be the whole
-    // pre-check union (a conditional return type resolves to one entry
-    // naming a class and listing an array alternative beside it), so
-    // restrict it to the narrowed classes as well.  Strip null on top
-    // because a successful instanceof check guarantees the value is
-    // non-null (e.g. `?Foo` → `Foo`).
+    // set, or is a subtype of one — a `VarLikeIdentifier` alternative
+    // passes `instanceof Identifier` and stays as itself, being the more
+    // specific of the two.  An exact check
+    // (`get_class($x) === Identifier::class`) pins the identity instead,
+    // and there the subclass does not pass.
+    //
+    // A kept entry's own type_string may still be the whole pre-check union
+    // (a conditional return type resolves to one entry naming a class and
+    // listing an array alternative beside it), so restrict it to the
+    // surviving classes as well.  Strip null on top because a successful
+    // instanceof check guarantees the value is non-null (`?Foo` → `Foo`).
+    let passes_check = |fqn: &str| {
+        narrowed_fqns.iter().any(|n| {
+            n == fqn
+                || (!exact && crate::class_lookup::is_subtype_of_names(fqn, n, ctx.class_loader))
+        })
+    };
     let survives = |name: &str| {
         narrowed.iter().any(|rt| {
             rt.class_info
                 .as_ref()
                 .is_some_and(|c| c.name == name || c.fqn() == name)
-        })
+        }) || passes_check(name)
     };
     let filtered: Vec<ResolvedType> = existing
         .iter()
         .filter(|rt| {
             rt.class_info
                 .as_ref()
-                .is_some_and(|c| narrowed_fqns.contains(&c.fqn().to_string()))
+                .is_some_and(|c| passes_check(&c.fqn()))
         })
         .map(|rt| {
             let mut rt = rt.clone();
@@ -1053,8 +1115,20 @@ fn commit_instanceof_narrowing(
     results.retain(|rt| !rt.type_string.is_null());
     // `apply_instanceof_inclusion` merging in an unrelated interface (the
     // branch this call site exists for) leaves both classes in `results` as
-    // separate entries, which describe one value that is both at once.
-    ResolvedType::tag_as_intersection(&mut results);
+    // separate entries, which describe one value that is both at once —
+    // recognisable by a class surviving that the check never named.  When
+    // the inclusion instead *replaced* the subject's class (the checked
+    // classes are the more specific ones), the result is those classes as
+    // the check handed them over, and a `||` chain hands over
+    // alternatives, not an intersection.
+    let kept_unchecked_class = results.iter().any(|rt| {
+        rt.class_info
+            .as_ref()
+            .is_some_and(|c| !narrowed_fqns.iter().any(|n| n == c.fqn()))
+    });
+    if intersected || kept_unchecked_class {
+        ResolvedType::tag_as_intersection(&mut results);
+    }
     if !results.is_empty() {
         scope.set(var_name, with_string_alt(results));
     } else {
@@ -1149,8 +1223,7 @@ pub(crate) fn apply_condition_narrowing_inverse_single<'b>(
                         commit_instanceof_narrowing(
                             var_name,
                             narrowed,
-                            false,
-                            false,
+                            CheckShape::default(),
                             scope,
                             ctx,
                             &scope_resolver,
@@ -1202,8 +1275,11 @@ pub(crate) fn apply_condition_narrowing_inverse_single<'b>(
                 commit_instanceof_narrowing(
                     var_name,
                     narrowed,
-                    false,
-                    extraction.allow_string,
+                    CheckShape {
+                        allow_string: extraction.allow_string,
+                        exact: extraction.exact,
+                        ..CheckShape::default()
+                    },
                     scope,
                     ctx,
                     &scope_resolver,
@@ -1254,6 +1330,14 @@ pub(crate) fn apply_condition_narrowing_inverse<'b>(
 ) {
     // As in the truthy pass: `!(!$x)` is `$x`, so cancel the pair first.
     let condition = narrowing::fold_negation_pairs(condition);
+
+    // The mirror of the truthy pass: the fall-through of
+    // `if (!($t instanceof CallableType || $t instanceof ClosureType)) { return; }`
+    // is what the chain itself proves, so hand it to the truthy pass.
+    if let Some(inner) = negated_logical_chain(condition) {
+        apply_condition_narrowing(inner, scope, ctx);
+        return;
+    }
 
     // De Morgan over `||`: NOT (A || B) = !A && !B.  Every operand's inverse
     // holds at the same time, so they apply sequentially to one scope.  This

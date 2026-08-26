@@ -525,6 +525,18 @@ function runDemoAssertions(): void
     assert(method_exists($sedan, 'cruise'), 'Scaffolding\ScaffoldingSedan must have cruise()');
     assert(method_exists($sedan, 'start'), 'Scaffolding\ScaffoldingSedan must inherit start()');
 
+    // ── Negated disjunction and subclass subtraction ────────────────────
+    $negated = new NegatedDisjunctionDemo();
+    assert($negated->demo(new Scaffolding\ScaffoldingSedan()) === 'sedan', 'Sedan must take the sedan branch');
+    assert($negated->demo(new Scaffolding\ScaffoldingCoupe()) === 'race', 'Coupe must take the coupe branch');
+    assert($negated->demo(new Scaffolding\ScaffoldingMotor()) === 'other', 'A bare motor must be ruled out by the guard');
+    assert($negated->keepsSubclass(new Scaffolding\ScaffoldingSportSedan()) === 'launch', 'A subclass must pass a check on its parent');
+    assert($negated->keepsSubclass(new Scaffolding\ScaffoldingCoupe()) === 'race', 'A failed check must leave only the coupe');
+    assert(
+        (new Scaffolding\ScaffoldingSportSedan()) instanceof Scaffolding\ScaffoldingSedan,
+        'Scaffolding\ScaffoldingSportSedan must extend Scaffolding\ScaffoldingSedan'
+    );
+
     $demo = new InstanceofSelfDemo();
     assert($demo instanceof Scaffolding\ScaffoldingSedan, 'InstanceofSelfDemo must extend Scaffolding\ScaffoldingSedan');
     assert(method_exists($demo, 'sport'), 'InstanceofSelfDemo must have sport()');

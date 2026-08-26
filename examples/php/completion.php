@@ -1116,6 +1116,51 @@ class InstanceofSelfDemo extends Scaffolding\ScaffoldingSedan
 }
 
 
+// ── Negated Disjunction and Subclass Subtraction ────────────────────────────
+
+class NegatedDisjunctionDemo
+{
+    /**
+     * A guard that rules out two types at once leaves the value narrowed to
+     * both of them, and a check that fails rules out the subclasses of the
+     * class it names along with the class itself.
+     */
+    public function demo(Scaffolding\ScaffoldingMotor $motor): string
+    {
+        // Everything that is neither type leaves here, so `$motor` is
+        // Scaffolding\ScaffoldingSedan|Scaffolding\ScaffoldingCoupe below.
+        if (!($motor instanceof Scaffolding\ScaffoldingSedan
+            || $motor instanceof Scaffolding\ScaffoldingCoupe)) {
+            return 'other';
+        }
+        // Try: completion here offers start() from the base class of both.
+        $motor->start();
+
+        if (!$motor instanceof Scaffolding\ScaffoldingSedan) {
+            return $motor->race();                // Scaffolding\ScaffoldingCoupe
+        }
+        $motor->cruise();                         // Scaffolding\ScaffoldingSedan
+        return 'sedan';
+    }
+
+    /**
+     * A subclass passes a check on its parent and stays as itself, so
+     * launch() is still reachable inside the branch.
+     *
+     * @param Scaffolding\ScaffoldingSportSedan|Scaffolding\ScaffoldingCoupe $motor
+     */
+    public function keepsSubclass($motor): string
+    {
+        if ($motor instanceof Scaffolding\ScaffoldingSedan) {
+            return $motor->launch();              // Scaffolding\ScaffoldingSportSedan
+        }
+        // A ScaffoldingSportSedan is a ScaffoldingSedan, so the failed check
+        // ruled it out here too and only the coupe is left.
+        return $motor->race();                    // Scaffolding\ScaffoldingCoupe
+    }
+}
+
+
 // ── Custom Assert Narrowing ─────────────────────────────────────────────────
 
 class AssertNarrowingDemo

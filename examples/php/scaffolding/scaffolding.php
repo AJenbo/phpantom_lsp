@@ -478,6 +478,18 @@ class ScaffoldingSedan extends ScaffoldingMotor
     public function cruise(): void {}
 }
 
+class ScaffoldingCoupe extends ScaffoldingMotor
+{
+    public function race(): string { return 'race'; }
+}
+
+// A subclass of a subclass, so a check on the middle class has something
+// below it to keep on the way in and rule out on the way out.
+class ScaffoldingSportSedan extends ScaffoldingSedan
+{
+    public function launch(): string { return 'launch'; }
+}
+
 abstract class ScaffoldingAbstractShape
 {
     abstract public function area(): float;
