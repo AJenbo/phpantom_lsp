@@ -580,6 +580,18 @@ impl Backend {
     ) -> Vec<(ReferenceIndexKey, bool)> {
         match &span.kind {
             SymbolKind::ClassReference { name, is_fqn, .. } => {
+                // A resource document only ever records fully-qualified
+                // names, so the short-name candidate key `class_keys` adds
+                // for a source spelling that could differ from the resolved
+                // FQN can never apply.  Skipping it keeps a large generated
+                // XML from adding one index entry per distinct class it
+                // names on top of the one that answers lookups.
+                if *is_fqn && crate::resource_navigation::is_resource_document(uri) {
+                    return vec![(
+                        ReferenceIndexKey::class_owned(normalize_symbol_name(name)),
+                        true,
+                    )];
+                }
                 let resolved = if *is_fqn {
                     normalize_symbol_name(name)
                 } else if let Some(fqn) = self.resolved_name_at(uri, span.start) {

@@ -707,9 +707,11 @@ impl LanguageServer for Backend {
             .write()
             .insert(uri.clone(), Arc::clone(&text));
 
-        // Resource documents are not PHP source. Their schema-free symbol
-        // navigation reads the open buffer directly when requested.
+        // Resource documents are not PHP source. Build a lightweight symbol
+        // map so navigation, references, rename, and PHP declaration lenses
+        // all consume the same indexed occurrences.
         if crate::resource_navigation::is_resource_document(&uri) {
+            self.update_resource_symbol_index(&uri, &text);
             self.log(MessageType::INFO, format!("Opened resource file: {}", uri))
                 .await;
             return;
@@ -794,7 +796,43 @@ impl LanguageServer for Backend {
             .write()
             .insert(uri.clone(), Arc::clone(&text));
 
+        // A resource document is re-scanned the same way a PHP file is
+        // re-parsed: on a blocking task, and only if the buffer it was
+        // queued for is still the current one.  Scanning a large XML on the
+        // service loop for every keystroke would stall interactive
+        // requests, and refreshing lenses per keystroke would make the
+        // client re-pull them faster than it can render them.
         if crate::resource_navigation::is_resource_document(&uri) {
+            if self.sync_ast_updates {
+                self.update_resource_symbol_index(&uri, &text);
+                return;
+            }
+            let backend = self.clone_for_blocking();
+            tokio::spawn(async move {
+                let refresh_backend = backend.clone_for_blocking();
+                let committed = run_blocking_cancel_safe("did_change resource scan", move || {
+                    let is_latest_text = backend
+                        .open_files
+                        .read()
+                        .get(&uri)
+                        .is_some_and(|current| Arc::ptr_eq(current, &text));
+                    if !is_latest_text {
+                        return false;
+                    }
+                    backend.update_resource_symbol_index(&uri, &text);
+                    true
+                })
+                .await;
+
+                if committed == Some(true)
+                    && refresh_backend
+                        .supports_code_lens_refresh
+                        .load(Ordering::Acquire)
+                    && let Some(ref client) = refresh_backend.client
+                {
+                    let _ = client.code_lens_refresh().await;
+                }
+            });
             return;
         }
 
@@ -903,7 +941,15 @@ impl LanguageServer for Backend {
             self.blade_injected_vars.write().remove(&uri);
         }
 
-        self.clear_file_maps(&uri);
+        if crate::resource_navigation::is_resource_document(&uri) {
+            if let Some(content) = self.get_file_content(&uri) {
+                self.update_resource_symbol_index(&uri, &content);
+            } else {
+                self.clear_file_maps(&uri);
+            }
+        } else {
+            self.clear_file_maps(&uri);
+        }
 
         // Clear diagnostics so stale warnings don't linger after the file is closed
         self.clear_diagnostics_for_file(&uri).await;
@@ -921,7 +967,9 @@ impl LanguageServer for Backend {
             self.open_files
                 .write()
                 .insert(uri.clone(), Arc::clone(&text));
-            if !is_resource {
+            if is_resource {
+                self.update_resource_symbol_index(&uri, &text);
+            } else {
                 self.update_ast(&uri, &text);
             }
         }
@@ -1017,6 +1065,11 @@ impl LanguageServer for Backend {
         // (or missing ones) are corrected.
         if did_work {
             self.request_diagnostic_refresh().await;
+            if self.supports_code_lens_refresh.load(Ordering::Acquire)
+                && let Some(ref client) = self.client
+            {
+                let _ = client.code_lens_refresh().await;
+            }
         }
     }
 

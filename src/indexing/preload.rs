@@ -282,23 +282,25 @@ impl Backend {
         // the initial pass and reuse it.
         let workspace_root = self.workspace.workspace_root.read().clone();
         let phase1_uri_set: HashSet<&str> = phase1_uris.iter().map(|uri| uri.as_str()).collect();
-        let phase2_work = if let Some(root) = workspace_root.clone() {
+        let (phase2_work, resource_work) = if let Some(root) = workspace_root.clone() {
             let vendor_dir_paths = self.workspace.vendor_dir_paths.lock().clone();
 
             self.report_workspace_index_progress(progress, 3, "Scanning workspace files");
             let walk_start = std::time::Instant::now();
-            let php_files = crate::references::collect_php_files_gitignore(
-                &root,
-                &vendor_dir_paths,
-                &self.index_filters(),
-            );
+            let (php_files, resource_files) =
+                crate::references::collect_workspace_index_files_gitignore(
+                    &root,
+                    &vendor_dir_paths,
+                    &self.index_filters(),
+                );
             tracing::info!(
-                "ensure_workspace_indexed: Phase 2 disk walk found {} PHP files in {:?}",
+                "ensure_workspace_indexed: Phase 2 disk walk found {} PHP and {} resource files in {:?}",
                 php_files.len(),
+                resource_files.len(),
                 walk_start.elapsed()
             );
 
-            php_files
+            let php_work = php_files
                 .into_iter()
                 .filter_map(|path| {
                     let uri = crate::util::path_to_uri(&path);
@@ -308,12 +310,20 @@ impl Backend {
                         Some((uri, path))
                     }
                 })
-                .collect()
+                .collect();
+            let resource_work = resource_files
+                .into_iter()
+                .filter_map(|path| {
+                    let uri = crate::util::path_to_uri(&path);
+                    (!existing_uris.contains(&uri)).then_some((uri, path))
+                })
+                .collect();
+            (php_work, resource_work)
         } else {
-            Vec::new()
+            (Vec::new(), Vec::new())
         };
 
-        let total_to_parse = phase1_uris.len() + phase2_work.len();
+        let total_to_parse = phase1_uris.len() + phase2_work.len() + resource_work.len();
         let phase1_units: u64 = phase1_uris
             .iter()
             .map(|uri| self.index_progress_weight_for_uri(uri, None))
@@ -322,7 +332,14 @@ impl Backend {
             .iter()
             .map(|(_, path)| index_progress_weight_for_path(path))
             .sum();
-        let total_parse_units = phase1_units.saturating_add(phase2_units).max(1);
+        let resource_units: u64 = resource_work
+            .iter()
+            .map(|(_, path)| index_progress_weight_for_path(path))
+            .sum();
+        let total_parse_units = phase1_units
+            .saturating_add(phase2_units)
+            .saturating_add(resource_units)
+            .max(1);
         self.report_workspace_index_progress(
             progress,
             5,
@@ -378,6 +395,20 @@ impl Backend {
                         );
                     }),
                 );
+            }
+            if !resource_work.is_empty() {
+                self.report_workspace_index_progress(
+                    progress,
+                    workspace_parse_percentage(
+                        phase1_units.saturating_add(phase2_units),
+                        total_parse_units,
+                    ),
+                    format!(
+                        "Indexing resource references ({}/{total_to_parse})",
+                        phase1_uris.len() + phase2_work.len()
+                    ),
+                );
+                self.index_resource_paths_batch(&resource_work);
             }
             self.report_workspace_index_progress(progress, 99, "Finalizing workspace index");
             // Release pairs with the Acquire loads in
