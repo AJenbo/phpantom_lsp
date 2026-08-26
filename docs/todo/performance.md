@@ -913,6 +913,53 @@ lengths where it shows.
 
 ---
 
+## P56. Folding array shapes across branches costs superlinear time
+
+**Impact: Low · Complexity: Medium**
+
+`join_shapes` keeps a variable at one tracked shape no matter how many
+branches write to it, which is what stops a merge from having to compare
+a variant per branch pairwise. The fold itself is not free, though:
+`join_shape_entries` builds a fresh `Vec<ShapeEntry>` and interns a new
+shape on every merge, so a variable that gains a key per branch pays for
+hashing a shape whose entry count grows with the branch count. The work
+is quadratic in the number of conditional writes.
+
+Measured on a release build, over a generated function assigning a
+distinct array shape under each of N sequential `if`s:
+
+| N writes | analyse wall clock |
+| -------- | ------------------ |
+| 400      | 0.30s              |
+| 800      | 0.90s              |
+| 1200     | 2.10s              |
+
+Doubling the writes roughly triples the time, and the same file with the
+shapes left un-merged (each write pushing its own alternative instead)
+runs in half of that, so folding is the more expensive of the two
+strategies at these sizes. It is still the right default: the variant-per-
+branch alternative grows the *type* without bound, which costs every
+later consumer rather than just the merge. What is missing is the cheap
+exit that would make the fold linear in the common case:
+
+1. **Skip the rebuild when nothing changes.** Most merges join a shape
+   with one whose keys it already covers, and the result is the existing
+   shape. Comparing entry lists before allocating would return the
+   interned handle unchanged rather than rebuilding and re-hashing it.
+
+2. **Fold in place along a chain of merges.** A run of merges against the
+   same variable rebuilds the accumulator from scratch each time. Joining
+   into a reusable buffer and interning once at the end of the run would
+   drop the repeated hashing.
+
+**Where to look:** `join_shapes`, `join_shape_entries`, and `join_values`
+in `php_type/mod.rs`, and the shape-folding branch of `merge_scopes` in
+`type_engine/variable/forward_walk/scope_state.rs`. Hand-written code
+does not reach the sizes where this shows; generated code and long
+procedural report builders do.
+
+---
+
 ## P50. Cache the top-level scope for `global` keyword resolution
 
 **Impact: Low-Medium · Complexity: High**
