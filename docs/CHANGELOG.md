@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Reference CodeLens.** PHP declarations show clickable exact reference counts. Declarations with no indexed uses are answered immediately, while semantic member locations are cached in a bounded background index so opening a large file does not fan out into an expensive resolve request per lens. Clients that support CodeLens refresh receive only ready, fully resolved member lenses. Contributed by @sidux.
 - **`analyze` takes more than one path.** `phpantom_lsp analyze app/ lib/Helper.php tests/` scans the union of everything named, mixing directories and single files freely, so a pre-commit hook or a CI step can hand it exactly the paths that changed instead of running the whole project or invoking the binary once per path. Overlapping arguments are reported once, and a path that does not exist still stops the run with exit code 2. Naming no path scans the entire project, as before.
 
 ### Changed
