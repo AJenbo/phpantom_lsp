@@ -117,12 +117,20 @@ impl LanguageServer for Backend {
             *self.client_name.lock() = info.name.clone();
         }
 
+        let client_supports_diagnostic_refresh = params
+            .capabilities
+            .workspace
+            .as_ref()
+            .and_then(|ws| ws.diagnostic.as_ref())
+            .and_then(|d| d.refresh_support)
+            .unwrap_or(false);
         let client_supports_pull = params
             .capabilities
             .text_document
             .as_ref()
             .and_then(|td| td.diagnostic.as_ref())
-            .is_some();
+            .is_some()
+            && client_supports_diagnostic_refresh;
         self.supports_pull_diagnostics
             .store(client_supports_pull, Ordering::Release);
 
@@ -1832,6 +1840,51 @@ mod tests {
         assert_eq!(options["documentSelector"][0]["language"], "php");
         assert!(options["documentSelector"][0].get("scheme").is_none());
         assert!(options["documentSelector"][0].get("pattern").is_none());
+    }
+
+    #[tokio::test]
+    async fn pull_diagnostics_requires_refresh_support() {
+        use tower_lsp::LanguageServer;
+
+        let backend = Backend::new_test();
+        let mut params = InitializeParams::default();
+
+        // 1. Neither text_document.diagnostic nor workspace.diagnostic.refresh_support
+        let result = backend.initialize(params.clone()).await.unwrap();
+        assert!(!backend.supports_pull_diagnostics.load(Ordering::Acquire));
+        assert!(result.capabilities.diagnostic_provider.is_none());
+
+        // 2. Only text_document.diagnostic without workspace.diagnostic.refresh_support (e.g. Neovim <= 0.11)
+        params.capabilities.text_document = Some(TextDocumentClientCapabilities {
+            diagnostic: Some(DiagnosticClientCapabilities::default()),
+            ..Default::default()
+        });
+        let result = backend.initialize(params.clone()).await.unwrap();
+        assert!(
+            !backend.supports_pull_diagnostics.load(Ordering::Acquire),
+            "Pull diagnostics must be disabled without refresh_support"
+        );
+        assert!(
+            result.capabilities.diagnostic_provider.is_none(),
+            "diagnosticProvider must be None when client cannot handle refresh requests"
+        );
+
+        // 3. Both text_document.diagnostic AND workspace.diagnostic.refresh_support = true (e.g. VS Code, Neovim >= 0.12)
+        params.capabilities.workspace = Some(WorkspaceClientCapabilities {
+            diagnostic: Some(DiagnosticWorkspaceClientCapabilities {
+                refresh_support: Some(true),
+            }),
+            ..Default::default()
+        });
+        let result = backend.initialize(params).await.unwrap();
+        assert!(
+            backend.supports_pull_diagnostics.load(Ordering::Acquire),
+            "Pull diagnostics must be enabled when client supports refresh"
+        );
+        assert!(
+            result.capabilities.diagnostic_provider.is_some(),
+            "diagnosticProvider must be advertised when client supports pull and refresh"
+        );
     }
 }
 
