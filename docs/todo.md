@@ -204,6 +204,7 @@ unlikely to move the needle for most users.
 | P48 | [Higher-order collection proxy injection repeats work](todo/performance.md#p48-higher-order-collection-proxy-injection-repeats-work)                                        | Low         | Medium      |
 | P49 | [A very long method chain costs superlinear time to analyse](todo/performance.md#p49-a-very-long-method-chain-costs-superlinear-time-to-analyse)                              | Low         | Medium      |
 | P54 | [Property narrowing re-walks the whole body once per subject](todo/performance.md#p54-property-narrowing-re-walks-the-whole-body-once-per-subject)                          | Low         | Medium      |
+| P56 | [Folding array shapes across branches costs superlinear time](todo/performance.md#p56-folding-array-shapes-across-branches-costs-superlinear-time)                            | Low         | Medium      |
 | P15 | [Two-phase stub index construction (eliminate `RwLock` on stub maps)](todo/performance.md#p15-two-phase-stub-index-construction-eliminate-rwlock-on-stub-maps)              | Low         | Medium-High |
 | P6  | O(n²) transitive eviction in `evict_fqn`                                                                                                                                    | Low         | High        |
 |     | **[Indexing](todo/indexing.md)**                                                                                                                                            |             |             |
