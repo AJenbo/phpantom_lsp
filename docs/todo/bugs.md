@@ -12,7 +12,7 @@ scale defined in [`docs/todo.md`](../todo.md); that table is also where
 each bug's row lives in the current sprint/backlog.
 
 All entries below come from triage of the PHPStan Source sample project,
-re-swept on 2026-08-27 (185 confirmed false positives after the genuine
+re-swept on 2026-08-27 (181 confirmed false positives after the genuine
 findings were patched in the sample, down from 242 at the 2026-08-25
 triage). Site counts refer to that sweep; every mechanism was either
 reproduced in a minimal project or confirmed by reading the guard
@@ -31,7 +31,7 @@ one entry. Defects too small to earn a row of their own are collected in
 [B301](#b301-narrowing-defects-with-a-single-site-each) rather than given
 one each.
 
-Of the 185 sites in the latest sweep, 140 are attributed to an entry
+Of the 181 sites in the latest sweep, 136 are attributed to an entry
 below. The unattributed remainder is described in
 [Not yet attributed](#not-yet-attributed).
 
@@ -45,48 +45,42 @@ No outstanding items.
 
 ## Standard-library return types
 
-### B290. Standard-library results stay wider than their arguments justify
+No outstanding items.
+
+## Reachability
+
+### B302. Diagnostics report inside branches that cannot run
 
 **Impact: Medium · Complexity: Medium-High**
 
-4 sites, four shapes of one missing capability: reading the arguments a
-builtin was actually handed and computing the answer from them, instead
-of falling back on the widest type the signature allows.
+1 site, but the mechanism is wider than the site: no diagnostic pass
+knows whether the statement it is looking at can run at all. A literal
+`if (false) { $base->gone(); }` reports `unknown_member` just as readily
+as live code does, and so does every branch a decidable guard rules out.
 
-- `strtolower()` of a literal union must constant-fold
-  (`'Interface'|'Trait'|'Enum'|'Class'` →
-  `'interface'|'trait'|'enum'|'class'`;
-  `src/Rules/Classes/DuplicateDeclarationRule.php:37`). There is no
-  literal folding of string builtins in the type engine at all: the
-  only const-evaluator that folds `strtolower`/`str_replace`/`sprintf`
-  is the Laravel route-name one in
-  `virtual_members::laravel::const_eval`, which is not on the shared
-  resolution path.
-- `method_exists(TestCase::class, 'assertFileDoesNotExist')` with a
-  statically known class and a literal method name folds to a constant
-  `true`, so the `!method_exists(...)` branch is dead — yet we report
-  the removed PHPUnit 9 method called inside it
-  (`src/Testing/LevelsTestCase.php:201`). PHPStan even flags the guard
-  itself as `function.alreadyNarrowedType` (it's in the sample's
-  baseline) and reports nothing inside the dead branch.
-- A `(?<position>\d+)` group in `Strings::matchAll()` results should be
-  a numeric (decimal integer) string, so that
-  `$placeholder['position'] - 1` is `int` rather than `int|float`
-  (`src/Rules/Functions/PrintfHelper.php:113`).
-- `pow()`'s `object` return belongs to the operator-overloading
-  extensions (GMP, BCMath), so two operands that are provably numeric
-  produce `int|float` and an operand that is provably an object
-  produces `object`. An operand typed `mixed` decides neither, and a
-  conditional return type that cannot be decided answers with the union
-  of both branches — which is honest (a `mixed` really could hold a
-  `GMP`) but reports what PHPStan does not: `private static function
-  pow(mixed $base, mixed $exp): float|int|null` returning
-  `pow($base, $exp)` is flagged as returning an `object` its signature
-  does not allow (`src/Type/ExponentiateHelper.php:128`). Fixing this
-  one needs a way to say "prefer the narrow branch when the argument
-  cannot be pinned down" for a specific conditional, which
-  `type_engine::types::conditional` has no vocabulary for today: the
-  undecided case always unions.
+The site is a guard whose value is a constant:
+
+```php
+if (!method_exists(parent::class, 'assertFileDoesNotExist')) {
+    parent::assertFileNotExists($filename, $message);   // reported
+}
+```
+
+`method_exists()` with a statically known class and a literal method
+name has a constant result, so the negated branch cannot run — PHPStan
+flags the guard itself as `function.alreadyNarrowedType` (it is in the
+sample's baseline) and reports nothing inside the branch. We report the
+removed PHPUnit 9 method called there
+(`src/Testing/LevelsTestCase.php:201`).
+
+Two halves, and the second is the one that matters: fold
+`method_exists()` over decidable arguments the way the other
+argument-driven builtins are folded, and give the diagnostic passes a
+notion of a statement that cannot be reached. The forward walker already
+tracks `ScopeState::unreachable`; the diagnostic passes walk spans
+independently of it and never consult it. Overlaps
+[D6](diagnostics.md#d6-unreachable-code-diagnostic), which reports
+unreachable code rather than declining to judge it.
 
 ## Narrowing
 
@@ -227,59 +221,40 @@ Sites: `src/Analyser/NodeScopeResolver.php:1103, 1112, 1116, 1903, 2001, 2153, 5
 
 **Impact: Medium · Complexity: Medium-High**
 
-4 sites, four independent mechanisms. None is large enough to earn a
-backlog row of its own, and each is reproduced minimally, so they are
-collected here rather than filed separately. Fixing one does not fix
-the others — take them one bullet at a time.
+2 sites, two independent mechanisms. Neither is large enough to earn a
+backlog row of its own, so they are collected here rather than filed
+separately. Fixing one does not fix the other — take them one bullet at
+a time.
 
-**a. A `@phpstan-assert bool` doesn't rule out `null`.** The assert tag
-itself, on a property or on a method result, and inherited two
-interfaces up, all narrow correctly. One combination of asserted type
-and subject type does not:
-
-```php
-/** @phpstan-assert bool $v */
-private function assertBool(mixed $v): void {}
-
-$this->assertBool($v);   // $v is ?bool
-return $v;               // reported as bool|null
-```
-
-The neighbouring cases all work, which is what makes this a narrow
-defect rather than a missing feature: `@phpstan-assert bool` over
-`bool|string` narrows, `@phpstan-assert string` over `?string` narrows,
-and the equivalent `if (is_bool($v))` guard over `?bool` narrows. Only
-the assert-`bool`-over-`null` pairing leaves the `null` behind.
-Site: `src/Reflection/ClassReflection.php:1524`.
-
-**b. Swap destructuring drops the type it was handed.** The plain
-`is_float()` shape resolves correctly — an `int|float` subject comes
-back as `float` in the `is_float()` branch, `int` in the else, and `int`
-after a branch that reassigns it — so what breaks is the shape at the
-sites, where the subject reaches the check through a swap destructuring
-and starts out `int|float|null`:
+**b. An `int|float` subject survives a guard that should split it.**
+The plain `is_float()` shape resolves correctly on its own — an
+`int|float` subject comes back as `float` in the `is_float()` branch,
+`int` in the else, and `int` after a branch that reassigns it. Neither
+site reproduces from that shape alone, and neither reproduces from the
+constructs named below either, so what carries the defect is the branch
+structure around them and not any one of these lines:
 
 ```php
+// 1. The subject reaches the guard through a swap destructuring,
+//    starting out int|float|null; we report `null|int|int|float`.
 if ($min !== null && $max !== null && $min > $max) { [$min, $max] = [$max, $min]; }
 if (is_float($min)) { $min = (int) ceil($min); }
-IntegerRangeType::fromInterval($min, $max);   // we report null|int|int|float
+IntegerRangeType::fromInterval($min, $max);
+
+// 2. An inline `@var int|float` subject checked with an elseif;
+//    the elseif branch keeps `int|float` where it must be `int`.
+/** @var int|float $newAutoIndex */
+$newAutoIndex = $offsetValue + 1;
+if (is_float($newAutoIndex)) { … } elseif (!$optional) { $this->nextAutoIndexes = [$newAutoIndex]; }
 ```
 
-The duplicated `int` and the surviving `null` in that result say the
-destructuring, not the guard, is where the type is lost. Sites:
+The duplicated `int` and the surviving `null` in the first result say
+the assignment, not the guard, is where the type is lost. Both sites sit
+several branches deep inside long methods, so the next attempt should
+start by bisecting the enclosing method down to a reproducing shape
+rather than from the excerpts above. Sites:
 `src/Reflection/InitializerExprTypeResolver.php:2533 (both args)`,
 `src/Type/Constant/ConstantArrayTypeBuilder.php:242`.
-
-**c. `instanceof self` in a trait narrows to the trait instead of the
-using class.** Inside a trait method, `self` is the class using the
-trait; `$type instanceof self && $this->value === $type->value` must
-resolve `$value` against that class. We narrow to an intersection with
-the *trait* and report "Property 'value' not found on any of the 2
-possible types (PHPStan\Type\Type, ...ConstantScalarTypeTrait)".
-`type_engine::trait_context` already answers "what is `$this` inside a
-trait" this way for the receiver; `self` in an `instanceof` position
-does not go through it.
-Site: `src/Type/Traits/ConstantScalarTypeTrait.php:74`.
 
 **d. By-reference out-parameters.** Complements
 [T41](type-inference.md#t41-param-out-is-parsed-but-never-read):
@@ -339,7 +314,7 @@ about — resolves correctly now.
 
 **Impact: High · Complexity: High**
 
-The biggest cluster left: ~46 sites. The sample analyses clean under
+The biggest cluster left: ~47 sites. The sample analyses clean under
 PHPStan level 8 because these values are `mixed` there, and level 8
 doesn't check members of or arguments from `mixed`. Our own severity
 table in [`todo/diagnostics.md`](diagnostics.md) already classifies
@@ -372,6 +347,13 @@ diagnostics fire as errors:
   `array_sum($peakMemoryUsages)` stays on the stub's `int|float` rather
   than folding to `int`, because the array was filled from
   `$json['memoryUsage']` (`src/Parallel/ParallelAnalyser.php:158`).
+- Elements of a `Strings::matchAll()` result, which is `array` with no
+  docblock: `$placeholder['position'] - 1` is `int|float` for us and
+  `mixed` for PHPStan, so an `int` parameter rejects it
+  (`src/Rules/Functions/PrintfHelper.php:113`). The pattern is built at
+  runtime (`sprintf($specifiersPattern, …) . $specifiers`), so no
+  capture-group analysis can type the element and `mixed` really is the
+  whole answer.
 
 Conversely, where the docblock *says* `mixed`, we substitute a narrower
 body-inferred type and then flag mismatches PHPStan never sees
@@ -476,7 +458,7 @@ No outstanding items.
 
 ## Not yet attributed
 
-45 of the 2026-08-27 sweep's 185 sites are not attributed to an entry
+45 of the 2026-08-27 sweep's 181 sites are not attributed to an entry
 above. Most are neighbours of a shape that already has an entry and need
 only a read to place; the recurring ones are recorded here so a future
 triage starts from them rather than rediscovering them.

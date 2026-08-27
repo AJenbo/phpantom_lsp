@@ -219,15 +219,10 @@ pub(in crate::type_engine) fn apply_instanceof_inclusion(
     ctx: &VarResolutionCtx<'_>,
     results: &mut Vec<ClassInfo>,
 ) -> bool {
-    let narrowed: Vec<ClassInfo> = super::super::resolution::type_hint_to_classes_typed(
-        ty,
-        &ctx.current_class.name,
-        ctx.all_classes,
-        ctx.class_loader,
-    )
-    .into_iter()
-    .map(Arc::unwrap_or_clone)
-    .collect();
+    let narrowed: Vec<ClassInfo> = super::resolve::resolve_narrowing_target(ty, ctx)
+        .into_iter()
+        .map(Arc::unwrap_or_clone)
+        .collect();
     if narrowed.is_empty() {
         // The instanceof target class could not be resolved (e.g. it
         // lives inside a phar that we cannot index).  The developer
@@ -333,15 +328,10 @@ pub(in crate::type_engine) fn apply_instanceof_exclusion(
     ctx: &VarResolutionCtx<'_>,
     results: &mut Vec<ClassInfo>,
 ) -> bool {
-    let excluded: Vec<ClassInfo> = super::super::resolution::type_hint_to_classes_typed(
-        ty,
-        &ctx.current_class.name,
-        ctx.all_classes,
-        ctx.class_loader,
-    )
-    .into_iter()
-    .map(Arc::unwrap_or_clone)
-    .collect();
+    let excluded: Vec<ClassInfo> = super::resolve::resolve_narrowing_target(ty, ctx)
+        .into_iter()
+        .map(Arc::unwrap_or_clone)
+        .collect();
     if !excluded.is_empty() {
         results.retain(|r| {
             !excluded.iter().any(|e| {

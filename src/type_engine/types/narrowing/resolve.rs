@@ -32,6 +32,45 @@ pub(in crate::type_engine) fn resolve_extraction_to_fqn(
     }
 }
 
+/// Resolve the classes an `instanceof`-style check names.
+///
+/// The same as [`type_hint_to_classes_typed`] except for one case it has
+/// no way to answer: a trait.  No value is ever an instance of a trait,
+/// so a check that resolves to one is really a check against the classes
+/// that use it — which is what `instanceof self` inside a trait method
+/// means, `self` there being the host class rather than the trait.
+/// Narrowing to the trait instead loses every member the hosts declare
+/// themselves, since a trait need not declare what its methods use.
+///
+/// [`type_hint_to_classes_typed`]: super::super::resolution::type_hint_to_classes_typed
+pub(in crate::type_engine) fn resolve_narrowing_target(
+    ty: &PhpType,
+    ctx: &VarResolutionCtx<'_>,
+) -> Vec<Arc<ClassInfo>> {
+    let resolved = super::super::resolution::type_hint_to_classes_typed(
+        ty,
+        &ctx.current_class.name,
+        ctx.all_classes,
+        ctx.class_loader,
+    );
+    let mut out: Vec<Arc<ClassInfo>> = Vec::with_capacity(resolved.len());
+    for cls in resolved {
+        let hosts = crate::type_engine::trait_context::trait_host_classes(
+            &cls,
+            ctx.all_classes,
+            ctx.class_loader,
+            ctx.backend,
+        );
+        match hosts.is_empty() {
+            // Either not a trait, or one whose hosts we cannot enumerate;
+            // the trait itself is still the best answer available.
+            true => ClassInfo::push_unique_arc(&mut out, cls),
+            false => ClassInfo::extend_unique_arc(&mut out, hosts),
+        }
+    }
+    out
+}
+
 /// Resolve a list of `PhpType` values into a deduplicated `Vec<ClassInfo>`.
 ///
 /// This is a shared helper for the compound instanceof/assert narrowing
@@ -42,13 +81,7 @@ pub(crate) fn resolve_class_names_to_union(
 ) -> Vec<ClassInfo> {
     let mut union = Vec::new();
     for ty in classes {
-        let resolved = super::super::resolution::type_hint_to_classes_typed(
-            ty,
-            &ctx.current_class.name,
-            ctx.all_classes,
-            ctx.class_loader,
-        );
-        for arc_cls in resolved {
+        for arc_cls in resolve_narrowing_target(ty, ctx) {
             ClassInfo::push_unique(&mut union, Arc::unwrap_or_clone(arc_cls));
         }
     }

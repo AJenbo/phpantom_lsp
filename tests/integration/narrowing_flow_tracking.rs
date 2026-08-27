@@ -913,6 +913,93 @@ function f(Scope $scope): void
     ));
 }
 
+/// An unconditional `@phpstan-assert` can name a path through the
+/// receiver too, and then the call takes no arguments at all: the
+/// promise is entirely about the object it was made on. The subject is
+/// the tag's own path with `$this` replaced by the receiver.
+#[test]
+fn an_assert_tag_narrows_a_property_of_the_receiver() {
+    assert_no_type_errors(
+        r#"<?php
+namespace Repro;
+
+class Reflection
+{
+    private ?bool $isDeprecated = null;
+
+    public function isDeprecated(): bool
+    {
+        if ($this->isDeprecated === null) {
+            $this->resolveDeprecation();
+        }
+
+        return $this->isDeprecated;
+    }
+
+    /** @phpstan-assert bool $this->isDeprecated */
+    private function resolveDeprecation(): void
+    {
+        $this->isDeprecated = false;
+    }
+}
+"#,
+    );
+}
+
+/// The same tag read through a variable rather than `$this`: the
+/// receiver the call was written on is what the tag's `$this` stands
+/// for, so the narrowing lands on that object's property.
+#[test]
+fn an_assert_tag_on_a_receiver_property_follows_the_variable_it_was_called_on() {
+    assert_no_type_errors(
+        r#"<?php
+namespace Repro;
+
+class Loader
+{
+    public ?string $name = null;
+
+    /** @phpstan-assert string $this->name */
+    public function load(): void { $this->name = ''; }
+}
+
+function takesName(string $name): void {}
+
+function f(Loader $loader): void
+{
+    $loader->load();
+    takesName($loader->name);
+}
+"#,
+    );
+}
+
+/// Negative control: without the call the property is as nullable as it
+/// declares itself to be.
+#[test]
+fn a_receiver_property_keeps_its_null_without_the_asserting_call() {
+    assert_type_error(
+        r#"<?php
+namespace Repro;
+
+class Loader
+{
+    public ?string $name = null;
+
+    /** @phpstan-assert string $this->name */
+    public function load(): void { $this->name = ''; }
+}
+
+function takesName(string $name): void {}
+
+function f(Loader $loader): void
+{
+    takesName($loader->name);
+}
+"#,
+    );
+}
+
 /// A `!null` promise about a plain parameter narrows the same way — the
 /// tag names no class, so it goes through the type guards rather than the
 /// `instanceof` machinery.

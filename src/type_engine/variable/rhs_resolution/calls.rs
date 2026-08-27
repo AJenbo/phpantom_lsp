@@ -1082,6 +1082,26 @@ pub(super) fn resolve_rhs_function_call<'b>(
         }
     }
 
+    // ── String builtins over literal arguments ───────
+    // The stub declares the widest string the function can return; with
+    // literal arguments the call has one answer, and a caller checking
+    // it against a literal union needs that answer rather than `string`.
+    if let Some(ref name) = func_name
+        && let Some(folded) =
+            crate::type_engine::variable::raw_type_inference::resolve_string_func_literal_type(
+                name,
+                &func_call.argument_list,
+                ctx,
+            )
+    {
+        return vec![resolved_type_with_lookup(
+            folded,
+            current_class_name,
+            all_classes,
+            class_loader,
+        )];
+    }
+
     // ── Known array functions ────────────────────────
     // For element-extracting functions (array_pop, etc.)
     // resolve to the element ClassInfo directly.

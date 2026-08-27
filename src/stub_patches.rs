@@ -571,15 +571,25 @@ fn patch_ini_get(func: &mut FunctionInfo) {
 /// (GMP, BCMath): raising two numbers to a power can only produce a number.
 /// The stubs declare `object|int|float` for every call, so arithmetic on the
 /// result of an ordinary `pow(2, $n)` is checked against a class.
+/// An operand nobody typed decides nothing, and the union of both
+/// branches would put `object` back into every such call — so both
+/// conditionals here take the numeric branch unless an operand is
+/// provably an object.
 fn patch_pow(func: &mut FunctionInfo) {
     let numeric = PhpType::union(vec![PhpType::int(), PhpType::float()]);
     let object = PhpType::named(atom("object"));
-    func.conditional_return = Some(PhpType::conditional(
+    func.conditional_return = Some(PhpType::conditional_defaulting_to_else(
         "$num",
         false,
         object.clone(),
         object.clone(),
-        PhpType::conditional("$exponent", false, object.clone(), object, numeric),
+        PhpType::conditional_defaulting_to_else(
+            "$exponent",
+            false,
+            object.clone(),
+            object,
+            numeric,
+        ),
     ));
 }
 

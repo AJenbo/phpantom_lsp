@@ -1026,6 +1026,24 @@ impl Backend {
                     let owner_name = ctx.current_class.map(|c| c.name.as_str()).unwrap_or("");
                     let fn_args = TextArrayFuncArgs::new(text_args, ctx);
 
+                    // String builtins over literal arguments: the stub
+                    // declares the widest string the function can return,
+                    // but a call whose arguments are all literals has one
+                    // answer.  It names no class, so it travels purely as
+                    // the hint.
+                    if crate::type_engine::variable::string_func_rules::is_foldable_string_func(
+                        func_name,
+                    ) && let Some(folded) =
+                        crate::type_engine::variable::string_func_rules::string_func_literal_type(
+                            func_name, &fn_args,
+                        )
+                    {
+                        if let Some(ref mut hint_out) = return_type_hint_out {
+                            **hint_out = Some(folded);
+                        }
+                        return Vec::new();
+                    }
+
                     // Element-extracting functions (`array_pop`, `current`,
                     // …): the call's type *is* the element type.
                     if let Some(element_type) = array_func_element_type(func_name, &fn_args) {

@@ -106,6 +106,9 @@ impl fmt::Display for PhpType {
                     condition,
                     then_type,
                     else_type,
+                    // A modelling detail of how an undecided condition is
+                    // answered, not part of the type's spelling.
+                    else_when_undecided: _,
                 } = &**c;
                 if *negated {
                     write!(f, "{param} is not {condition} ? {then_type} : {else_type}")

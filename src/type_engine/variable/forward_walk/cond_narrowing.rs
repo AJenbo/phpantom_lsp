@@ -4740,6 +4740,27 @@ pub(crate) fn seed_assert_arg_subject_keys(
         // seeded the same way an `if` condition's subject is.
         seed_property_keys_into_scope(arg_expr, scope, ctx);
     }
+
+    // A tag can also name a path the call site never spells out —
+    // `@phpstan-assert bool $this->resolved` on a method with no
+    // arguments at all — so the tags themselves are read for subjects to
+    // seed, not just the arguments.
+    let snapshot = scope.locals.clone();
+    let resolver =
+        |vn: &str| -> Vec<ResolvedType> { snapshot.get(&atom(vn)).cloned().unwrap_or_default() };
+    let var_ctx = build_var_ctx("", ctx, &resolver);
+    let Some(info) = narrowing::extract_call_assertions(call, &var_ctx) else {
+        return;
+    };
+    let keys: Vec<String> = info
+        .assertions
+        .iter()
+        .filter_map(|assertion| narrowing::assertion_subject_key(&assertion.param_name, &info))
+        .filter(|key| narrowing::is_member_path_key(key))
+        .collect();
+    for key in keys {
+        seed_synthetic_key_if_needed(&key, scope, ctx);
+    }
 }
 
 /// Collect property access keys (e.g. `$a->foo`) from conditions that

@@ -2024,3 +2024,87 @@ function f(Base $x): void {
         "a leading backslash does not make it a different function, got: {hover}"
     );
 }
+
+// ─── `instanceof self` inside a trait ───────────────────────────────────────
+
+/// A trait is never instantiated, so `self` inside one of its methods is
+/// whichever class used it. Narrowing to the trait would leave only the
+/// members the trait happens to declare itself, and a trait need not
+/// declare what its own methods reach for: here `$value` is a private
+/// property of each using class.
+#[test]
+fn instanceof_self_in_a_trait_narrows_to_the_classes_that_use_it() {
+    let backend = create_test_backend();
+    let uri = "file:///trait_instanceof_self.php";
+    let content = r#"<?php
+namespace App;
+
+interface ValueType {}
+
+trait ScalarValueTrait
+{
+    public function equals(ValueType $other): bool
+    {
+        if ($other instanceof self) {
+            $other; // <-- here
+            return $this->value === $other->value;
+        }
+        return false;
+    }
+}
+
+class IntValue implements ValueType
+{
+    use ScalarValueTrait;
+    public function __construct(private int $value) {}
+}
+
+class StringValue implements ValueType
+{
+    use ScalarValueTrait;
+    public function __construct(private string $value) {}
+}
+"#;
+
+    let hover = hover_marked(&backend, uri, content);
+    assert!(
+        hover.contains("IntValue") && hover.contains("StringValue"),
+        "the branch proves `$other` is one of the using classes, got: {hover}"
+    );
+    assert!(
+        !hover.contains("ScalarValueTrait"),
+        "the trait itself is not a type any value has, got: {hover}"
+    );
+}
+
+/// With no class in the project using the trait there is nothing to
+/// answer with, so the trait itself stands in as it did before — a
+/// partial answer would rule out members some unread user declares.
+#[test]
+fn instanceof_self_in_an_unused_trait_keeps_the_trait() {
+    let backend = create_test_backend();
+    let uri = "file:///trait_instanceof_self_unused.php";
+    let content = r#"<?php
+namespace App;
+
+interface ValueType {}
+
+trait LonelyTrait
+{
+    public function equals(ValueType $other): bool
+    {
+        if ($other instanceof self) {
+            $other; // <-- here
+            return true;
+        }
+        return false;
+    }
+}
+"#;
+
+    let hover = hover_marked(&backend, uri, content);
+    assert!(
+        hover.contains("LonelyTrait"),
+        "with no using class the trait is still the best answer, got: {hover}"
+    );
+}

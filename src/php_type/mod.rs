@@ -364,6 +364,23 @@ pub struct ConditionalType {
     pub then_type: PhpType,
     /// The type when the condition is false.
     pub else_type: PhpType,
+    /// Whether an undecidable condition answers with `else_type` rather
+    /// than the union of both branches.
+    ///
+    /// A conditional someone wrote in a docblock describes two outcomes
+    /// the call really can have, so an argument that settles neither
+    /// leaves both on the table. A conditional we synthesised to patch a
+    /// stub can be modelling something narrower: `pow()`'s `object`
+    /// branch exists only for the operator-overloading extensions (GMP,
+    /// BCMath), and an argument nobody gave a type is no reason to
+    /// believe one of those is in play. Setting this on such a
+    /// conditional keeps the ordinary answer instead of widening to a
+    /// union with a branch the call almost certainly does not take.
+    ///
+    /// Never set from parsed PHPDoc — [`PhpType::conditional`] leaves it
+    /// off, and only [`PhpType::conditional_defaulting_to_else`] turns
+    /// it on.
+    pub else_when_undecided: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -840,6 +857,28 @@ impl PhpType {
             condition,
             then_type,
             else_type,
+            else_when_undecided: false,
+        })
+    }
+
+    /// Conditional type whose `then` branch needs proof.
+    ///
+    /// See [`ConditionalType::else_when_undecided`] for when to reach
+    /// for this instead of [`PhpType::conditional`].
+    pub fn conditional_defaulting_to_else(
+        param: impl AsRef<str>,
+        negated: bool,
+        condition: PhpType,
+        then_type: PhpType,
+        else_type: PhpType,
+    ) -> PhpType {
+        PhpType::conditional_type(ConditionalType {
+            param: atom(param.as_ref()),
+            negated,
+            condition,
+            then_type,
+            else_type,
+            else_when_undecided: true,
         })
     }
 

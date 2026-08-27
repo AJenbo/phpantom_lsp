@@ -188,6 +188,10 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                 &cond.then_type,
                 &cond.else_type,
             );
+            // A conditional that asks for proof answers an undecided
+            // condition with its else branch instead of the union of
+            // both — see [`ConditionalType::else_when_undecided`].
+            let undecided: Option<&PhpType> = cond.else_when_undecided.then_some(else_type);
             // Check if the conditional subject is a template parameter
             // with a default value (not a method $parameter).
             let target = param.as_str();
@@ -532,10 +536,13 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                                 tpl,
                             )
                         };
-                        return union_branch_types(
-                            resolve_branch(then_type),
-                            resolve_branch(else_type),
-                        );
+                        return match undecided {
+                            Some(branch) => resolve_branch(branch),
+                            None => union_branch_types(
+                                resolve_branch(then_type),
+                                resolve_branch(else_type),
+                            ),
+                        };
                     }
                 };
                 resolve_conditional_with_text_args_and_defaults(
@@ -585,10 +592,13 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                                 tpl,
                             )
                         };
-                        return union_branch_types(
-                            resolve_branch(then_type),
-                            resolve_branch(else_type),
-                        );
+                        return match undecided {
+                            Some(branch) => resolve_branch(branch),
+                            None => union_branch_types(
+                                resolve_branch(then_type),
+                                resolve_branch(else_type),
+                            ),
+                        };
                     }
                     None => else_type,
                 };
@@ -673,10 +683,13 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                                     tpl,
                                 )
                             };
-                            return union_branch_types(
-                                resolve_branch(then_type),
-                                resolve_branch(else_type),
-                            );
+                            return match undecided {
+                                Some(branch) => resolve_branch(branch),
+                                None => union_branch_types(
+                                    resolve_branch(then_type),
+                                    resolve_branch(else_type),
+                                ),
+                            };
                         }
                         else_type
                     }

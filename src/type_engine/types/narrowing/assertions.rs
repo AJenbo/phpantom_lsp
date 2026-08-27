@@ -36,6 +36,15 @@ pub(in crate::type_engine) struct CallAssertionInfo<'a> {
     pub(in crate::type_engine) parameters: SharedVec<ParameterInfo>,
     /// The call-site argument list.
     pub(in crate::type_engine) argument_list: &'a ArgumentList<'a>,
+    /// The subject key of the object the call was made on (`"$this"`,
+    /// `"$reflection"`, …), for a method call whose receiver is a plain
+    /// variable.
+    ///
+    /// An assertion tag may name a path through the receiver rather than
+    /// an argument — `@phpstan-assert bool $this->resolved` on a method
+    /// promises something about the object it was called on. Reading the
+    /// tag at the call site means substituting this for its `$this`.
+    pub(in crate::type_engine) receiver_key: Option<String>,
     /// Template parameter names from the callee's `@template` tags.
     template_params: Vec<Atom>,
     /// Template parameter → parameter name bindings (e.g. `("T", "$class")`).
@@ -71,6 +80,7 @@ pub(in crate::type_engine) fn extract_call_assertions<'a>(
                 assertions: func_info.type_assertions,
                 parameters: func_info.parameters,
                 argument_list: &func_call.argument_list,
+                receiver_key: None,
                 template_params: func_info.template_params,
                 template_bindings: func_info.template_bindings,
             })
@@ -81,7 +91,13 @@ pub(in crate::type_engine) fn extract_call_assertions<'a>(
                 _ => return None,
             };
             let class_info = resolve_static_receiver_class(static_call.class, ctx)?;
-            build_method_assertion_info(&class_info, method_name, &static_call.argument_list, ctx)
+            build_method_assertion_info(
+                &class_info,
+                method_name,
+                &static_call.argument_list,
+                None,
+                ctx,
+            )
         }
         Call::Method(method_call) => {
             let method_name = match &method_call.method {
@@ -89,7 +105,13 @@ pub(in crate::type_engine) fn extract_call_assertions<'a>(
                 _ => return None,
             };
             let class_info = resolve_instance_receiver_class(method_call.object, ctx)?;
-            build_method_assertion_info(&class_info, method_name, &method_call.argument_list, ctx)
+            build_method_assertion_info(
+                &class_info,
+                method_name,
+                &method_call.argument_list,
+                expr_to_subject_key(method_call.object),
+                ctx,
+            )
         }
         Call::NullSafeMethod(method_call) => {
             let method_name = match &method_call.method {
@@ -97,7 +119,13 @@ pub(in crate::type_engine) fn extract_call_assertions<'a>(
                 _ => return None,
             };
             let class_info = resolve_instance_receiver_class(method_call.object, ctx)?;
-            build_method_assertion_info(&class_info, method_name, &method_call.argument_list, ctx)
+            build_method_assertion_info(
+                &class_info,
+                method_name,
+                &method_call.argument_list,
+                expr_to_subject_key(method_call.object),
+                ctx,
+            )
         }
     }
 }
@@ -168,6 +196,7 @@ fn build_method_assertion_info<'a>(
     class: &ClassInfo,
     method_name: &str,
     argument_list: &'a ArgumentList<'a>,
+    receiver_key: Option<String>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<CallAssertionInfo<'a>> {
     let (method, _) =
@@ -176,6 +205,7 @@ fn build_method_assertion_info<'a>(
         assertions: method.type_assertions,
         parameters: method.parameters,
         argument_list,
+        receiver_key,
         template_params: method.template_params,
         template_bindings: method.template_bindings,
     })
@@ -382,8 +412,7 @@ pub(in crate::type_engine) fn try_apply_custom_assert_narrowing(
         if assertion.kind != AssertionKind::Always {
             continue;
         }
-        if let Some(arg_var) =
-            find_assertion_arg_variable(info.argument_list, &assertion.param_name, &info.parameters)
+        if let Some(arg_var) = assertion_subject_key(&assertion.param_name, &info)
             && arg_var == ctx.var_name
         {
             // Resolve the asserted type.  When the type is a template
@@ -715,6 +744,36 @@ pub(in crate::type_engine) fn fold_negation_pairs<'b>(
 /// path (`$arg->value`), or an array access (`$stmts["0"]`) so that
 /// assertion narrowing applies to non-variable subjects, not just plain
 /// variables.
+/// The subject key an assertion tag names at the call site.
+///
+/// Most tags name a parameter (`@phpstan-assert Foo $value`), so the
+/// subject is whichever argument was bound to it — that is
+/// [`find_assertion_arg_variable`]. A tag can instead reach through a
+/// member: `@phpstan-assert bool $this->resolved` promises something
+/// about the object the call was made on, and `@phpstan-assert Foo
+/// $value->inner` about a path below an argument. Both are written from
+/// inside the callee, so the leading variable is rewritten to whatever
+/// stands in its place at the call site and the rest of the path is
+/// carried over unchanged.
+///
+/// Returns `None` when the leading variable has no counterpart here (a
+/// `$this->…` tag on a static call, a receiver that is not a plain
+/// variable, an argument that was not written).
+pub(in crate::type_engine) fn assertion_subject_key(
+    param_name: &str,
+    info: &CallAssertionInfo<'_>,
+) -> Option<String> {
+    let Some(split) = param_name.find(['-', '[', ':']) else {
+        return find_assertion_arg_variable(info.argument_list, param_name, &info.parameters);
+    };
+    let (root, rest) = param_name.split_at(split);
+    let base = match root {
+        "$this" => info.receiver_key.clone()?,
+        param => find_assertion_arg_variable(info.argument_list, param, &info.parameters)?,
+    };
+    Some(format!("{base}{rest}"))
+}
+
 pub(in crate::type_engine) fn find_assertion_arg_variable(
     argument_list: &ArgumentList<'_>,
     param_name: &str,

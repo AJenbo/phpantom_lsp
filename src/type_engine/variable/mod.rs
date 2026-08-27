@@ -18,6 +18,7 @@ pub(crate) mod forward_walk;
 pub(crate) mod raw_type_inference;
 pub(crate) mod resolution;
 pub(crate) mod rhs_resolution;
+pub(crate) mod string_func_rules;
 
 // ─── PHP array function classifications ─────────────────────────────────────
 //

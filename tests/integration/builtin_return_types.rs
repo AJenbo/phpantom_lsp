@@ -477,16 +477,65 @@ function probe(array $numbers): void {
     assert_assigned_types(content, &[("$seeded", "int"), ("$unseeded", "int|null")]);
 }
 
-/// `pow()`'s `object` branch belongs to the operator-overloading extensions;
-/// two numbers can only produce a number. An operand that might be an object
-/// keeps it.
+/// A string builtin handed literals produces a literal, one per
+/// alternative the subject can be. The stub's bare `string` is what the
+/// function can return in general, not what this call returns, and a
+/// caller checking the result against a literal union needs the
+/// difference.
 #[test]
-fn pow_drops_the_object_branch_for_numeric_operands() {
+fn string_builtins_fold_the_literals_they_are_handed() {
     let content = r#"<?php
-function probe(int $n, float $f, mixed $anything): void {
+function probe(bool $flag, string $unknown): void {
+    $kind = $flag ? 'Interface' : 'Trait';
+    $lowered = strtolower($kind);
+    $shouted = strtoupper('hello');
+    $titled = ucfirst('hello');
+    $trimmed = trim('  padded  ');
+    $swapped = str_replace('_', '-', 'a_b');
+    $unfoldable = strtolower($unknown);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$lowered", "'interface'|'trait'"),
+            ("$shouted", "'HELLO'"),
+            ("$titled", "'Hello'"),
+            ("$trimmed", "'padded'"),
+            ("$swapped", "'a-b'"),
+            ("$unfoldable", "string"),
+        ],
+    );
+}
+
+/// A constant's value in the stubs describes the machine the stubs came
+/// from, so folding a builtin over one would turn an
+/// environment-dependent answer into a literal the engine then treats as
+/// certain. The declared type is the honest answer there.
+#[test]
+fn a_string_builtin_over_a_constant_keeps_its_declared_type() {
+    let content = r#"<?php
+function probe(string $path): void {
+    $normalised = str_replace(DIRECTORY_SEPARATOR, '/', $path);
+    $os = strtolower(PHP_OS);
+}
+"#;
+    assert_assigned_types(content, &[("$normalised", "string"), ("$os", "string")]);
+}
+
+/// `pow()`'s `object` branch belongs to the operator-overloading extensions
+/// (GMP, BCMath); two numbers can only produce a number. Only an operand
+/// that *is* one of those objects brings the branch back — an operand nobody
+/// typed is no evidence for it, and unioning the branch back in for every
+/// such call would report an `object` where the code returns a number.
+#[test]
+fn pow_reports_an_object_only_for_an_operand_that_is_one() {
+    let content = r#"<?php
+function probe(int $n, float $f, mixed $anything, \GMP $gmp): void {
     $ints = pow(2, 3);
     $mixedNumeric = pow($n, $f);
-    $either = pow($anything, 2);
+    $untyped = pow($anything, 2);
+    $overloaded = pow($gmp, 2);
 }
 "#;
     assert_assigned_types(
@@ -494,7 +543,8 @@ function probe(int $n, float $f, mixed $anything): void {
         &[
             ("$ints", "int|float"),
             ("$mixedNumeric", "int|float"),
-            ("$either", "object|int|float"),
+            ("$untyped", "int|float"),
+            ("$overloaded", "object"),
         ],
     );
 }

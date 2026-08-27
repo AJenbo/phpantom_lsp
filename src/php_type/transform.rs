@@ -158,6 +158,7 @@ impl PhpType {
                 condition: c.condition.resolve_names(resolver),
                 then_type: c.then_type.resolve_names(resolver),
                 else_type: c.else_type.resolve_names(resolver),
+                else_when_undecided: c.else_when_undecided,
             }),
 
             TypeKind::ClassString(inner) => {
@@ -262,6 +263,7 @@ impl PhpType {
                 condition: c.condition.shorten(),
                 then_type: c.then_type.shorten(),
                 else_type: c.else_type.shorten(),
+                else_when_undecided: c.else_when_undecided,
             }),
 
             TypeKind::ClassString(inner) => {
@@ -462,6 +464,7 @@ impl PhpType {
                 else_type: c
                     .else_type
                     .resolve_self_refs_bounded(class_name, parent_class),
+                else_when_undecided: c.else_when_undecided,
             }),
             TypeKind::KeyOf(inner) => {
                 PhpType::key_of(inner.resolve_self_refs_bounded(class_name, parent_class))
@@ -775,6 +778,7 @@ impl PhpType {
                 condition: recurse(&c.condition),
                 then_type: recurse(&c.then_type),
                 else_type: recurse(&c.else_type),
+                else_when_undecided: c.else_when_undecided,
             }),
             _ => self.clone(),
         }
@@ -994,6 +998,7 @@ impl PhpType {
                 condition: c.condition.replace_self_inner(replacement, lsb),
                 then_type: c.then_type.replace_self_inner(replacement, lsb),
                 else_type: c.else_type.replace_self_inner(replacement, lsb),
+                else_when_undecided: c.else_when_undecided,
             }),
 
             TypeKind::ClassString(inner) => PhpType::class_string(
@@ -1204,6 +1209,7 @@ impl PhpType {
                 condition: c.condition.substitute(subs),
                 then_type: c.then_type.substitute(subs),
                 else_type: c.else_type.substitute(subs),
+                else_when_undecided: c.else_when_undecided,
             }),
 
             TypeKind::ClassString(inner) => {

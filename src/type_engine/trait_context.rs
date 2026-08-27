@@ -85,6 +85,43 @@ pub(crate) fn trait_this_bounds(
     bounds
 }
 
+/// The classes that use `trait_cls`, loaded.
+///
+/// Where [`trait_this_bounds`] answers "what is every host guaranteed to
+/// be" — a single set of bounds all of them satisfy — this answers with
+/// the hosts themselves.  A context that can hold a union wants this
+/// one: `$x instanceof self` inside a trait proves `$x` is one of the
+/// hosts, and each host's own members are reachable from that union
+/// even when the hosts share no ancestor that declares them.
+///
+/// Returns an empty vector for a non-trait, for a trait with no host in
+/// the project, and for one with more hosts than [`MAX_TRAIT_USERS`].
+pub(crate) fn trait_host_classes(
+    trait_cls: &ClassInfo,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    backend: Option<&crate::Backend>,
+) -> Vec<Arc<ClassInfo>> {
+    if trait_cls.kind != ClassLikeKind::Trait {
+        return Vec::new();
+    }
+    let mut hosts: Vec<Arc<ClassInfo>> = Vec::new();
+    for name in trait_users(trait_cls, all_classes, class_loader, backend) {
+        let loaded = crate::class_lookup::find_class_by_name(all_classes, &name)
+            .map(Arc::clone)
+            .or_else(|| class_loader(&name));
+        // A host we cannot read leaves the union describing fewer classes
+        // than it should, which would rule out members the missing one
+        // declares.  Answering with nothing keeps the caller on the
+        // trait itself rather than on a union that is wrong.
+        let Some(cls) = loaded else {
+            return Vec::new();
+        };
+        ClassInfo::push_unique_arc(&mut hosts, cls);
+    }
+    hosts
+}
+
 /// The FQNs every class using `trait_cls` is an instance of.
 ///
 /// A using class counts as an instance of itself, so a trait with a single

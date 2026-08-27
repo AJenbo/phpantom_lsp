@@ -495,6 +495,21 @@ pub(in crate::type_engine) fn resolve_array_func_element_type(
     array_func_element_type(func_name, &AstArrayFuncArgs { args, ctx })
 }
 
+/// Constant-fold a string builtin whose arguments are all literals.
+///
+/// See [`super::string_func_rules`] for which functions fold and why the
+/// literal answer matters.
+pub(in crate::type_engine) fn resolve_string_func_literal_type(
+    func_name: &str,
+    args: &ArgumentList<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<PhpType> {
+    if !super::string_func_rules::is_foldable_string_func(func_name) {
+        return None;
+    }
+    super::string_func_rules::string_func_literal_type(func_name, &AstArrayFuncArgs { args, ctx })
+}
+
 /// Extract per-argument source text from a parsed `ArgumentList`.
 ///
 /// Returns one `String` per argument by walking the AST nodes and
