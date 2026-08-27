@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787835060054,
+  "lastUpdate": 1787840886650,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -25159,6 +25159,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 74.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "b4e7a4b97231df777bef019becd569a44815da53",
+          "message": "A callable's signature is completed from where it is written, not only\nfrom what it declares",
+          "timestamp": "2026-08-27T16:15:00+02:00",
+          "tree_id": "950de113fbb536e56ca7e0dbbea3b5edd5304ef1",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/b4e7a4b97231df777bef019becd569a44815da53"
+        },
+        "date": 1787840880499,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 36.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 73,
             "unit": "MiB"
           }
         ]
