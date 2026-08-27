@@ -11,20 +11,29 @@ Each entry below carries an **Impact · Complexity** rating using the same
 scale defined in [`docs/todo.md`](../todo.md); that table is also where
 each bug's row lives in the current sprint/backlog.
 
-All entries below come from the 2026-08-25 triage of the PHPStan Source
-sample project (242 confirmed false positives after the genuine findings
-were patched in the sample). Site counts refer to that sweep; every
-mechanism was either reproduced in a minimal project or confirmed by
-reading the guard construct PHPStan honours. The sweep is a snapshot, so
-a site named here may already read differently: re-run the analyser
-before working an entry, and trim the shapes that no longer reproduce.
+All entries below come from triage of the PHPStan Source sample project,
+re-swept on 2026-08-27 (185 confirmed false positives after the genuine
+findings were patched in the sample, down from 242 at the 2026-08-25
+triage). Site counts refer to that sweep; every mechanism was either
+reproduced in a minimal project or confirmed by reading the guard
+construct PHPStan honours. The sweep is a snapshot, so a site named here
+may already read differently: re-run the analyser before working an
+entry, and trim the shapes that no longer reproduce. Line numbers drift
+by a line or two between sweeps — match on the surrounding construct, not
+on the number.
 
 Entries are grouped by the mechanism that has to change, not by the
 symptom that surfaced: one entry is one root cause, however many shapes
 it shows up in. Splitting a shape out into its own entry because it
 reads differently in the source is how this list grew past forty in the
 first place. If two entries would be fixed by the same change, they are
-one entry.
+one entry. Defects too small to earn a row of their own are collected in
+[B301](#b301-narrowing-defects-with-a-single-site-each) rather than given
+one each.
+
+Of the 185 sites in the latest sweep, 140 are attributed to an entry
+below. The unattributed remainder is described in
+[Not yet attributed](#not-yet-attributed).
 
 ## Crashes
 
@@ -40,7 +49,7 @@ No outstanding items.
 
 **Impact: Medium · Complexity: Medium-High**
 
-6 sites, four shapes of one missing capability: reading the arguments a
+4 sites, four shapes of one missing capability: reading the arguments a
 builtin was actually handed and computing the answer from them, instead
 of falling back on the widest type the signature allows.
 
@@ -85,7 +94,7 @@ of falling back on the widest type the signature allows.
 
 **Impact: High · Complexity: Very High**
 
-44 sites — by far the largest cluster here, and one root cause: what the
+42 sites — by far the largest cluster here, and one root cause: what the
 narrowing store keys a proof against, and what invalidates it. PHPStan
 keys specified types by expression string and keeps them until something
 writes to that expression. We handle plain variables reliably and
@@ -94,20 +103,19 @@ reconciliation engine planned as
 [T20](type-inference.md#t20-type-narrowing-reconciliation-engine).
 
 **a. A guard on a call's result doesn't narrow the same call afterwards**
-(18 sites). This ubiquitous idiom is clean under PHPStan and re-resolved
+(17 sites). This ubiquitous idiom is clean under PHPStan and re-resolved
 from the declaration by us, which hands back the wide type:
 
 ```php
 if ($analyserResult->getDependencies() !== null) {
     $this->switchTmpFile($analyserResult->getDependencies(), ...); // non-null here
 }
-// and the ternary form:
-$f = $r->getFileName() !== false ? $r->getFileName() : null;      // string|null
 ```
 
 Concentrated around reflection accessors (`getFileName()`,
-`getDocComment()`, `getResolvedPhpDoc()`, `getDependencies()`).
-Sites: `src/Analyser/NodeScopeResolver.php:5365`,
+`getDocComment()`, `getResolvedPhpDoc()`, `getDependencies()`). The
+ternary spelling of the same idiom narrows correctly now.
+Sites: `src/Analyser/NodeScopeResolver.php:1121, 5320, 5366`,
 `src/Analyser/ResultCache/ResultCacheManager.php:858`,
 `src/Command/AnalyseApplication.php:329, 333, 337`,
 `src/PhpDoc/PhpDocInheritanceResolver.php:246, 282`,
@@ -131,13 +139,10 @@ if ($tag->value === null) { continue; } elseif (!($tag->value instanceof Sub)) {
 $tag->value->n;               // lost
 ```
 
-Notably `src/PhpDoc/TypeNodeResolver.php:1303` shows the engine *does*
-apply consecutive `instanceof` subtractions on a property fetch but not
-a final `!== null` in an `elseif`. Sites:
-`src/Analyser/MutatingScope.php:2946, 2949`,
-`src/Analyser/NodeScopeResolver.php:2873, 4837, 4843, 4999, 5102`,
+Sites: `src/Analyser/MutatingScope.php:1778, 2946, 2949`,
+`src/Analyser/NodeScopeResolver.php:1689, 1702, 2874, 3866, 4838, 4844, 5000, 5103`,
+`src/Analyser/ExprHandler/AssignHandler.php:1027`,
 `src/Analyser/TypeSpecifier.php:600`,
-`src/PhpDoc/TypeNodeResolver.php:1303`,
 `src/Rules/FunctionDefinitionCheck.php:195` (narrowed `$param`
 `use`-captured by a closure),
 `src/Rules/PhpDoc/InvalidPhpDocTagValueRule.php:98, 99`,
@@ -146,7 +151,7 @@ a final `!== null` in an `elseif`. Sites:
 `src/Type/ValueOfType.php:59`.
 
 **c. Re-testing a condition, or a boolean flag holding it, doesn't
-re-apply its narrowing** (9 sites). Three shapes PHPStan's
+re-apply its narrowing** (8 sites). Three shapes PHPStan's
 specified-types machinery handles:
 
 ```php
@@ -154,19 +159,23 @@ specified-types machinery handles:
 if (count($args) > 0) { $acceptor = Selector::selectFromArgs(...); }
 if (count($args) > 0) { use($acceptor); }                    // non-null
 
-// 2. A boolean flag recording an instanceof disjunction:
-$shouldCheck = $node instanceof Function_ || $node instanceof ClassMethod || ...;
-if ($stmtCount === 0 && $shouldCheck) { $node->getReturnType(); }
+// 2. A boolean flag recording an instanceof, then read to pick a subject:
+$constArrayIsI = $types[$i] instanceof ConstantArrayType && ...;
+$constArray = $constArrayIsI ? $types[$i] : $types[$j];      // ConstantArrayType
 
 // 3. Two variables assigned together; checking one implies the other:
 if ($assertions === null) { return null; } // $acceptor was set iff $assertions was
 ```
 
+Shape 2 accounts for the whole `TypeCombinator` cluster: the flag is
+recorded, but the subject it narrows is an array dim rather than a
+plain variable, so the ternary that reads the flag back hands out the
+declared element type.
 Sites: `src/Analyser/ExprHandler/FuncCallHandler.php:977, 1042`,
 `src/Analyser/ExprHandler/MethodCallHandler.php:350`,
 `src/Analyser/ExprHandler/StaticCallHandler.php:455`,
 `src/Analyser/NodeScopeResolver.php:693, 707, 727, 732`,
-`src/Type/TypeCombinator.php:1994`.
+`src/Type/TypeCombinator.php:1991, 1994, 2012, 2013, 2020, 2021, 2029`.
 
 **d. Reading a property of `$this` before `$this instanceof Subclass`
 kills the narrowing** (1 site, isolated to a two-line repro). The store
@@ -208,20 +217,25 @@ or a literal `$files = [$file]`), and after a foreach over a local
 array that every branch pushed into (reproduced minimally; also
 `src/Analyser/TypeSpecifier.php:542`).
 
-Sites: `src/Analyser/NodeScopeResolver.php:1103, 1112, 1116, 1903, 2001, 2153, 5405, 5413`,
+Sites: `src/Analyser/NodeScopeResolver.php:1103, 1112, 1116, 1903, 2001, 2153, 5406, 5414`,
 `src/Rules/Properties/SetNonVirtualPropertyHookAssignRule.php:64, 72, 80, 81, 90`,
 `src/Rules/TooWideTypehints/TooWideParameterOutTypeCheck.php:47, 56`,
 `src/Reflection/BetterReflection/SourceLocator/OptimizedDirectorySourceLocator.php:149, 150`,
 `src/Analyser/TypeSpecifier.php:542`.
 
-### B276. A `@phpstan-assert bool` doesn't rule out `null`
+### B301. Narrowing defects with a single site each
 
-**Impact: Low-Medium · Complexity: Medium**
+**Impact: Medium · Complexity: Medium-High**
 
-1 site, reproduced minimally, and the last of what this entry used to
-cover — the assert tag itself, on a property or on a method result, and
-inherited two interfaces up, all narrow correctly now. What is left is
-the single combination of asserted type and subject type that does not:
+4 sites, four independent mechanisms. None is large enough to earn a
+backlog row of its own, and each is reproduced minimally, so they are
+collected here rather than filed separately. Fixing one does not fix
+the others — take them one bullet at a time.
+
+**a. A `@phpstan-assert bool` doesn't rule out `null`.** The assert tag
+itself, on a property or on a method result, and inherited two
+interfaces up, all narrow correctly. One combination of asserted type
+and subject type does not:
 
 ```php
 /** @phpstan-assert bool $v */
@@ -238,16 +252,12 @@ and the equivalent `if (is_bool($v))` guard over `?bool` narrows. Only
 the assert-`bool`-over-`null` pairing leaves the `null` behind.
 Site: `src/Reflection/ClassReflection.php:1524`.
 
-### B277. `is_float()` branches don't eliminate `float` from `int|float`
-
-**Impact: Medium · Complexity: Medium**
-
-3 sites. The plain shape resolves correctly — an `int|float` subject
-comes back as `float` in the `is_float()` branch, `int` in the else, and
-`int` after a branch that reassigns it — so what breaks is the shape at
-the sites, where the subject reaches the check through a swap
-destructuring (`[$min, $max] = [$max, $min];`) and starts out
-`int|float|null`:
+**b. Swap destructuring drops the type it was handed.** The plain
+`is_float()` shape resolves correctly — an `int|float` subject comes
+back as `float` in the `is_float()` branch, `int` in the else, and `int`
+after a branch that reassigns it — so what breaks is the shape at the
+sites, where the subject reaches the check through a swap destructuring
+and starts out `int|float|null`:
 
 ```php
 if ($min !== null && $max !== null && $min > $max) { [$min, $max] = [$max, $min]; }
@@ -260,16 +270,29 @@ destructuring, not the guard, is where the type is lost. Sites:
 `src/Reflection/InitializerExprTypeResolver.php:2533 (both args)`,
 `src/Type/Constant/ConstantArrayTypeBuilder.php:242`.
 
-### B281. `instanceof self` in a trait narrows to the trait instead of the using class
-
-**Impact: Medium · Complexity: Medium-High**
-
-1 site, reproduced minimally. Inside a trait method, `self` is the
-class using the trait; `$type instanceof self && $this->value === $type->value`
-must resolve `$value` against that class. We narrow to an intersection
-with the *trait* and report "Property 'value' not found on any of the 2
+**c. `instanceof self` in a trait narrows to the trait instead of the
+using class.** Inside a trait method, `self` is the class using the
+trait; `$type instanceof self && $this->value === $type->value` must
+resolve `$value` against that class. We narrow to an intersection with
+the *trait* and report "Property 'value' not found on any of the 2
 possible types (PHPStan\Type\Type, ...ConstantScalarTypeTrait)".
+`type_engine::trait_context` already answers "what is `$this` inside a
+trait" this way for the receiver; `self` in an `instanceof` position
+does not go through it.
 Site: `src/Type/Traits/ConstantScalarTypeTrait.php:74`.
+
+**d. By-reference out-parameters.** Complements
+[T41](type-inference.md#t41-param-out-is-parsed-but-never-read):
+
+- A by-ref parameter the callee unconditionally assigns (no
+  `@param-out` tag) should get the assigned type after the call
+  (`ScopeOps::getTypeFromCache(..., ?string &$key)` always sets a
+  `string`; `src/Analyser/MutatingScope.php:1031`).
+- The *input* type of a by-ref argument that merely creates the
+  variable must not be checked at all — PHPStan skips it
+  (`preg_match_all(..., $matches, PREG_OFFSET_CAPTURE)` where the
+  variable still holds the previous iteration's shape;
+  `src/Parser/RichParser.php:183`).
 
 ## Arithmetic
 
@@ -277,18 +300,7 @@ No outstanding items.
 
 ## Symbol resolution
 
-### B291. A name that is both a class and a namespace fails to resolve through imports and templates
-
-**Impact: Medium · Complexity: Medium-High**
-
-4 sites. `PhpParser\Node\Scalar` is a class (`Node/Scalar.php`) *and* a
-namespace (`Node/Scalar/`). With `use PhpParser\Node\Scalar;` in scope,
-a docblock `@param list<Scalar|...>` stays unresolved as the short name
-`Scalar` (`build/PHPStan/Build/OrChainIdenticalComparisonToInArrayRule.php:107`),
-and `@implements ExprHandler<Scalar>` + `@param T $expr` substitution
-produces a `Scalar` that isn't recognised as a subtype of
-`PhpParser\Node\Expr` even though `abstract class Scalar extends Expr`
-(`src/Analyser/ExprHandler/ScalarHandler.php:49, 59, 64`).
+No outstanding items.
 
 ## Array types
 
@@ -296,7 +308,7 @@ produces a `Scalar` that isn't recognised as a subtype of
 
 **Impact: Medium-High · Complexity: Medium-High**
 
-15 sites. Every shape below is the same gap seen from one side or the
+14 sites. Every shape below is the same gap seen from one side or the
 other: the element type of an array the engine watched being built, or
 the element type a key check proves is there.
 
@@ -317,13 +329,9 @@ the element type a key check proves is there.
   and `isset($options['default'])` over `array<string, ?Type>` must
   strip `null` from the value type
   (`src/Type/Php/FilterFunctionReturnTypeHelper.php:198`).
-- The mirror image, where the *key* is what the check proves something
-  about: `array_key_exists($tag, $flippedMapping)` over an
-  `array<string, class-string>` proves `$tag` is a `string`, so a `$tag`
-  read out of `array_keys()` on a bare `array` (Nette's
-  `Definition::getTags()`) stops being `array-key` inside the branch.
-  `isset($arr[$k])` says the same thing. Site:
-  `src/DependencyInjection/ValidateServiceTagsExtension.php:93`.
+
+The mirror image — where the *key* is what a check proves something
+about — resolves correctly now.
 
 ## Docblock handling
 
@@ -342,7 +350,11 @@ diagnostics fire as errors:
 - Elements of an undocblocked `array` parameter (closures included) —
   e.g. `src/Type/UnionType.php:527`, where `instanceof`-guarded
   accesses on the same element are correctly silent and only the bare
-  `else` branch reports.
+  `else` branch reports. The `$arg`/`$funcCallArg` reads in
+  `src/Reflection/ParametersAcceptorSelector.php:211-213`,
+  `src/Analyser/ExprHandler/Helper/ClosureTypeResolver.php:825-831`,
+  `src/Analyser/ScopeOps.php:76` and
+  `src/Analyser/NodeScopeResolver.php:3844, 3845` are the same shape.
 - `getAttribute()`-style `@return mixed` values combined with `??`
   (`mixed ?? Arg` must be `mixed`) and flowing through `use()` captures
   (`src/Reflection/ParametersAcceptorSelector.php:129-145`,
@@ -376,14 +388,17 @@ The fix direction: these sources must uniformly produce `mixed`,
 whichever spelling declares it, and member/argument checks on `mixed`
 must follow the severity policy (hint, not error).
 
-### B296. Closure and arrow-function signatures aren't completed from their context and body
+### B296. Signatures aren't completed from the call site, the body, or a neighbouring docblock
 
 **Impact: High · Complexity: High**
 
-23 sites, three shapes. A closure's declared signature is only part of
-what its parameters and return type are: the rest comes from the
-parameter it is passed to, from its own body, and from a docblock that
-isn't attached to the closure node.
+25 sites, five shapes. A declared signature is only part of what a
+callable's parameters and return type are: the rest comes from the
+parameter it is passed to, from the argument that binds a template, from
+its own body, and from a docblock that isn't attached to the node.
+Shapes a and d are two views of one gap — template arguments the
+inference engine has no source for — and b, c and e are the
+signature-completion side of the same subsystem.
 
 **a. Callback parameters aren't inferred from templated callable
 parameters** (16 sites). The `usort` stub declares `@template T` /
@@ -418,41 +433,17 @@ Sites: `src/Reflection/Type/IntersectionTypeUnresolvedMethodPrototypeReflection.
 `src/Reflection/Type/UnionTypeUnresolvedMethodPrototypeReflection.php:49`,
 `src/Reflection/Type/UnionTypeUnresolvedPropertyPrototypeReflection.php:47`.
 
-**c. `@param` docblocks aren't applied in two placement shapes**
-(3 sites):
+**c. A doc comment above a closure assignment doesn't type the closure**
+(2 sites). A doc comment above `$closure = static function (...) { ... };`
+attaches to the expression statement, not the closure node; its
+`@param` tags must still type the closure's parameters
+(`src/Analyser/ExprHandler/FuncCallHandler.php:707, 708`).
 
-- A doc comment above `$closure = static function (...) { ... };`
-  attaches to the expression statement, not the closure node; its
-  `@param` tags must still type the closure's parameters
-  (`src/Analyser/ExprHandler/FuncCallHandler.php:707, 708`).
-- A trait method implementing an interface method must inherit the
-  interface's `@param` docblock (`Type::getTemplateType()` declares
-  `@param class-string`; the trait implementation loses it —
-  `src/Type/Traits/LateResolvableTypeTrait.php:86`).
-
-### B299. By-reference out-parameter types: no body inference, and by-ref inputs are type-checked
-
-**Impact: Medium · Complexity: Medium-High**
-
-2 sites, complementing [T41](type-inference.md#t41-param-out-is-parsed-but-never-read):
-
-- A by-ref parameter the callee unconditionally assigns (no
-  `@param-out` tag) should get the assigned type after the call
-  (`ScopeOps::getTypeFromCache(..., ?string &$key)` always sets a
-  `string`; `src/Analyser/MutatingScope.php:1031`).
-- The *input* type of a by-ref argument that merely creates the
-  variable must not be checked at all — PHPStan skips it
-  (`preg_match_all(..., $matches, PREG_OFFSET_CAPTURE)` where the
-  variable still holds the previous iteration's shape;
-  `src/Parser/RichParser.php:183`).
-
-### B300. Template arguments aren't recovered from `class-string`, `@implements`, or a constructor argument
-
-**Impact: Medium · Complexity: High**
-
-8 sites, two shapes. Both need a template argument that is nowhere in
-the call's own type arguments, and both then have to carry the recovered
-value through the expressions that read it.
+**d. Template arguments aren't recovered from `class-string`,
+`@implements`, or a constructor argument** (8 sites). Both shapes need a
+template argument that is nowhere in the call's own type arguments, and
+both then have to carry the recovered value through the expressions that
+read it.
 
 - `CollectedDataNode::get()` declares
   `@template TCollector of Collector<Node, TValue>` /
@@ -474,6 +465,45 @@ value through the expressions that read it.
   `build/PHPStan/Build/TurboAttributeCollector.php:162, 165, 169`,
   `src/Cache/FileCacheStorage.php:151`.
 
+**e. A trait method implementing an interface method doesn't inherit its
+`@param` docblock** (1 site). `Type::getTemplateType()` declares
+`@param class-string`; the trait implementation loses it
+(`src/Type/Traits/LateResolvableTypeTrait.php:86`).
+
 ## Miscellaneous
 
 No outstanding items.
+
+## Not yet attributed
+
+45 of the 2026-08-27 sweep's 185 sites are not attributed to an entry
+above. Most are neighbours of a shape that already has an entry and need
+only a read to place; the recurring ones are recorded here so a future
+triage starts from them rather than rediscovering them.
+
+- **Four are not our bug.** `PHPStan\ExtensionInstaller\GeneratedConfig`
+  is written at install time and is absent from a plain checkout, so
+  `GeneratedConfig::EXTENSIONS` genuinely names a class that is not
+  there (`src/Analyser/ResultCache/ResultCacheManager.php:1396`,
+  `src/Command/CommandHelper.php:309`,
+  `src/Diagnose/PHPStanDiagnoseExtension.php:132, 142`). They are
+  correct findings against the sample as checked out, not false
+  positives; a sweep that counts them is counting four too many.
+- **A `foreach` key reaching a `string` parameter** —
+  `src/DependencyInjection/ConditionalTagsExtension.php:45` and
+  `src/Rules/PhpDoc/WrongVariableNameInVarTagRule.php:376` both report
+  "expects string, got int", so the key type of an array whose keys are
+  strings is coming back as the `int` half of `array-key`.
+- **Unresolved receivers with no entry yet**:
+  `src/Analyser/ResultCache/ResultCacheManager.php:832, 837` (`$error`),
+  `src/DependencyInjection/NeonAdapter.php:102, 103` (`$st`),
+  `src/Type/Regex/RegexGroupParser.php:160, 168` (`$child`,
+  `$children[$i + 1]`), `src/PhpDoc/StubValidator.php:57`
+  (`$pathRoutingParser`), `src/Analyser/ScopeOps.php:511` (an empty
+  subject name, which is a reporting bug of its own).
+- **`src/Analyser/ResultCache/ResultCacheManager.php:727`** returns
+  `non-empty-list<int>|list<string>` where `array<string>` is declared —
+  an array built in two branches that keeps the key type of one and the
+  value type of the other.
+- **`src/Rules/Properties/ExistingClassesInPropertyHookTypehintsRule.php:41`**
+  passes `?string` to a `string` parameter.

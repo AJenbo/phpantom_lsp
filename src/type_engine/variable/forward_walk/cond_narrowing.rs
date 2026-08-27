@@ -382,9 +382,6 @@ struct Conjuncts {
     /// How many operands contributed a positive `instanceof` naming a
     /// single class.
     operands: usize,
-    /// A `||` chain contributed, so at least one contribution is a set of
-    /// alternatives rather than a class the value definitely is.
-    saw_alternatives: bool,
     /// At least one contributing operand was `is_a($x, C::class, true)` —
     /// a string alternative on the subject must survive the narrowing.
     allow_string: bool,
@@ -410,11 +407,10 @@ impl Conjuncts {
     /// them at once.
     ///
     /// `$x instanceof A && $x instanceof B` proves both, so the value is
-    /// `A&B`.  One operand on its own proves a single class, and a `||`
-    /// chain proves only that the value is one of its members, so
-    /// neither concludes an intersection.
+    /// `A&B`.  One operand on its own proves a single class, so it does
+    /// not conclude an intersection.
     fn is_intersection(&self) -> bool {
-        self.operands > 1 && !self.saw_alternatives
+        self.operands > 1
     }
 }
 
@@ -516,7 +512,15 @@ pub(crate) fn apply_condition_narrowing<'b>(
     // `&&` operands so we can merge them, plus where each subject's
     // classes came from so the merge knows whether they are alternatives
     // or an intersection.
+    //
+    // Operands that prove a single class and operands that prove a set of
+    // alternatives are kept apart, because `&&` intersects what its
+    // operands prove and these two cannot be intersected by unioning them
+    // into one list.  `$b instanceof A && ($cls === A::class || $b
+    // instanceof B)` proves `$b` is an `A`; merging `B` in as a peer would
+    // answer `A|B` and lose the very thing the first operand established.
     let mut instanceof_results: HashMap<String, Vec<ResolvedType>> = HashMap::new();
+    let mut alternative_results: HashMap<String, Vec<ResolvedType>> = HashMap::new();
     let mut conjuncts: HashMap<String, Conjuncts> = HashMap::new();
 
     for (op_idx, operand) in operands.iter().enumerate() {
@@ -528,15 +532,11 @@ pub(crate) fn apply_condition_narrowing<'b>(
                 let var_ctx = build_var_ctx(var_name, ctx, &scope_resolver);
                 let union = narrowing::resolve_class_names_to_union(&classes, &var_ctx);
                 if !union.is_empty() {
-                    let entry = instanceof_results.entry(var_name.clone()).or_default();
+                    let entry = alternative_results.entry(var_name.clone()).or_default();
                     ResolvedType::extend_unique(
                         entry,
                         union.into_iter().map(ResolvedType::from_class).collect(),
                     );
-                    conjuncts
-                        .entry(var_name.clone())
-                        .or_default()
-                        .saw_alternatives = true;
                 }
                 continue;
             }
@@ -576,16 +576,17 @@ pub(crate) fn apply_condition_narrowing<'b>(
                         // proves nothing, so the subject is left as it
                         // was rather than emptied.
                         if !resolved.is_empty() {
-                            let alternatives = targets.len() > 1;
-                            ResolvedType::extend_unique(
-                                instanceof_results.entry(var_name.clone()).or_default(),
-                                resolved,
-                            );
-                            let c = conjuncts.entry(var_name.clone()).or_default();
-                            if alternatives {
-                                c.saw_alternatives = true;
+                            if targets.len() > 1 {
+                                ResolvedType::extend_unique(
+                                    alternative_results.entry(var_name.clone()).or_default(),
+                                    resolved,
+                                );
                             } else {
-                                c.operands += 1;
+                                ResolvedType::extend_unique(
+                                    instanceof_results.entry(var_name.clone()).or_default(),
+                                    resolved,
+                                );
+                                conjuncts.entry(var_name.clone()).or_default().operands += 1;
                             }
                         }
                     }
@@ -649,6 +650,18 @@ pub(crate) fn apply_condition_narrowing<'b>(
                     }
                 }
             }
+        }
+    }
+
+    // A subject an operand proved a definite class for keeps that class:
+    // every alternative the rest of the chain allows is one the definite
+    // check already has to admit, so the definite class bounds them all
+    // and is the safe answer.  Alternatives narrow the subject only when
+    // nothing in the chain pinned it down.
+    for (var_name, alternatives) in alternative_results {
+        let entry = instanceof_results.entry(var_name).or_default();
+        if entry.is_empty() {
+            *entry = alternatives;
         }
     }
 

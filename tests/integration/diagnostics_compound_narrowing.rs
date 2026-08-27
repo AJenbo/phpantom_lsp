@@ -1497,3 +1497,66 @@ function probe(Holder $h): void {
     backend.collect_slow_diagnostics(uri, text, &mut diags);
     assert!(diags.is_empty(), "expected no diagnostics, got {diags:?}");
 }
+
+/// An `&&` operand that pins the subject to one class outranks a later
+/// `||` operand that only lists alternatives.  The disjunction's own
+/// left-hand branch says nothing about the subject, so reading its
+/// right-hand `instanceof` as a peer of the first operand would answer
+/// `Generic|Template` and reject the `Generic` parameter.
+#[test]
+fn a_definite_conjunct_survives_an_alternatives_operand() {
+    let backend = create_test_backend();
+    let uri = "file:///definite_conjunct.php";
+    let text = r#"<?php
+namespace Repro;
+
+class TypeNode {}
+class Generic extends TypeNode {}
+class Template extends TypeNode {}
+
+function needGeneric(Generic $b): void {}
+
+function build(TypeNode $bound, string $boundClass): void {
+    if ($bound instanceof Generic && ($boundClass === Generic::class || $bound instanceof Template)) {
+        needGeneric($bound);
+    }
+}
+"#;
+    let messages = type_error_messages(&backend, uri, text);
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// With nothing pinning the subject down, a `||` operand still narrows
+/// it to the alternatives it lists.
+#[test]
+fn an_alternatives_operand_still_narrows_an_unpinned_subject() {
+    let backend = create_test_backend();
+    let uri = "file:///alternatives_only.php";
+    let text = r#"<?php
+namespace Repro;
+
+class TypeNode {}
+class Generic extends TypeNode {}
+class Template extends TypeNode {}
+
+function needNode(TypeNode $b): void {}
+function needGeneric(Generic $b): void {}
+
+function build(object $bound, bool $flag): void {
+    if (($bound instanceof Generic || $bound instanceof Template) && $flag) {
+        needNode($bound);
+        needGeneric($bound);
+    }
+}
+"#;
+    let messages = type_error_messages(&backend, uri, text);
+    assert_eq!(
+        messages.len(),
+        1,
+        "the union must still reach both calls: {messages:?}"
+    );
+    assert!(
+        messages[0].contains("Generic|Repro\\Template") || messages[0].contains("Generic|Template"),
+        "got {messages:?}"
+    );
+}

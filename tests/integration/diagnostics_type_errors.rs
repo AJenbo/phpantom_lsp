@@ -634,6 +634,90 @@ accepts(new Boolean(), new Double(), new Resource());
     );
 }
 
+#[test]
+fn no_diagnostic_for_classes_named_scalar_and_numeric() {
+    // `scalar` and `numeric` are PHPDoc-only pseudo-types with no native
+    // spelling, so `Scalar` and `Numeric` are ordinary class names —
+    // nikic/php-parser ships a `PhpParser\Node\Scalar`. Folding either into
+    // the pseudo-type leaves the name unresolvable and every subtype check
+    // against it fails.
+    let php = r#"<?php
+namespace App;
+
+class Expr {}
+class Scalar extends Expr {}
+class Numeric extends Expr {}
+
+function takesExpr(Expr $e): void {}
+
+/**
+ * @param Scalar $s
+ * @param Numeric $n
+ */
+function accepts($s, $n): void {
+    takesExpr($s);
+    takesExpr($n);
+}
+
+function nativeParam(Scalar $s): void {
+    takesExpr($s);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "A `Scalar`/`Numeric` subclass passed to its parent's param must not be \
+         flagged, got: {diags:?}"
+    );
+}
+
+#[test]
+fn flags_wrong_type_to_scalar_class_param() {
+    // The `Scalar` class must still participate in genuine mismatch
+    // detection rather than being silently unresolvable.
+    let php = r#"<?php
+namespace App;
+
+class Scalar {}
+class Money {}
+
+function takesScalar(Scalar $s): void {}
+
+function test(): void {
+    takesScalar(new Money());
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "Passing Money to a Scalar param should be flagged, got: {diags:?}"
+    );
+}
+
+#[test]
+fn lowercase_scalar_and_numeric_stay_pseudo_types() {
+    // The lowercase spellings keep their PHPDoc meaning: `scalar` accepts an
+    // `int`, and an object does not satisfy it.
+    let php = r#"<?php
+namespace App;
+
+class Money {}
+
+/** @param scalar $s */
+function takesScalar($s): void {}
+
+function test(): void {
+    takesScalar(1);
+    takesScalar(new Money());
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "An object passed to a `@param scalar` must be flagged, got: {diags:?}"
+    );
+}
+
 // ─── No diagnostic: interface implementation ────────────────────────────────
 
 #[test]
