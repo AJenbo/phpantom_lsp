@@ -4448,6 +4448,15 @@ native diagnostic set.</p>
 method bodies top-to-bottom, building a scope of variable types at
 each statement boundary. It is shared by diagnostics, completion,
 hover, go-to-definition, and signature help.</p>
+<p>The same walk answers which branches cannot run
+(<code>forward_walk/reachability.rs</code>): a guard whose value the source decides
+(a boolean literal, the logical operators over decidable operands, or a
+<code>method_exists()</code> naming one class and one method) marks its dead
+branches. The walker uses that to keep a dead branch out of the join
+after the <code>if</code>; the diagnostic pass collects the branches' byte ranges
+while the scope cache is live and drops everything the collectors
+reported inside one, since no collector knows on its own whether the
+span it is looking at can be reached.</p>
 <h2 id="name-resolution">Name Resolution<a class="headerlink" href="#name-resolution" title="Permanent link">&para;</a></h2>
 <p>PHP class names go through resolution at parse time (<code>resolve_parent_class_names</code>):</p>
 <ol>
