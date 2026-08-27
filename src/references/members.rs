@@ -275,6 +275,34 @@ impl Backend {
             let _parse_cache_guard = crate::parser::with_parse_cache(&content);
             let file_ctx = self.file_context(file_uri);
 
+            // Receiver resolution for a bare variable normally walks its
+            // enclosing body from the start. A batch can contain hundreds of
+            // accesses from the same file, so build the forward-walked scope
+            // snapshots once and make every variable lookup below O(log N).
+            // The guard is per file: offsets from different files must never
+            // share one thread-local snapshot map.
+            let _scope_guard =
+                crate::type_engine::variable::forward_walk::with_diagnostic_scope_cache();
+            let class_loader = self.class_loader(&file_ctx);
+            let function_loader = self.function_loader(&file_ctx);
+            let constant_loader = self.constant_loader(&file_ctx);
+            let config_resolver = |key: &str| self.resolve_config_type(key);
+            let trans_resolver = |key: &str| self.resolve_trans_type(key);
+            let loaders = crate::type_engine::resolver::Loaders {
+                function_loader: Some(&function_loader),
+                constant_loader: Some(&constant_loader),
+                config_resolver: Some(&config_resolver),
+                trans_resolver: Some(&trans_resolver),
+            };
+            crate::type_engine::variable::forward_walk::build_diagnostic_scopes(
+                &content,
+                &file_ctx.classes,
+                &class_loader,
+                Some(self),
+                loaders,
+                Some(&self.resolved_class_cache),
+            );
+
             for span_index in span_indices {
                 let span = &symbol_map.spans[span_index];
                 let SymbolKind::MemberAccess {
