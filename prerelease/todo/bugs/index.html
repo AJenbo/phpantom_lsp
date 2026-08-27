@@ -952,23 +952,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Array types">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b286-array-element-types-are-lost-by-writes-and-key-checks-dont-restore-them" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B286. Array element types are lost by writes, and key checks don't restore them
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1624,23 +1607,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Array types">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b286-array-element-types-are-lost-by-writes-and-key-checks-dont-restore-them" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B286. Array element types are lost by writes, and key checks don't restore them
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1929,33 +1895,7 @@ rather than from the excerpts above. Sites:
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
-<h3 id="b286-array-element-types-are-lost-by-writes-and-key-checks-dont-restore-them">B286. Array element types are lost by writes, and key checks don't restore them<a class="headerlink" href="#b286-array-element-types-are-lost-by-writes-and-key-checks-dont-restore-them" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium-High · Complexity: Medium-High</strong></p>
-<p>14 sites. Every shape below is the same gap seen from one side or the
-other: the element type of an array the engine watched being built, or
-the element type a key check proves is there.</p>
-<ul>
-<li>A locally built array of tuples read back by a destructuring foreach:
-  <code>$offsetTypes[$key] = [$trinary, $type];</code> …
-  <code>foreach ($offsetTypes as $key =&gt; [$hasOffsetValue, $offsetType])</code> —
-  both variables come back as <code>mixed</code> rather than as the tuple slot the
-  write put there
-  (<code>src/Type/Php/ArrayMergeFunctionDynamicReturnTypeExtension.php:188, 250, 255, 258, 300, 306</code>,
-  <code>src/Type/Php/ArrayReplaceFunctionReturnTypeExtension.php:177, 227, 231, 264, 270</code>).</li>
-<li>Indexing a docblock shape through two dims unions the tuple slots
-  instead of selecting one: <code>$alternatives[$exprString][1]</code> on
-  <code>array&lt;string, array{Expr, list&lt;...&gt;}&gt;</code> returns <code>Expr|list&lt;...&gt;</code>
-  (<code>src/Analyser/SpecifiedTypes.php:587</code>).</li>
-<li><code>isset(self::$anonymousClasses[$className])</code> doesn't make the
-  subsequent read of that offset resolve (static property with a
-  <code>@var ClassReflection[]</code> docblock —
-  <code>src/Reflection/BetterReflection/BetterReflectionProvider.php:170</code>),
-  and <code>isset($options['default'])</code> over <code>array&lt;string, ?Type&gt;</code> must
-  strip <code>null</code> from the value type
-  (<code>src/Type/Php/FilterFunctionReturnTypeHelper.php:198</code>).</li>
-</ul>
-<p>The mirror image — where the <em>key</em> is what a check proves something
-about — resolves correctly now.</p>
+<p>No outstanding items.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
 <h3 id="b303-a-call-whose-member-name-is-decided-at-runtime-comes-back-unresolved-in-situ">B303. A call whose member name is decided at runtime comes back unresolved in situ<a class="headerlink" href="#b303-a-call-whose-member-name-is-decided-at-runtime-comes-back-unresolved-in-situ" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
