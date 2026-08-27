@@ -12,7 +12,7 @@ scale defined in [`docs/todo.md`](../todo.md); that table is also where
 each bug's row lives in the current sprint/backlog.
 
 All entries below come from triage of the PHPStan Source sample project,
-re-swept on 2026-08-27 (181 confirmed false positives after the genuine
+re-swept on 2026-08-27 (180 confirmed false positives after the genuine
 findings were patched in the sample, down from 242 at the 2026-08-25
 triage). Site counts refer to that sweep; every mechanism was either
 reproduced in a minimal project or confirmed by reading the guard
@@ -31,7 +31,7 @@ one entry. Defects too small to earn a row of their own are collected in
 [B301](#b301-narrowing-defects-with-a-single-site-each) rather than given
 one each.
 
-Of the 181 sites in the latest sweep, 136 are attributed to an entry
+Of the 180 sites in the latest sweep, 135 are attributed to an entry
 below. The unattributed remainder is described in
 [Not yet attributed](#not-yet-attributed).
 
@@ -49,38 +49,7 @@ No outstanding items.
 
 ## Reachability
 
-### B302. Diagnostics report inside branches that cannot run
-
-**Impact: Medium · Complexity: Medium-High**
-
-1 site, but the mechanism is wider than the site: no diagnostic pass
-knows whether the statement it is looking at can run at all. A literal
-`if (false) { $base->gone(); }` reports `unknown_member` just as readily
-as live code does, and so does every branch a decidable guard rules out.
-
-The site is a guard whose value is a constant:
-
-```php
-if (!method_exists(parent::class, 'assertFileDoesNotExist')) {
-    parent::assertFileNotExists($filename, $message);   // reported
-}
-```
-
-`method_exists()` with a statically known class and a literal method
-name has a constant result, so the negated branch cannot run — PHPStan
-flags the guard itself as `function.alreadyNarrowedType` (it is in the
-sample's baseline) and reports nothing inside the branch. We report the
-removed PHPUnit 9 method called there
-(`src/Testing/LevelsTestCase.php:201`).
-
-Two halves, and the second is the one that matters: fold
-`method_exists()` over decidable arguments the way the other
-argument-driven builtins are folded, and give the diagnostic passes a
-notion of a statement that cannot be reached. The forward walker already
-tracks `ScopeState::unreachable`; the diagnostic passes walk spans
-independently of it and never consult it. Overlaps
-[D6](diagnostics.md#d6-unreachable-code-diagnostic), which reports
-unreachable code rather than declining to judge it.
+No outstanding items.
 
 ## Narrowing
 
@@ -458,7 +427,7 @@ No outstanding items.
 
 ## Not yet attributed
 
-45 of the 2026-08-27 sweep's 181 sites are not attributed to an entry
+45 of the 2026-08-27 sweep's 180 sites are not attributed to an entry
 above. Most are neighbours of a shape that already has an entry and need
 only a read to place; the recurring ones are recorded here so a future
 triage starts from them rather than rediscovering them.

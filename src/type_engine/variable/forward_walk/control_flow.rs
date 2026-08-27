@@ -101,6 +101,33 @@ pub(crate) fn process_if_statement_body<'b>(
     let cursor_in_then =
         ctx.cursor_offset >= then_span.start.offset && ctx.cursor_offset <= then_span.end.offset;
 
+    // Which branches a decidable guard rules out.  Recorded before the
+    // cursor dispatch below so the ranges are collected whichever branch
+    // the walk goes on to take.
+    let dead = dead_if_branches(
+        if_stmt.condition,
+        body.else_if_clauses.iter().map(|ei| ei.condition),
+        body.else_clause.is_some(),
+        ctx,
+    );
+    if dead.any() {
+        if dead.then_branch {
+            record_unreachable_range((then_span.start.offset, then_span.end.offset));
+        }
+        for (ei, ei_dead) in body.else_if_clauses.iter().zip(dead.else_if_clauses.iter()) {
+            if *ei_dead {
+                let sp = ei.statement.span();
+                record_unreachable_range((sp.start.offset, sp.end.offset));
+            }
+        }
+        if dead.else_clause
+            && let Some(ref else_clause) = body.else_clause
+        {
+            let sp = else_clause.statement.span();
+            record_unreachable_range((sp.start.offset, sp.end.offset));
+        }
+    }
+
     let cursor_in_elseif = body.else_if_clauses.iter().any(|ei| {
         let sp = ei.statement.span();
         ctx.cursor_offset >= sp.start.offset && ctx.cursor_offset <= sp.end.offset
@@ -185,22 +212,22 @@ pub(crate) fn process_if_statement_body<'b>(
     let pre_if_scope = scope.clone();
     let pre_if_unreachable = pre_if_scope.unreachable;
 
-    // Walk each branch independently and merge results.
+    // Walk each branch independently and merge results.  A branch the
+    // guard rules out is still walked (the cursor may be inside it), but
+    // it is marked so the merge below drops what it established.
     let mut then_scope = scope.clone();
+    then_scope.unreachable |= dead.then_branch;
     apply_condition_narrowing(if_stmt.condition, &mut then_scope, ctx);
     walk_body_forward(std::iter::once(body.statement), &mut then_scope, ctx);
     let then_exits = branch_exits(body.statement, &then_scope, ctx);
 
     let mut elseif_scopes: Vec<(ScopeState, bool)> = Vec::new();
-    for ei in body.else_if_clauses.iter() {
+    for (ei_idx, ei) in body.else_if_clauses.iter().enumerate() {
         let mut ei_scope = pre_if_scope.clone();
+        ei_scope.unreachable |= dead.else_if_clauses[ei_idx];
         apply_condition_narrowing_inverse(if_stmt.condition, &mut ei_scope, ctx);
-        for (prev_idx, prev_ei) in body.else_if_clauses.iter().enumerate() {
-            if std::ptr::eq(prev_ei, ei) {
-                break;
-            }
+        for prev_ei in body.else_if_clauses.iter().take(ei_idx) {
             apply_condition_narrowing_inverse(prev_ei.condition, &mut ei_scope, ctx);
-            let _ = prev_idx;
         }
         // Record a scope snapshot at the elseif condition boundary so
         // that diagnostic variable lookups inside the condition don't
@@ -221,6 +248,7 @@ pub(crate) fn process_if_statement_body<'b>(
 
     let (else_scope, else_exits) = if let Some(ref else_clause) = body.else_clause {
         let mut else_scope = pre_if_scope.clone();
+        else_scope.unreachable |= dead.else_clause;
         apply_condition_narrowing_inverse(if_stmt.condition, &mut else_scope, ctx);
         for ei in body.else_if_clauses.iter() {
             apply_condition_narrowing_inverse(ei.condition, &mut else_scope, ctx);
@@ -383,6 +411,30 @@ pub(crate) fn process_if_colon_body<'b>(
     let then_start = body.colon.start.offset;
     let cursor_in_then = ctx.cursor_offset >= then_start && ctx.cursor_offset < then_end;
 
+    // Which branches a decidable guard rules out.  See the brace-body
+    // variant for why this runs before the cursor dispatch.
+    let dead = dead_if_branches(
+        if_stmt.condition,
+        body.else_if_clauses.iter().map(|ei| ei.condition),
+        body.else_clause.is_some(),
+        ctx,
+    );
+    if dead.any() {
+        if dead.then_branch {
+            record_statements_unreachable(body.statements.iter());
+        }
+        for (ei, ei_dead) in body.else_if_clauses.iter().zip(dead.else_if_clauses.iter()) {
+            if *ei_dead {
+                record_statements_unreachable(ei.statements.iter());
+            }
+        }
+        if dead.else_clause
+            && let Some(ref else_clause) = body.else_clause
+        {
+            record_statements_unreachable(else_clause.statements.iter());
+        }
+    }
+
     if cursor_in_then {
         apply_condition_narrowing(if_stmt.condition, scope, ctx);
         walk_body_forward(body.statements.iter(), scope, ctx);
@@ -448,21 +500,20 @@ pub(crate) fn process_if_colon_body<'b>(
     let pre_if_unreachable = pre_if_scope.unreachable;
 
     let mut then_scope = scope.clone();
+    then_scope.unreachable |= dead.then_branch;
     apply_condition_narrowing(if_stmt.condition, &mut then_scope, ctx);
     walk_body_forward(body.statements.iter(), &mut then_scope, ctx);
     let then_exits = branch_exits_stmts(body.statements.iter(), &then_scope, ctx);
 
     let mut elseif_scopes: Vec<(ScopeState, bool)> = Vec::new();
-    for ei in body.else_if_clauses.iter() {
+    for (ei_idx, ei) in body.else_if_clauses.iter().enumerate() {
         let mut ei_scope = pre_if_scope.clone();
+        ei_scope.unreachable |= dead.else_if_clauses[ei_idx];
         // The elseif branch only runs when the if condition and every
         // preceding elseif condition were false, so apply their inverse
         // narrowing before walking this branch.
         apply_condition_narrowing_inverse(if_stmt.condition, &mut ei_scope, ctx);
-        for prev_ei in body.else_if_clauses.iter() {
-            if std::ptr::eq(prev_ei, ei) {
-                break;
-            }
+        for prev_ei in body.else_if_clauses.iter().take(ei_idx) {
             apply_condition_narrowing_inverse(prev_ei.condition, &mut ei_scope, ctx);
         }
         // Record a scope snapshot at the elseif condition boundary so
@@ -484,6 +535,7 @@ pub(crate) fn process_if_colon_body<'b>(
 
     let (else_scope, else_exits) = if let Some(ref else_clause) = body.else_clause {
         let mut else_scope = pre_if_scope.clone();
+        else_scope.unreachable |= dead.else_clause;
         // The else branch only runs when the if condition and every
         // elseif condition were false, so apply the inverse of all of
         // them.

@@ -134,6 +134,7 @@ mod diagnostics_match_type_errors;
 mod diagnostics_property_discriminant;
 mod diagnostics_property_type_errors;
 mod diagnostics_psr4_mismatch;
+mod diagnostics_reachability;
 mod diagnostics_readonly_writes;
 mod diagnostics_return_type_errors;
 mod diagnostics_syntax_errors;

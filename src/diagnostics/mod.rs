@@ -343,6 +343,69 @@ impl Backend {
         uri_str: &str,
         content: &str,
         out: &mut Vec<Diagnostic>,
+        observe: Option<SlowDiagnosticObserver<'_>>,
+    ) {
+        // Where this pass's own diagnostics start, so the reachability
+        // filter below only judges what the collectors add and leaves any
+        // fast diagnostics the caller already collected.
+        let slow_start = out.len();
+
+        // ── Phase 2: forward-walked diagnostic scope cache ──────
+        // Walk every function/method body in the file once with the
+        // forward walker, recording scope snapshots at each statement
+        // boundary.  All subsequent `resolve_variable_types` calls
+        // from diagnostic collectors hit the cache (O(log N) lookup)
+        // instead of doing a full backward scan per member-access
+        // span.  This eliminates the O(N × depth × file_size) cost
+        // that caused multi-minute analysis times on large files.
+        //
+        // Held here rather than around the collectors alone: the same
+        // walk records which branches cannot run, and the filter below
+        // reads those ranges once the collectors are done.
+        let _scope_guard =
+            crate::type_engine::variable::forward_walk::with_diagnostic_scope_cache();
+
+        self.run_slow_collectors(uri_str, content, out, observe);
+
+        // ── Drop what a branch that cannot run reported ──────────────
+        // The collectors each walk spans of their own with no notion of
+        // control flow, so they judge a branch a decidable guard rules
+        // out exactly as readily as live code.  The walk that built the
+        // scope cache recorded those branches; nothing inside one is a
+        // finding.
+        let unreachable = crate::type_engine::variable::forward_walk::unreachable_ranges();
+        if !unreachable.is_empty() {
+            let dead: Vec<Range> = unreachable
+                .iter()
+                .filter_map(|&(start, end)| {
+                    offset_range_to_lsp_range(content, start as usize, end as usize)
+                })
+                .collect();
+            let mut i = slow_start;
+            while i < out.len() {
+                let start = out[i].range.start;
+                if dead
+                    .iter()
+                    .any(|range| start >= range.start && start < range.end)
+                {
+                    out.remove(i);
+                } else {
+                    i += 1;
+                }
+            }
+        }
+    }
+
+    /// Run every slow collector for `uri_str`, in order.
+    ///
+    /// Split out from [`Self::collect_slow_diagnostics_observed`] so the
+    /// observer's "stop here" can return from the collector list while
+    /// the reachability filter still runs on what was collected.
+    fn run_slow_collectors(
+        &self,
+        uri_str: &str,
+        content: &str,
+        out: &mut Vec<Diagnostic>,
         mut observe: Option<SlowDiagnosticObserver<'_>>,
     ) {
         // Activate the chain resolution cache so that all slow
@@ -361,17 +424,6 @@ impl Backend {
         // every `$q->where(...)`, `$query->where(...)`, and
         // `Product::query()->where(...)` call site in the file.
         let _resolver_guard = crate::type_engine::call_resolution::activate_type_engine_caches();
-
-        // ── Phase 2: forward-walked diagnostic scope cache ──────
-        // Walk every function/method body in the file once with the
-        // forward walker, recording scope snapshots at each statement
-        // boundary.  All subsequent `resolve_variable_types` calls
-        // from diagnostic collectors hit the cache (O(log N) lookup)
-        // instead of doing a full backward scan per member-access
-        // span.  This eliminates the O(N × depth × file_size) cost
-        // that caused multi-minute analysis times on large files.
-        let _scope_guard =
-            crate::type_engine::variable::forward_walk::with_diagnostic_scope_cache();
 
         // ── Shared per-file snapshot for the symbol-span collectors ────
         // Built once and reused by the forward-walker warm-up below and

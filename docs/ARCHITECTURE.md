@@ -1183,6 +1183,16 @@ method bodies top-to-bottom, building a scope of variable types at
 each statement boundary. It is shared by diagnostics, completion,
 hover, go-to-definition, and signature help.
 
+The same walk answers which branches cannot run
+(`forward_walk/reachability.rs`): a guard whose value the source decides
+(a boolean literal, the logical operators over decidable operands, or a
+`method_exists()` naming one class and one method) marks its dead
+branches. The walker uses that to keep a dead branch out of the join
+after the `if`; the diagnostic pass collects the branches' byte ranges
+while the scope cache is live and drops everything the collectors
+reported inside one, since no collector knows on its own whether the
+span it is looking at can be reached.
+
 ## Name Resolution
 
 PHP class names go through resolution at parse time (`resolve_parent_class_names`):
