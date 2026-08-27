@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787840886650,
+  "lastUpdate": 1787859831077,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -25193,6 +25193,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 73,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "651f5c086c25da8b425bbd5cd76434ed9b151ac2",
+          "message": "A value PHP itself leaves open is `mixed`, and the diagnostic says so",
+          "timestamp": "2026-08-27T21:30:52+02:00",
+          "tree_id": "028e23f36140f3d7f5899cef5e8e1f291e4d7cda",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/651f5c086c25da8b425bbd5cd76434ed9b151ac2"
+        },
+        "date": 1787859823644,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 36.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 68,
             "unit": "MiB"
           }
         ]
