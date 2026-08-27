@@ -1121,7 +1121,9 @@ impl LanguageServer for Backend {
                     )
                     .flatten()
                 });
-                return Ok(location.map(GotoDefinitionResponse::Scalar));
+                if let Some(location) = location {
+                    return Ok(Some(GotoDefinitionResponse::Scalar(location)));
+                }
             }
 
             // A component tag is HTML, so it has no position in the virtual
