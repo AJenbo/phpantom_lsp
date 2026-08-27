@@ -43,6 +43,10 @@ pub(crate) struct WorkspaceEnv {
     /// must be visible to every other clone, including the long-lived one
     /// that answers LSP requests.
     pub(crate) config: Arc<Mutex<config::Config>>,
+    /// Session-scoped settings supplied by the editor during `initialize`.
+    /// They are reapplied after every TOML reload so the client-selected
+    /// startup profile remains stable for the lifetime of the session.
+    pub(crate) initialization_options: Arc<Mutex<config::InitializationOptions>>,
     /// Where the global `.phpantom.toml` layer is read from, or `None`
     /// to load the project config on its own.
     ///
@@ -75,6 +79,7 @@ impl WorkspaceEnv {
             vendor_package_origin_roots: Arc::new(RwLock::new(Vec::new())),
             php_version: Mutex::new(PhpVersion::default()),
             config: Arc::new(Mutex::new(config::Config::default())),
+            initialization_options: Arc::new(Mutex::new(config::InitializationOptions::default())),
             global_config_path,
         }
     }
@@ -90,6 +95,7 @@ impl Clone for WorkspaceEnv {
             vendor_package_origin_roots: Arc::clone(&self.vendor_package_origin_roots),
             php_version: Mutex::new(*self.php_version.lock()),
             config: Arc::clone(&self.config),
+            initialization_options: Arc::clone(&self.initialization_options),
             global_config_path: self.global_config_path.clone(),
         }
     }

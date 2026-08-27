@@ -41,7 +41,6 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::composer;
-use crate::config::IndexingStrategy;
 use crate::formatting;
 
 /// Run `f` on a blocking thread in a way that survives `$/cancelRequest`.
@@ -110,6 +109,19 @@ impl LanguageServer for Backend {
 
         if let Some(root) = workspace_root {
             *self.workspace.workspace_root.write() = Some(root);
+        }
+
+        if let Some(options) = params.initialization_options.clone() {
+            match serde_json::from_value::<crate::config::InitializationOptions>(options) {
+                Ok(options) => *self.workspace.initialization_options.lock() = options,
+                Err(error) => {
+                    self.log(
+                        MessageType::WARNING,
+                        format!("Invalid PHPantom initializationOptions: {error}"),
+                    )
+                    .await;
+                }
+            }
         }
 
         // Store the client name for quirks-mode adjustments.
@@ -351,7 +363,11 @@ impl LanguageServer for Backend {
                 &root,
                 self.workspace.global_config_path.as_deref(),
             ) {
-                Ok(cfg) => {
+                Ok(mut cfg) => {
+                    self.workspace
+                        .initialization_options
+                        .lock()
+                        .apply_to(&mut cfg);
                     *self.workspace.config.lock() = cfg;
                 }
                 Err(e) => {
@@ -1988,7 +2004,8 @@ impl Backend {
         if self.client.is_none() {
             return;
         }
-        if self.config().indexing.strategy() != IndexingStrategy::Full {
+        let strategy = self.config().indexing.strategy();
+        if !strategy.builds_workspace_index() {
             return;
         }
         if self.workspace.workspace_root.read().is_none() {
@@ -2002,7 +2019,11 @@ impl Backend {
         if let Some(ref tok) = progress_token {
             self.progress_begin(
                 tok,
-                "PHPantom: Full index",
+                if strategy.prewarms_semantic_relations() {
+                    "PHPantom: Semantic index"
+                } else {
+                    "PHPantom: Full index"
+                },
                 Some("Parsing workspace files".to_string()),
             )
             .await;
@@ -2017,14 +2038,27 @@ impl Backend {
         let progress_backend = self.clone_for_blocking();
         tokio::spawn(async move {
             let worker_state = Arc::clone(&progress_state);
-            let indexed_files = run_blocking_cancel_safe("full_background_index", move || {
-                let report_progress =
-                    |percentage, message: String| worker_state.set_percentage(percentage, message);
-                parse_backend.ensure_workspace_indexed_with_progress(Some(&report_progress));
-                parse_backend.symbol_maps.read().len()
-            })
-            .await
-            .unwrap_or(0);
+            let (indexed_files, warmed_files) =
+                run_blocking_cancel_safe("full_background_index", move || {
+                    let report_progress = |percentage: u32, message: String| {
+                        let percentage = if strategy.prewarms_semantic_relations() {
+                            percentage.saturating_mul(80) / 100
+                        } else {
+                            percentage
+                        };
+                        worker_state.set_percentage(percentage, message);
+                    };
+                    parse_backend.ensure_workspace_indexed_with_progress(Some(&report_progress));
+                    let indexed_files = parse_backend.symbol_maps.read().len();
+                    let warmed_files = if strategy.prewarms_semantic_relations() {
+                        parse_backend.prewarm_member_reference_targets(Some(&worker_state))
+                    } else {
+                        0
+                    };
+                    (indexed_files, warmed_files)
+                })
+                .await
+                .unwrap_or((0, 0));
 
             if let Some(poller) = poller {
                 poller.finish().await;
@@ -2035,9 +2069,14 @@ impl Backend {
                 .store(false, Ordering::Release);
 
             if let Some(tok) = progress_token {
-                progress_backend
-                    .progress_end(&tok, Some(format!("Parsed {} files", indexed_files)))
-                    .await;
+                let message = if strategy.prewarms_semantic_relations() {
+                    format!(
+                        "Parsed {indexed_files} files and prepared {warmed_files} reference files"
+                    )
+                } else {
+                    format!("Parsed {indexed_files} files")
+                };
+                progress_backend.progress_end(&tok, Some(message)).await;
             }
 
             progress_backend.request_diagnostic_refresh().await;

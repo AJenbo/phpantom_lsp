@@ -42,6 +42,25 @@ pub struct Config {
     pub laravel: LaravelConfig,
 }
 
+/// Configuration supplied by an editor through LSP `initializationOptions`.
+///
+/// Keep this deliberately sparse: only settings whose startup behaviour a
+/// client needs to select belong here. Project and global TOML files remain
+/// the source of truth for the rest of the configuration.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub(crate) struct InitializationOptions {
+    pub(crate) indexing: IndexingConfig,
+}
+
+impl InitializationOptions {
+    pub(crate) fn apply_to(&self, config: &mut Config) {
+        if let Some(strategy) = self.indexing.strategy {
+            config.indexing.strategy = Some(strategy);
+        }
+    }
+}
+
 /// `[semantic_tokens]` section — controls LSP semantic highlighting.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
@@ -499,6 +518,9 @@ pub struct IndexingConfig {
     /// - `"full"` (default) — same discovery as `"self"`, then
     ///   background-parse every user PHP file to populate symbol and
     ///   reference indexes.
+    /// - `"semantic"` — same complete workspace index as `"full"`, then
+    ///   pre-resolve member receivers so reference CodeLens and repeated
+    ///   member searches avoid their first-use semantic scan.
     /// - `"composer"` — use Composer's classmap when available,
     ///   fall back to self-scan when it is missing or incomplete.
     /// - `"self"` — scan every PHP file under the workspace root,
@@ -522,6 +544,9 @@ pub enum IndexingStrategy {
     /// Background-parse every PHP file for rich intelligence.
     #[default]
     Full,
+    /// Build the full workspace index and eagerly prepare the semantic member
+    /// receiver layer used by references and CodeLens.
+    Semantic,
     /// Merged classmap + self-scan.  Load Composer's classmap (if it
     /// exists) as a skip set, then self-scan all PSR-4 and vendor
     /// directories for anything the classmap missed.  Whatever the
@@ -548,12 +573,23 @@ impl<'de> Deserialize<'de> for IndexingStrategy {
             "composer" => Ok(IndexingStrategy::Composer),
             "self" => Ok(IndexingStrategy::SelfScan),
             "full" => Ok(IndexingStrategy::Full),
+            "semantic" => Ok(IndexingStrategy::Semantic),
             "none" => Ok(IndexingStrategy::None),
             other => Err(serde::de::Error::unknown_variant(
                 other,
-                &["composer", "self", "full", "none"],
+                &["composer", "self", "full", "semantic", "none"],
             )),
         }
+    }
+}
+
+impl IndexingStrategy {
+    pub(crate) fn builds_workspace_index(self) -> bool {
+        matches!(self, Self::Full | Self::Semantic)
+    }
+
+    pub(crate) fn prewarms_semantic_relations(self) -> bool {
+        matches!(self, Self::Semantic)
     }
 }
 
@@ -563,6 +599,7 @@ impl std::fmt::Display for IndexingStrategy {
             IndexingStrategy::Composer => write!(f, "composer"),
             IndexingStrategy::SelfScan => write!(f, "self"),
             IndexingStrategy::Full => write!(f, "full"),
+            IndexingStrategy::Semantic => write!(f, "semantic"),
             IndexingStrategy::None => write!(f, "none"),
         }
     }
@@ -1279,6 +1316,15 @@ paths = ["database/schema", "extra/schema.sql"]
     }
 
     #[test]
+    fn parses_indexing_strategy_semantic() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE_NAME);
+        std::fs::write(&path, "[indexing]\nstrategy = \"semantic\"\n").unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert_eq!(config.indexing.strategy, Some(IndexingStrategy::Semantic));
+    }
+
+    #[test]
     fn parses_indexing_strategy_none() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(CONFIG_FILE_NAME);
@@ -1310,7 +1356,25 @@ paths = ["database/schema", "extra/schema.sql"]
         assert_eq!(IndexingStrategy::Composer.to_string(), "composer");
         assert_eq!(IndexingStrategy::SelfScan.to_string(), "self");
         assert_eq!(IndexingStrategy::Full.to_string(), "full");
+        assert_eq!(IndexingStrategy::Semantic.to_string(), "semantic");
         assert_eq!(IndexingStrategy::None.to_string(), "none");
+    }
+
+    #[test]
+    fn initialization_options_override_only_the_indexing_strategy() {
+        let options: InitializationOptions = serde_json::from_value(serde_json::json!({
+            "indexing": { "strategy": "semantic" },
+            "editorSpecific": true
+        }))
+        .unwrap();
+        let mut config = Config::default();
+        config.indexing.strategy = Some(IndexingStrategy::Composer);
+        config.php.version = Some("8.4".to_string());
+
+        options.apply_to(&mut config);
+
+        assert_eq!(config.indexing.strategy, Some(IndexingStrategy::Semantic));
+        assert_eq!(config.php.version.as_deref(), Some("8.4"));
     }
 
     #[test]

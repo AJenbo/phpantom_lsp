@@ -830,6 +830,50 @@ function run(Service $service): void {
     }
 
     #[test]
+    fn semantic_prewarm_builds_member_targets_before_the_first_lens() {
+        const SERVICE_URI: &str = "file:///Service.php";
+        const CONSUMER_URI: &str = "file:///Consumer.php";
+        const SERVICE: &str = r#"<?php
+class Service {
+    public function save(): void {}
+}
+"#;
+        const CONSUMER: &str = r#"<?php
+function run(Service $service): void {
+    $service->save();
+}
+"#;
+
+        let backend = Backend::new_test();
+        parse_extra(&backend, SERVICE_URI, SERVICE);
+        parse_extra(&backend, CONSUMER_URI, CONSUMER);
+        backend.workspace_indexed.store(true, Ordering::Release);
+        let progress = crate::progress::ScanProgress::new();
+
+        let warmed = backend.prewarm_member_reference_targets(Some(&progress));
+
+        assert_eq!(warmed, 1);
+        let consumer_map = backend
+            .symbol_maps
+            .read()
+            .get(CONSUMER_URI)
+            .cloned()
+            .unwrap();
+        assert!(
+            backend
+                .resolved_member_file(CONSUMER_URI, &consumer_map)
+                .is_some()
+        );
+        assert_eq!(
+            progress.take_report(),
+            Some((
+                100,
+                "Preparing member reference targets (1/1 files)".to_string()
+            ))
+        );
+    }
+
+    #[test]
     fn ready_only_location_lookup_does_not_queue_background_work() {
         let backend = Backend::new_test();
         parse(&backend, ONE_CALL);

@@ -688,7 +688,7 @@ impl Backend {
     fn workspace_diagnostics_due_after_reload(&self) -> bool {
         let config = self.config();
         config.diagnostics.workspace_enabled()
-            && config.indexing.strategy() == crate::config::IndexingStrategy::Full
+            && config.indexing.strategy().builds_workspace_index()
             && self.workspace.workspace_root.read().is_some()
             && !self
                 .diag

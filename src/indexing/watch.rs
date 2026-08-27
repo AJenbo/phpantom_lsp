@@ -264,7 +264,13 @@ impl Backend {
     /// answers LSP requests.
     pub(crate) fn reload_config(&self, root: &std::path::Path) {
         match crate::config::load_config_from(root, self.workspace.global_config_path.as_deref()) {
-            Ok(cfg) => *self.workspace.config.lock() = cfg,
+            Ok(mut cfg) => {
+                self.workspace
+                    .initialization_options
+                    .lock()
+                    .apply_to(&mut cfg);
+                *self.workspace.config.lock() = cfg;
+            }
             Err(e) => {
                 tracing::warn!("Failed to reload .phpantom.toml: {}", e);
                 return;

@@ -98,7 +98,7 @@ impl Backend {
                     classmap_scanner::vendor_package_roots(root, &vendor_dir, &explicit_deps);
                 (cm, "composer", HashMap::new(), roots)
             }
-            IndexingStrategy::SelfScan | IndexingStrategy::Full => {
+            IndexingStrategy::SelfScan | IndexingStrategy::Full | IndexingStrategy::Semantic => {
                 // "self" strategy: scan every PHP file under the
                 // workspace root (ignoring .gitignore, hidden dirs,
                 // etc.) to discover all classes, functions, and
