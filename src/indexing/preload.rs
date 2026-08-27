@@ -76,13 +76,13 @@ impl Backend {
                             if i >= file_count {
                                 break;
                             }
-                            if let Some(p) = progress {
-                                p.add_done(1);
-                            }
                             let path = pending[i];
                             if let Ok(content) = std::fs::read_to_string(path) {
                                 let uri = crate::util::path_to_uri(path);
                                 self.update_ast(&uri, &content);
+                            }
+                            if let Some(p) = progress {
+                                p.add_done(1);
                             }
                         }
                     })

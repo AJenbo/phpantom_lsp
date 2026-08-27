@@ -481,13 +481,14 @@ impl LanguageServer for Backend {
                 }
             }
 
-            let framework_count = self.index_framework_workspace();
+            let framework_count = self.index_framework_workspace(Some(&progress));
             if framework_count > 0 {
                 tracing::info!(
                     "PHPantom: indexed {} Symfony/Doctrine resource file(s)",
                     framework_count
                 );
             }
+            progress.set_percentage(99, "Finalizing startup indexes");
 
             if let Some(poller) = poller {
                 poller.finish().await;

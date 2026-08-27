@@ -15,7 +15,7 @@ use tower_lsp::lsp_types::{
 };
 
 use crate::Backend;
-use crate::text_position::{offset_to_position, position_to_offset};
+use crate::text_position::{LineIndex, offset_to_position, position_to_offset};
 use crate::util::strip_fqn_prefix;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -154,13 +154,14 @@ impl Backend {
         Self::remove_framework_lookup_uri(lookup, uri);
 
         let uri: Arc<str> = Arc::from(uri);
+        let line_index = LineIndex::new(content);
         let mut keys = FrameworkLookupUriKeys::default();
         for reference in references {
             let location = IndexedFrameworkLocation {
                 uri: Arc::clone(&uri),
                 range: Range::new(
-                    offset_to_position(content, reference.start as usize),
-                    offset_to_position(content, reference.end as usize),
+                    line_index.position(reference.start as usize),
+                    line_index.position(reference.end as usize),
                 ),
             };
             match &reference.kind {
@@ -220,30 +221,41 @@ impl Backend {
     }
 
     /// Scan all YAML/XML framework resources under the workspace root.
-    pub(crate) fn index_framework_workspace(&self) -> usize {
+    pub(crate) fn index_framework_workspace(
+        &self,
+        progress: Option<&crate::progress::ScanProgress>,
+    ) -> usize {
         let Some(root) = self.workspace.workspace_root.read().clone() else {
             return 0;
         };
 
-        let mut indexed = HashMap::new();
-        let mut doctrine_repositories = HashMap::new();
-        let mut lookup = FrameworkReferenceLookupIndexInner::default();
-        for entry in ignore::WalkBuilder::new(&root)
+        if let Some(progress) = progress {
+            progress.set_percentage(91, "Discovering framework resources");
+        }
+        let paths: Vec<PathBuf> = ignore::WalkBuilder::new(&root)
             .hidden(false)
             .build()
             .filter_map(Result::ok)
-        {
-            let path = entry.path();
-            if !entry.file_type().is_some_and(|ft| ft.is_file()) {
-                continue;
-            }
-            if !is_framework_resource_path(path) || is_skipped_resource_path(path) {
-                continue;
-            }
-            let Ok(content) = std::fs::read_to_string(path) else {
+            .filter(|entry| entry.file_type().is_some_and(|ft| ft.is_file()))
+            .map(|entry| entry.into_path())
+            .filter(|path| is_framework_resource_path(path) && !is_skipped_resource_path(path))
+            .collect();
+        if let Some(progress) = progress {
+            progress.set_scope(91, 99, "Indexing framework resources");
+            progress.add_total(paths.len() as u64);
+        }
+
+        let mut indexed = HashMap::new();
+        let mut doctrine_repositories = HashMap::new();
+        let mut lookup = FrameworkReferenceLookupIndexInner::default();
+        for path in paths {
+            let Ok(content) = std::fs::read_to_string(&path) else {
+                if let Some(progress) = progress {
+                    progress.add_done(1);
+                }
                 continue;
             };
-            let uri = crate::util::path_to_uri(path);
+            let uri = crate::util::path_to_uri(&path);
             let mappings = scan_doctrine_repository_mappings(&uri, &content);
             if !mappings.is_empty() {
                 doctrine_repositories.insert(uri.clone(), Arc::new(mappings));
@@ -252,6 +264,9 @@ impl Backend {
             if !refs.is_empty() {
                 Self::replace_framework_lookup_uri(&mut lookup, &uri, &content, &refs);
                 indexed.insert(uri, Arc::new(refs));
+            }
+            if let Some(progress) = progress {
+                progress.add_done(1);
             }
         }
 
@@ -1278,6 +1293,28 @@ fn normalize_path(path: PathBuf) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn framework_workspace_index_reports_counted_progress() {
+        let dir = tempfile::tempdir_in(".").unwrap();
+        let config_dir = dir.path().join("config");
+        std::fs::create_dir(&config_dir).unwrap();
+        std::fs::write(
+            config_dir.join("routes.yaml"),
+            "home:\n  path: /\n  controller: App\\Controller\\HomeController::index\n",
+        )
+        .unwrap();
+
+        let backend = Backend::new_test();
+        *backend.workspace.workspace_root.write() = Some(dir.path().to_path_buf());
+        let progress = crate::progress::ScanProgress::new();
+
+        assert_eq!(backend.index_framework_workspace(Some(&progress)), 1);
+        assert_eq!(
+            progress.take_report(),
+            Some((99, "Indexing framework resources (1/1 files)".to_string()))
+        );
+    }
 
     #[test]
     fn doctrine_repository_index_updates_with_framework_resource() {
