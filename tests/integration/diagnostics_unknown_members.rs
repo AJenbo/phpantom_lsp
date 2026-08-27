@@ -13822,3 +13822,61 @@ function probe(): void
         diags.iter().map(|d| &d.message).collect::<Vec<_>>()
     );
 }
+
+/// `isset(self::$cache[$key])` proves the offset is there, so the member
+/// access it guards resolves against the property's declared element type.
+/// Nothing ever assigns a static property a scope entry, so the key
+/// `self::$cache[$key]` used to come back unresolved and the guarded call
+/// was reported as a member access on an untypeable subject.
+#[test]
+fn isset_on_a_static_property_offset_types_the_read_it_guards() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Reflection {
+    public function getDisplayName(): string { return ''; }
+}
+
+class Provider {
+    /** @var Reflection[] */
+    private static array $anonymousClasses = [];
+
+    /** @var Reflection[] */
+    private array $instanceClasses = [];
+
+    public function viaStatic(string $className): string {
+        if (isset(self::$anonymousClasses[$className])) {
+            return self::$anonymousClasses[$className]->getDisplayName();
+        }
+        return '';
+    }
+
+    public function viaInstance(string $className): string {
+        if (isset($this->instanceClasses[$className])) {
+            return $this->instanceClasses[$className]->getDisplayName();
+        }
+        return '';
+    }
+}
+"#;
+    // The narrowing this depends on is recorded by the forward walk, so
+    // the whole diagnostic pipeline has to run rather than the
+    // unknown-member collector on its own.
+    backend.update_ast(uri, text);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    diags.retain(|d| {
+        d.code.as_ref().is_some_and(
+            |c| matches!(c, NumberOrString::String(s) if s == "unresolved_member_access"),
+        )
+    });
+    assert!(
+        diags.is_empty(),
+        "both guarded reads resolve to Reflection, got: {diags:?}",
+    );
+}

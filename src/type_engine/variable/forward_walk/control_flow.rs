@@ -859,16 +859,19 @@ pub(crate) fn collect_assignment_deps(
             }
         }
         // Nested loops: walk their bodies too.
-        Statement::Foreach(f) => match &f.body {
-            ForeachBody::Statement(s) => {
-                collect_assignment_deps(s, deps);
-            }
-            ForeachBody::ColonDelimited(body) => {
-                for s in body.statements.iter() {
+        Statement::Foreach(f) => {
+            collect_foreach_header_deps(f, deps);
+            match &f.body {
+                ForeachBody::Statement(s) => {
                     collect_assignment_deps(s, deps);
                 }
+                ForeachBody::ColonDelimited(body) => {
+                    for s in body.statements.iter() {
+                        collect_assignment_deps(s, deps);
+                    }
+                }
             }
-        },
+        }
         Statement::While(w) => match &w.body {
             WhileBody::Statement(s) => {
                 collect_assignment_deps(s, deps);
@@ -901,16 +904,151 @@ pub(crate) fn collect_expr_assignment_deps(
     expr: &Expression<'_>,
     deps: &mut HashMap<String, HashSet<String>>,
 ) {
+    let Expression::Assignment(assign) = expr else {
+        return;
+    };
+
+    let mut rhs_vars = HashSet::new();
+    collect_rhs_variables(assign.rhs, &mut rhs_vars);
+
+    // A write through an index or a property (`$a[$k] = …`, `$a->p = …`)
+    // keeps everything the target already held, so the new type of the
+    // base variable depends on its own previous type as well as on the
+    // RHS.  Recording that self-edge is what makes a loop that both
+    // reads and writes the same array iterate until the element type
+    // settles, instead of stopping after the first walk.
+    let mut targets = HashSet::new();
+    collect_assignment_target_vars(assign.lhs, &mut targets);
+    let indexed_write = !matches!(
+        assign.lhs,
+        Expression::Variable(mago_syntax::cst::variable::Variable::Direct(_))
+            | Expression::Array(_)
+            | Expression::List(_)
+    );
+    if indexed_write {
+        // The index/receiver sub-expressions are reads, not writes.
+        collect_lhs_index_variables(assign.lhs, &mut rhs_vars);
+    }
+
+    for target in targets {
+        let entry = deps.entry(target.clone()).or_default();
+        entry.extend(rhs_vars.iter().cloned());
+        if indexed_write {
+            entry.insert(target);
+        }
+    }
+}
+
+/// Collect the variables an assignment target writes to.
+///
+/// A direct variable writes itself, a destructuring pattern writes each
+/// variable it binds, and an indexed or property write is attributed to
+/// the variable at the base of the chain (`$a[$k][0] = …` writes `$a`).
+pub(crate) fn collect_assignment_target_vars(target: &Expression<'_>, out: &mut HashSet<String>) {
+    use mago_syntax::cst::access::Access;
     use mago_syntax::cst::variable::Variable;
 
-    if let Expression::Assignment(assign) = expr
-        && let Expression::Variable(Variable::Direct(dv)) = assign.lhs
-    {
-        let lhs_name = bytes_to_str(dv.name).to_string();
-        let mut rhs_vars = HashSet::new();
-        collect_rhs_variables(assign.rhs, &mut rhs_vars);
-        deps.entry(lhs_name).or_default().extend(rhs_vars);
+    match target {
+        Expression::Variable(Variable::Direct(dv)) => {
+            out.insert(bytes_to_str(dv.name).to_string());
+        }
+        Expression::Array(_) | Expression::List(_) => {
+            for value_expr in destructuring_element_exprs(target) {
+                collect_assignment_target_vars(value_expr, out);
+            }
+        }
+        Expression::ArrayAccess(aa) => collect_assignment_target_vars(aa.array, out),
+        Expression::ArrayAppend(aa) => collect_assignment_target_vars(aa.array, out),
+        Expression::Access(access) => match access {
+            Access::Property(pa) => collect_assignment_target_vars(pa.object, out),
+            Access::NullSafeProperty(pa) => collect_assignment_target_vars(pa.object, out),
+            _ => {}
+        },
+        Expression::Parenthesized(p) => collect_assignment_target_vars(p.expression, out),
+        _ => {}
     }
+}
+
+/// Collect the variables read by the index expressions of a write target.
+///
+/// `$a[$k] = …` reads `$k` to decide where to write, so `$k` belongs in
+/// the dependency set even though `$a` is what gets assigned.
+fn collect_lhs_index_variables(target: &Expression<'_>, vars: &mut HashSet<String>) {
+    use mago_syntax::cst::access::Access;
+
+    match target {
+        Expression::ArrayAccess(aa) => {
+            collect_rhs_variables(aa.index, vars);
+            collect_lhs_index_variables(aa.array, vars);
+        }
+        Expression::ArrayAppend(aa) => collect_lhs_index_variables(aa.array, vars),
+        Expression::Access(access) => match access {
+            Access::Property(pa) => collect_lhs_index_variables(pa.object, vars),
+            Access::NullSafeProperty(pa) => collect_lhs_index_variables(pa.object, vars),
+            _ => {}
+        },
+        Expression::Parenthesized(p) => collect_lhs_index_variables(p.expression, vars),
+        _ => {}
+    }
+}
+
+/// The value expressions of a destructuring pattern's elements.
+fn destructuring_element_exprs<'b>(pattern: &'b Expression<'b>) -> Vec<&'b Expression<'b>> {
+    let elements: Vec<&ArrayElement<'b>> = match pattern {
+        Expression::Array(arr) => arr.elements.iter().collect(),
+        Expression::List(list) => list.elements.iter().collect(),
+        _ => return Vec::new(),
+    };
+    elements
+        .into_iter()
+        .filter_map(|elem| match elem {
+            ArrayElement::KeyValue(kv) => Some(kv.value),
+            ArrayElement::Value(val) => Some(val.value),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Record the dependency a `foreach` header creates: every variable the
+/// target binds takes its type from the iterated expression.
+///
+/// Without this edge a loop that destructures an array it also writes to
+/// looks dependency-free, so the fixed-point walk stops before the
+/// element type it wrote has been read back.
+fn collect_foreach_header_deps(foreach: &Foreach<'_>, deps: &mut HashMap<String, HashSet<String>>) {
+    let mut iter_vars = HashSet::new();
+    collect_rhs_variables(foreach.expression, &mut iter_vars);
+    if iter_vars.is_empty() {
+        return;
+    }
+
+    let mut bound = HashSet::new();
+    match &foreach.target {
+        ForeachTarget::Value(val) => collect_foreach_bound_vars(val.value, &mut bound),
+        ForeachTarget::KeyValue(kv) => {
+            collect_foreach_bound_vars(kv.key, &mut bound);
+            collect_foreach_bound_vars(kv.value, &mut bound);
+        }
+    }
+
+    for name in bound {
+        deps.entry(name)
+            .or_default()
+            .extend(iter_vars.iter().cloned());
+    }
+}
+
+/// Collect the variables a `foreach` target binds, unwrapping `&$v` and
+/// recursing through destructuring patterns.
+fn collect_foreach_bound_vars(target: &Expression<'_>, out: &mut HashSet<String>) {
+    let target = if let Expression::UnaryPrefix(up) = target
+        && matches!(up.operator, UnaryPrefixOperator::Reference(_))
+    {
+        up.operand
+    } else {
+        target
+    };
+    collect_assignment_target_vars(target, out);
 }
 
 /// Collect all variable references from an expression (cheap, no type resolution).
@@ -1380,6 +1518,29 @@ pub(crate) fn process_foreach<'b>(
     };
     let assignment_depth =
         clamp_iterations_for_depth(assignment_map_depth(&body_stmts), loop_depth);
+
+    // A `foreach` over an array the engine watched being built and knows
+    // is still empty runs zero times, so it cannot change any type.  The
+    // body is still walked so that a cursor or diagnostic inside it is
+    // answered, but its writes are dropped afterwards.
+    //
+    // Keeping them would poison an enclosing loop's fixed point: the
+    // first walk of an outer loop reaches an inner `foreach` over the
+    // accumulator before anything has been written to it, and the
+    // unresolved element types that walk produces would be unioned into
+    // the accumulator for good, so the element type never converges.
+    if iter_type
+        .as_ref()
+        .is_some_and(|it| it.is_empty_array_shape())
+    {
+        let restored = pre_loop_scope.clone();
+        push_exit_frame();
+        walk_body_forward(body_stmts.iter().copied(), scope, ctx);
+        pop_exit_frame();
+        *scope = restored;
+        leave_loop(loop_depth);
+        return;
+    }
 
     push_exit_frame();
     walk_loop_body_to_fixed_point(
@@ -2508,6 +2669,12 @@ pub(crate) fn process_do_while<'b>(
             LoopSeedPoint::Entry => {
                 process_condition_assignment(dw.condition, next_scope, ctx);
                 seed_pass_by_ref_in_condition(dw.condition, next_scope, ctx);
+                // The assignment above re-runs `$c = $c->getParent()` on
+                // the merged scope, which puts the declared `?Category`
+                // back over the narrowing `AfterBody` applied. The loop
+                // only re-enters when the condition held, so that
+                // narrowing has to go back on top of it.
+                apply_condition_narrowing(dw.condition, next_scope, ctx);
             }
         },
     );

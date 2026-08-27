@@ -254,35 +254,7 @@ No outstanding items.
 
 ## Array types
 
-### B286. Array element types are lost by writes, and key checks don't restore them
-
-**Impact: Medium-High · Complexity: Medium-High**
-
-14 sites. Every shape below is the same gap seen from one side or the
-other: the element type of an array the engine watched being built, or
-the element type a key check proves is there.
-
-- A locally built array of tuples read back by a destructuring foreach:
-  `$offsetTypes[$key] = [$trinary, $type];` …
-  `foreach ($offsetTypes as $key => [$hasOffsetValue, $offsetType])` —
-  both variables come back as `mixed` rather than as the tuple slot the
-  write put there
-  (`src/Type/Php/ArrayMergeFunctionDynamicReturnTypeExtension.php:188, 250, 255, 258, 300, 306`,
-  `src/Type/Php/ArrayReplaceFunctionReturnTypeExtension.php:177, 227, 231, 264, 270`).
-- Indexing a docblock shape through two dims unions the tuple slots
-  instead of selecting one: `$alternatives[$exprString][1]` on
-  `array<string, array{Expr, list<...>}>` returns `Expr|list<...>`
-  (`src/Analyser/SpecifiedTypes.php:587`).
-- `isset(self::$anonymousClasses[$className])` doesn't make the
-  subsequent read of that offset resolve (static property with a
-  `@var ClassReflection[]` docblock —
-  `src/Reflection/BetterReflection/BetterReflectionProvider.php:170`),
-  and `isset($options['default'])` over `array<string, ?Type>` must
-  strip `null` from the value type
-  (`src/Type/Php/FilterFunctionReturnTypeHelper.php:198`).
-
-The mirror image — where the *key* is what a check proves something
-about — resolves correctly now.
+No outstanding items.
 
 ## Docblock handling
 

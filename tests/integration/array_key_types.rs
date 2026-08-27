@@ -300,3 +300,152 @@ function spelledOut($declared): void
         "an unknown foreach key must not be held to both branches: {messages:?}"
     );
 }
+
+/// An array the walk watched being built inside a loop keeps its element
+/// type when a later iteration reads it back through a destructuring
+/// `foreach`. The first walk of the outer loop reaches the inner `foreach`
+/// before anything has been written to the accumulator, and the element
+/// types that walk cannot resolve used to be unioned into the accumulator
+/// for good, so the tuple slots came back `mixed` however many times the
+/// loop was re-walked.
+#[test]
+fn a_loop_carried_tuple_slot_keeps_the_type_the_write_put_there() {
+    let content = r#"<?php
+class Trin
+{
+    public function and(Trin $other): Trin { return $this; }
+}
+class Ty
+{
+    public function isConstant(): bool { return true; }
+}
+
+function makeTrin(): Trin { return new Trin(); }
+
+/** @param list<Ty> $inputs */
+function build(array $inputs): void
+{
+    $offsetTypes = [];
+    foreach ($inputs as $input) {
+        if ($input->isConstant()) {
+            $offsetTypes['k'] = [makeTrin(), $input];
+        } else {
+            foreach ($offsetTypes as $key => [$carried, $value]) {
+                echo /*CARRIED*/$carried->foo;
+                $offsetTypes[$key] = [$carried->and(makeTrin()), $input];
+            }
+        }
+    }
+
+    foreach ($offsetTypes as $key => [$hasOffsetValue, $offsetType]) {
+        echo /*SLOT_ZERO*/$hasOffsetValue->foo;
+        echo /*SLOT_ONE*/$offsetType->foo;
+    }
+}
+"#;
+    assert_marked_types(
+        content,
+        &[
+            ("CARRIED", "Trin"),
+            ("SLOT_ZERO", "Trin"),
+            ("SLOT_ONE", "Ty"),
+        ],
+    );
+}
+
+/// A write through a written-out index updates that one slot of a
+/// tuple-style shape. Folding it into the generic key/value pair instead
+/// unioned every slot together, so reading any single slot back gave the
+/// union of all of them.
+#[test]
+fn a_write_to_one_tuple_slot_leaves_the_others_alone() {
+    let content = r#"<?php
+class Expr {}
+class Term {}
+
+/** @param list<Term> $terms
+ *  @param list<Term> $more
+ *  @return list<Term> */
+function conjoin(array $terms, array $more): array { return $terms; }
+
+/**
+ * @param list<Expr> $nodes
+ * @param list<Term> $terms
+ */
+function merge(array $nodes, array $terms, string $key): void
+{
+    $alternatives = [];
+    foreach ($nodes as $node) {
+        if (!isset($alternatives[$key])) {
+            $alternatives[$key] = [$node, $terms];
+            continue;
+        }
+        $alternatives[$key][1] = conjoin($alternatives[$key][1], $terms);
+    }
+
+    // Indexing straight through both dimensions has to select the slot
+    // rather than union the tuple together.
+    $slotZero = $alternatives[$key][0];
+    echo /*SLOT_ZERO*/$slotZero->foo;
+    $slotOne = $alternatives[$key][1];
+    echo count(/*SLOT_ONE*/$slotOne);
+}
+"#;
+    assert_marked_types(
+        content,
+        &[("SLOT_ZERO", "Expr"), ("SLOT_ONE", "list<Term>")],
+    );
+}
+
+/// `isset($arr['k'])` on an array that may also be the empty `[]` proves
+/// the key is there, so a member access on that offset resolves against
+/// the value type. A guaranteed-miss alternative used to contribute
+/// `mixed` to the offset's type, and `mixed` survives the null strip the
+/// check exists to license, so the access was reported unresolvable.
+#[test]
+fn isset_on_a_possibly_empty_array_types_the_offset_it_guards() {
+    let content = r#"<?php
+class Ty {
+    public function describe(): string { return ''; }
+}
+
+class Helper {
+    /** @return array<string, ?Ty> */
+    private function getOptions(bool $flag): array { return []; }
+
+    public function probe(bool $hasOptions): string
+    {
+        $options = $hasOptions ? $this->getOptions($hasOptions) : [];
+        if (isset($options['default'])) {
+            $defaultType = $options['default'];
+        } else {
+            $defaultType = new Ty();
+        }
+        return $defaultType->describe();
+    }
+}
+"#;
+    let backend = create_test_backend_with_full_stubs();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///isset_possibly_empty.php";
+    backend.update_ast(uri, content);
+    let mut diagnostics = Vec::new();
+    backend.collect_slow_diagnostics(uri, content, &mut diagnostics);
+    let unresolved: Vec<String> = diagnostics
+        .into_iter()
+        .filter(|d| {
+            d.code.as_ref().is_some_and(
+                |c| matches!(c, NumberOrString::String(s) if s == "unresolved_member_access"),
+            )
+        })
+        .map(|d| d.message)
+        .collect();
+    assert!(
+        unresolved.is_empty(),
+        "the guarded offset resolves to Ty: {unresolved:?}"
+    );
+}

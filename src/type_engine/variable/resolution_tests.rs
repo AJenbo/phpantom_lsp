@@ -1028,7 +1028,10 @@ fn element_writes_refine_the_type_they_are_written_into() {
     assert_eq!(
         write(
             "array{name: string}",
-            vec![ArrayWriteKey::Keyed(PhpType::string())],
+            vec![ArrayWriteKey::Keyed {
+                key_type: PhpType::string(),
+                slot: None,
+            }],
             "int",
         ),
         "array<string, string|int>"

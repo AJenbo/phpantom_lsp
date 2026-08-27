@@ -1786,7 +1786,14 @@ pub(super) enum ArrayWriteKey {
     Shape(String),
     /// A dynamic (variable / expression / numeric) key tracked as a
     /// generic `array<K, V>` level. Carries the inferred key type.
-    Keyed(PhpType),
+    ///
+    /// `slot` holds the index a written-out integer named, which lets a
+    /// write update that positional slot of a tuple-style shape instead
+    /// of collapsing the shape into the generic pair.
+    Keyed {
+        key_type: PhpType,
+        slot: Option<usize>,
+    },
     /// A trailing `[]` append, as in `$var['a'][] = …`. Only ever the
     /// last segment of a chain.
     Append,
@@ -1826,7 +1833,26 @@ pub(super) fn merge_nested_array_write(
                 merge_shape_key(base, key, &inner_merged)
             }
         }
-        ArrayWriteKey::Keyed(key_type) => {
+        ArrayWriteKey::Keyed { key_type, slot } => {
+            // A written-out index into a shape that already has that
+            // positional slot updates it in place, keeping the tuple's
+            // arity and the slots the write did not name. Folding it into
+            // the generic pair instead would union every slot's type
+            // together, so reading any one of them back gives the union.
+            if let Some(slot) = slot
+                && let Some(entries) = base.shape_entries()
+                && let Some(index) = positional_entry_index(entries, *slot)
+            {
+                let inner_merged = if keys.len() == 1 {
+                    value_type.clone()
+                } else {
+                    merge_nested_array_write(&entries[index].value_type, &keys[1..], value_type)
+                };
+                let mut updated: Vec<ShapeEntry> = entries.to_vec();
+                updated[index].value_type = inner_merged.widen_scalar_literals();
+                updated[index].optional = false;
+                return PhpType::array_shape(updated);
+            }
             let inner_merged = if keys.len() == 1 {
                 value_type.clone()
             } else {
@@ -1992,6 +2018,21 @@ pub(super) fn extract_array_key_for_shape(index: &Expression<'_>) -> Option<Stri
     }
 }
 
+/// The literal integer an index expression spells out, if it is one.
+///
+/// A write through such an index can update the matching slot of a
+/// tuple-style shape it already has (`$tuple[1] = …`). It deliberately
+/// does not *create* a numeric-keyed shape: `$data[0] = 'x'` on a plain
+/// array leaves the tracked `array<int, string>` pair alone, because a
+/// written-out index is usually one of many an unrolled or generated
+/// write sequence touches, not a promise about the array's arity.
+pub(super) fn extract_array_write_index(index: &Expression<'_>) -> Option<usize> {
+    if let Expression::Literal(Literal::Integer(int_lit)) = index {
+        return int_lit.value.and_then(|v| usize::try_from(v).ok());
+    }
+    None
+}
+
 /// Merge a `(key, value_type)` pair into an existing `PhpType` to
 /// produce an `ArrayShape`.
 ///
@@ -2037,6 +2078,20 @@ fn merge_shape_key(base: &PhpType, key: &str, value_type: &PhpType) -> PhpType {
     });
 
     PhpType::array_shape(entries)
+}
+
+/// The position in `entries` of the `index`th unkeyed entry.
+fn positional_entry_index(entries: &[ShapeEntry], index: usize) -> Option<usize> {
+    let mut positional = 0usize;
+    for (slot, entry) in entries.iter().enumerate() {
+        if entry.key.is_none() {
+            if positional == index {
+                return Some(slot);
+            }
+            positional += 1;
+        }
+    }
+    None
 }
 
 /// Merge a push element type into an existing `PhpType` to produce

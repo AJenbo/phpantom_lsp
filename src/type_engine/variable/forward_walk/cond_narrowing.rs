@@ -4597,8 +4597,15 @@ fn resolve_static_property_key_type(
     prop_name: &str,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Vec<ResolvedType> {
+    // `self`/`static` name the class the walk is already inside, so its
+    // own `ClassInfo` is the owner. Looking the name up in the index
+    // instead would miss a class the index does not carry — the document
+    // being edited is exactly that case.
+    if matches!(class_key, "self" | "static") {
+        return static_property_hint_of(ctx.current_class, prop_name, ctx);
+    }
+
     let class_name = match class_key {
-        "self" | "static" => ctx.current_class.name.to_string(),
         "parent" => match ctx.current_class.parent_class {
             Some(parent) => parent.to_string(),
             None => return Vec::new(),
@@ -4612,23 +4619,35 @@ fn resolve_static_property_key_type(
         ctx.class_loader,
     );
     for owner in &owners {
-        let Some(hint) =
-            crate::inheritance::resolve_property_type_hint(owner, prop_name, ctx.class_loader)
-        else {
-            continue;
-        };
-        let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-            &hint,
-            &ctx.current_class.name,
-            ctx.all_classes,
-            ctx.class_loader,
-        );
-        return match resolved.is_empty() {
-            true => vec![ResolvedType::from_type_string(hint)],
-            false => ResolvedType::from_classes_with_hint(resolved, hint),
-        };
+        let resolved = static_property_hint_of(owner, prop_name, ctx);
+        if !resolved.is_empty() {
+            return resolved;
+        }
     }
     Vec::new()
+}
+
+/// What `owner`'s declaration of `prop_name` promises.
+fn static_property_hint_of(
+    owner: &crate::types::ClassInfo,
+    prop_name: &str,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Vec<ResolvedType> {
+    let Some(hint) =
+        crate::inheritance::resolve_property_type_hint(owner, prop_name, ctx.class_loader)
+    else {
+        return Vec::new();
+    };
+    let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+        &hint,
+        &ctx.current_class.name,
+        ctx.all_classes,
+        ctx.class_loader,
+    );
+    match resolved.is_empty() {
+        true => vec![ResolvedType::from_type_string(hint)],
+        false => ResolvedType::from_classes_with_hint(resolved, hint),
+    }
 }
 
 /// Resolve the element type an array-access key promises (`$a["k"]`,
@@ -4651,9 +4670,16 @@ fn resolve_array_key_type(
     // a compound base has to be resolved the same way this key is.  Each
     // step drops one segment, so the recursion is bounded by the number of
     // segments in the key.
+    // A static property is one of those bases: nothing ever assigns
+    // `self::$cache` a scope entry, so without this the whole key comes
+    // back unresolved and `isset(self::$cache[$k])` proves nothing about
+    // the read it guards.
     let resolved_base;
     let base_types: &[ResolvedType] = match scope.get(base_var) {
-        [] if base_var.contains("->") || base_var.ends_with(']') => {
+        [] if base_var.contains("->")
+            || base_var.ends_with(']')
+            || split_static_property_key(base_var).is_some() =>
+        {
             resolved_base = resolve_synthetic_key_type(base_var, scope, ctx);
             &resolved_base
         }
@@ -4674,6 +4700,13 @@ fn resolve_array_key_type(
         let element_type = key_name
             .and_then(|name| rt.type_string.extract_shape_key_type(name))
             .or_else(|| rt.type_string.extract_value_type(false).cloned())
+            // An empty shape has no entry any key could address, so the
+            // read is a guaranteed miss and yields `null` — the same
+            // answer the offset-read path gives.  Widening to `mixed`
+            // here would leave an `isset($a['k'])` branch claiming the
+            // key could be anything, because `mixed` survives the null
+            // strip that the check's whole purpose is to license.
+            .or_else(|| rt.type_string.is_empty_array_shape().then(PhpType::null))
             .or_else(|| rt.type_string.is_array_like().then(PhpType::mixed));
         let Some(element_type) = element_type else {
             continue;

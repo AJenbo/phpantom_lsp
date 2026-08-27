@@ -2423,9 +2423,10 @@ fn apply_array_write<'b>(
                 Some(key) => super::super::resolution::ArrayWriteKey::Shape(key),
                 None => {
                     let index_types = resolve_rhs_with_scope(idx, scope, ctx);
-                    super::super::resolution::ArrayWriteKey::Keyed(
-                        super::super::resolution::infer_array_key_type(idx, &index_types),
-                    )
+                    super::super::resolution::ArrayWriteKey::Keyed {
+                        key_type: super::super::resolution::infer_array_key_type(idx, &index_types),
+                        slot: super::super::resolution::extract_array_write_index(idx),
+                    }
                 }
             },
         )
