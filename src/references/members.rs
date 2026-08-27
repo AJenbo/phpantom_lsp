@@ -549,6 +549,11 @@ impl Backend {
 
             let mut file_content: Option<Arc<String>> = None;
 
+            // Receiver resolution may visit the parsed AST once per matching
+            // access. Keep one AST alive for this candidate file so common
+            // member names do not reparse the whole source for every access.
+            let parse_cache_guard = std::cell::OnceCell::new();
+
             // Lazily resolved file context — only computed when we need
             // to check a candidate's subject against the hierarchy.
             let file_ctx_cell: std::cell::OnceCell<crate::types::FileContext> =
@@ -581,6 +586,8 @@ impl Backend {
                             let Some(ref content) = file_content else {
                                 break;
                             };
+                            parse_cache_guard
+                                .get_or_init(|| crate::parser::with_parse_cache(content));
 
                             let ctx = file_ctx_cell.get_or_init(|| self.file_context(file_uri));
                             let subject_fqns = self.resolve_subject_to_fqns(
