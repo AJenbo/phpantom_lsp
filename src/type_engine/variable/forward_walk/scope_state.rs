@@ -8,7 +8,7 @@ use crate::atom::{Atom, AtomMap, atom, bytes_to_str};
 use crate::parser::extract_hint_type;
 use crate::php_type::PhpType;
 use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
-use crate::types::{ClassInfo, ResolvedType};
+use crate::types::{ClassInfo, MethodInfo, ResolvedType};
 
 // ─── Core data structures ───────────────────────────────────────────────────
 
@@ -973,6 +973,8 @@ pub(crate) fn seed_params<'b>(
         crate::type_engine::call_resolution::call_site_param_types(&ctx.current_class.fqn(), name)
     });
 
+    let trait_prototype = trait_prototype_method(method_name, ctx);
+
     for (index, param) in parameters.enumerate() {
         let pname = bytes_to_str(param.variable.name).to_string();
         let is_variadic = param.ellipsis.is_some();
@@ -1021,9 +1023,12 @@ pub(crate) fn seed_params<'b>(
             &pname,
             native_type.as_ref(),
             is_variadic,
-            method_span_start,
-            method_name,
-            has_scope_attr,
+            &EnclosingMethod {
+                span_start: method_span_start,
+                name: method_name,
+                has_scope_attr,
+                trait_prototype: trait_prototype.as_ref(),
+            },
             ctx,
         );
 
@@ -1177,6 +1182,23 @@ pub(crate) fn resolve_docblock_param_type(raw: &PhpType, ctx: &ForwardWalkCtx<'_
     finish_constant_operands(&resolved, ctx).unwrap_or(resolved)
 }
 
+/// The declaration a parameter belongs to, as far as resolving its type
+/// needs to know it.
+#[derive(Clone, Copy)]
+pub(crate) struct EnclosingMethod<'a> {
+    /// Byte offset the declaration starts at, which the `@param` scan
+    /// reads backward from.
+    pub span_start: u32,
+    /// `None` for a top-level function, where no method-shaped enrichment
+    /// applies.
+    pub name: Option<&'a str>,
+    /// The declaration carries `#[Scope]`, for Eloquent query scopes.
+    pub has_scope_attr: bool,
+    /// The declaration a trait method implements, which the trait itself
+    /// cannot reach — see [`trait_prototype_method`].
+    pub trait_prototype: Option<&'a MethodInfo>,
+}
+
 /// Resolve a single parameter's type through the full resolution
 /// pipeline: native hint → Eloquent Builder enrichment → docblock
 /// `@param` → template substitution → merged class fallback →
@@ -1189,11 +1211,15 @@ pub(crate) fn resolve_param_type(
     pname: &str,
     native_type: Option<&PhpType>,
     is_variadic: bool,
-    method_span_start: u32,
-    method_name: Option<&str>,
-    has_scope_attr: bool,
+    enclosing: &EnclosingMethod<'_>,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Vec<ResolvedType> {
+    let EnclosingMethod {
+        span_start: method_span_start,
+        name: method_name,
+        has_scope_attr,
+        trait_prototype,
+    } = *enclosing;
     // Eloquent scope Builder enrichment: when the enclosing class
     // extends Eloquent Model and this is a scope method (convention
     // or #[Scope] attribute), enrich bare `Builder` to
@@ -1228,6 +1254,18 @@ pub(crate) fn resolve_param_type(
     } else {
         None
     };
+
+    // A trait's own merged declaration is the un-refined one, so unlike an
+    // override's it cannot be read back below — the prototype's `@param`
+    // has to be carried through as the effective type instead.
+    let trait_refinement =
+        if inherited_refinement.is_none() && raw_docblock_type.is_none() && enriched_type.is_none()
+        {
+            trait_prototype.and_then(|proto| prototype_param_refinement(proto, pname, native_type))
+        } else {
+            None
+        };
+    let inherited_refinement = inherited_refinement.or_else(|| trait_refinement.clone());
 
     let type_for_resolution: Option<&PhpType> = inherited_refinement
         .as_ref()
@@ -1305,7 +1343,8 @@ pub(crate) fn resolve_param_type(
             }),
         )
     } else if let Some(ref eff) = effective_type
-        && raw_docblock_type.as_ref().is_some_and(|rdt| *rdt != *eff)
+        && (trait_refinement.is_some()
+            || raw_docblock_type.as_ref().is_some_and(|rdt| *rdt != *eff))
     {
         // The effective type differs from the raw docblock type, meaning
         // template substitution produced a concrete type (e.g. `K` →
@@ -1371,6 +1410,61 @@ pub(crate) fn resolve_param_type(
     }
 
     param_results
+}
+
+/// The declaration a trait's own method implements.
+///
+/// A trait has no parent class and no interface list, so
+/// [`inherited_param_refinement`] has nothing to read. PHP flattens the
+/// trait into each using class, and the interface method it implements is
+/// declared there, so the bounds every host is guaranteed to satisfy (see
+/// [`crate::type_engine::trait_context`]) are where the prototype lives.
+///
+/// Resolved once per body rather than per parameter: finding a trait's
+/// hosts means reading the reverse-inheritance index and loading each one.
+pub(crate) fn trait_prototype_method(
+    method_name: Option<&str>,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Option<MethodInfo> {
+    let method_name = method_name?;
+    let class = ctx.current_class;
+    if class.kind != crate::types::ClassLikeKind::Trait {
+        return None;
+    }
+    crate::type_engine::trait_context::trait_this_bounds(
+        class,
+        ctx.all_classes,
+        ctx.class_loader,
+        ctx.backend,
+    )
+    .iter()
+    .find_map(|bound| {
+        crate::virtual_members::resolve_class_fully_maybe_cached(
+            bound,
+            ctx.class_loader,
+            ctx.resolved_class_cache,
+        )
+        .get_method(method_name)
+        .cloned()
+    })
+}
+
+/// The `@param` type `prototype` declares for `pname`, when the current
+/// declaration only restates the native hint.
+///
+/// Same test as [`inherited_param_refinement`]: the prototype parameter
+/// must be the same declaration (identical native hint) carrying a
+/// docblock type that differs from it, which is the refinement PHP's own
+/// signature rules could not express.
+fn prototype_param_refinement(
+    prototype: &MethodInfo,
+    pname: &str,
+    native_type: Option<&PhpType>,
+) -> Option<PhpType> {
+    let native = native_type?;
+    let param = prototype.parameters.iter().find(|p| p.name == pname)?;
+    let hint = param.type_hint.as_ref()?;
+    (param.native_type_hint.as_ref() == Some(native) && hint != native).then(|| hint.clone())
 }
 
 /// The narrower parameter type an override inherits from its ancestor's

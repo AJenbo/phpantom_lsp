@@ -72,7 +72,7 @@ pub(crate) use calls::{
 };
 pub(crate) use instantiation::{
     TemplateBindingMode, array_element_binding, classify_template_binding, extract_array_position,
-    remap_inherited_ctor_subs, type_contains_name,
+    extract_generic_arg_from_ancestor, remap_inherited_ctor_subs, type_contains_name,
 };
 
 /// Apply unary `+` or `-` to an already-resolved numeric type.

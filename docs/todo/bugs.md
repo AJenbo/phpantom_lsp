@@ -31,7 +31,7 @@ one entry. Defects too small to earn a row of their own are collected in
 [B301](#b301-narrowing-defects-with-a-single-site-each) rather than given
 one each.
 
-Of the 180 sites in the latest sweep, 135 are attributed to an entry
+Of the 180 sites in the latest sweep, 110 are attributed to an entry
 below. The unattributed remainder is described in
 [Not yet attributed](#not-yet-attributed).
 
@@ -339,87 +339,25 @@ The fix direction: these sources must uniformly produce `mixed`,
 whichever spelling declares it, and member/argument checks on `mixed`
 must follow the severity policy (hint, not error).
 
-### B296. Signatures aren't completed from the call site, the body, or a neighbouring docblock
+### B302. A docblock sharing a line with code is invisible to the parameter scan
 
-**Impact: High · Complexity: High**
+**Impact: Low · Complexity: Medium**
 
-25 sites, five shapes. A declared signature is only part of what a
-callable's parameters and return type are: the rest comes from the
-parameter it is passed to, from the argument that binds a template, from
-its own body, and from a docblock that isn't attached to the node.
-Shapes a and d are two views of one gap — template arguments the
-inference engine has no source for — and b, c and e are the
-signature-completion side of the same subsystem.
-
-**a. Callback parameters aren't inferred from templated callable
-parameters** (16 sites). The `usort` stub declares `@template T` /
-`@param TArray $array` / `@param callable(T, T): int $callback`; an
-untyped closure passed as the callback must get its parameters bound
-from the array argument's element type:
+The `@param` scan that types a closure's parameters reads the source
+line by line and only recognises a docblock on a line of its own, so a
+comment written inline between an assignment and the closure it
+documents is skipped:
 
 ```php
-/** @return array{list<Error>, list<IdentifierRuleError>} */
-[$actualErrors, $delayed] = $this->gather(...);
-usort($actualErrors, static function ($a, $b) { return $a->getLine() <=> $b->getLine(); });
-// $a, $b must be Error
+$collect = /** @param Arg[] $callArgs */ static function (array $callArgs): void { … };
+// $callArgs is the bare `array` hint; the annotation is never read
 ```
 
-Sites: `src/Testing/RuleTestCase.php:213-231` (13),
-`src/DependencyInjection/ContainerExtensionsExtension.php:45` (×2, with
-a generic `TargetClass<T>` element), and the return-position variant
-`array_map(static fn ($builder) => $builder->build(), $errorBuilders)`
-where `build(): T` on a union of two `RuleErrorBuilder<...>`
-instantiations comes back as the builder itself
-(`build/PHPStan/Build/NamedArgumentsRule.php:238`,
-a `type_mismatch_return`).
-
-**b. Arrow-function return types ignore the body** (4 sites). PHPStan
-computes an arrow function's return type as the intersection of the
-declared type and the body's inferred type. We use only the declared
-type, so `static fn (X $p): MethodReflection => $p->getTransformedMethod()`
-(body returns `ExtendedMethodReflection`) fails against an
-`ExtendedMethodReflection[]` parameter.
-Sites: `src/Reflection/Type/IntersectionTypeUnresolvedMethodPrototypeReflection.php:48`,
-`src/Reflection/Type/IntersectionTypeUnresolvedPropertyPrototypeReflection.php:47`,
-`src/Reflection/Type/UnionTypeUnresolvedMethodPrototypeReflection.php:49`,
-`src/Reflection/Type/UnionTypeUnresolvedPropertyPrototypeReflection.php:47`.
-
-**c. A doc comment above a closure assignment doesn't type the closure**
-(2 sites). A doc comment above `$closure = static function (...) { ... };`
-attaches to the expression statement, not the closure node; its
-`@param` tags must still type the closure's parameters
-(`src/Analyser/ExprHandler/FuncCallHandler.php:707, 708`).
-
-**d. Template arguments aren't recovered from `class-string`,
-`@implements`, or a constructor argument** (8 sites). Both shapes need a
-template argument that is nowhere in the call's own type arguments, and
-both then have to carry the recovered value through the expressions that
-read it.
-
-- `CollectedDataNode::get()` declares
-  `@template TCollector of Collector<Node, TValue>` /
-  `@param class-string<TCollector>` /
-  `@return array<string, list<TValue>>`; `TValue` must be recovered from
-  the collector class's `@implements Collector<..., array{...}>`. The
-  value then survives nested array writes and an `array_values(...)[0]`.
-  Sites: `src/Rules/Comparison/ConstantConditionInTraitRule.php:68, 80`,
-  `src/Rules/Comparison/FunctionCallConstantConditionRule.php:100, 119`.
-- PHPStan's `RecursiveIteratorIterator` stub is
-  `@template T of \RecursiveIterator|\IteratorAggregate` with `@mixin T`;
-  `foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir)) as $file)`
-  must bind `T` from the constructor argument and resolve iteration
-  through the mixin to `SplFileInfo`. Line 169 is downstream of the same
-  unresolved `$file`:
-  `str_replace(DIRECTORY_SEPARATOR, '/', $file->getPathname())` has a
-  subject nobody can type, so the conditional return keyed on it answers
-  with both the array and the string branch. Sites:
-  `build/PHPStan/Build/TurboAttributeCollector.php:162, 165, 169`,
-  `src/Cache/FileCacheStorage.php:151`.
-
-**e. A trait method implementing an interface method doesn't inherit its
-`@param` docblock** (1 site). `Type::getTemplateType()` declares
-`@param class-string`; the trait implementation loses it
-(`src/Type/Traits/LateResolvableTypeTrait.php:86`).
+The multi-line spelling above the statement works. Both placements are
+the same annotation, so a scanner that understands where a docblock
+begins and ends — rather than which lines look like comment lines —
+would read either. No site in the sample projects; found while working
+the closure-signature entry.
 
 ## Miscellaneous
 

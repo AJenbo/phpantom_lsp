@@ -567,10 +567,10 @@ pub(crate) fn walk_closure_in_partial_call_args<'b, F>(
 }
 
 /// Check whether a `/** … */` docblock is directly attached to the
-/// code at `fn_offset` — i.e. only whitespace separates the closing
-/// `*/` from `fn_offset`.  This prevents `@param` annotations from
-/// sibling closures/arrow functions from leaking across statement
-/// boundaries.
+/// code at `fn_offset` — i.e. only whitespace, the `static`/`function`
+/// keywords, or an assignment target separates the closing `*/` from
+/// `fn_offset`.  This prevents `@param` annotations from sibling
+/// closures/arrow functions from leaking across statement boundaries.
 pub(crate) fn is_docblock_adjacent(content: &str, fn_offset: usize) -> bool {
     let before = match content.get(..fn_offset) {
         Some(s) => s,
@@ -589,7 +589,43 @@ pub(crate) fn is_docblock_adjacent(content: &str, fn_offset: usize) -> bool {
     let trimmed = trimmed
         .trim_end_matches(|c: char| c.is_ascii_alphanumeric() || c == '_')
         .trim_end();
-    trimmed.ends_with("*/")
+    if trimmed.ends_with("*/") {
+        return true;
+    }
+    // A closure stored in a variable carries its docblock above the whole
+    // statement, because that is where PHP attaches the comment:
+    //
+    //   /** @param Arg[] $callArgs */
+    //   $setOffsetValueTypes = static function (array $callArgs) { … };
+    //
+    // Stepping back over the assignment target reaches it.  Only a plain
+    // assignment is stepped over — a call argument or an array element is
+    // not — which is what keeps a sibling closure's annotation out.
+    match assignment_target_start(trimmed) {
+        Some(start) => trimmed[..start].trim_end().ends_with("*/"),
+        None => false,
+    }
+}
+
+/// Byte offset of the assignment target in text that ends with a plain
+/// `=`, or `None` when the text does not end in an assignment to a simple
+/// lvalue (`$fn =`, `$this->fn =`, `$fns[] =`, `$fns['k'] =`).
+fn assignment_target_start(before: &str) -> Option<usize> {
+    let rest = before.strip_suffix('=')?;
+    // Comparisons, arrows and compound assignments all put another
+    // operator character right before the `=`; none of them assigns.
+    if rest.ends_with(|c: char| "=!<>.+-*/%?&|^:".contains(c)) {
+        return None;
+    }
+    let rest = rest.trim_end();
+    let start = rest.rfind('$')?;
+    rest[start..]
+        .chars()
+        .all(|c| {
+            c.is_ascii_alphanumeric()
+                || matches!(c, '_' | '$' | '[' | ']' | '-' | '>' | ':' | '\'' | '"')
+        })
+        .then_some(start)
 }
 
 /// Seed a closure/arrow function scope with parameter types, using

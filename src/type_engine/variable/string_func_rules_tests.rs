@@ -26,6 +26,9 @@ impl ArrayFuncArgs for Args {
     fn callback_inferred_return_type(&self, _index: usize, _param: &PhpType) -> Option<PhpType> {
         None
     }
+    fn narrows(&self, inferred: &PhpType, declared: &PhpType) -> bool {
+        inferred.is_subtype_of(declared)
+    }
     fn arg_atom_text(&self, index: usize) -> Option<String> {
         self.1.contains(&index).then(|| "SOME_CONSTANT".to_string())
     }

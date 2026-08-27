@@ -2638,6 +2638,26 @@ pub(crate) fn seed_pass_by_ref_in_condition<'b>(
     }
 }
 
+/// The callee whose own `@template` params a by-reference out type may name.
+///
+/// Carried alongside the parameter list so the check below is only made
+/// for calls that actually declare template parameters.
+enum ByRefTemplateOwner {
+    Function(Box<crate::types::FunctionInfo>),
+    Method(std::sync::Arc<ClassInfo>, String),
+}
+
+/// The `@template` parameters the callee declares.
+fn by_ref_template_params(owner: &ByRefTemplateOwner) -> &[crate::atom::Atom] {
+    match owner {
+        ByRefTemplateOwner::Function(fi) => &fi.template_params,
+        ByRefTemplateOwner::Method(cls, name) => match cls.get_method(name) {
+            Some(m) => &m.template_params,
+            None => &[],
+        },
+    }
+}
+
 /// For each variable argument in a call expression that is passed to a
 /// pass-by-reference parameter with a primitive type hint (e.g.
 /// `array &$matches`), seed or refresh the variable in scope. Existing exact
@@ -2656,7 +2676,7 @@ pub(crate) fn seed_pass_by_ref_primitives<'b>(
     }
 
     // Resolve the called function/method's parameters.
-    let (arg_list, parameters) = match expr {
+    let (arg_list, parameters, template_owner) = match expr {
         Expression::Call(Call::Function(func_call)) => {
             let func_name = match func_call.function {
                 Expression::Identifier(ident) => bytes_to_str(ident.value()).to_string(),
@@ -2671,7 +2691,12 @@ pub(crate) fn seed_pass_by_ref_primitives<'b>(
                 Some(fi) => fi,
                 None => return,
             };
-            (&func_call.argument_list, func_info.parameters)
+            let parameters = func_info.parameters.clone();
+            (
+                &func_call.argument_list,
+                parameters,
+                ByRefTemplateOwner::Function(Box::new(func_info)),
+            )
         }
         Expression::Call(Call::Method(mc)) => {
             let method_name = match &mc.method {
@@ -2712,7 +2737,11 @@ pub(crate) fn seed_pass_by_ref_primitives<'b>(
                 Some(m) => m,
                 None => return,
             };
-            (&mc.argument_list, method.parameters.clone())
+            (
+                &mc.argument_list,
+                method.parameters.clone(),
+                ByRefTemplateOwner::Method(merged, method_name),
+            )
         }
         Expression::Call(Call::NullSafeMethod(mc)) => {
             let method_name = match &mc.method {
@@ -2753,7 +2782,11 @@ pub(crate) fn seed_pass_by_ref_primitives<'b>(
                 Some(m) => m,
                 None => return,
             };
-            (&mc.argument_list, method.parameters.clone())
+            (
+                &mc.argument_list,
+                method.parameters.clone(),
+                ByRefTemplateOwner::Method(merged, method_name),
+            )
         }
         Expression::Call(Call::StaticMethod(sc)) => {
             let method_name = match &sc.method {
@@ -2782,7 +2815,11 @@ pub(crate) fn seed_pass_by_ref_primitives<'b>(
                 Some(m) => m,
                 None => return,
             };
-            (&sc.argument_list, method.parameters.clone())
+            (
+                &sc.argument_list,
+                method.parameters.clone(),
+                ByRefTemplateOwner::Method(merged, method_name),
+            )
         }
         _ => return,
     };
@@ -2791,6 +2828,14 @@ pub(crate) fn seed_pass_by_ref_primitives<'b>(
     // seeds the parameter it actually targets, not the one at its ordinal
     // position in the call.
     let bound = crate::call_args::bind_args_to_params(&parameters, arg_list);
+
+    // An out type written in the callee's own `@template` params
+    // (`usort`'s `array<TKey, TValue> &$array`) describes the caller's
+    // variable only once those params are bound, and this pass has no
+    // binding for them. Applied raw it would replace a precise argument
+    // type (`TargetClass<ContainerExtension>[]`) with an array of a name
+    // nothing can resolve, so the variable is left as it was instead.
+    let callee_templates = by_ref_template_params(&template_owner);
 
     for (param, arg_expr) in parameters.iter().zip(bound.iter()) {
         let arg_expr = match arg_expr {
@@ -2811,6 +2856,9 @@ pub(crate) fn seed_pass_by_ref_primitives<'b>(
 
         let already_in_scope = !scope.get(&var_name).is_empty();
         if let Some(out_hint) = param.out_type() {
+            if out_hint.references_any_name(callee_templates) {
+                continue;
+            }
             // A variadic parameter's stored PHPDoc type may describe the
             // collected argument array (`string[] &$values`), while each
             // call-site variable is one element of that collection. Native

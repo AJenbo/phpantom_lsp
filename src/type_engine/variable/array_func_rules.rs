@@ -60,6 +60,14 @@ pub(in crate::type_engine) trait ArrayFuncArgs {
     /// `param_type`.
     fn callback_inferred_return_type(&self, index: usize, param_type: &PhpType) -> Option<PhpType>;
 
+    /// Whether `inferred` is a subtype of `declared`, following the class
+    /// hierarchy rather than just the two types' structure.
+    ///
+    /// A closure's real return type is the intersection of what it declares
+    /// and what its body produces (PHPStan's `intersectButNotNever`), which
+    /// for a hierarchy pair is simply the narrower of the two.
+    fn narrows(&self, inferred: &PhpType, declared: &PhpType) -> bool;
+
     /// The argument at `index` written as a bare constant name or integer
     /// literal (`ARRAY_FILTER_USE_KEY`, `2`), with any namespace prefix
     /// stripped.  `None` for any other expression.
@@ -677,7 +685,10 @@ fn filter_key_param_index(args: &dyn ArrayFuncArgs) -> Option<usize> {
 ///
 /// Strategy:
 /// 1. If the callback (first arg) is a closure/arrow function with a
-///    return type hint, use that.
+///    return type hint, use that — narrowed by what the body returns,
+///    since a callback may declare a supertype of what it produces
+///    (`fn (X $p): MethodReflection => $p->getTransformedMethod()` really
+///    returns the `ExtendedMethodReflection` the body hands back).
 /// 2. Otherwise infer it from the callback body, with the callback's
 ///    first parameter seeded to the input array's element type.
 /// 3. Otherwise assume the callback passes its element through.
@@ -685,7 +696,19 @@ fn array_map_element_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
     if let Some(declared) = args.callback_declared_return_type(0)
         && !declared.is_untyped()
     {
-        return Some(declared);
+        // Only a class-like declaration can be narrowed by a hierarchy
+        // relation, so a scalar one skips the body walk entirely.
+        if declared.is_scalar_leaf() {
+            return Some(declared);
+        }
+        let seed = args
+            .arg_raw_type(1)
+            .and_then(|t| t.iterable_element_type())
+            .unwrap_or_else(PhpType::mixed);
+        let narrowed = args
+            .callback_inferred_return_type(0, &seed)
+            .filter(|inferred| args.narrows(inferred, &declared));
+        return Some(narrowed.unwrap_or(declared));
     }
 
     let input_element = args.arg_raw_type(1)?.iterable_element_type()?;

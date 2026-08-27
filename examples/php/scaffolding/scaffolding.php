@@ -801,6 +801,9 @@ class ScaffoldingArrayFunc
 
     /** @return list<int> */
     public function weights(): array { return [2, 3, 4]; }
+
+    /** @return list<Marker> */
+    public function markers(): array { return [new Marker('wide'), new Marker('slim')]; }
 }
 
 class ScaffoldingException

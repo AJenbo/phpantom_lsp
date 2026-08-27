@@ -59,6 +59,12 @@
 //!    return type (and thus the function's own return) stays in the
 //!    value-inspecting logic in `raw_type_inference.rs`.
 //!
+//!    **`usort`** / **`uasort`** / **`uksort`** are the same deficiency in
+//!    the comparison-callback family: both parameters of
+//!    `usort($errors, fn ($a, $b) => …)` are untyped until the array binds
+//!    them. We add the `@template TKey`/`TValue` pair and retype the
+//!    callback `callable(T, T): int` over whichever of the two it compares.
+//!
 //! 6. **`spl_autoload_register`** -- the callback is typed bare
 //!    `?callable`, so the closure an autoloader is normally written as
 //!    leaves its parameter untyped. We retype it
@@ -196,6 +202,8 @@ pub fn apply_function_stub_patches(func: &mut FunctionInfo) {
         "stream_bucket_make_writeable" => patch_stream_bucket_make_writeable(func),
         "array_map" => patch_array_map(func),
         "array_filter" => patch_array_filter(func),
+        "usort" | "uasort" => patch_user_sort(func, SortComparand::Value),
+        "uksort" => patch_user_sort(func, SortComparand::Key),
         "array_fill_keys" => patch_array_fill_keys(func),
         "array_keys" => patch_array_key_value_generics(func, "$array", "list<TKey>"),
         "array_values" => patch_array_key_value_generics(func, "$array", "list<TValue>"),
@@ -335,6 +343,66 @@ fn patch_array_filter(func: &mut FunctionInfo) {
         _ => return,
     };
     link_callback_to_array_element(func, callback_name, array_name, "mixed");
+}
+
+/// Which half of the array a user-comparison sort hands its callback.
+#[derive(Copy, Clone)]
+enum SortComparand {
+    /// `usort`/`uasort` compare values.
+    Value,
+    /// `uksort` compares keys.
+    Key,
+}
+
+/// Spell out the comparison callback of `usort`, `uasort` and `uksort`.
+///
+/// phpstorm-stubs declare all three as
+/// `usort(array &$array, callable $callback)`, so the comparison closure
+/// idiom `usort($errors, fn ($a, $b) => $a->getLine() <=> $b->getLine())`
+/// leaves both parameters untyped. PHP calls the callback with two
+/// elements of the array it is sorting: two values for `usort`/`uasort`,
+/// two keys for `uksort`. We add the `@template` pair, retype the array as
+/// `array<TKey, TValue>` and the callback as `callable(T, T): int` over
+/// whichever of the two it compares, then bind both from the array
+/// argument. Mirrors PHPStan's own `stubs/arrayFunctions.stub`.
+fn patch_user_sort(func: &mut FunctionInfo, comparand: SortComparand) {
+    const TKEY: &str = "TKey";
+    const TVALUE: &str = "TValue";
+
+    // Expected stub shape: `usort(array &$array, callable $callback)`.
+    let array_name = match func.parameters.first() {
+        Some(p) if p.name.as_str() == "$array" => p.name,
+        _ => return,
+    };
+    let callback_name = match func.parameters.get(1) {
+        Some(p) if p.name.as_str() == "$callback" => p.name,
+        _ => return,
+    };
+
+    let compared = match comparand {
+        SortComparand::Value => TVALUE,
+        SortComparand::Key => TKEY,
+    };
+    let array_hint = PhpType::parse(&format!("array<{TKEY}, {TVALUE}>"));
+    let callback_hint = PhpType::parse(&format!("callable({compared}, {compared}): int"));
+
+    for param in func.parameters.make_mut() {
+        if param.name == array_name {
+            param.type_hint = Some(array_hint.clone());
+        } else if param.name == callback_name {
+            param.type_hint = Some(callback_hint.clone());
+        }
+    }
+
+    func.template_params = vec![atom(TKEY), atom(TVALUE)];
+    // A bare `array` argument binds neither param, and `array-key` is
+    // PHP's own answer for a key that nothing narrowed.
+    func.template_param_bounds = [(atom(TKEY), PhpType::parse("array-key"))]
+        .into_iter()
+        .collect();
+    // Only the array argument can bind them: the callback is the very
+    // thing whose parameters these templates are there to type.
+    func.template_bindings = vec![(atom(TKEY), array_name), (atom(TVALUE), array_name)];
 }
 
 /// Shared helper: give `func` a single `TValue` template bound from the
@@ -953,6 +1021,7 @@ pub fn apply_class_stub_patches(class: &mut ClassInfo) {
     match class.name.as_str() {
         "WeakMap" => patch_weak_map(class),
         "IteratorIterator" => patch_iterator_iterator(class),
+        "RecursiveIteratorIterator" => patch_recursive_iterator_iterator(class),
         "FilterIterator" => patch_filter_iterator(class),
         "NoRewindIterator" => patch_no_rewind_iterator(class),
         "CachingIterator" => patch_caching_iterator(class),
@@ -1117,6 +1186,59 @@ fn patch_iterator_iterator(class: &mut ClassInfo) {
             .find(|p| p.name == "$iterator")
         {
             param.type_hint = Some(PhpType::named(atom("TIterator")));
+        }
+        class.methods.make_mut()[ctor_idx] = std::sync::Arc::new(ctor);
+    }
+}
+
+/// Add `@template T of RecursiveIterator|IteratorAggregate` and
+/// `@mixin T`, bound from the constructor's `$iterator` argument.
+///
+/// `RecursiveIteratorIterator` does not extend `IteratorIterator`, so it
+/// gets its own patch rather than
+/// [`patch_iterator_iterator_subclass`]. phpstorm-stubs type the
+/// constructor `Traversable $iterator` and every accessor `mixed`, so the
+/// directory-walk idiom
+/// `foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir)) as $file)`
+/// leaves `$file` with nothing behind it. Binding `T` to the wrapped
+/// iterator and mixing it in is what gives the traversal its element type.
+///
+/// PHPStan ref: `stubs/iterable.stub`
+fn patch_recursive_iterator_iterator(class: &mut ClassInfo) {
+    if !class.template_params.is_empty() {
+        return;
+    }
+    let t = atom("T");
+    class.template_params.push(t);
+    class.template_param_bounds.entry(t).or_insert_with(|| {
+        PhpType::union(vec![
+            PhpType::named(atom("RecursiveIterator")),
+            PhpType::named(atom("IteratorAggregate")),
+        ])
+    });
+    if !class.mixins.contains(&t) {
+        class.mixins.push(t);
+    }
+
+    if let Some(ctor_idx) = class
+        .methods
+        .iter()
+        .position(|m| m.name.as_str() == "__construct")
+    {
+        let mut ctor = (*class.methods[ctor_idx]).clone();
+        let binding = (t, atom("$iterator"));
+        if !ctor.template_bindings.iter().any(|(n, _)| *n == t) {
+            ctor.template_bindings.push(binding);
+        }
+        // A `T` hint (rather than the stub's `Traversable`) is what makes
+        // `classify_template_binding` read the argument as a direct bind.
+        if let Some(param) = ctor
+            .parameters
+            .make_mut()
+            .iter_mut()
+            .find(|p| p.name == "$iterator")
+        {
+            param.type_hint = Some(PhpType::named(t));
         }
         class.methods.make_mut()[ctor_idx] = std::sync::Arc::new(ctor);
     }
@@ -1932,6 +2054,55 @@ mod tests {
         assert_eq!(
             func.parameters[0].type_hint,
             Some(PhpType::parse("?callable"))
+        );
+    }
+
+    #[test]
+    fn the_user_sort_family_types_its_comparison_callback() {
+        for (name, compared) in [
+            ("usort", "TValue"),
+            ("uasort", "TValue"),
+            ("uksort", "TKey"),
+        ] {
+            let mut func = empty_function(name);
+            func.parameters = vec![param("$array", "array"), param("$callback", "callable")].into();
+
+            apply_function_stub_patches(&mut func);
+
+            assert_eq!(
+                func.parameters[0].type_hint,
+                Some(PhpType::parse("array<TKey, TValue>")),
+                "{name} array parameter"
+            );
+            assert_eq!(
+                func.parameters[1].type_hint,
+                Some(PhpType::parse(&format!(
+                    "callable({compared}, {compared}): int"
+                ))),
+                "{name} callback parameter"
+            );
+            assert_eq!(
+                func.template_bindings,
+                vec![
+                    (atom("TKey"), atom("$array")),
+                    (atom("TValue"), atom("$array")),
+                ],
+                "{name} bindings"
+            );
+        }
+    }
+
+    #[test]
+    fn a_differently_shaped_sort_stub_is_not_patched() {
+        let mut func = empty_function("usort");
+        func.parameters = vec![param("$callback", "callable"), param("$array", "array")].into();
+
+        apply_function_stub_patches(&mut func);
+
+        assert!(func.template_params.is_empty());
+        assert_eq!(
+            func.parameters[0].type_hint,
+            Some(PhpType::parse("callable"))
         );
     }
 

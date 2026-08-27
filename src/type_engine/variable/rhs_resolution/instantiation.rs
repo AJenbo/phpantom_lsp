@@ -370,7 +370,7 @@ pub(super) fn extract_class_string_inner(resolved: &[ResolvedType]) -> Option<St
 ///
 /// For example, if `FooContainer` has `@extends Container<Foo>`, calling
 /// `extract_generic_arg_from_ancestor(FooContainer, "Container", 0, ...)` returns `Foo`.
-pub(super) fn extract_generic_arg_from_ancestor(
+pub(crate) fn extract_generic_arg_from_ancestor(
     arg_type: &PhpType,
     wrapper_name: &str,
     tpl_position: usize,
@@ -396,28 +396,76 @@ pub(super) fn extract_generic_arg_from_ancestor(
     let cls = class_loader(class_name)?;
 
     let wrapper_short = crate::util::short_name(wrapper_name);
-    if let Some(arg) = find_extends_generic_arg(&cls, wrapper_short, tpl_position) {
-        return Some(arg);
+    let mut visited = Vec::new();
+    ancestor_generic_arg(
+        &cls,
+        wrapper_short,
+        tpl_position,
+        &HashMap::new(),
+        &mut visited,
+        class_loader,
+    )
+}
+
+/// Maximum ancestry depth walked while looking for an ancestor's generic
+/// argument.  A backstop against an `extends`/`implements` cycle the
+/// loader hands back; the `visited` set is what actually bounds the work.
+const MAX_ANCESTOR_GENERIC_DEPTH: usize = 15;
+
+/// The type argument `ancestor_short` receives at `position`, as seen from
+/// `cls`.
+///
+/// Walks the parent chain **and** the interface list, threading each
+/// level's `@extends`/`@implements` arguments into the next, so a class
+/// that reaches the ancestor only through an intermediate generic
+/// interface still reports a concrete argument.
+/// `X implements CollectorWithPaths<never, array{…}>` together with
+/// `CollectorWithPaths extends Collector<TNodeType, TValue>` is what says
+/// `Collector`'s value argument is that `array{…}`.
+fn ancestor_generic_arg(
+    cls: &ClassInfo,
+    ancestor_short: &str,
+    position: usize,
+    subs: &HashMap<String, PhpType>,
+    visited: &mut Vec<crate::atom::Atom>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<PhpType> {
+    if visited.len() > MAX_ANCESTOR_GENERIC_DEPTH {
+        return None;
+    }
+    let fqn = cls.fqn();
+    if visited.contains(&fqn) {
+        return None;
+    }
+    visited.push(fqn);
+
+    if let Some(arg) = find_extends_generic_arg(cls, ancestor_short, position) {
+        return Some(if subs.is_empty() {
+            arg
+        } else {
+            arg.substitute(subs)
+        });
     }
 
-    let mut current = cls;
-    for _ in 0..15 {
-        let parent_name = current.parent_class.as_ref()?;
-        let parent = class_loader(parent_name)?;
-
-        if let Some(arg) = find_extends_generic_arg(&parent, wrapper_short, tpl_position) {
-            // The arg might reference the parent's template params — substitute
-            // through the chain to get concrete types.
-            let subs = build_extends_sub_map(&current, &parent);
-            let resolved = if subs.is_empty() {
-                arg
-            } else {
-                arg.substitute(&subs)
-            };
-            return Some(resolved);
+    for ancestor_name in cls.parent_class.iter().chain(cls.interfaces.iter()) {
+        let Some(ancestor) = class_loader(ancestor_name) else {
+            continue;
+        };
+        let next_subs = crate::inheritance::build_substitution_map(
+            &crate::inheritance::ClassRef::Borrowed(cls),
+            &ancestor,
+            subs,
+        );
+        if let Some(arg) = ancestor_generic_arg(
+            &ancestor,
+            ancestor_short,
+            position,
+            &next_subs,
+            visited,
+            class_loader,
+        ) {
+            return Some(arg);
         }
-
-        current = parent;
     }
 
     None
@@ -440,33 +488,6 @@ pub(super) fn find_extends_generic_arg(
         }
     }
     None
-}
-
-/// Build a simple substitution map from a child class to its parent based
-/// on `@extends` generics.
-pub(super) fn build_extends_sub_map(
-    child: &ClassInfo,
-    parent: &ClassInfo,
-) -> HashMap<String, PhpType> {
-    if parent.template_params.is_empty() {
-        return HashMap::new();
-    }
-    let parent_short = crate::util::short_name(&parent.name);
-    let type_args = child
-        .extends_generics
-        .iter()
-        .chain(child.implements_generics.iter())
-        .find(|(name, _)| crate::util::short_name(name) == parent_short)
-        .map(|(_, args)| args);
-    let mut map = HashMap::new();
-    if let Some(args) = type_args {
-        for (i, param) in parent.template_params.iter().enumerate() {
-            if let Some(arg) = args.get(i) {
-                map.insert(param.to_string(), arg.clone());
-            }
-        }
-    }
-    map
 }
 
 /// Remap constructor template substitutions from ancestor param names to child

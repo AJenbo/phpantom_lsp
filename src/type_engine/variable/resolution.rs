@@ -1491,13 +1491,19 @@ fn resolve_abstract_method_param(
             top_level_scope: ctx.top_level_scope.clone(),
         };
 
+        let trait_prototype =
+            super::forward_walk::trait_prototype_method(Some(&method_name_str), &fw_ctx);
+
         return super::forward_walk::resolve_param_type(
             pname,
             native_type.as_ref(),
             is_variadic,
-            method.span().start.offset,
-            Some(&method_name_str),
-            has_scope_attr,
+            &super::forward_walk::EnclosingMethod {
+                span_start: method.span().start.offset,
+                name: Some(&method_name_str),
+                has_scope_attr,
+                trait_prototype: trait_prototype.as_ref(),
+            },
             &fw_ctx,
         );
     }

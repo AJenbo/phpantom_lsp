@@ -107,8 +107,13 @@ impl ArrayFuncArgs for TextArrayFuncArgs<'_, '_> {
 
     fn callback_declared_return_type(&self, index: usize) -> Option<PhpType> {
         let text = self.arg_text(index)?;
-        crate::completion::source::helpers::extract_closure_return_type_from_text(text).or_else(
-            || {
+        crate::completion::source::helpers::extract_closure_return_type_from_text(text)
+            // A `: ReturnType` annotation is read as written, so it still
+            // carries the file's own spelling of the class (`Support\Pen`
+            // behind a `use App\Support;`).  It is compared against types
+            // that arrived fully qualified, so canonicalise it here.
+            .map(|ty| crate::util::resolve_php_type_names(&ty, self.ctx.class_loader))
+            .or_else(|| {
                 // See the AST counterpart: a callable string names a
                 // function whose declared return the call hands back.
                 let name =
@@ -116,8 +121,7 @@ impl ArrayFuncArgs for TextArrayFuncArgs<'_, '_> {
                         text,
                     )?;
                 (self.ctx.function_loader?)(name, 0)?.return_type
-            },
-        )
+            })
     }
 
     fn callback_inferred_return_type(&self, index: usize, param_type: &PhpType) -> Option<PhpType> {
@@ -144,6 +148,10 @@ impl ArrayFuncArgs for TextArrayFuncArgs<'_, '_> {
             subject,
             Some(&self.ctx.class_loader),
         )
+    }
+
+    fn narrows(&self, inferred: &PhpType, declared: &PhpType) -> bool {
+        crate::class_lookup::is_subtype_of_typed(inferred, declared, self.ctx.class_loader)
     }
 }
 

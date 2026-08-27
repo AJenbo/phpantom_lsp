@@ -199,6 +199,7 @@ mod return_type_resolution;
 mod self_out;
 mod semantic_tokens;
 mod server_lifecycle;
+mod signature_from_call_site;
 mod signature_help;
 mod smoke;
 mod type_definition;

@@ -1961,6 +1961,19 @@ function runDemoAssertions(): void
     assert($promotedHook->promoted instanceof GtdTarget, 'the promoted get hook reads through $this');
     assert($promotedHook->formatted === 'gtd', 'parent::$formatted::get() calls the overridden hook');
 
+    // ── The user-comparison sorts, and a callback narrowed by its body ──
+    $sorted = (new Scaffolding\ScaffoldingArrayFunc())->byName();
+    uasort($sorted, fn($a, $b) => strcmp($a->color(), $b->color()));
+    assert(array_keys($sorted) === ['blue', 'red'], 'uasort() hands its callback the values and keeps the keys with them');
+    uksort($sorted, fn($a, $b) => strcmp($b, $a));
+    assert(array_keys($sorted) === ['red', 'blue'], 'uksort() hands its callback the keys');
+
+    $markers = (new Scaffolding\ScaffoldingArrayFunc())->markers();
+    $renamedMarkers = array_map(fn(Scaffolding\Marker $m): Scaffolding\Pen => $m->rename('wide'), $markers);
+    assert($renamedMarkers[0] instanceof Scaffolding\Marker, 'rename() returns static, so a callback declaring Scaffolding\Pen still hands back a Scaffolding\Marker');
+
+    assert((new ClosureParamInferenceDemo())->docblockedClosure() === 'blue', 'a closure typed by the docblock above its assignment runs on the values that docblock describes');
+
     echo "All assertions passed.\n";
 }
 

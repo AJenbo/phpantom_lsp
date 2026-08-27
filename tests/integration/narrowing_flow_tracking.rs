@@ -1968,3 +1968,136 @@ function f(Arm $arm, array $fresh): void
 "#
     ));
 }
+
+// ─── Falling out of the bottom of an if/elseif chain ────────────────────────
+
+/// Every condition in the chain was false on the fall-through path, so
+/// each one's inverse holds there. An `elseif` used to make the leading
+/// condition's inverse go missing: the guard-clause pass declines to run
+/// once there is an `elseif`, and the implicit-else path never learned it.
+#[test]
+fn falling_past_an_elseif_chain_inverts_every_condition_in_it() {
+    assert_no_type_errors(
+        r#"<?php
+namespace Repro;
+
+class Tip
+{
+    public function text(): string { return ''; }
+}
+
+function useTip(Tip $tip): string { return $tip->text(); }
+
+function f(?Tip $a, ?Tip $b): int
+{
+    if ($a === null) {
+        return 1;
+    } elseif ($b === null) {
+        return -1;
+    }
+
+    return strcmp(useTip($a), useTip($b));
+}
+"#,
+    );
+}
+
+/// The same shape with the guard written on an array offset, which is how
+/// a comparison callback tests an optional tuple member.
+#[test]
+fn falling_past_an_elseif_chain_keeps_an_isset_proof_on_an_offset() {
+    assert_no_type_errors(
+        r#"<?php
+namespace Repro;
+
+class Tip
+{
+    public function text(): string { return ''; }
+}
+
+function useTip(Tip $tip): string { return $tip->text(); }
+
+/**
+ * @param array{0: string, 2?: Tip|null} $a
+ * @param array{0: string, 2?: Tip|null} $b
+ */
+function f(array $a, array $b): int
+{
+    if (!isset($a[2])) {
+        if (!isset($b[2])) {
+            return 0;
+        }
+
+        return 1;
+    } elseif (!isset($b[2])) {
+        return -1;
+    }
+
+    return strcmp(useTip($a[2]), useTip($b[2]));
+}
+"#,
+    );
+}
+
+/// Negative control: an `elseif` body that falls through instead of
+/// exiting reaches the bottom with its own condition *true*, so nothing
+/// downstream may assume the inverse.
+#[test]
+fn an_elseif_that_falls_through_does_not_prove_its_condition_false() {
+    assert_type_error(
+        r#"<?php
+namespace Repro;
+
+class Tip
+{
+    public function text(): string { return ''; }
+}
+
+function useTip(Tip $tip): string { return $tip->text(); }
+
+function f(?Tip $a, ?Tip $b): string
+{
+    if ($a === null) {
+        return 'first';
+    } elseif ($b === null) {
+        echo 'noted';
+    }
+
+    return useTip($b);
+}
+"#,
+    );
+}
+
+// ─── Reading an offset of a union of array shapes ───────────────────────────
+
+/// Every alternative contributes its own entry: offset 1 of
+/// `array{string, null}|array{string, Err}` is `null|Err`, so the guard
+/// that rules out `null` leaves `Err`. Taking only the first alternative's
+/// entry left the guard nothing to remove and the read reported `null`.
+#[test]
+fn an_offset_of_a_union_of_shapes_unions_every_alternatives_entry() {
+    assert_no_type_errors(
+        r#"<?php
+namespace Repro;
+
+class Err
+{
+    public function message(): string { return ''; }
+}
+
+function useMessage(string $m): void {}
+
+/** @param list<array{string, null}|array{string, Err}> $rows */
+function f(array $rows): void
+{
+    foreach ($rows as $row) {
+        if ($row[1] === null) {
+            continue;
+        }
+        useMessage($row[1]->message());
+    }
+}
+"#,
+    );
+}

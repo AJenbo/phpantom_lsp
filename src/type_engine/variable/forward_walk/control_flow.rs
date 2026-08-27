@@ -294,17 +294,23 @@ pub(crate) fn process_if_statement_body<'b>(
         }
     } else {
         // No else clause — the pre-if scope is an implicit surviving path.
-        // When the then-body does NOT exit, apply inverse condition
-        // narrowing so that information from the condition (e.g.
-        // `$a["test"] === null` → `$a["test"]` is NOT null in the
-        // implicit else path) is reflected in the merge.
+        // Falling out of the bottom means every condition in the chain was
+        // false, so each one's inverse narrowing holds here (e.g.
+        // `$a["test"] === null` → `$a["test"]` is NOT null in the implicit
+        // else path).
         //
-        // When the then-body DOES exit (guard clause), skip inverse
-        // narrowing here — the dedicated guard clause section below
-        // handles it.  Applying it in both places would double-narrow.
+        // The leading condition is the exception: when the then-body exits
+        // and there is no `elseif`, the dedicated guard clause section
+        // below applies its inverse to the merged scope, and applying it in
+        // both places would double-narrow.  With an `elseif` present that
+        // section bails out, so this is the only place the fall-through
+        // path learns the leading condition was false.
         implicit_else_scope = pre_if_scope.clone();
-        if !then_exits {
+        if !then_exits || !body.else_if_clauses.is_empty() {
             apply_condition_narrowing_inverse(if_stmt.condition, &mut implicit_else_scope, ctx);
+        }
+        for ei in body.else_if_clauses.iter() {
+            apply_condition_narrowing_inverse(ei.condition, &mut implicit_else_scope, ctx);
         }
         // The implicit else path precedes the then-body in source order, so
         // it goes first: the merge below preserves this order in each

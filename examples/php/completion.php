@@ -1566,6 +1566,16 @@ class SplWrapperIterationDemo
         foreach (new \DirectoryIterator(__DIR__) as $entry) {
             $entry->isFile();                     // DirectoryIterator → current(): DirectoryIterator
         }
+
+        // `RecursiveIteratorIterator` says nothing about what it yields on
+        // its own: the wrapped iterator does, and the wrapper carries it
+        // through. This is the directory-walk idiom.
+        $tree = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator(__DIR__, \FilesystemIterator::SKIP_DOTS)
+        );
+        foreach ($tree as $file) {
+            $file->getExtension();                // SplFileInfo from RecursiveDirectoryIterator
+        }
     }
 }
 
@@ -3838,6 +3848,38 @@ class ArrayFuncDemo
             'total' => array_sum($src->weights()),
         ];
     }
+
+    /**
+     * The user-comparison sorts hand their callback two entries of the array
+     * they are sorting: two values for usort and uasort, two keys for
+     * uksort. Neither the call nor the callback spells the type out.
+     *
+     * Try: trigger completion after each `->` below.
+     */
+    public function sortCallbacks(Scaffolding\ScaffoldingArrayFunc $src): void
+    {
+        $roster = $src->roster();
+        usort($roster, static fn($a, $b) => strcmp($a->color(), $b->color()));
+        $roster[0]->write();              // list<Scaffolding\Pen> survives the sort
+
+        $byName = $src->byName();
+        uasort($byName, static fn($a, $b) => strcmp($a->color(), $b->color()));
+        uksort($byName, static fn($a, $b) => strcmp($a, $b));  // $a, $b are the string keys
+        $byName['blue']->write();         // array<string, Scaffolding\Pen> survives both
+    }
+
+    /**
+     * A callback may annotate a return type wider than what its body hands
+     * back; the narrower one is what the mapped array holds.
+     */
+    public function mappedSubclass(Scaffolding\ScaffoldingArrayFunc $src): void
+    {
+        $renamed = array_map(
+            static fn(Scaffolding\Marker $m): Scaffolding\Pen => $m->rename('wide'),
+            $src->markers()
+        );
+        $renamed[0]->highlight();         // Scaffolding\Marker: rename() returns static
+    }
 }
 
 
@@ -4183,6 +4225,30 @@ class ClosureParamInferenceDemo
         $tools->each(function (Scaffolding\Pen|Scaffolding\Pencil $item): void {
             $item->label();               // resolves on both union arms
         });
+    }
+
+    /**
+     * A doc comment written above the statement a closure is assigned in
+     * still types the closure. PHP attaches the comment to the statement,
+     * but its `@param` tags describe the closure's own parameters.
+     *
+     * Try: trigger completion after `$pen->` inside the closure body.
+     */
+    public function docblockedClosure(): string
+    {
+        /**
+         * @param list<Scaffolding\Pen> $pens
+         */
+        $labels = static function (array $pens): string {
+            $out = '';
+            foreach ($pens as $pen) {
+                $out .= $pen->color();    // Scaffolding\Pen from the docblock above the assignment
+            }
+
+            return $out;
+        };
+
+        return $labels([new Scaffolding\Pen('blue')]);
     }
 }
 

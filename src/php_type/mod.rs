@@ -2196,7 +2196,16 @@ impl PhpType {
                 None
             }
             TypeKind::Nullable(inner) => inner.extract_shape_key_type(key),
-            TypeKind::Union(members) => members.iter().find_map(|m| m.extract_shape_key_type(key)),
+            TypeKind::Union(members) => {
+                // Every alternative contributes its own entry: reading
+                // offset 1 of `array{string, null}|array{string, Err}` is
+                // `null|Err`, not whichever alternative comes first.
+                let found: Vec<PhpType> = members
+                    .iter()
+                    .filter_map(|m| m.extract_shape_key_type(key))
+                    .collect();
+                (!found.is_empty()).then(|| PhpType::union(found))
+            }
             _ => None,
         }
     }

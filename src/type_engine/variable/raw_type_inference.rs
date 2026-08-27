@@ -415,15 +415,20 @@ impl ArrayFuncArgs for AstArrayFuncArgs<'_, '_, '_> {
     }
 
     fn callback_declared_return_type(&self, index: usize) -> Option<PhpType> {
+        // A written `: ReturnType` carries the file's own spelling of the
+        // class (`Support\Pen` behind a `use App\Support;`), and it is
+        // compared against types that arrived fully qualified, so the
+        // spelling is canonicalised on the way out.
+        let qualify = |ty: PhpType| crate::util::resolve_php_type_names(&ty, self.ctx.class_loader);
         match super::resolution::nth_arg_expr(self.args, index)? {
             Expression::Closure(closure) => closure
                 .return_type_hint
                 .as_ref()
-                .map(|rth| extract_hint_type(&rth.hint)),
+                .map(|rth| qualify(extract_hint_type(&rth.hint))),
             Expression::ArrowFunction(arrow) => arrow
                 .return_type_hint
                 .as_ref()
-                .map(|rth| extract_hint_type(&rth.hint)),
+                .map(|rth| qualify(extract_hint_type(&rth.hint))),
             // `array_map('intval', $xs)` names its callback instead of
             // spelling it out; the named function's own return type is what
             // the call produces.
@@ -464,6 +469,10 @@ impl ArrayFuncArgs for AstArrayFuncArgs<'_, '_, '_> {
             subject,
             Some(&self.ctx.class_loader),
         )
+    }
+
+    fn narrows(&self, inferred: &PhpType, declared: &PhpType) -> bool {
+        crate::class_lookup::is_subtype_of_typed(inferred, declared, self.ctx.class_loader)
     }
 }
 
@@ -588,14 +597,21 @@ fn infer_callback_return_type(
     // Build a scope resolver that maps the callback parameter to the
     // input element type.  Include ClassInfo when available so that
     // property access resolution can find the class members.
-    let resolved_param = if let Some(class_name) = param_type.base_name() {
-        if let Some(cls) = (ctx.class_loader)(class_name) {
-            vec![ResolvedType::from_both(param_type.clone(), (*cls).clone())]
-        } else {
-            vec![ResolvedType::from_type_string(param_type.clone())]
+    //
+    // A union element type seeds one entry per alternative rather than one
+    // entry holding the whole union: two instantiations of the same class
+    // (`Builder<A>|Builder<B>`) resolve to one class, and a single entry
+    // could only carry the union as its type string, leaving a `@return T`
+    // on that class with no instantiation to substitute from.
+    let seed_member = |ty: &PhpType| -> ResolvedType {
+        match ty.base_name().and_then(|name| (ctx.class_loader)(name)) {
+            Some(cls) => ResolvedType::from_both(ty.clone(), (*cls).clone()),
+            None => ResolvedType::from_type_string(ty.clone()),
         }
-    } else {
-        vec![ResolvedType::from_type_string(param_type.clone())]
+    };
+    let resolved_param: Vec<ResolvedType> = match param_type.kind() {
+        crate::php_type::TypeKind::Union(members) => members.iter().map(seed_member).collect(),
+        _ => vec![seed_member(param_type)],
     };
     let scope_resolver = move |var: &str| -> Vec<ResolvedType> {
         if var == param_name {
