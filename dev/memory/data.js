@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787781140944,
+  "lastUpdate": 1787802752926,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -25057,6 +25057,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 67.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "8744e5990c23760dd38390ca0316be2051073b6a",
+          "message": "A class named `Scalar` or `Numeric` is a class, not a PHPDoc pseudo-type",
+          "timestamp": "2026-08-27T05:40:32+02:00",
+          "tree_id": "ffc87a0aa6d04f7b528c5a4c46c1ce90114a0915",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/8744e5990c23760dd38390ca0316be2051073b6a"
+        },
+        "date": 1787802746516,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 36.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 74.9,
             "unit": "MiB"
           }
         ]
