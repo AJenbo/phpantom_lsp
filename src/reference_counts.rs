@@ -561,9 +561,10 @@ impl Backend {
     /// Run the queued member reference counts on a background thread and
     /// ask the editor to re-pull inlay hints once they land.
     ///
-    /// At most one computation runs at a time: the counts a viewport needs
-    /// are queued again by the next request, so a dropped schedule costs
-    /// nothing but the wait.
+    /// At most one computation runs at a time. Requests that arrive while it
+    /// runs join the same burst, which is drained before one editor refresh.
+    /// Refreshing after every partial batch creates a feedback loop in clients
+    /// that immediately re-request lenses for all open buffers.
     pub(crate) fn schedule_member_ref_counts(&self) {
         if !self.member_ref_counts.has_pending()
             || self
@@ -578,12 +579,23 @@ impl Backend {
         tokio::spawn(async move {
             let worker = backend.clone_for_blocking();
             let changed = crate::server::run_blocking_cancel_safe("member ref counts", move || {
-                let changed = worker.compute_pending_member_ref_counts();
-                worker
-                    .member_ref_counts
-                    .computing
-                    .store(false, Ordering::Release);
-                changed
+                let mut changed = false;
+                loop {
+                    changed |= worker.compute_pending_member_ref_counts();
+
+                    // Pair the empty check with clearing `computing` under
+                    // the queue lock. A request either lands before this and
+                    // is drained by the loop, or lands afterwards, observes
+                    // `computing == false`, and starts the next worker.
+                    let pending = worker.member_ref_counts.pending.lock();
+                    if pending.is_empty() {
+                        worker
+                            .member_ref_counts
+                            .computing
+                            .store(false, Ordering::Release);
+                        return changed;
+                    }
+                }
             })
             .await;
 
