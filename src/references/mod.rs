@@ -67,7 +67,7 @@ impl Backend {
     /// vendor directory or the internal stub scheme.  All four cross-file
     /// reference scanners use this to restrict results to user code.
     pub(crate) fn user_file_symbol_maps(&self) -> Vec<(String, Arc<SymbolMap>)> {
-        self.ensure_workspace_indexed_for_request();
+        self.ensure_workspace_index_ready_for_request();
         self.user_file_symbol_maps_matching(None)
     }
 
@@ -85,7 +85,7 @@ impl Backend {
         &self,
         keys: &[ReferenceIndexKey],
     ) -> Vec<(String, Arc<SymbolMap>)> {
-        self.ensure_workspace_indexed_for_request();
+        self.ensure_workspace_index_ready_for_request();
         let candidate_uris = self.reference_candidate_uris_for_keys(keys);
         self.user_file_symbol_maps_matching(candidate_uris.as_ref())
     }
