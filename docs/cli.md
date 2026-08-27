@@ -104,8 +104,9 @@ That makes it useful in a few situations:
   reports what it finds. No baselines, no ignore files, no level to
   choose. The only configuration worth knowing about is
   `unresolved-member-access`: enable it in `.phpantom.toml` to also
-  flag member access on variables whose type could not be resolved
-  (off by default because it is noisy on untyped codebases).
+  flag member access on variables that are `mixed`, or whose type could
+  not be worked out (off by default because it is noisy on untyped
+  codebases).
 
 > [!NOTE]
 > There are still occasional false positives, though they are getting

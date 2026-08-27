@@ -489,21 +489,12 @@ impl ResolvedType {
             }
         }
 
-        fn contains_mixed(ty: &PhpType) -> bool {
-            if ty.is_mixed() {
-                return true;
-            }
-            match ty.kind() {
-                TypeKind::Union(members) => members.iter().any(contains_mixed),
-                TypeKind::Nullable(inner) => contains_mixed(inner),
-                _ => false,
-            }
-        }
-
         fn mixed_hides_alternatives(ty: &PhpType) -> bool {
             match ty.kind() {
-                TypeKind::Union(members) => members.len() > 1 && members.iter().any(contains_mixed),
-                TypeKind::Nullable(inner) => contains_mixed(inner),
+                TypeKind::Union(members) => {
+                    members.len() > 1 && members.iter().any(PhpType::contains_mixed)
+                }
+                TypeKind::Nullable(inner) => inner.contains_mixed(),
                 _ => false,
             }
         }

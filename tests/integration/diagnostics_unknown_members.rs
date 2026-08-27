@@ -2031,8 +2031,9 @@ function test(): void {
 /// `$app['config']->set(...)` where `Application implements ArrayAccess`
 /// without concrete generic annotations should NOT resolve the bracket
 /// access to `Application` itself.  With `unresolved-member-access`
-/// enabled, it should emit a diagnostic saying the type could not be
-/// resolved.
+/// enabled, it should emit a diagnostic naming what the subject is:
+/// `offsetGet()` declares `mixed`, so that is the answer and the
+/// diagnostic says so rather than implying the type engine came up short.
 #[test]
 fn array_access_on_array_access_class_emits_unresolved_diagnostic() {
     let backend = create_test_backend();
@@ -2068,11 +2069,11 @@ function test(Application $app): void {
         !diags.iter().any(|d| d.message.contains("Application")),
         "should not report 'set' as missing on Application, got: {diags:?}",
     );
-    // $app['config']->set() SHOULD flag that the subject type is unresolved.
+    // $app['config']->set() SHOULD flag that the subject is `mixed`.
     assert!(
         diags
             .iter()
-            .any(|d| d.message.contains("set") && d.message.contains("could not be resolved")),
+            .any(|d| d.message.contains("set") && d.message.contains("is 'mixed'")),
         "expected unresolved-member-access diagnostic for $app['config']->set(), got: {diags:?}",
     );
 }
@@ -13738,6 +13739,86 @@ function f(array $types): int {
     assert!(
         diags.is_empty(),
         "the identity check pins the element to Sub, got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// A `mixed` subject is an answer, not a resolution failure
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// The values PHP leaves open — an undescribed array's elements, a
+/// `@return mixed` accessor's result, a `mixed` parameter — all resolve to
+/// `mixed`, and a member read off one of them is unverifiable because the
+/// codebase never said what it holds. The diagnostic names `mixed` so the
+/// reader knows to reach for an annotation, rather than reading it as the
+/// type engine having come up short.
+#[test]
+fn a_mixed_subject_is_reported_as_mixed_not_as_unresolved() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///mixed_subject.php";
+    let text = r#"<?php
+/** @return mixed */
+function attribute(string $key) { return null; }
+
+function probe(array $types, mixed $declared): void
+{
+    foreach ($types as $type) {
+        echo $type->describe();
+    }
+    echo attribute('key')->describe();
+    echo $declared->describe();
+}
+"#;
+
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    let messages: Vec<&String> = diags.iter().map(|d| &d.message).collect();
+    assert_eq!(
+        diags.len(),
+        3,
+        "each of the three reads is unverifiable: {messages:?}"
+    );
+    assert!(
+        diags.iter().all(|d| d.message.contains("is 'mixed'")),
+        "every subject here resolved to `mixed`: {messages:?}"
+    );
+    assert!(
+        diags
+            .iter()
+            .all(|d| d.severity == Some(DiagnosticSeverity::HINT)),
+        "a gap in the codebase's annotations is a hint, not an error: {diags:?}"
+    );
+}
+
+/// A subject the type engine genuinely could not work out still says so, so
+/// the two stay distinguishable.
+#[test]
+fn a_subject_the_engine_cannot_work_out_still_says_so() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///unresolved_subject.php";
+    let text = r#"<?php
+function probe(): void
+{
+    echo $undeclared->describe();
+}
+"#;
+
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("could not be resolved")),
+        "nothing typed `$undeclared` at all: {:?}",
         diags.iter().map(|d| &d.message).collect::<Vec<_>>()
     );
 }

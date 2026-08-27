@@ -256,7 +256,26 @@ pub(crate) fn infer_arithmetic_result_type(
         // At least one float, the other is known: result is float.
         (Some(true), Some(_)) | (Some(_), Some(true)) => PhpType::float(),
         // One or both operands are unknown: fall back to int|float.
-        _ => PhpType::union(vec![PhpType::int(), PhpType::float()]),
+        _ => {
+            let union = PhpType::union(vec![PhpType::int(), PhpType::float()]);
+            // An operand nobody typed decides neither half. The union is
+            // the operator's own invention over a gap in what the code
+            // said, not a value measured to be two things, so enforcing
+            // both halves would turn every `$row['count'] - 1` handed to
+            // an `int` parameter into a mismatch. Tag it benevolent —
+            // one branch satisfying the target is enough. PHPStan
+            // resolves the same operands to `__benevolent<int|float>`.
+            //
+            // An operand that resolved to a real but non-numeric type
+            // (`string`, an object) keeps the strict union: there the
+            // code did say something, and PHP's own answer for it is not
+            // a number this can vouch for.
+            if operand_is_unenforceable(lhs_types) || operand_is_unenforceable(rhs_types) {
+                PhpType::benevolent(union)
+            } else {
+                union
+            }
+        }
     }
 }
 
@@ -312,6 +331,18 @@ fn bitwise_op(operator: &BinaryOperator<'_>) -> Option<BitwiseOp> {
 /// branch it resolved to is `mixed`.
 fn operand_is_undecided(types: &[ResolvedType]) -> bool {
     types.is_empty() || types.iter().all(|rt| rt.type_string.is_mixed())
+}
+
+/// Whether an operand leaves the arithmetic result unenforceable — either
+/// nothing typed it at all ([`operand_is_undecided`]), or it is already a
+/// benevolent union that an earlier operator produced for the same reason.
+///
+/// The second case is what keeps a chain honest: in `strlen($s) + $line - 1`
+/// the addition already answered benevolent `int|float`, and re-reading that
+/// as a plain two-valued union would make the subtraction strict again and
+/// reject the `int` the whole expression is declared to return.
+fn operand_is_unenforceable(types: &[ResolvedType]) -> bool {
+    operand_is_undecided(types) || types.iter().any(|rt| rt.type_string.is_benevolent())
 }
 
 /// The integer an operand holds, when it resolved to exactly one literal

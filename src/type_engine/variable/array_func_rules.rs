@@ -260,11 +260,29 @@ pub(in crate::type_engine) fn array_func_element_type(
     }
 
     if matches!(func_name, "array_sum" | "array_product") {
-        let element = args.arg_raw_type(0)?.iterable_element_type()?;
+        // An array nobody typed the elements of decides neither half, and
+        // the sum is then exactly what adding two `mixed` values is: the
+        // pair, benevolent, because it is a gap in what the code said
+        // rather than a value measured to be two things. Enforcing both
+        // halves reported `array_sum($bytes)` handed to an `int` parameter
+        // as a mismatch on code that is fine. PHPStan reaches the same
+        // answer by summing the element type with itself.
+        let undecided = || {
+            Some(PhpType::benevolent(PhpType::union(vec![
+                PhpType::int(),
+                PhpType::float(),
+            ])))
+        };
+        let Some(element) = args.arg_raw_type(0).and_then(|a| a.iterable_element_type()) else {
+            return undecided();
+        };
         let members: Vec<&PhpType> = match element.kind() {
             TypeKind::Union(m) => m.iter().collect(),
             _ => vec![&element],
         };
+        if members.iter().any(|m| m.is_mixed()) {
+            return undecided();
+        }
         let (int_ty, float_ty) = (PhpType::int(), PhpType::float());
         let all_int = members.iter().all(|m| m.is_subtype_of(&int_ty));
         if all_int {

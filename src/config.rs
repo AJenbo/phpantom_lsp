@@ -152,14 +152,16 @@ pub struct PhpConfig {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct DiagnosticsConfig {
-    /// Report member access on subjects whose type could not be resolved.
+    /// Report member access on a subject whose type cannot answer for it.
     ///
     /// Off by default. When enabled, PHPantom emits a hint-level
-    /// diagnostic on every `->`, `?->`, or `::` access where the
-    /// subject type is unknown (e.g. `mixed`, untyped variable, or a
-    /// return type PHPantom cannot infer). This is useful for
-    /// discovering gaps in type coverage but produces too many
-    /// diagnostics on codebases without comprehensive type annotations.
+    /// diagnostic on every `->`, `?->`, or `::` access where the subject
+    /// is `mixed` or where its type could not be worked out at all. The
+    /// message says which, since the first is an annotation missing from
+    /// the codebase and the second a gap in PHPantom's own inference.
+    /// This is useful for discovering gaps in type coverage but produces
+    /// too many diagnostics on codebases without comprehensive type
+    /// annotations.
     #[serde(rename = "unresolved-member-access")]
     pub unresolved_member_access: Option<bool>,
 

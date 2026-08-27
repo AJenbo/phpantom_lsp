@@ -1136,6 +1136,17 @@ pub(crate) enum SubjectOutcome {
     Scalar(PhpType),
     /// Subject resolved to a class name that couldn't be loaded.
     UnresolvableClass(PhpType),
+    /// Subject resolved to `mixed`.
+    ///
+    /// Distinct from [`Untyped`](Self::Untyped): `mixed` is an answer, not
+    /// the absence of one. It is what an undocblocked `array`'s elements,
+    /// a `@return mixed` accessor and a `mixed` parameter all hold, so the
+    /// gap is in what the code says about the value rather than in what
+    /// the type engine could work out. A member on it is unverifiable
+    /// either way, but the two are worth telling apart: one is a note
+    /// about the codebase's annotations, the other a report of our own
+    /// resolution falling short.
+    Mixed,
     /// Subject type could not be resolved — no class information
     /// available.
     Untyped,
@@ -1167,6 +1178,13 @@ pub(crate) fn resolve_subject_outcome(
 
         // ── All entries are type-string-only (no class info) ────
         let joined = ResolvedType::types_joined(&resolved);
+
+        // `mixed` is a resolved type, and one that absorbs whatever stands
+        // beside it, so it is answered before the narrower classifications
+        // below get a chance to describe only part of the value.
+        if joined.contains_mixed() {
+            return SubjectOutcome::Mixed;
+        }
 
         // Pure scalar — member access is a runtime crash, unless this
         // is a `::` access on a `string`-only subject (see
@@ -1209,6 +1227,12 @@ pub(crate) fn resolve_subject_outcome(
     {
         if let Some(scalar) = resolve_call_scalar_return(callee, access_kind, ctx) {
             return SubjectOutcome::Scalar(scalar);
+        }
+        // A declared `mixed` is why this resolved to no class, and saying
+        // so is the difference between reporting the codebase's missing
+        // annotation and reporting our own resolution falling short.
+        if call_returns_mixed(callee, access_kind, ctx) {
+            return SubjectOutcome::Mixed;
         }
         // Note: a call returning `object`/`?object` is already caught by
         // the "stdClass / object" check above — `resolve_target_classes`
@@ -1275,6 +1299,39 @@ fn resolve_call_scalar_return(
     access_kind: AccessKind,
     ctx: &ResolutionCtx<'_>,
 ) -> Option<PhpType> {
+    let hint = declared_call_return_type(callee, access_kind, ctx, &|hint| {
+        hint.all_members_primitive_scalar()
+    })?;
+    Some(hint.non_null_type().unwrap_or(hint))
+}
+
+/// Whether the method or function a call names declares `mixed`.
+///
+/// A call that resolves to no class at all has two very different causes
+/// — the declaration said `mixed`, or nothing could be worked out — and
+/// only the declaration is on record to tell them apart.
+fn call_returns_mixed(
+    callee: &SubjectExpr,
+    access_kind: AccessKind,
+    ctx: &ResolutionCtx<'_>,
+) -> bool {
+    declared_call_return_type(callee, access_kind, ctx, &PhpType::contains_mixed).is_some()
+}
+
+/// The return type declared on the method or function a call names, when
+/// `accept` recognises it.
+///
+/// Reads the hint straight off the `MethodInfo`/`FunctionInfo` rather than
+/// going through the full class resolution pipeline: the callers want to
+/// know what the declaration says, not what a resolver can make of it.
+/// `accept` is consulted per candidate so a receiver whose type is a union
+/// keeps looking past a class that declares something else.
+fn declared_call_return_type(
+    callee: &SubjectExpr,
+    access_kind: AccessKind,
+    ctx: &ResolutionCtx<'_>,
+    accept: &dyn Fn(&PhpType) -> bool,
+) -> Option<PhpType> {
     match callee {
         // Instance method call: $obj->getAge()
         SubjectExpr::MethodCall { base, method } => {
@@ -1287,10 +1344,9 @@ fn resolve_call_scalar_return(
                 );
                 if let Some(m) = resolved.get_method_ci(method)
                     && let Some(ref hint) = m.return_type
-                    && hint.all_members_primitive_scalar()
+                    && accept(hint)
                 {
-                    let scalar = hint.non_null_type().unwrap_or_else(|| hint.clone());
-                    return Some(scalar);
+                    return Some(hint.clone());
                 }
             }
             None
@@ -1300,10 +1356,9 @@ fn resolve_call_scalar_return(
             if let Some(fl) = ctx.function_loader
                 && let Some(func_info) = fl(fn_name, 0)
                 && let Some(ref hint) = func_info.return_type
-                && hint.all_members_primitive_scalar()
+                && accept(hint)
             {
-                let scalar = hint.non_null_type().unwrap_or_else(|| hint.clone());
-                return Some(scalar);
+                return Some(hint.clone());
             }
             None
         }
@@ -1318,10 +1373,9 @@ fn resolve_call_scalar_return(
                 );
                 if let Some(m) = resolved.get_method_ci(method)
                     && let Some(ref hint) = m.return_type
-                    && hint.all_members_primitive_scalar()
+                    && accept(hint)
                 {
-                    let scalar = hint.non_null_type().unwrap_or_else(|| hint.clone());
-                    return Some(scalar);
+                    return Some(hint.clone());
                 }
             }
             None

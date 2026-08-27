@@ -4740,6 +4740,26 @@ fn unevaluated_operators_widen_to_their_bounds() {
 }
 
 #[test]
+fn mixed_is_found_wherever_it_reaches_the_top_level() {
+    // `mixed` is the top type, so a union or nullable holding it holds
+    // every value and reads as plain `mixed`.
+    assert!(PhpType::mixed().contains_mixed());
+    assert!(PhpType::parse("mixed|Foo").contains_mixed());
+    assert!(PhpType::parse("?mixed").contains_mixed());
+    assert!(PhpType::parse("int|mixed|string").contains_mixed());
+    assert_eq!(
+        PhpType::parse("mixed|Foo").contains_mixed(),
+        PhpType::parse("mixed|Foo").simplified().is_mixed(),
+        "the cheap answer must match the folded one"
+    );
+    // A `mixed` nested inside a type argument describes the members of a
+    // container, not the container, so it does not reach the top level.
+    assert!(!PhpType::parse("array<string, mixed>").contains_mixed());
+    assert!(!PhpType::parse("Foo|null").contains_mixed());
+    assert!(!PhpType::parse("int").contains_mixed());
+}
+
+#[test]
 fn benevolence_is_invisible_to_readers_and_matchers() {
     let ty = PhpType::parse("__benevolent<string|false>");
     assert!(ty.is_benevolent());

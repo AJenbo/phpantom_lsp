@@ -389,6 +389,26 @@ fn infer_body_return_type(
 
     let result = backend.infer_return_type_for_function(&file_uri, &content, decl_line, true)?;
 
+    // A declaration the caller can fall back on is only worth replacing
+    // with a reading the body actually agrees on. `mixed` is the one
+    // declaration this is reached with (it says nothing, so the body is
+    // read for something better), and a body whose `return` statements
+    // disagree has not said anything better: the union is this walk's
+    // reconstruction of the control flow, complete only as far as the
+    // branch analysis behind it goes. `processArgument()` in PHPStan's own
+    // source returns a schema, an array, or its own `mixed` argument, and
+    // reading it as `Schema|Statement` claimed the array could not happen
+    // — which then rejected the caller that hands the result straight to a
+    // `Schema` parameter. `mixed` is the sound answer there.
+    //
+    // Returns that agree leave nothing to reconstruct: one `return` (or
+    // several with the same type) resolves to whatever that expression is,
+    // nullable or generic included, and that is a real narrowing of a
+    // declaration that promised nothing.
+    if method.return_type.is_some() && !result.returns_agree {
+        return None;
+    }
+
     // Prefer the effective type (richer, e.g. `list<string>`)
     // over the native type (e.g. `array`).
     let inferred = result.effective.unwrap_or(result.native);

@@ -180,11 +180,17 @@ or a literal `$files = [$file]`), and after a foreach over a local
 array that every branch pushed into (reproduced minimally; also
 `src/Analyser/TypeSpecifier.php:542`).
 
+An inline `/** @var … */` on the assignment inside the loop does not
+rescue it either: the accumulator still leaves the loop nullable, so
+`return $parameterSchema;` reports the `null` against a declared
+`Schema` (`src/DependencyInjection/ContainerFactory.php:403`).
+
 Sites: `src/Analyser/NodeScopeResolver.php:1103, 1112, 1116, 1903, 2001, 2153, 5406, 5414`,
 `src/Rules/Properties/SetNonVirtualPropertyHookAssignRule.php:64, 72, 80, 81, 90`,
 `src/Rules/TooWideTypehints/TooWideParameterOutTypeCheck.php:47, 56`,
 `src/Reflection/BetterReflection/SourceLocator/OptimizedDirectorySourceLocator.php:149, 150`,
-`src/Analyser/TypeSpecifier.php:542`.
+`src/Analyser/TypeSpecifier.php:542`,
+`src/DependencyInjection/ContainerFactory.php:403`.
 
 ### B301. Narrowing defects with a single site each
 
@@ -259,7 +265,8 @@ the element type a key check proves is there.
 - A locally built array of tuples read back by a destructuring foreach:
   `$offsetTypes[$key] = [$trinary, $type];` …
   `foreach ($offsetTypes as $key => [$hasOffsetValue, $offsetType])` —
-  both variables come back unresolved
+  both variables come back as `mixed` rather than as the tuple slot the
+  write put there
   (`src/Type/Php/ArrayMergeFunctionDynamicReturnTypeExtension.php:188, 250, 255, 258, 300, 306`,
   `src/Type/Php/ArrayReplaceFunctionReturnTypeExtension.php:177, 227, 231, 264, 270`).
 - Indexing a docblock shape through two dims unions the tuple slots
@@ -279,65 +286,30 @@ about — resolves correctly now.
 
 ## Docblock handling
 
-### B295. Values PHPStan types as `mixed` come back unresolved, or narrower than the docblock says
+### B303. A call whose member name is decided at runtime comes back unresolved in situ
 
-**Impact: High · Complexity: High**
+**Impact: Low · Complexity: Medium**
 
-The biggest cluster left: ~47 sites. The sample analyses clean under
-PHPStan level 8 because these values are `mixed` there, and level 8
-doesn't check members of or arguments from `mixed`. Our own severity
-table in [`todo/diagnostics.md`](diagnostics.md) already classifies
-"`mixed` subject member access" as an opt-in **Hint** — but the engine
-returns *unresolved* instead of `mixed` for these sources, so the
-diagnostics fire as errors:
+2 sites. `TrinaryLogic::{$certainty->name->toString()}()` names a method
+PHP only knows at runtime, so the result is `mixed` — which is what the
+same shape produces in isolation, whether the name is a variable, a
+method call, or a chain, and whether or not the
+`// @phpstan-ignore staticMethod.dynamicName` comment above it is
+present. In place it comes back unresolved instead, so the two reads off
+the assigned variable report that its type could not be worked out:
 
-- Elements of an undocblocked `array` parameter (closures included) —
-  e.g. `src/Type/UnionType.php:527`, where `instanceof`-guarded
-  accesses on the same element are correctly silent and only the bare
-  `else` branch reports. The `$arg`/`$funcCallArg` reads in
-  `src/Reflection/ParametersAcceptorSelector.php:211-213`,
-  `src/Analyser/ExprHandler/Helper/ClosureTypeResolver.php:825-831`,
-  `src/Analyser/ScopeOps.php:76` and
-  `src/Analyser/NodeScopeResolver.php:3844, 3845` are the same shape.
-- `getAttribute()`-style `@return mixed` values combined with `??`
-  (`mixed ?? Arg` must be `mixed`) and flowing through `use()` captures
-  (`src/Reflection/ParametersAcceptorSelector.php:129-145`,
-  `src/Command/CommandHelper.php:608`, `src/Command/WorkerCommand.php:130`).
-- `@param mixed ...$args` variadic elements
-  (`src/Testing/TypeInferenceTestCase.php:161, 212, 225`).
-- Dynamic static-method names (`TrinaryLogic::{$name}()`,
-  `src/Rules/Debug/FileAssertRule.php:222, 227`) and static calls on
-  `$node['type']` from untyped arrays
-  (`src/Dependency/ExportedNode/*.php`, `src/Parallel/ParallelAnalyser.php:345`).
-- List-destructuring a `@return mixed|null` cache load
-  (`src/Type/FileTypeMapper.php:400`).
-- An array accumulated from an undocblocked `array $json` argument, which
-  makes its element type unreadable and blocks the rules that read one:
-  `array_sum($peakMemoryUsages)` stays on the stub's `int|float` rather
-  than folding to `int`, because the array was filled from
-  `$json['memoryUsage']` (`src/Parallel/ParallelAnalyser.php:158`).
-- Elements of a `Strings::matchAll()` result, which is `array` with no
-  docblock: `$placeholder['position'] - 1` is `int|float` for us and
-  `mixed` for PHPStan, so an `int` parameter rejects it
-  (`src/Rules/Functions/PrintfHelper.php:113`). The pattern is built at
-  runtime (`sprintf($specifiersPattern, …) . $specifiers`), so no
-  capture-group analysis can type the element and `mixed` really is the
-  whole answer.
+```php
+$expectedCertaintyValue = TrinaryLogic::{$certainty->name->toString()}();
+…
+if ($expectedCertaintyValue->equals($actualCertaintyValue)) { … }
+$expectedCertaintyValue->describe();
+```
 
-Conversely, where the docblock *says* `mixed`, we substitute a narrower
-body-inferred type and then flag mismatches PHPStan never sees
-(`src/DependencyInjection/ContainerFactory.php:335, 403`,
-`src/Command/ErrorFormatter/BaselineNeonErrorFormatter.php:100`,
-`src/Testing/TestCaseSourceLocatorFactory.php:75`) — and a docblock
-`mixed` doesn't even agree with a native one: `strlen($s) + $line - 1`
-where `$line` comes from an untyped method with `@return mixed`
-(narrowed by `!== null`) produces `int|float`, while the same code with
-a *native* `mixed` return type produces `int`, which is what PHPStan
-reports (`src/Rules/PhpDoc/PhpDocLineHelper.php:25`).
-
-The fix direction: these sources must uniformly produce `mixed`,
-whichever spelling declares it, and member/argument checks on `mixed`
-must follow the severity policy (hint, not error).
+The assignment sits after a run of eight `instanceof`-guarded early
+returns inside a long method, so the next attempt should bisect the
+enclosing method down to a reproducing shape rather than starting from
+the excerpt above — none of the pieces reproduce on their own. Sites:
+`src/Rules/Debug/FileAssertRule.php:222, 227`.
 
 ### B302. A docblock sharing a line with code is invisible to the parameter scan
 
@@ -378,6 +350,14 @@ triage starts from them rather than rediscovering them.
   `src/Diagnose/PHPStanDiagnoseExtension.php:132, 142`). They are
   correct findings against the sample as checked out, not false
   positives; a sweep that counts them is counting four too many.
+- **`src/Testing/TestCaseSourceLocatorFactory.php:75` is also not our
+  bug.** `dirname($vendorDirProperty->getValue($classLoader))` reads
+  Composer's `ClassLoader::$vendorDir`, which its own docblock types
+  `string|null`, and nothing between the `hasProperty()` guard and the
+  call rules the `null` out. `dirname()` rejects it under
+  `strict_types`. PHPStan stays quiet only because reflection reads are
+  `mixed` to it, so this is a place where we are the more accurate of the
+  two rather than a false positive.
 - **A `foreach` key reaching a `string` parameter** —
   `src/DependencyInjection/ConditionalTagsExtension.php:45` and
   `src/Rules/PhpDoc/WrongVariableNameInVarTagRule.php:376` both report

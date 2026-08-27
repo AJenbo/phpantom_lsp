@@ -11641,3 +11641,145 @@ function f(): void {
         type_error_messages(&collect(php))
     );
 }
+
+// ─── Arithmetic over a value nobody typed ───────────────────────────────────
+
+#[test]
+fn arithmetic_on_an_undescribed_array_element_satisfies_an_int_parameter() {
+    let php = r#"<?php declare(strict_types = 1);
+function wantsInt(int $i): void {}
+
+function f(array $placeholder): void {
+    wantsInt($placeholder['position'] - 1);
+}
+"#;
+    assert!(
+        !has_type_error(&collect(php)),
+        "`mixed - 1` is `int` or `float` depending on the value, and nothing \
+         about the element rules either out: {:?}",
+        type_error_messages(&collect(php))
+    );
+}
+
+#[test]
+fn arithmetic_chained_through_an_untyped_operand_stays_unenforced() {
+    let php = r#"<?php declare(strict_types = 1);
+/** @return mixed */
+function tagLine() { return null; }
+
+function wantsInt(int $i): void {}
+
+function f(string $s): void {
+    $line = tagLine();
+    if ($line !== null) {
+        wantsInt(strlen($s) + $line - 1);
+    }
+}
+"#;
+    assert!(
+        !has_type_error(&collect_with_full_stubs(php)),
+        "The addition already answered `int|float` for want of a typed \
+         operand; the subtraction must not turn that into a promise: {:?}",
+        type_error_messages(&collect_with_full_stubs(php))
+    );
+}
+
+#[test]
+fn arithmetic_on_a_string_operand_is_still_enforced() {
+    let php = r#"<?php declare(strict_types = 1);
+function wantsInt(int $i): void {}
+
+function f(string $s): void {
+    wantsInt($s * 2);
+}
+"#;
+    assert!(
+        has_type_error(&collect(php)),
+        "A `string` operand is something the code did say, and PHP's answer \
+         for it is not an int"
+    );
+}
+
+#[test]
+fn array_sum_over_an_undescribed_array_satisfies_an_int_parameter() {
+    let php = r#"<?php declare(strict_types = 1);
+function wantsInt(int $i): void {}
+
+function f(array $json): void {
+    $peaks = [];
+    foreach ($json as $entry) {
+        $peaks[] = $entry['memoryUsage'];
+    }
+    wantsInt(array_sum($peaks));
+}
+"#;
+    assert!(
+        !has_type_error(&collect_with_full_stubs(php)),
+        "Summing values nobody typed is `int` or `float` by the same rule \
+         adding two of them is: {:?}",
+        type_error_messages(&collect_with_full_stubs(php))
+    );
+}
+
+#[test]
+fn array_sum_over_a_float_array_is_still_enforced() {
+    let php = r#"<?php declare(strict_types = 1);
+function wantsInt(int $i): void {}
+
+/** @param list<float> $prices */
+function f(array $prices): void {
+    wantsInt(array_sum($prices));
+}
+"#;
+    assert!(
+        has_type_error(&collect_with_full_stubs(php)),
+        "Every element is a float, so the sum is one too"
+    );
+}
+
+// ─── A declared `mixed` against a body that disagrees with itself ───────────
+
+#[test]
+fn a_declared_mixed_stands_where_the_bodys_returns_disagree() {
+    let php = r#"<?php
+class Statement {}
+interface Schema {}
+
+class Factory
+{
+    public function build(Statement $statement): void
+    {
+        $this->process($this->processArgument($statement));
+    }
+
+    public function process(Schema $schema): void {}
+
+    /**
+     * @param mixed $argument
+     * @return mixed
+     */
+    private function processArgument($argument)
+    {
+        if ($argument instanceof Statement) {
+            return $this->makeSchema();
+        } elseif (is_array($argument)) {
+            return $argument;
+        }
+
+        return $argument;
+    }
+
+    private function makeSchema(): Schema
+    {
+        throw new \RuntimeException();
+    }
+}
+"#;
+    assert!(
+        !has_type_error(&collect(php)),
+        "The body can also hand back an array or its own `mixed` argument, \
+         so reading it as one of two classes states a narrower answer than \
+         the truth: {:?}",
+        type_error_messages(&collect(php))
+    );
+}

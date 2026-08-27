@@ -37,6 +37,18 @@ pub(crate) struct InferredReturnType {
     /// Full effective type including generics/shapes (e.g. `list<string>`).
     /// `None` when the native type already captures the full type.
     pub(crate) effective: Option<PhpType>,
+    /// Whether every `return` in the body contributed the same type.
+    ///
+    /// One `return` (or several that agree) leaves nothing for the join to
+    /// reconstruct: the answer is whatever that expression resolves to,
+    /// nullable or generic or otherwise. Several that disagree make the
+    /// result a reconstruction of the control flow instead, and it is only
+    /// as complete as the branch analysis behind it — a body whose third
+    /// `return` this walk mistyped or dropped still reports the other two
+    /// as if they were the whole answer. Callers that have a declared type
+    /// to fall back on use this to decide whether the reading is worth
+    /// preferring over the declaration.
+    pub(crate) returns_agree: bool,
 }
 
 // ── Backend methods ─────────────────────────────────────────────────────────
@@ -212,6 +224,7 @@ pub(crate) fn infer_return_type(
         return Some(InferredReturnType {
             native: PhpType::void(),
             effective: None,
+            returns_agree: true,
         });
     }
 
@@ -219,12 +232,17 @@ pub(crate) fn infer_return_type(
         return Some(InferredReturnType {
             native: PhpType::void(),
             effective: None,
+            returns_agree: true,
         });
     }
 
     if has_bare_return {
         return_types.push(PhpType::null());
     }
+
+    let returns_agree = return_types
+        .split_first()
+        .is_none_or(|(first, rest)| rest.iter().all(|ty| ty.equivalent(first)));
 
     // Keep exact literal alternatives in the effective PHPDoc type while
     // removing only alternatives made redundant by a broad scalar branch.
@@ -272,6 +290,7 @@ pub(crate) fn infer_return_type(
         } else {
             None
         },
+        returns_agree,
     })
 }
 

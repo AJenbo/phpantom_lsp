@@ -2962,6 +2962,24 @@ impl PhpType {
         matches!(self.kind(), TypeKind::Named(s) if s.eq_ignore_ascii_case("mixed"))
     }
 
+    /// Whether `mixed` reaches the top level of this type.
+    ///
+    /// `mixed` is the top type, so a union or nullable that holds it holds
+    /// every value: `mixed|Foo` and `?mixed` are both just `mixed`.
+    /// [`simplified`](Self::simplified) folds them, but a caller that only
+    /// needs the answer and not the folded type gets it here without
+    /// rebuilding every member on the way.
+    pub fn contains_mixed(&self) -> bool {
+        if self.is_mixed() {
+            return true;
+        }
+        match self.kind() {
+            TypeKind::Union(members) => members.iter().any(PhpType::contains_mixed),
+            TypeKind::Nullable(inner) => inner.contains_mixed(),
+            _ => false,
+        }
+    }
+
     /// Whether this type is `void`.
     pub fn is_void(&self) -> bool {
         matches!(self.kind(), TypeKind::Named(s) if s.eq_ignore_ascii_case("void"))

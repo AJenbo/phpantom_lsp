@@ -444,12 +444,12 @@ impl Backend {
                     ));
                 }
 
-                SubjectOutcome::Untyped => {
+                SubjectOutcome::Mixed | SubjectOutcome::Untyped => {
                     // When the opt-in `unresolved-member-access` diagnostic
-                    // is enabled, report every member access where the
-                    // subject type could not be resolved — regardless of
-                    // whether the subject is a bare variable, a chain, an
-                    // array access, or a function call result.
+                    // is enabled, report every member access the subject
+                    // type cannot answer for — regardless of whether the
+                    // subject is a bare variable, a chain, an array access,
+                    // or a function call result.
                     if self.config().diagnostics.unresolved_member_access_enabled() {
                         let range = match self.offset_range_to_lsp_range(
                             uri,
@@ -462,10 +462,22 @@ impl Backend {
                         };
                         let subject_display = subject_text.trim();
                         let kind_label = if is_method_call { "method" } else { "property" };
-                        let message = format!(
-                            "Cannot verify {} '{}' — type of '{}' could not be resolved",
-                            kind_label, member_name, subject_display,
-                        );
+                        // A `mixed` subject is not a resolution failure:
+                        // the type engine answered, and the answer was the
+                        // type that admits every value. Saying so points at
+                        // the annotation that is missing from the codebase
+                        // instead of implying a gap in the type engine.
+                        let message = if matches!(outcome, SubjectOutcome::Mixed) {
+                            format!(
+                                "Cannot verify {} '{}' — type of '{}' is 'mixed'",
+                                kind_label, member_name, subject_display,
+                            )
+                        } else {
+                            format!(
+                                "Cannot verify {} '{}' — type of '{}' could not be resolved",
+                                kind_label, member_name, subject_display,
+                            )
+                        };
                         out.push(make_diagnostic(
                             range,
                             DiagnosticSeverity::HINT,
