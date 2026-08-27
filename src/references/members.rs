@@ -252,62 +252,118 @@ impl Backend {
         let snapshot = self.user_file_symbol_maps_for_reference_keys(&candidate_keys);
         self.begin_request_scan_window(snapshot.len(), "Scanning for member references");
 
-        let mut locations = vec![Vec::new(); queries.len()];
-        for (file_uri, symbol_map) in &snapshot {
-            self.request_scan_file_done();
-
+        let scan_file = |file_uri: &str,
+                         symbol_map: &Arc<crate::symbol_map::SymbolMap>|
+         -> Vec<(usize, Location)> {
             let mut span_indices = Vec::new();
             for member in by_member.keys() {
                 span_indices.extend_from_slice(symbol_map.member_access_indices(member));
             }
             if span_indices.is_empty() {
-                continue;
+                return Vec::new();
             }
             span_indices.sort_unstable();
             span_indices.dedup();
 
             let Ok(parsed_uri) = Url::parse(file_uri) else {
-                continue;
+                return Vec::new();
             };
             let Some(content) = self.reference_file_content_arc(file_uri) else {
-                continue;
+                return Vec::new();
             };
-            let _parse_cache_guard = crate::parser::with_parse_cache(&content);
-            let file_ctx = self.file_context(file_uri);
+            let needs_receiver = prepared.iter().any(|query| query.hierarchy.is_some());
+            let resolved_file = needs_receiver.then(|| {
+                self.resolved_member_file(file_uri, symbol_map)
+                    .unwrap_or_else(|| {
+                        let _parse_cache_guard = crate::parser::with_parse_cache(&content);
+                        let file_ctx = self.file_context(file_uri);
+                        let all_access_indices: Vec<_> = symbol_map
+                            .spans
+                            .iter()
+                            .enumerate()
+                            .filter_map(|(index, span)| {
+                                matches!(span.kind, SymbolKind::MemberAccess { .. })
+                                    .then_some(index)
+                            })
+                            .collect();
 
-            // Receiver resolution for a bare variable normally walks its
-            // enclosing body from the start. A batch can contain hundreds of
-            // accesses from the same file, so build the forward-walked scope
-            // snapshots once and make every variable lookup below O(log N).
-            // The guard is per file: offsets from different files must never
-            // share one thread-local snapshot map.
-            let _scope_guard =
-                crate::type_engine::variable::forward_walk::with_diagnostic_scope_cache();
-            let class_loader = self.class_loader(&file_ctx);
-            let function_loader = self.function_loader(&file_ctx);
-            let constant_loader = self.constant_loader(&file_ctx);
-            let config_resolver = |key: &str| self.resolve_config_type(key);
-            let trans_resolver = |key: &str| self.resolve_trans_type(key);
-            let loaders = crate::type_engine::resolver::Loaders {
-                function_loader: Some(&function_loader),
-                constant_loader: Some(&constant_loader),
-                config_resolver: Some(&config_resolver),
-                trans_resolver: Some(&trans_resolver),
-            };
-            crate::type_engine::variable::forward_walk::build_diagnostic_scopes(
-                &content,
-                &file_ctx.classes,
-                &class_loader,
-                Some(self),
-                loaders,
-                Some(&self.resolved_class_cache),
-            );
+                        // Build variable scopes once, then resolve every
+                        // member access while those snapshots are hot.
+                        // Later declaration names reuse this packed
+                        // per-file result without reopening the PHP file.
+                        let _scope_guard =
+                            crate::type_engine::variable::forward_walk::with_diagnostic_scope_cache(
+                            );
+                        let needs_variable_scopes = all_access_indices.iter().any(|&span_index| {
+                            let SymbolKind::MemberAccess { subject_text, .. } =
+                                &symbol_map.spans[span_index].kind
+                            else {
+                                return false;
+                            };
+                            let subject = subject_text.as_str(&content).trim_start();
+                            subject.starts_with('$') && !subject.starts_with("$this")
+                        });
+                        if needs_variable_scopes {
+                            let class_loader = self.class_loader(&file_ctx);
+                            let function_loader = self.function_loader(&file_ctx);
+                            let constant_loader = self.constant_loader(&file_ctx);
+                            let config_resolver = |key: &str| self.resolve_config_type(key);
+                            let trans_resolver = |key: &str| self.resolve_trans_type(key);
+                            let loaders = crate::type_engine::resolver::Loaders {
+                                function_loader: Some(&function_loader),
+                                constant_loader: Some(&constant_loader),
+                                config_resolver: Some(&config_resolver),
+                                trans_resolver: Some(&trans_resolver),
+                            };
+                            crate::type_engine::variable::forward_walk::build_diagnostic_scopes(
+                                &content,
+                                &file_ctx.classes,
+                                &class_loader,
+                                Some(self),
+                                loaders,
+                                Some(&self.resolved_class_cache),
+                            );
+                        }
 
+                        let _chain_guard =
+                            crate::type_engine::resolver::with_chain_resolution_cache();
+                        let _resolver_guard =
+                            crate::type_engine::call_resolution::activate_type_engine_caches();
+                        let resolved = all_access_indices
+                            .into_iter()
+                            .filter_map(|span_index| {
+                                let span = &symbol_map.spans[span_index];
+                                let SymbolKind::MemberAccess {
+                                    subject_text,
+                                    is_static,
+                                    ..
+                                } = &span.kind
+                                else {
+                                    return None;
+                                };
+                                let targets = self
+                                    .resolve_subject_to_fqns(
+                                        subject_text.as_str(&content),
+                                        *is_static,
+                                        &file_ctx,
+                                        span.start,
+                                        &content,
+                                    )
+                                    .into_iter()
+                                    .map(|target| crate::atom::atom(&target))
+                                    .collect();
+                                Some((span_index, targets))
+                            })
+                            .collect();
+                        self.cache_resolved_member_file(file_uri, Arc::clone(symbol_map), resolved)
+                    })
+            });
+
+            let mut matches = Vec::new();
             for span_index in span_indices {
                 let span = &symbol_map.spans[span_index];
                 let SymbolKind::MemberAccess {
                     member_name,
-                    subject_text,
                     is_static,
                     ..
                 } = &span.kind
@@ -318,18 +374,9 @@ impl Backend {
                     continue;
                 };
 
-                let needs_receiver = query_indices
-                    .iter()
-                    .any(|&index| prepared[index].hierarchy.is_some());
-                let subject_fqns = needs_receiver.then(|| {
-                    self.resolve_subject_to_fqns(
-                        subject_text.as_str(&content),
-                        *is_static,
-                        &file_ctx,
-                        span.start,
-                        &content,
-                    )
-                });
+                let subject_fqns = resolved_file
+                    .as_ref()
+                    .map_or(&[][..], |file| file.targets_for_span(span_index));
                 let range = Range::new(
                     offset_to_position(&content, span.start as usize),
                     offset_to_position(&content, span.end as usize),
@@ -339,8 +386,8 @@ impl Backend {
                     let query = &prepared[query_index];
                     if let Some(hierarchy) = &query.hierarchy {
                         if !subject_fqns
-                            .as_ref()
-                            .is_some_and(|fqns| fqns.iter().any(|fqn| hierarchy.contains(fqn)))
+                            .iter()
+                            .any(|fqn| hierarchy.contains(fqn.as_str()))
                         {
                             continue;
                         }
@@ -348,11 +395,69 @@ impl Backend {
                         continue;
                     }
 
-                    locations[query_index].push(Location {
-                        uri: parsed_uri.clone(),
-                        range,
-                    });
+                    matches.push((
+                        query_index,
+                        Location {
+                            uri: parsed_uri.clone(),
+                            range,
+                        },
+                    ));
                 }
+            }
+            matches
+        };
+
+        let mut locations = vec![Vec::new(); queries.len()];
+        if snapshot.len() <= 2 {
+            for (file_uri, symbol_map) in &snapshot {
+                self.request_scan_file_done();
+                for (query_index, location) in scan_file(file_uri, symbol_map) {
+                    locations[query_index].push(location);
+                }
+            }
+        } else {
+            let next = std::sync::atomic::AtomicUsize::new(0);
+            let thread_count = std::thread::available_parallelism()
+                .map(std::num::NonZeroUsize::get)
+                .unwrap_or(4)
+                .min(snapshot.len());
+            let worker_results = std::thread::scope(|scope| {
+                let mut handles = Vec::with_capacity(thread_count);
+                for _ in 0..thread_count {
+                    let next = &next;
+                    let snapshot = &snapshot;
+                    let scan_file = &scan_file;
+                    handles.push(
+                        std::thread::Builder::new()
+                            .stack_size(crate::PARSE_WORKER_STACK_SIZE)
+                            .spawn_scoped(scope, move || {
+                                let mut matches = Vec::new();
+                                loop {
+                                    let index =
+                                        next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                    let Some((file_uri, symbol_map)) = snapshot.get(index) else {
+                                        break;
+                                    };
+                                    self.request_scan_file_done();
+                                    matches.extend(scan_file(file_uri, symbol_map));
+                                }
+                                matches
+                            })
+                            .expect("spawn member reference worker"),
+                    );
+                }
+                handles
+                    .into_iter()
+                    .flat_map(|handle| {
+                        handle.join().unwrap_or_else(|_| {
+                            tracing::error!("member reference worker panicked");
+                            Vec::new()
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            });
+            for (query_index, location) in worker_results {
+                locations[query_index].push(location);
             }
         }
 
