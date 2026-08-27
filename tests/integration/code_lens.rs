@@ -1201,7 +1201,7 @@ class HomeController {
     open_doc(&backend, routes_uri, "yaml", routes_yaml).await;
 
     let lenses = backend
-        .handle_code_lens(&controller_uri.to_string(), controller_php)
+        .handle_code_lens(controller_uri.as_ref(), controller_php)
         .unwrap_or_default();
     let titles = lens_titles(&lenses);
 
@@ -1255,7 +1255,7 @@ async fn doctrine_mapping_lenses_link_entity_and_configured_repository() {
     .await;
 
     let entity_lenses = backend
-        .handle_code_lens(&entity_uri.to_string(), entity_php)
+        .handle_code_lens(entity_uri.as_ref(), entity_php)
         .unwrap_or_default();
     let entity_titles = lens_titles(&entity_lenses);
     assert!(
@@ -1281,7 +1281,7 @@ async fn doctrine_mapping_lenses_link_entity_and_configured_repository() {
     assert_eq!(locations.len(), 2);
 
     let repo_lenses = backend
-        .handle_code_lens(&repo_uri.to_string(), repo_php)
+        .handle_code_lens(repo_uri.as_ref(), repo_php)
         .unwrap_or_default();
     let repo_titles = lens_titles(&repo_lenses);
     assert!(
@@ -1380,7 +1380,7 @@ class UserLookup {
     .await;
 
     let lenses = backend
-        .handle_code_lens(&service_uri.to_string(), service_php)
+        .handle_code_lens(service_uri.as_ref(), service_php)
         .unwrap_or_default();
     let titles = lens_titles(&lenses);
 
