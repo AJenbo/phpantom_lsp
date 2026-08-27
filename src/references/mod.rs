@@ -36,6 +36,7 @@ mod functions;
 mod members;
 mod variables;
 
+pub(crate) use members::MemberDeclarationReferenceQuery;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
