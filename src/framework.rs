@@ -152,13 +152,21 @@ struct IndexedFrameworkMemberLocation {
     location: IndexedFrameworkLocation,
 }
 
+#[derive(Debug, Clone)]
+struct IndexedMessengerMapping {
+    uri: Arc<str>,
+    message_fqn: String,
+    handler_fqn: String,
+}
+
 #[derive(Debug, Default)]
 struct FrameworkLookupUriKeys {
     classes: HashSet<String>,
     methods: HashSet<String>,
+    messenger_classes: HashSet<String>,
 }
 
-/// Inverted locations for class and method references in framework resources.
+/// Inverted class, method, and Messenger relations from framework resources.
 ///
 /// The primary framework index stays keyed by URI for cursor-local features.
 /// This derived index makes cross-file lookups proportional to the matching
@@ -168,6 +176,7 @@ struct FrameworkLookupUriKeys {
 pub(crate) struct FrameworkReferenceLookupIndexInner {
     classes: HashMap<String, Vec<IndexedFrameworkLocation>>,
     methods: HashMap<String, Vec<IndexedFrameworkMemberLocation>>,
+    messenger_by_class: HashMap<String, Vec<IndexedMessengerMapping>>,
     uri_keys: HashMap<Arc<str>, FrameworkLookupUriKeys>,
 }
 
@@ -352,11 +361,36 @@ impl Backend {
                     );
                     keys.methods.insert(member_name.clone());
                 }
+                FrameworkReferenceKind::MessengerHandler {
+                    message_fqn,
+                    handler_fqn,
+                    ..
+                } => {
+                    let mapping = IndexedMessengerMapping {
+                        uri: Arc::clone(&uri),
+                        message_fqn: normalize_framework_fqn(message_fqn),
+                        handler_fqn: normalize_framework_fqn(handler_fqn),
+                    };
+                    for key in [
+                        framework_fqn_lookup_key(message_fqn),
+                        framework_fqn_lookup_key(handler_fqn),
+                    ] {
+                        lookup
+                            .messenger_by_class
+                            .entry(key.clone())
+                            .or_default()
+                            .push(mapping.clone());
+                        keys.messenger_classes.insert(key);
+                    }
+                }
                 _ => {}
             }
         }
 
-        if !keys.classes.is_empty() || !keys.methods.is_empty() {
+        if !keys.classes.is_empty()
+            || !keys.methods.is_empty()
+            || !keys.messenger_classes.is_empty()
+        {
             lookup.uri_keys.insert(uri, keys);
         }
     }
@@ -382,6 +416,18 @@ impl Backend {
             });
             if remove_key {
                 lookup.methods.remove(&key);
+            }
+        }
+        for key in keys.messenger_classes {
+            let remove_key = lookup
+                .messenger_by_class
+                .get_mut(&key)
+                .is_some_and(|mappings| {
+                    mappings.retain(|mapping| mapping.uri.as_ref() != uri);
+                    mappings.is_empty()
+                });
+            if remove_key {
+                lookup.messenger_by_class.remove(&key);
             }
         }
     }
@@ -831,6 +877,23 @@ impl Backend {
         }
         sort_locations(&mut locations);
         locations
+    }
+
+    pub(crate) fn framework_messenger_mappings_for_class(
+        &self,
+        target_fqn: &str,
+    ) -> Vec<(String, String)> {
+        let lookup = self.framework_reference_lookup.read();
+        let mut mappings: Vec<_> = lookup
+            .messenger_by_class
+            .get(&framework_fqn_lookup_key(target_fqn))
+            .into_iter()
+            .flatten()
+            .map(|mapping| (mapping.message_fqn.clone(), mapping.handler_fqn.clone()))
+            .collect();
+        mappings.sort_unstable();
+        mappings.dedup();
+        mappings
     }
 
     pub(crate) fn framework_doctrine_repository_fqns_for_entity(
@@ -4433,6 +4496,70 @@ mod tests {
         assert!(
             backend
                 .framework_member_reference_locations("dashboard", None)
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn messenger_lookup_updates_and_removes_one_handler() {
+        let backend = Backend::new_test();
+        let uri = "file:///project/src/MessageHandler/PlaceOrderHandler.php";
+        backend.index_framework_uri_content(
+            uri,
+            r#"<?php
+namespace App\MessageHandler;
+use App\Message\PlaceOrder;
+use Symfony\Component\Messenger\Attribute\AsMessageHandler;
+#[AsMessageHandler]
+final class PlaceOrderHandler {
+    public function __invoke(PlaceOrder $message): void {}
+}
+"#,
+        );
+
+        let expected = vec![(
+            "App\\Message\\PlaceOrder".to_string(),
+            "App\\MessageHandler\\PlaceOrderHandler".to_string(),
+        )];
+        assert_eq!(
+            backend.framework_messenger_mappings_for_class("app\\message\\placeorder"),
+            expected
+        );
+        assert_eq!(
+            backend
+                .framework_messenger_mappings_for_class("App\\MessageHandler\\PlaceOrderHandler")
+                .len(),
+            1
+        );
+
+        backend.index_framework_uri_content(
+            uri,
+            r#"<?php
+namespace App\MessageHandler;
+use App\Message\CancelOrder;
+use Symfony\Component\Messenger\Attribute\AsMessageHandler;
+#[AsMessageHandler]
+final class CancelOrderHandler {
+    public function __invoke(CancelOrder $message): void {}
+}
+"#,
+        );
+        assert!(
+            backend
+                .framework_messenger_mappings_for_class("App\\Message\\PlaceOrder")
+                .is_empty()
+        );
+        assert_eq!(
+            backend
+                .framework_messenger_mappings_for_class("App\\Message\\CancelOrder")
+                .len(),
+            1
+        );
+
+        backend.remove_framework_uri(uri);
+        assert!(
+            backend
+                .framework_messenger_mappings_for_class("App\\Message\\CancelOrder")
                 .is_empty()
         );
     }

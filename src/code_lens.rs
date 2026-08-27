@@ -761,23 +761,7 @@ impl Backend {
             );
         }
 
-        let messenger_mappings = {
-            let mut mappings = HashSet::new();
-            for references in self.framework_references.read().values() {
-                for reference in references.iter() {
-                    if let FrameworkReferenceKind::MessengerHandler {
-                        message_fqn,
-                        handler_fqn,
-                        ..
-                    } = &reference.kind
-                    {
-                        mappings.insert((message_fqn.clone(), handler_fqn.clone()));
-                    }
-                }
-            }
-            mappings
-        };
-        for (message_fqn, handler_fqn) in messenger_mappings {
+        for (message_fqn, handler_fqn) in self.framework_messenger_mappings_for_class(&class_fqn) {
             let (target, title) = if framework_fqn_eq(&class_fqn, &message_fqn) {
                 (
                     handler_fqn.as_str(),
