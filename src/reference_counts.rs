@@ -704,6 +704,47 @@ function persist(Order $order): void {
 "#;
 
     #[test]
+    fn batch_member_counts_reuse_forward_walked_scope_snapshots() {
+        const ORDER_URI: &str = "file:///Order.php";
+        const CONSUMER_URI: &str = "file:///Consumer.php";
+        const ORDER: &str = "<?php\nclass Order {\n    public function save(): void {}\n}\n";
+        const CONSUMER: &str = r#"<?php
+function persist(Order $order): void {
+    $order->save();
+    $order->save();
+    $order->save();
+}
+"#;
+
+        let backend = Backend::new_test();
+        parse_extra(&backend, ORDER_URI, ORDER);
+        parse_extra(&backend, CONSUMER_URI, CONSUMER);
+        hints_for(&backend, ORDER_URI, ORDER);
+
+        crate::type_engine::variable::resolution::reset_test_scope_cache_hits();
+        backend.compute_pending_member_ref_counts();
+
+        let declaration_offset = ORDER.find("save").unwrap() as u32;
+        assert_eq!(
+            backend
+                .member_ref_locations_cached(
+                    ORDER_URI,
+                    declaration_offset,
+                    crate::atom::atom("Order"),
+                    crate::atom::atom("save"),
+                    false,
+                )
+                .unwrap()
+                .len(),
+            3
+        );
+        assert!(
+            crate::type_engine::variable::resolution::test_scope_cache_hits() >= 3,
+            "each repeated receiver lookup should reuse the one forward-walked file scope"
+        );
+    }
+
+    #[test]
     fn ready_only_location_lookup_does_not_queue_background_work() {
         let backend = Backend::new_test();
         parse(&backend, ONE_CALL);
