@@ -373,7 +373,9 @@ impl Backend {
                 let Some(content) = self.get_file_content(uri) else {
                     return lens;
                 };
-                let Some(locations) = self.find_references(uri, &content, position, false) else {
+                let Some(locations) =
+                    self.find_references_from_workspace_index(uri, &content, position, false)
+                else {
                     return lens;
                 };
                 locations

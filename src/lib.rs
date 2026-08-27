@@ -969,12 +969,13 @@ pub struct Backend {
     /// symbol map recorded a candidate site ever get an entry.
     pub(crate) typed_receiver_view_spans_cache:
         Arc<RwLock<HashMap<String, crate::blade::typed_receiver::TypedReceiverSpans>>>,
-    /// Whether the workspace directory has been fully scanned for PHP files.
+    /// Whether the workspace directory has been fully scanned for PHP and
+    /// resource files.
     ///
-    /// Set to `true` after the first Phase 2 walk in `ensure_workspace_indexed`.
-    /// Subsequent calls still re-walk the directory to discover newly created
-    /// files, but the flag lets us log the difference between initial and
-    /// refresh scans.
+    /// Set to `true` after the initial `ensure_workspace_indexed` pass.
+    /// Per-symbol consumers reuse that index, watched-file notifications
+    /// update it incrementally, and an explicit reference search may refresh
+    /// it once to discover filesystem changes the editor did not report.
     pub(crate) workspace_indexed: Arc<std::sync::atomic::AtomicBool>,
     /// Serializes whole-workspace indexing so a foreground request does not
     /// duplicate the background full-index parse.
