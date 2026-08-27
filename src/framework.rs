@@ -57,7 +57,14 @@ pub(crate) struct DoctrineRepositoryMapping {
 pub(crate) type FrameworkReferenceIndex =
     Arc<RwLock<HashMap<String, Arc<Vec<FrameworkReference>>>>>;
 
+pub(crate) type DoctrineRepositoryIndex =
+    Arc<RwLock<HashMap<String, Arc<Vec<DoctrineRepositoryMapping>>>>>;
+
 pub(crate) fn new_framework_reference_index() -> FrameworkReferenceIndex {
+    Arc::new(RwLock::new(HashMap::new()))
+}
+
+pub(crate) fn new_doctrine_repository_index() -> DoctrineRepositoryIndex {
     Arc::new(RwLock::new(HashMap::new()))
 }
 
@@ -100,6 +107,7 @@ impl Backend {
         };
 
         let mut indexed = HashMap::new();
+        let mut doctrine_repositories = HashMap::new();
         for entry in ignore::WalkBuilder::new(&root)
             .hidden(false)
             .build()
@@ -116,6 +124,10 @@ impl Backend {
                 continue;
             };
             let uri = crate::util::path_to_uri(path);
+            let mappings = scan_doctrine_repository_mappings(&uri, &content);
+            if !mappings.is_empty() {
+                doctrine_repositories.insert(uri.clone(), Arc::new(mappings));
+            }
             let refs = scan_framework_references(&uri, &content);
             if !refs.is_empty() {
                 indexed.insert(uri, Arc::new(refs));
@@ -124,6 +136,7 @@ impl Backend {
 
         let count = indexed.len();
         *self.framework_references.write() = indexed;
+        *self.framework_doctrine_repositories.write() = doctrine_repositories;
         count
     }
 
@@ -132,11 +145,18 @@ impl Backend {
             return;
         }
         let refs = scan_framework_references(uri, content);
+        let mappings = scan_doctrine_repository_mappings(uri, content);
         let mut index = self.framework_references.write();
         if refs.is_empty() {
             index.remove(uri);
         } else {
             index.insert(uri.to_string(), Arc::new(refs));
+        }
+        let mut doctrine_repositories = self.framework_doctrine_repositories.write();
+        if mappings.is_empty() {
+            doctrine_repositories.remove(uri);
+        } else {
+            doctrine_repositories.insert(uri.to_string(), Arc::new(mappings));
         }
     }
 
@@ -152,14 +172,13 @@ impl Backend {
         });
         match content {
             Some(content) => self.index_framework_uri_content(uri, &content),
-            None => {
-                self.framework_references.write().remove(uri);
-            }
+            None => self.remove_framework_uri(uri),
         }
     }
 
     pub(crate) fn remove_framework_uri(&self, uri: &str) {
         self.framework_references.write().remove(uri);
+        self.framework_doctrine_repositories.write().remove(uri);
     }
 
     pub(crate) fn apply_framework_file_change(
@@ -296,9 +315,11 @@ impl Backend {
     ) -> Vec<String> {
         let target = normalize_framework_fqn(entity_fqn);
         let mut out = Vec::new();
-        for mapping in self.framework_doctrine_repository_mappings() {
-            if normalize_framework_fqn(&mapping.entity_fqn).eq_ignore_ascii_case(&target) {
-                push_unique_string(&mut out, normalize_framework_fqn(&mapping.repository_fqn));
+        for mappings in self.framework_doctrine_repositories.read().values() {
+            for mapping in mappings.iter() {
+                if normalize_framework_fqn(&mapping.entity_fqn).eq_ignore_ascii_case(&target) {
+                    push_unique_string(&mut out, normalize_framework_fqn(&mapping.repository_fqn));
+                }
             }
         }
         out
@@ -310,37 +331,14 @@ impl Backend {
     ) -> Vec<String> {
         let target = normalize_framework_fqn(repository_fqn);
         let mut out = Vec::new();
-        for mapping in self.framework_doctrine_repository_mappings() {
-            if normalize_framework_fqn(&mapping.repository_fqn).eq_ignore_ascii_case(&target) {
-                push_unique_string(&mut out, normalize_framework_fqn(&mapping.entity_fqn));
+        for mappings in self.framework_doctrine_repositories.read().values() {
+            for mapping in mappings.iter() {
+                if normalize_framework_fqn(&mapping.repository_fqn).eq_ignore_ascii_case(&target) {
+                    push_unique_string(&mut out, normalize_framework_fqn(&mapping.entity_fqn));
+                }
             }
         }
         out
-    }
-
-    pub(crate) fn framework_doctrine_repository_mappings(&self) -> Vec<DoctrineRepositoryMapping> {
-        let uris: Vec<String> = self.framework_references.read().keys().cloned().collect();
-        let mut mappings = Vec::new();
-        for uri in uris {
-            let Some(content) = self.get_file_content_arc(&uri) else {
-                continue;
-            };
-            mappings.extend(scan_doctrine_repository_mappings(&uri, &content));
-        }
-        mappings.sort_by(|a, b| {
-            a.uri
-                .cmp(&b.uri)
-                .then(a.entity_start.cmp(&b.entity_start))
-                .then(a.repository_start.cmp(&b.repository_start))
-        });
-        mappings.dedup_by(|a, b| {
-            a.uri == b.uri
-                && normalize_framework_fqn(&a.entity_fqn)
-                    .eq_ignore_ascii_case(&normalize_framework_fqn(&b.entity_fqn))
-                && normalize_framework_fqn(&a.repository_fqn)
-                    .eq_ignore_ascii_case(&normalize_framework_fqn(&b.repository_fqn))
-        });
-        mappings
     }
 
     pub(crate) fn framework_highlights(
@@ -1165,4 +1163,43 @@ fn normalize_path(path: PathBuf) -> PathBuf {
         }
     }
     normalized
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn doctrine_repository_index_updates_with_framework_resource() {
+        let backend = Backend::new_test();
+        let uri = "file:///project/config/doctrine/User.orm.yaml";
+        backend.index_framework_uri_content(
+            uri,
+            "App\\Entity\\User:\n  repositoryClass: App\\Repository\\UserRepository\n",
+        );
+        assert_eq!(
+            backend.framework_doctrine_repository_fqns_for_entity("App\\Entity\\User"),
+            vec!["App\\Repository\\UserRepository"]
+        );
+
+        backend.index_framework_uri_content(
+            uri,
+            "App\\Entity\\User:\n  repositoryClass: App\\Storage\\UserStore\n",
+        );
+        assert_eq!(
+            backend.framework_doctrine_repository_fqns_for_entity("App\\Entity\\User"),
+            vec!["App\\Storage\\UserStore"]
+        );
+        assert!(
+            backend
+                .framework_doctrine_entity_fqns_for_repository("App\\Repository\\UserRepository")
+                .is_empty()
+        );
+
+        backend.remove_framework_uri(uri);
+        assert!(
+            backend
+                .framework_doctrine_repository_fqns_for_entity("App\\Entity\\User")
+                .is_empty()
+        );
+    }
 }
