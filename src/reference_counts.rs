@@ -757,6 +757,79 @@ function persist(Order $order): void {
     }
 
     #[test]
+    fn later_member_batches_reuse_the_semantic_file_index() {
+        const SERVICE_URI: &str = "file:///Service.php";
+        const CONSUMER_URI: &str = "file:///Consumer.php";
+        const SERVICE: &str = r#"<?php
+class Service {
+    public function save(): void {}
+    public function cancel(): void {}
+}
+"#;
+        const CONSUMER: &str = r#"<?php
+function run(Service $service): void {
+    $service->save();
+    $service->cancel();
+}
+"#;
+
+        let backend = Backend::new_test();
+        parse_extra(&backend, SERVICE_URI, SERVICE);
+        parse_extra(&backend, CONSUMER_URI, CONSUMER);
+        backend.workspace_indexed.store(true, Ordering::Release);
+
+        let class_fqn = crate::atom::atom("Service");
+        let save_offset = SERVICE.find("save").unwrap() as u32;
+        assert!(
+            backend
+                .member_ref_count_cached(
+                    SERVICE_URI,
+                    save_offset,
+                    class_fqn,
+                    crate::atom::atom("save"),
+                    false,
+                )
+                .is_none()
+        );
+        crate::type_engine::variable::resolution::reset_test_scope_cache_hits();
+        backend.compute_pending_member_ref_counts();
+        assert!(crate::type_engine::variable::resolution::test_scope_cache_hits() > 0);
+
+        let consumer_map = backend
+            .symbol_maps
+            .read()
+            .get(CONSUMER_URI)
+            .cloned()
+            .unwrap();
+        assert!(
+            backend
+                .resolved_member_file(CONSUMER_URI, &consumer_map)
+                .is_some(),
+            "the first member query should index every receiver in its candidate file"
+        );
+
+        let cancel_offset = SERVICE.find("cancel").unwrap() as u32;
+        assert!(
+            backend
+                .member_ref_count_cached(
+                    SERVICE_URI,
+                    cancel_offset,
+                    class_fqn,
+                    crate::atom::atom("cancel"),
+                    false,
+                )
+                .is_none()
+        );
+        crate::type_engine::variable::resolution::reset_test_scope_cache_hits();
+        backend.compute_pending_member_ref_counts();
+        assert_eq!(
+            crate::type_engine::variable::resolution::test_scope_cache_hits(),
+            0,
+            "a later member name must not rebuild or query the file's variable scopes"
+        );
+    }
+
+    #[test]
     fn ready_only_location_lookup_does_not_queue_background_work() {
         let backend = Backend::new_test();
         parse(&backend, ONE_CALL);
