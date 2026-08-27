@@ -984,10 +984,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b295-values-phpstan-types-as-mixed-come-back-unresolved-or-narrower-than-the-docblock-says" class="md-nav__link">
+  <a href="#b303-a-call-whose-member-name-is-decided-at-runtime-comes-back-unresolved-in-situ" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B295. Values PHPStan types as <code>mixed</code> come back unresolved, or narrower than the docblock says
+        B303. A call whose member name is decided at runtime comes back unresolved in situ
       </span>
     </span>
   </a>
@@ -1656,10 +1656,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b295-values-phpstan-types-as-mixed-come-back-unresolved-or-narrower-than-the-docblock-says" class="md-nav__link">
+  <a href="#b303-a-call-whose-member-name-is-decided-at-runtime-comes-back-unresolved-in-situ" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B295. Values PHPStan types as <code>mixed</code> come back unresolved, or narrower than the docblock says
+        B303. A call whose member name is decided at runtime comes back unresolved in situ
       </span>
     </span>
   </a>
@@ -1869,11 +1869,16 @@ loop that provably runs (<code>if (count($xs) &gt; 0) { ... foreach ($xs) ... }<
 or a literal <code>$files = [$file]</code>), and after a foreach over a local
 array that every branch pushed into (reproduced minimally; also
 <code>src/Analyser/TypeSpecifier.php:542</code>).</p>
+<p>An inline <code>/** @var … */</code> on the assignment inside the loop does not
+rescue it either: the accumulator still leaves the loop nullable, so
+<code>return $parameterSchema;</code> reports the <code>null</code> against a declared
+<code>Schema</code> (<code>src/DependencyInjection/ContainerFactory.php:403</code>).</p>
 <p>Sites: <code>src/Analyser/NodeScopeResolver.php:1103, 1112, 1116, 1903, 2001, 2153, 5406, 5414</code>,
 <code>src/Rules/Properties/SetNonVirtualPropertyHookAssignRule.php:64, 72, 80, 81, 90</code>,
 <code>src/Rules/TooWideTypehints/TooWideParameterOutTypeCheck.php:47, 56</code>,
 <code>src/Reflection/BetterReflection/SourceLocator/OptimizedDirectorySourceLocator.php:149, 150</code>,
-<code>src/Analyser/TypeSpecifier.php:542</code>.</p>
+<code>src/Analyser/TypeSpecifier.php:542</code>,
+<code>src/DependencyInjection/ContainerFactory.php:403</code>.</p>
 <h3 id="b301-narrowing-defects-with-a-single-site-each">B301. Narrowing defects with a single site each<a class="headerlink" href="#b301-narrowing-defects-with-a-single-site-each" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
 <p>2 sites, two independent mechanisms. Neither is large enough to earn a
@@ -1933,7 +1938,8 @@ the element type a key check proves is there.</p>
 <li>A locally built array of tuples read back by a destructuring foreach:
   <code>$offsetTypes[$key] = [$trinary, $type];</code> …
   <code>foreach ($offsetTypes as $key =&gt; [$hasOffsetValue, $offsetType])</code> —
-  both variables come back unresolved
+  both variables come back as <code>mixed</code> rather than as the tuple slot the
+  write put there
   (<code>src/Type/Php/ArrayMergeFunctionDynamicReturnTypeExtension.php:188, 250, 255, 258, 300, 306</code>,
   <code>src/Type/Php/ArrayReplaceFunctionReturnTypeExtension.php:177, 227, 231, 264, 270</code>).</li>
 <li>Indexing a docblock shape through two dims unions the tuple slots
@@ -1951,70 +1957,33 @@ the element type a key check proves is there.</p>
 <p>The mirror image — where the <em>key</em> is what a check proves something
 about — resolves correctly now.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
-<h3 id="b295-values-phpstan-types-as-mixed-come-back-unresolved-or-narrower-than-the-docblock-says">B295. Values PHPStan types as <code>mixed</code> come back unresolved, or narrower than the docblock says<a class="headerlink" href="#b295-values-phpstan-types-as-mixed-come-back-unresolved-or-narrower-than-the-docblock-says" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: High · Complexity: High</strong></p>
-<p>The biggest cluster left: ~47 sites. The sample analyses clean under
-PHPStan level 8 because these values are <code>mixed</code> there, and level 8
-doesn't check members of or arguments from <code>mixed</code>. Our own severity
-table in <a href="../diagnostics/"><code>todo/diagnostics.md</code></a> already classifies
-"<code>mixed</code> subject member access" as an opt-in <strong>Hint</strong> — but the engine
-returns <em>unresolved</em> instead of <code>mixed</code> for these sources, so the
-diagnostics fire as errors:</p>
-<ul>
-<li>Elements of an undocblocked <code>array</code> parameter (closures included) —
-  e.g. <code>src/Type/UnionType.php:527</code>, where <code>instanceof</code>-guarded
-  accesses on the same element are correctly silent and only the bare
-  <code>else</code> branch reports. The <code>$arg</code>/<code>$funcCallArg</code> reads in
-  <code>src/Reflection/ParametersAcceptorSelector.php:211-213</code>,
-  <code>src/Analyser/ExprHandler/Helper/ClosureTypeResolver.php:825-831</code>,
-  <code>src/Analyser/ScopeOps.php:76</code> and
-  <code>src/Analyser/NodeScopeResolver.php:3844, 3845</code> are the same shape.</li>
-<li><code>getAttribute()</code>-style <code>@return mixed</code> values combined with <code>??</code>
-  (<code>mixed ?? Arg</code> must be <code>mixed</code>) and flowing through <code>use()</code> captures
-  (<code>src/Reflection/ParametersAcceptorSelector.php:129-145</code>,
-  <code>src/Command/CommandHelper.php:608</code>, <code>src/Command/WorkerCommand.php:130</code>).</li>
-<li><code>@param mixed ...$args</code> variadic elements
-  (<code>src/Testing/TypeInferenceTestCase.php:161, 212, 225</code>).</li>
-<li>Dynamic static-method names (<code>TrinaryLogic::{$name}()</code>,
-  <code>src/Rules/Debug/FileAssertRule.php:222, 227</code>) and static calls on
-  <code>$node['type']</code> from untyped arrays
-  (<code>src/Dependency/ExportedNode/*.php</code>, <code>src/Parallel/ParallelAnalyser.php:345</code>).</li>
-<li>List-destructuring a <code>@return mixed|null</code> cache load
-  (<code>src/Type/FileTypeMapper.php:400</code>).</li>
-<li>An array accumulated from an undocblocked <code>array $json</code> argument, which
-  makes its element type unreadable and blocks the rules that read one:
-  <code>array_sum($peakMemoryUsages)</code> stays on the stub's <code>int|float</code> rather
-  than folding to <code>int</code>, because the array was filled from
-  <code>$json['memoryUsage']</code> (<code>src/Parallel/ParallelAnalyser.php:158</code>).</li>
-<li>Elements of a <code>Strings::matchAll()</code> result, which is <code>array</code> with no
-  docblock: <code>$placeholder['position'] - 1</code> is <code>int|float</code> for us and
-  <code>mixed</code> for PHPStan, so an <code>int</code> parameter rejects it
-  (<code>src/Rules/Functions/PrintfHelper.php:113</code>). The pattern is built at
-  runtime (<code>sprintf($specifiersPattern, …) . $specifiers</code>), so no
-  capture-group analysis can type the element and <code>mixed</code> really is the
-  whole answer.</li>
-</ul>
-<p>Conversely, where the docblock <em>says</em> <code>mixed</code>, we substitute a narrower
-body-inferred type and then flag mismatches PHPStan never sees
-(<code>src/DependencyInjection/ContainerFactory.php:335, 403</code>,
-<code>src/Command/ErrorFormatter/BaselineNeonErrorFormatter.php:100</code>,
-<code>src/Testing/TestCaseSourceLocatorFactory.php:75</code>) — and a docblock
-<code>mixed</code> doesn't even agree with a native one: <code>strlen($s) + $line - 1</code>
-where <code>$line</code> comes from an untyped method with <code>@return mixed</code>
-(narrowed by <code>!== null</code>) produces <code>int|float</code>, while the same code with
-a <em>native</em> <code>mixed</code> return type produces <code>int</code>, which is what PHPStan
-reports (<code>src/Rules/PhpDoc/PhpDocLineHelper.php:25</code>).</p>
-<p>The fix direction: these sources must uniformly produce <code>mixed</code>,
-whichever spelling declares it, and member/argument checks on <code>mixed</code>
-must follow the severity policy (hint, not error).</p>
+<h3 id="b303-a-call-whose-member-name-is-decided-at-runtime-comes-back-unresolved-in-situ">B303. A call whose member name is decided at runtime comes back unresolved in situ<a class="headerlink" href="#b303-a-call-whose-member-name-is-decided-at-runtime-comes-back-unresolved-in-situ" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<p>2 sites. <code>TrinaryLogic::{$certainty-&gt;name-&gt;toString()}()</code> names a method
+PHP only knows at runtime, so the result is <code>mixed</code> — which is what the
+same shape produces in isolation, whether the name is a variable, a
+method call, or a chain, and whether or not the
+<code>// @phpstan-ignore staticMethod.dynamicName</code> comment above it is
+present. In place it comes back unresolved instead, so the two reads off
+the assigned variable report that its type could not be worked out:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">$expectedCertaintyValue = TrinaryLogic::{$certainty-&gt;name-&gt;toString()}();</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">…</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">if ($expectedCertaintyValue-&gt;equals($actualCertaintyValue)) { … }</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">$expectedCertaintyValue-&gt;describe();</span>
+</code></pre></div>
+<p>The assignment sits after a run of eight <code>instanceof</code>-guarded early
+returns inside a long method, so the next attempt should bisect the
+enclosing method down to a reproducing shape rather than starting from
+the excerpt above — none of the pieces reproduce on their own. Sites:
+<code>src/Rules/Debug/FileAssertRule.php:222, 227</code>.</p>
 <h3 id="b302-a-docblock-sharing-a-line-with-code-is-invisible-to-the-parameter-scan">B302. A docblock sharing a line with code is invisible to the parameter scan<a class="headerlink" href="#b302-a-docblock-sharing-a-line-with-code-is-invisible-to-the-parameter-scan" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
 <p>The <code>@param</code> scan that types a closure's parameters reads the source
 line by line and only recognises a docblock on a line of its own, so a
 comment written inline between an assignment and the closure it
 documents is skipped:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">$collect = /** @param Arg[] $callArgs */ static function (array $callArgs): void { … };</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">// $callArgs is the bare `array` hint; the annotation is never read</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">$collect = /** @param Arg[] $callArgs */ static function (array $callArgs): void { … };</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">// $callArgs is the bare `array` hint; the annotation is never read</span>
 </code></pre></div>
 <p>The multi-line spelling above the statement works. Both placements are
 the same annotation, so a scanner that understands where a docblock
@@ -2037,6 +2006,14 @@ triage starts from them rather than rediscovering them.</p>
   <code>src/Diagnose/PHPStanDiagnoseExtension.php:132, 142</code>). They are
   correct findings against the sample as checked out, not false
   positives; a sweep that counts them is counting four too many.</li>
+<li><strong><code>src/Testing/TestCaseSourceLocatorFactory.php:75</code> is also not our
+  bug.</strong> <code>dirname($vendorDirProperty-&gt;getValue($classLoader))</code> reads
+  Composer's <code>ClassLoader::$vendorDir</code>, which its own docblock types
+  <code>string|null</code>, and nothing between the <code>hasProperty()</code> guard and the
+  call rules the <code>null</code> out. <code>dirname()</code> rejects it under
+  <code>strict_types</code>. PHPStan stays quiet only because reflection reads are
+  <code>mixed</code> to it, so this is a place where we are the more accurate of the
+  two rather than a false positive.</li>
 <li><strong>A <code>foreach</code> key reaching a <code>string</code> parameter</strong> —
   <code>src/DependencyInjection/ConditionalTagsExtension.php:45</code> and
   <code>src/Rules/PhpDoc/WrongVariableNameInVarTagRule.php:376</code> both report

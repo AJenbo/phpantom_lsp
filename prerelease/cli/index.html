@@ -1982,8 +1982,9 @@ team.</p>
   reports what it finds. No baselines, no ignore files, no level to
   choose. The only configuration worth knowing about is
   <code>unresolved-member-access</code>: enable it in <code>.phpantom.toml</code> to also
-  flag member access on variables whose type could not be resolved
-  (off by default because it is noisy on untyped codebases).</li>
+  flag member access on variables that are <code>mixed</code>, or whose type could
+  not be worked out (off by default because it is noisy on untyped
+  codebases).</li>
 </ul>
 <blockquote>
 <p>[!NOTE]
