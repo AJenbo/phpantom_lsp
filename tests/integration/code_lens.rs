@@ -1295,6 +1295,38 @@ async fn doctrine_mapping_lenses_link_entity_and_configured_repository() {
 }
 
 #[tokio::test]
+async fn doctrine_repository_convention_links_back_to_entity() {
+    let entity_php = "<?php\nnamespace App\\Entity;\nclass User {}\n";
+    let repo_php = "<?php\nnamespace App\\Repository;\nclass UserRepository {}\n";
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER,
+        &[
+            ("src/Entity/User.php", entity_php),
+            ("src/Repository/UserRepository.php", repo_php),
+        ],
+    );
+
+    open_doc(
+        &backend,
+        uri_for(&dir, "src/Entity/User.php"),
+        "php",
+        entity_php,
+    )
+    .await;
+    let repo_uri = uri_for(&dir, "src/Repository/UserRepository.php");
+    open_doc(&backend, repo_uri.clone(), "php", repo_php).await;
+
+    let lenses = backend
+        .handle_code_lens(repo_uri.as_ref(), repo_php)
+        .unwrap_or_default();
+    let titles = lens_titles(&lenses);
+    assert!(
+        titles.contains(&"Doctrine entity: User"),
+        "expected conventional entity lens, got {titles:?}"
+    );
+}
+
+#[tokio::test]
 async fn doctrine_get_repository_lens_uses_repository_class_mapping() {
     let entity_php = "<?php\nnamespace App\\Entity;\nclass User {}\n";
     let repo_php = "<?php\nnamespace App\\Storage;\nclass SpecialUserStore {}\n";

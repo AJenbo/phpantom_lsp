@@ -1550,6 +1550,19 @@ fn doctrine_repository_short_name(entity_short: &str) -> String {
     format!("{stem}Repository")
 }
 
+pub(crate) fn doctrine_repository_matches_entity_convention(
+    entity_fqn: &str,
+    repository_fqn: &str,
+) -> bool {
+    let entity = normalize_fqn(entity_fqn);
+    let repository = normalize_fqn(repository_fqn);
+    let repository_short = doctrine_repository_short_name(crate::util::short_name(&entity));
+    crate::util::short_name(&repository).eq_ignore_ascii_case(&repository_short)
+        || doctrine_repository_convention_candidates(&entity, &repository_short)
+            .iter()
+            .any(|candidate| candidate.eq_ignore_ascii_case(&repository))
+}
+
 fn doctrine_repository_convention_candidates(
     entity_fqn: &str,
     repository_short: &str,
@@ -1578,7 +1591,7 @@ fn doctrine_repository_convention_candidates(
     candidates
 }
 
-fn looks_like_doctrine_repository(class_info: &ClassInfo) -> bool {
+pub(crate) fn looks_like_doctrine_repository(class_info: &ClassInfo) -> bool {
     if class_info.name.to_string().ends_with("Repository") {
         return true;
     }

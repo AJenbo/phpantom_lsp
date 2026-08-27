@@ -36,7 +36,11 @@ mod functions;
 mod members;
 mod variables;
 
-pub(crate) use members::MemberDeclarationReferenceQuery;
+pub(crate) use members::{
+    MemberDeclarationReferenceQuery, doctrine_repository_matches_entity_convention,
+    looks_like_doctrine_repository,
+};
+
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
