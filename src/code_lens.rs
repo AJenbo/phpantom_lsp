@@ -265,13 +265,27 @@ impl Backend {
             });
         }
 
-        if let Some(locations) = self.member_ref_locations_cached(
-            origin_uri,
-            declaration_offset,
-            class_fqn,
-            member,
-            is_static,
-        ) {
+        let supports_refresh = self
+            .supports_code_lens_refresh
+            .load(std::sync::atomic::Ordering::Acquire);
+        let cached_locations = if supports_refresh {
+            self.member_ref_locations_cached(
+                origin_uri,
+                declaration_offset,
+                class_fqn,
+                member,
+                is_static,
+            )
+        } else {
+            self.member_ref_locations_ready(
+                origin_uri,
+                declaration_offset,
+                class_fqn,
+                member,
+                is_static,
+            )
+        };
+        if let Some(locations) = cached_locations {
             return Some(CodeLens {
                 range,
                 command: Some(Self::reference_lens_command(
@@ -284,10 +298,7 @@ impl Backend {
         // Clients with refresh support can re-pull once the shared background
         // worker fills the exact cache.  Omitting the cold lens avoids an
         // eager resolve burst merely to obtain titles for the viewport.
-        if self
-            .supports_code_lens_refresh
-            .load(std::sync::atomic::Ordering::Acquire)
-        {
+        if supports_refresh {
             return None;
         }
 

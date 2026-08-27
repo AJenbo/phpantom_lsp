@@ -13,11 +13,20 @@ use std::collections::HashMap;
 
 use tower_lsp::lsp_types::{Location, Range};
 
+use crate::atom::{Atom, AtomMap};
 use crate::class_lookup::find_class_at_offset;
 use crate::references::push_unique_location;
 use crate::symbol_map::SymbolKind;
 use crate::text_position::offset_to_position;
 use crate::types::ClassInfo;
+
+#[derive(Clone)]
+pub(crate) struct MemberDeclarationReferenceQuery {
+    pub(crate) uri: Arc<str>,
+    pub(crate) offset: u32,
+    pub(crate) member: Atom,
+    pub(crate) is_static: bool,
+}
 
 impl Backend {
     pub(super) fn find_laravel_macro_references(
@@ -180,18 +189,170 @@ impl Backend {
         member_name: &str,
         is_static: bool,
     ) -> Vec<Location> {
-        let mode = ReferenceSearchMode::References;
-        let hierarchy =
-            self.resolve_member_declaration_hierarchy(uri, offset, member_name, is_static, mode);
-        let declaration_scope =
-            self.resolve_member_declaration_scope(uri, offset, member_name, is_static, mode);
-        self.find_member_references(
-            member_name,
+        self.member_declaration_references_batch(&[MemberDeclarationReferenceQuery {
+            uri: Arc::from(uri),
+            offset,
+            member: crate::atom::atom(member_name),
             is_static,
-            false,
-            hierarchy.as_ref(),
-            declaration_scope.as_ref(),
-        )
+        }])
+        .pop()
+        .unwrap_or_default()
+    }
+
+    /// Find exact references for several member declarations in one semantic
+    /// pass over the union of their candidate files.
+    ///
+    /// A viewport commonly queues many declarations at once. Resolving each
+    /// declaration separately reopens the same files and repeats receiver
+    /// inference for every same-named method in unrelated class hierarchies.
+    /// This batch resolves each matching access once, then attributes it only
+    /// to queries whose hierarchy contains the receiver class.
+    pub(crate) fn member_declaration_references_batch(
+        &self,
+        queries: &[MemberDeclarationReferenceQuery],
+    ) -> Vec<Vec<Location>> {
+        struct PreparedQuery {
+            member: Atom,
+            is_static: bool,
+            hierarchy: Option<HashSet<String>>,
+        }
+
+        if queries.is_empty() {
+            return Vec::new();
+        }
+
+        let mode = ReferenceSearchMode::References;
+        let prepared: Vec<_> = queries
+            .iter()
+            .map(|query| PreparedQuery {
+                member: query.member,
+                is_static: query.is_static,
+                hierarchy: self.resolve_member_declaration_hierarchy(
+                    &query.uri,
+                    query.offset,
+                    &query.member,
+                    query.is_static,
+                    mode,
+                ),
+            })
+            .collect();
+
+        let mut by_member: AtomMap<Vec<usize>> = AtomMap::default();
+        let mut candidate_keys = HashSet::new();
+        for (query_index, query) in prepared.iter().enumerate() {
+            by_member.entry(query.member).or_default().push(query_index);
+            candidate_keys.extend(member_candidate_keys(
+                &query.member,
+                query.is_static,
+                query.hierarchy.as_ref(),
+            ));
+        }
+
+        let candidate_keys: Vec<_> = candidate_keys.into_iter().collect();
+        let snapshot = self.user_file_symbol_maps_for_reference_keys(&candidate_keys);
+        self.begin_request_scan_window(snapshot.len(), "Scanning for member references");
+
+        let mut locations = vec![Vec::new(); queries.len()];
+        for (file_uri, symbol_map) in &snapshot {
+            self.request_scan_file_done();
+
+            let mut span_indices = Vec::new();
+            for member in by_member.keys() {
+                span_indices.extend_from_slice(symbol_map.member_access_indices(member));
+            }
+            if span_indices.is_empty() {
+                continue;
+            }
+            span_indices.sort_unstable();
+            span_indices.dedup();
+
+            let Ok(parsed_uri) = Url::parse(file_uri) else {
+                continue;
+            };
+            let Some(content) = self.reference_file_content_arc(file_uri) else {
+                continue;
+            };
+            let _parse_cache_guard = crate::parser::with_parse_cache(&content);
+            let file_ctx = self.file_context(file_uri);
+
+            for span_index in span_indices {
+                let span = &symbol_map.spans[span_index];
+                let SymbolKind::MemberAccess {
+                    member_name,
+                    subject_text,
+                    is_static,
+                    ..
+                } = &span.kind
+                else {
+                    continue;
+                };
+                let Some(query_indices) = by_member.get(member_name) else {
+                    continue;
+                };
+
+                let needs_receiver = query_indices
+                    .iter()
+                    .any(|&index| prepared[index].hierarchy.is_some());
+                let subject_fqns = needs_receiver.then(|| {
+                    self.resolve_subject_to_fqns(
+                        subject_text.as_str(&content),
+                        *is_static,
+                        &file_ctx,
+                        span.start,
+                        &content,
+                    )
+                });
+                let range = Range::new(
+                    offset_to_position(&content, span.start as usize),
+                    offset_to_position(&content, span.end as usize),
+                );
+
+                for &query_index in query_indices {
+                    let query = &prepared[query_index];
+                    if let Some(hierarchy) = &query.hierarchy {
+                        if !subject_fqns
+                            .as_ref()
+                            .is_some_and(|fqns| fqns.iter().any(|fqn| hierarchy.contains(fqn)))
+                        {
+                            continue;
+                        }
+                    } else if query.is_static != *is_static {
+                        continue;
+                    }
+
+                    locations[query_index].push(Location {
+                        uri: parsed_uri.clone(),
+                        range,
+                    });
+                }
+            }
+        }
+
+        for (query, query_locations) in prepared.iter().zip(&mut locations) {
+            for location in
+                self.framework_member_reference_locations(&query.member, query.hierarchy.as_ref())
+            {
+                push_unique_location(
+                    query_locations,
+                    &location.uri,
+                    location.range.start,
+                    location.range.end,
+                );
+            }
+            for location in
+                self.framework_property_reference_locations(&query.member, query.hierarchy.as_ref())
+            {
+                push_unique_location(
+                    query_locations,
+                    &location.uri,
+                    location.range.start,
+                    location.range.end,
+                );
+            }
+            sort_locations_for_references(query_locations);
+        }
+
+        locations
     }
 
     /// Find all references to a member (method, property, or constant)

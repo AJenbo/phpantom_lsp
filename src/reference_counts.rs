@@ -377,10 +377,39 @@ impl Backend {
         member: Atom,
         is_static: bool,
     ) -> Option<Vec<Location>> {
+        self.member_ref_locations(uri, offset, class_fqn, member, is_static, true)
+    }
+
+    /// Fresh exact locations without queuing a background computation.
+    ///
+    /// Clients without CodeLens refresh receive a lazy lens and resolve only
+    /// the entries they display. Avoiding a background queue here prevents
+    /// that resolve from waiting behind every declaration in the file.
+    pub(crate) fn member_ref_locations_ready(
+        &self,
+        uri: &str,
+        offset: u32,
+        class_fqn: Atom,
+        member: Atom,
+        is_static: bool,
+    ) -> Option<Vec<Location>> {
+        self.member_ref_locations(uri, offset, class_fqn, member, is_static, false)
+    }
+
+    fn member_ref_locations(
+        &self,
+        uri: &str,
+        offset: u32,
+        class_fqn: Atom,
+        member: Atom,
+        is_static: bool,
+        queue_if_missing: bool,
+    ) -> Option<Vec<Location>> {
         let cached = self.member_ref_counts.get(class_fqn, member, is_static);
-        if cached
-            .as_ref()
-            .is_none_or(|cached| cached.count_stale || cached.locations_stale)
+        if queue_if_missing
+            && cached
+                .as_ref()
+                .is_none_or(|cached| cached.count_stale || cached.locations_stale)
         {
             self.queue_member_references(uri, offset, class_fqn, member, is_static);
         }
@@ -482,21 +511,26 @@ impl Backend {
         let _chain_guard = crate::type_engine::resolver::with_chain_resolution_cache();
         let _resolver_guard = crate::type_engine::call_resolution::activate_type_engine_caches();
 
+        // A declaration may have moved or gone since the hint was requested.
+        // Exclude stale offsets before preparing the shared semantic scan so
+        // they cannot fall back to counting every member of that name.
+        let valid_pending: Vec<_> = pending
+            .iter()
+            .filter(|item| self.declaration_still_at(item))
+            .collect();
+        let queries: Vec<_> = valid_pending
+            .iter()
+            .map(|item| crate::references::MemberDeclarationReferenceQuery {
+                uri: Arc::clone(&item.uri),
+                offset: item.offset,
+                member: item.member,
+                is_static: item.is_static,
+            })
+            .collect();
+        let results = self.member_declaration_references_batch(&queries);
+
         let mut changed = false;
-        for item in &pending {
-            // The declaration may have moved or gone since the hint was
-            // requested, and recomputing against a stale offset would scope
-            // the search to the wrong class (or to none at all, which falls
-            // back to counting every member of that name).
-            if !self.declaration_still_at(item) {
-                continue;
-            }
-            let locations = self.member_declaration_references(
-                &item.uri,
-                item.offset,
-                &item.member,
-                item.is_static,
-            );
+        for (item, locations) in valid_pending.into_iter().zip(results) {
             changed |= self.member_ref_counts.store(
                 item.class_fqn,
                 item.member,
@@ -668,6 +702,26 @@ function persist(Order $order): void {
     $order->save();
 }
 "#;
+
+    #[test]
+    fn ready_only_location_lookup_does_not_queue_background_work() {
+        let backend = Backend::new_test();
+        parse(&backend, ONE_CALL);
+        let declaration_offset = ONE_CALL.find("save").unwrap() as u32;
+
+        assert!(
+            backend
+                .member_ref_locations_ready(
+                    URI,
+                    declaration_offset,
+                    crate::atom::atom("Order"),
+                    crate::atom::atom("save"),
+                    false,
+                )
+                .is_none()
+        );
+        assert!(!backend.member_ref_counts.has_pending());
+    }
 
     #[test]
     fn an_edit_that_adds_an_access_recomputes_the_count() {
