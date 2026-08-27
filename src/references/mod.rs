@@ -216,6 +216,17 @@ pub(super) fn is_constructor_name(name: &str) -> bool {
     name.eq_ignore_ascii_case("__construct")
 }
 
+fn sort_locations_for_references(locations: &mut Vec<Location>) {
+    locations.sort_by(|a, b| {
+        a.uri
+            .as_str()
+            .cmp(b.uri.as_str())
+            .then(a.range.start.line.cmp(&b.range.start.line))
+            .then(a.range.start.character.cmp(&b.range.start.character))
+    });
+    locations.dedup();
+}
+
 /// Check whether a resolved class name matches the target FQN.
 ///
 /// Two names match if their fully-qualified forms are equal, or if both

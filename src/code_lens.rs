@@ -8,9 +8,28 @@ use crate::Backend;
 use crate::atom::Atom;
 use crate::definition::member::MemberKind;
 use crate::reference_index::ReferenceIndexKey;
-use crate::symbol_map::SymbolKind;
+use crate::symbol_map::{SymbolKind, SymbolMap};
 use crate::text_position::offset_to_position;
 use crate::types::{ClassInfo, ClassLikeKind, MAX_INHERITANCE_DEPTH, Visibility};
+
+/// The offset of the class' own name, so the reference lens sits on the
+/// declaration line rather than on a preceding attribute or docblock.
+fn class_declaration_name_offset(symbol_map: Option<&SymbolMap>, class: &ClassInfo) -> u32 {
+    let Some(map) = symbol_map else {
+        return class.keyword_offset;
+    };
+    map.spans
+        .iter()
+        .find(|span| {
+            matches!(
+                &span.kind,
+                SymbolKind::ClassDeclaration { name } if *name == class.name
+            ) && span.start >= class.decl_start_offset
+                && span.start <= class.start_offset
+        })
+        .map(|span| span.start)
+        .unwrap_or(class.keyword_offset)
+}
 
 fn line_indent(content: &str, byte_offset: usize) -> u32 {
     let line_start = content[..byte_offset]
@@ -45,6 +64,7 @@ impl Backend {
             let map = self.symbols.uri_classes_index.read();
             map.get(uri).cloned().unwrap_or_default()
         };
+        let symbol_map = self.symbol_maps.read().get(uri).cloned();
 
         let mut lenses = Vec::new();
 
@@ -54,7 +74,7 @@ impl Backend {
             if let Some(lens) = self.build_declaration_reference_lens(
                 uri,
                 content,
-                self.class_declaration_name_offset(uri, class),
+                class_declaration_name_offset(symbol_map.as_deref(), class),
                 &ReferenceIndexKey::class(&class_fqn),
             ) {
                 lenses.push(lens);
@@ -155,7 +175,7 @@ impl Backend {
             }
         }
 
-        if let Some(symbol_map) = self.symbol_maps.read().get(uri).cloned() {
+        if let Some(symbol_map) = &symbol_map {
             for span in &symbol_map.spans {
                 let key = match &span.kind {
                     SymbolKind::FunctionCall {
@@ -242,11 +262,7 @@ impl Backend {
         if declaration_offset == 0 {
             return None;
         }
-        let key = ReferenceIndexKey::Member {
-            name: member.to_string(),
-            is_static,
-        };
-        let candidate_count = self.indexed_reference_count(&key)?;
+        let candidate_count = self.indexed_member_reference_count(&member)?;
         let origin_url = Url::parse(origin_uri).ok()?;
         let position = offset_to_position(content, declaration_offset as usize);
         let range = Range::new(
@@ -315,24 +331,6 @@ impl Backend {
                 "isStatic": is_static,
             })),
         })
-    }
-
-    fn class_declaration_name_offset(&self, uri: &str, class: &ClassInfo) -> u32 {
-        let maps = self.symbol_maps.read();
-        let Some(map) = maps.get(uri) else {
-            return class.keyword_offset;
-        };
-        map.spans
-            .iter()
-            .find(|span| {
-                matches!(
-                    &span.kind,
-                    SymbolKind::ClassDeclaration { name } if *name == class.name
-                ) && span.start >= class.decl_start_offset
-                    && span.start <= class.start_offset
-            })
-            .map(|span| span.start)
-            .unwrap_or(class.keyword_offset)
     }
 
     fn reference_lens_command(

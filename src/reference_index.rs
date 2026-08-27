@@ -315,21 +315,41 @@ impl Backend {
     /// Number of indexed reference occurrences for `key`.
     ///
     /// `None` means the workspace index cannot answer yet.  A returned zero
-    /// is conclusive even for the deliberately coarse member keys: semantic
-    /// filtering can remove name matches, but it cannot create a reference
-    /// that the symbol map did not index.
+    /// is conclusive: semantic filtering can remove name matches, but it
+    /// cannot create a reference that the symbol map did not index.
     pub(crate) fn indexed_reference_count(&self, key: &ReferenceIndexKey) -> Option<usize> {
         if self.skip_reference_index || !self.workspace_indexed.load(Ordering::Acquire) {
             return None;
         }
 
-        Some(
-            self.reference_index
-                .read()
-                .get(key)
-                .map(|entries| entries.values().map(|&count| count as usize).sum())
-                .unwrap_or(0),
-        )
+        let index = self.reference_index.read();
+        Some(occurrences_for_key(&index, key))
+    }
+
+    /// Number of indexed occurrences of a member name, counting the instance
+    /// and static access forms together.
+    ///
+    /// Both forms have to be summed for a zero to be conclusive.  A static
+    /// access can reach an instance declaration (`parent::handle()`), and
+    /// Laravel's model forwarding turns `User::active()` into a call to an
+    /// instance method on a custom builder; the exact search searches both
+    /// keys for exactly that reason (see `member_candidate_keys`).
+    pub(crate) fn indexed_member_reference_count(&self, member: &str) -> Option<usize> {
+        if self.skip_reference_index || !self.workspace_indexed.load(Ordering::Acquire) {
+            return None;
+        }
+
+        let mut key = ReferenceIndexKey::Member {
+            name: member.to_string(),
+            is_static: false,
+        };
+        let index = self.reference_index.read();
+        let mut total = occurrences_for_key(&index, &key);
+        if let ReferenceIndexKey::Member { is_static, .. } = &mut key {
+            *is_static = true;
+        }
+        total += occurrences_for_key(&index, &key);
+        Some(total)
     }
 
     /// Narrow `uris` to the files that reference one of `keys`.
@@ -788,6 +808,13 @@ fn evict_reference_index_uri_locked(index: &mut ReferenceIndexInner, uri: &str) 
             }
         }
     }
+}
+
+fn occurrences_for_key(index: &ReferenceIndexInner, key: &ReferenceIndexKey) -> usize {
+    index
+        .get(key)
+        .map(|entries| entries.values().map(|&count| count as usize).sum())
+        .unwrap_or(0)
 }
 
 fn normalize_symbol_name(name: impl AsRef<str>) -> String {

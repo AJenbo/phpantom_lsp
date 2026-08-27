@@ -354,6 +354,110 @@ makeWidget();
     }
 }
 
+/// A method PHP or Laravel can reach through a static call is indexed under
+/// the static member key, so the lens must not answer a conclusive zero from
+/// the instance key alone.
+#[tokio::test]
+async fn statically_forwarded_instance_method_is_not_reported_as_zero() {
+    let (backend, dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/", "Illuminate\\": "vendor/illuminate/" } } }"#,
+        &[
+            (
+                "vendor/illuminate/Model.php",
+                "<?php namespace Illuminate\\Database\\Eloquent; abstract class Model { public static function query() {} }",
+            ),
+            (
+                "vendor/illuminate/Builder.php",
+                "<?php namespace Illuminate\\Database\\Eloquent; class Builder { /** @return $this */ public function where($c) { return $this; } }",
+            ),
+            (
+                "src/Models/UserBuilder.php",
+                r#"<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Builder;
+class UserBuilder extends Builder {
+    /** @return $this */
+    public function active() { return $this; }
+}
+"#,
+            ),
+            (
+                "src/Models/User.php",
+                r#"<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Attributes\UseEloquentBuilder;
+#[UseEloquentBuilder(UserBuilder::class)]
+class User extends Model {}
+"#,
+            ),
+            (
+                "usage.php",
+                "<?php\nuse App\\Models\\User;\n\nUser::active();\n",
+            ),
+        ],
+    );
+    for path in [
+        "vendor/illuminate/Builder.php",
+        "vendor/illuminate/Model.php",
+        "src/Models/UserBuilder.php",
+        "src/Models/User.php",
+        "usage.php",
+    ] {
+        let uri = Url::from_file_path(dir.path().join(path)).unwrap();
+        let text = std::fs::read_to_string(dir.path().join(path)).unwrap();
+        open_doc(&backend, uri, &text).await;
+    }
+
+    let builder_uri = Url::from_file_path(dir.path().join("src/Models/UserBuilder.php")).unwrap();
+    // Drive the workspace index the way a client would before asking for lenses.
+    backend
+        .references(ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier::new(builder_uri.clone()),
+                position: Position::new(5, 21),
+            },
+            context: ReferenceContext {
+                include_declaration: false,
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        })
+        .await
+        .unwrap();
+
+    let lenses = backend
+        .code_lens(CodeLensParams {
+            text_document: TextDocumentIdentifier::new(builder_uri),
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        })
+        .await
+        .unwrap()
+        .expect("expected declaration reference lenses");
+    let lens = lenses
+        .into_iter()
+        .find(|lens| lens.range.start.line == 5)
+        .expect("expected a reference lens above UserBuilder::active");
+    assert!(
+        lens.command.is_none(),
+        "`User::active()` is indexed as a static access, so a zero drawn from \
+         the instance key alone would contradict Find References: {lens:?}"
+    );
+
+    let resolved = backend
+        .code_lens_resolve(lens)
+        .await
+        .expect("reference lens should resolve");
+    assert_eq!(
+        resolved
+            .command
+            .as_ref()
+            .map(|command| command.title.as_str()),
+        Some("1 reference")
+    );
+}
+
 // ─── Basic Override Detection ───────────────────────────────────────────────
 
 #[test]

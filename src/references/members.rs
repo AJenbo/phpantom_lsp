@@ -461,27 +461,7 @@ impl Backend {
             }
         }
 
-        for (query, query_locations) in prepared.iter().zip(&mut locations) {
-            for location in
-                self.framework_member_reference_locations(&query.member, query.hierarchy.as_ref())
-            {
-                push_unique_location(
-                    query_locations,
-                    &location.uri,
-                    location.range.start,
-                    location.range.end,
-                );
-            }
-            for location in
-                self.framework_property_reference_locations(&query.member, query.hierarchy.as_ref())
-            {
-                push_unique_location(
-                    query_locations,
-                    &location.uri,
-                    location.range.start,
-                    location.range.end,
-                );
-            }
+        for query_locations in &mut locations {
             sort_locations_for_references(query_locations);
         }
 

@@ -1080,3 +1080,62 @@ through a separate flag, so the cached value has to carry both.
 `type_engine/resolver/mod.rs` (`SubjectExpr::CallExpr` and the property
 path) and `narrowed_by_rewalk` in
 `type_engine/variable/rhs_resolution/mod.rs`.
+
+---
+
+## P55. Every edit re-reads every member-reference candidate file
+
+**Impact: Medium-High · Complexity: Medium-High**
+
+`reindex_references_for_symbol_maps_batch` and
+`evict_reference_index_uri` both call
+`MemberRefCounts::invalidate_locations_all`, so any reparse marks the
+exact locations of *every* cached member declaration stale, not just the
+ones the edited file contributed to. The count side is invalidated far
+more selectively: `member_contributions` compares each file's old and
+new per-member contribution and only the members whose contribution
+actually changed become `count_stale`, which is what lets an edit that
+touches no access recompute nothing.
+
+Locations are blanket-invalidated because a receiver's type can change
+without changing any indexed member name or count (the
+`Order $value` → `Buyer $value` case), and a clickable lens must never
+point at a range the edit moved. But the consequence is that the
+declaration CodeLens path re-queues every public member of the open file
+on every keystroke, and `member_declaration_references_batch` then calls
+`reference_file_content_arc` for each candidate file. That falls through
+to `get_file_content_arc`, which is an uncached
+`std::fs::read_to_string` for any file not open in the editor. On a
+large application a common member name (`handle`, `get`, `name`) is a
+candidate in thousands of files, so a typing pause costs thousands of
+file reads even though the expensive part, the per-file
+`ResolvedMemberFile` semantic layer, is still warm and reused.
+
+### Fix
+
+Two independent halves, either of which helps on its own:
+
+1. **Narrow the invalidation.** Split the blanket call into the two
+   causes it currently conflates. Offsets only shift in the files that
+   were reparsed, so a location cache entry needs invalidating when one
+   of its own locations names a rebuilt URI. The receiver-type case
+   belongs where the type change is already detected: `update_ast`
+   clears `resolved_members` when `any_signature_changed ||
+   any_function_changed`, and the location cache should be invalidated
+   from the same branch. Check what that flag covers before relying on
+   it — a docblock-only `@return` edit changes receiver types too, and
+   serving a stale clickable location is worse than the current cost.
+
+2. **Make the warm semantic layer self-sufficient.** `ResolvedMemberFile`
+   already packs the resolved receiver atoms per symbol-span index; it
+   does not carry the LSP `Range` for the access, which is the only
+   other thing `scan_file` needs the file's text for. Storing the range
+   alongside the targets (16 bytes per access) would let a warm
+   candidate file be filtered without reading it at all.
+
+**Where to look:** `invalidate_locations_all` and
+`member_declaration_references` in `reference_counts.rs`,
+`reindex_references_for_symbol_maps_batch` and `ResolvedMemberFile` in
+`reference_index.rs`, `member_declaration_references_batch` in
+`references/members.rs`, and `get_file_content_arc` in
+`backend/file_access.rs`.
