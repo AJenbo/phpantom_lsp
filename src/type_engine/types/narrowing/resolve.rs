@@ -621,8 +621,17 @@ const NON_DETERMINISTIC_FUNCTIONS: &[&str] = &[
 pub(in crate::type_engine) fn array_access_key_as_string(
     aa: &mago_syntax::cst::ArrayAccess<'_>,
 ) -> Option<String> {
+    array_index_literal_key(aa.index)
+}
+
+/// The same literal-key extraction [`array_access_key_as_string`] does,
+/// taken directly from an index expression rather than the `ArrayAccess`
+/// node that wraps it. Lets a caller that only has the index (e.g. one
+/// key of a write's flattened `key_chain`) render it the same way a read
+/// through the full `ArrayAccess` would.
+pub(in crate::type_engine) fn array_index_literal_key(index: &Expression<'_>) -> Option<String> {
     use mago_syntax::cst::Literal;
-    match aa.index {
+    match index {
         Expression::Literal(Literal::String(s)) => {
             // `value` is the unquoted content; fall back to stripping
             // quotes from `raw`.

@@ -309,6 +309,31 @@ class Repro {
     );
 }
 
+/// The same annotation, written inline between the assignment and the
+/// closure it documents rather than on its own line above the
+/// statement, still types the closure's parameters.
+#[test]
+fn a_doc_comment_inline_with_a_closure_assignment_types_its_parameters() {
+    assert_only(
+        r#"<?php
+class Arg {
+    public mixed $value = null;
+}
+class Repro {
+    public function run(): void {
+        $collect = /** @param Arg[] $callArgs */ static function (array $callArgs): void {
+            foreach ($callArgs as $callArg) {
+                $callArg->nope();
+            }
+        };
+        $collect([]);
+    }
+}
+"#,
+        "Method 'nope' not found on class 'Arg'",
+    );
+}
+
 /// The relaxation only steps over an assignment target. A docblock
 /// separated from the closure by a statement of its own belongs to that
 /// statement, or two closures sharing a parameter name would borrow each

@@ -2230,3 +2230,40 @@ function f(Reflection $reflection): void
 "#,
     );
 }
+
+// ─── Seed-if-absent array writes ────────────────────────────────────────────
+
+const SEED_IF_ABSENT_SCAFFOLD: &str = r#"<?php
+namespace Repro;
+
+class Total {
+    public function add(int|self $v): self { return $this; }
+}
+
+function makeTotal(mixed $v): Total { return new Total(); }
+"#;
+
+/// `if (!isset($tmp[$key])) { $tmp[$key] = 0; }` proves the element
+/// present on both paths out of the guard: the then-branch just wrote it,
+/// and the fall-through only runs when `isset` already said it was there.
+/// The write goes through a variable key, so it must overwrite the
+/// synthetic scope entry the guard narrowed to null, or that stale null
+/// resurfaces once the branches rejoin.
+#[test]
+fn a_variable_keyed_write_after_a_true_isset_guard_leaves_no_null_behind() {
+    assert_no_type_errors(&format!(
+        r#"{SEED_IF_ABSENT_SCAFFOLD}
+/** @param array<string, mixed> $row */
+function totals(array $row): void
+{{
+    $tmp = [];
+    foreach ($row as $key => $value) {{
+        if (!isset($tmp[$key])) {{
+            $tmp[$key] = 0;
+        }}
+        $tmp[$key] = makeTotal($value)->add($tmp[$key]);
+    }}
+}}
+"#
+    ));
+}

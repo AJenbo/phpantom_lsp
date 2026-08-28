@@ -615,6 +615,28 @@ fn strip_docblock_line_delimiters(trimmed: &str) -> &str {
     inner.trim().trim_start_matches('*').trim()
 }
 
+/// Pull the inner text out of a `/** ... */` docblock that shares its
+/// line with code on either side, e.g.
+/// `$x = /** @param T $y */ static function (T $y) {`.
+///
+/// [`strip_docblock_line_delimiters`] only strips `/**`/`*/` when they
+/// sit at the very start/end of the trimmed line, so a docblock preceded
+/// or followed by other code on the same line is left untouched and its
+/// tags never match. Returns `None` when the line has no `/** ... */`
+/// span, or when the span *is* the whole line (that case is already
+/// handled by `strip_docblock_line_delimiters`).
+fn split_inline_docblock(trimmed: &str) -> Option<&str> {
+    let open = trimmed.find("/**")?;
+    let after_open = &trimmed[open + 3..];
+    let close_rel = after_open.find("*/")?;
+    let before = trimmed[..open].trim();
+    let after = after_open[close_rel + 2..].trim();
+    if before.is_empty() && after.is_empty() {
+        return None;
+    }
+    Some(after_open[..close_rel].trim())
+}
+
 /// Search backward through `content` (up to `before_offset`) for any
 /// `/** @var RawType $var_name */` annotation and return the **raw**
 /// (uncleaned) type string — including generic parameters like `<User>`.
@@ -1138,8 +1160,17 @@ pub fn find_iterable_raw_type_in_source(
         }
 
         // ── Named annotation: line mentions the variable name ───────
-        if trimmed.contains(var_name) {
-            let inner = strip_docblock_line_delimiters(trimmed);
+        // A docblock sharing its line with code (`$x = /** @param T $y
+        // */ function ($y) {`) is matched against its own inner text so
+        // the annotation is not swallowed by the surrounding code.
+        let inline_annotation = split_inline_docblock(trimmed);
+        let annotation_source = inline_annotation.unwrap_or(trimmed);
+        if annotation_source.contains(var_name) {
+            let inner = if inline_annotation.is_some() {
+                annotation_source
+            } else {
+                strip_docblock_line_delimiters(annotation_source)
+            };
 
             // Try @var first, then @param.
             let rest = if let Some(r) = inner.strip_prefix("@var") {

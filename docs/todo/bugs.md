@@ -231,31 +231,6 @@ rather than from the excerpts above. Sites:
   variable still holds the previous iteration's shape;
   `src/Parser/RichParser.php:183`).
 
-### B303. A true `isset($a[$k])` is not proof that the element is there
-
-**Impact: Medium · Complexity: Medium**
-
-Unlike the entries above, this one comes from a Laravel sample project (3
-sites in one controller), and it reproduces on its own:
-
-```php
-$tmp = [];
-foreach ($row as $key => $value) {
-    if (!isset($tmp[$key])) { $tmp[$key] = 0; }
-    $tmp[$key] = Convert::toDecimal($value)->add($tmp[$key]);  // we report `int|Decimal|null`
-}
-```
-
-The seed-if-absent idiom leaves the element set on both paths: the
-`!isset` branch writes it, and the fall-through only runs when `isset`
-already answered true. We add a `null` for the fall-through, so the read
-of a variable-index element is typed as if it might be missing even
-where the condition just ruled that out. Spelling the same guard
-`!array_key_exists($key, $tmp)` resolves correctly, and so does dropping
-the guard and writing unconditionally, which places the defect in what a
-*true* `isset` on an array element records rather than in the loop's
-fixed point.
-
 ## Arithmetic
 
 No outstanding items.
@@ -270,25 +245,7 @@ No outstanding items.
 
 ## Docblock handling
 
-### B302. A docblock sharing a line with code is invisible to the parameter scan
-
-**Impact: Low · Complexity: Medium**
-
-The `@param` scan that types a closure's parameters reads the source
-line by line and only recognises a docblock on a line of its own, so a
-comment written inline between an assignment and the closure it
-documents is skipped:
-
-```php
-$collect = /** @param Arg[] $callArgs */ static function (array $callArgs): void { … };
-// $callArgs is the bare `array` hint; the annotation is never read
-```
-
-The multi-line spelling above the statement works. Both placements are
-the same annotation, so a scanner that understands where a docblock
-begins and ends — rather than which lines look like comment lines —
-would read either. No site in the sample projects; found while working
-the closure-signature entry.
+No outstanding items.
 
 ## Miscellaneous
 

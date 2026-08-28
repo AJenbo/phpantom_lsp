@@ -2465,6 +2465,54 @@ fn apply_array_write<'b>(
         &value_php_type,
     );
     scope.set(base_name, vec![ResolvedType::from_type_string(merged)]);
+
+    // A keyed write is authoritative for the element it targets, so it
+    // must overwrite any synthetic scope key (`$tmp[$key]`, `$a["x"]`)
+    // narrowing left behind for that same subject. Left stale, a
+    // narrowed-to-null entry from an `isset`/`!isset` guard survives past
+    // the write that just proved the key present, and resurfaces when
+    // this branch's scope merges back with one where the key was proven
+    // present a different way — see `apply_null_narrowing_truthy`'s
+    // `extract_not_isset_vars` arm, which narrows the synthetic key to
+    // null before the guarded body ever runs. An append (`$var[] = …`)
+    // has no addressable key to overwrite and is skipped.
+    if !append && let Some(key) = array_write_synthetic_key(base_name, key_chain) {
+        // `rhs_types`, not `value_php_type`: the latter is a plain
+        // `PhpType` string flattened for the shape merge above, which
+        // drops the `class_info` a member-access completion on the
+        // synthetic key (`$result["user"]->`) needs.
+        let synthetic_types = if rhs_types.is_empty() {
+            vec![ResolvedType::from_type_string(PhpType::mixed())]
+        } else {
+            rhs_types
+        };
+        scope.set(&key, synthetic_types);
+    }
+}
+
+/// Render the synthetic scope key a keyed write targets, matching the key
+/// text [`narrowing::expr_to_subject_key`] builds for a read of the same
+/// subject (`$tmp[$key]`, `$a["x"][$i]`), so a write can find and
+/// overwrite whatever narrowing recorded under that key.
+fn array_write_synthetic_key(base_name: &str, key_chain: &[&Expression<'_>]) -> Option<String> {
+    let mut key = base_name.to_string();
+    for index in key_chain {
+        if let Some(literal) = narrowing::array_index_literal_key(index) {
+            key.push_str(&format!("[\"{literal}\"]"));
+        } else {
+            let index_key = narrowing::array_index_key(index)?;
+            // `expr_to_subject_key`'s `array_access_subject_key` only
+            // renders a non-literal index that reads a variable
+            // (`contains('$')`); an index that writes, concatenates, or
+            // compares is not the same subject a read of it renders, so
+            // there is no synthetic key to find.
+            if !index_key.contains('$') {
+                return None;
+            }
+            key.push_str(&format!("[{index_key}]"));
+        }
+    }
+    Some(key)
 }
 
 /// Process pass-by-reference parameter type inference.
