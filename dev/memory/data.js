@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787923155474,
+  "lastUpdate": 1787931735514,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -25363,6 +25363,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 72.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "38a169128d87b8c762e221a58cfb1c299dd54d2a",
+          "message": "A `@param` docblock written inline between an assignment and the closure\nit documents still types the closure",
+          "timestamp": "2026-08-28T17:28:55+02:00",
+          "tree_id": "66d8fce4db3d655c9304701dc151654dd5be5734",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/38a169128d87b8c762e221a58cfb1c299dd54d2a"
+        },
+        "date": 1787931726902,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 72.3,
             "unit": "MiB"
           }
         ]
