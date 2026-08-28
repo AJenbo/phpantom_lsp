@@ -1576,8 +1576,9 @@ pub(super) fn resolve_method_call_on_receiver<'b>(
 ) -> Vec<ResolvedType> {
     let method_name = match method {
         ClassLikeMemberSelector::Identifier(ident) => bytes_to_str(ident.value).to_string(),
-        // Variable method name (`$obj->$method()`) — can't resolve statically.
-        _ => return vec![],
+        // Variable method name (`$obj->$method()`) — see
+        // `runtime_named_member_type`.
+        _ => return super::runtime_named_member_type(),
     };
     let (owner_classes, receiver_resolved) =
         receiver.unwrap_or_else(|| resolve_method_receiver(object, ctx));
@@ -2494,6 +2495,11 @@ pub(super) fn resolve_rhs_static_call(
     static_call: &StaticMethodCall<'_>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
+    // `Cls::{$expr}()` / `Cls::$name()` — see `runtime_named_member_type`.
+    if !matches!(static_call.method, ClassLikeMemberSelector::Identifier(_)) {
+        return super::runtime_named_member_type();
+    }
+
     let current_class_name: &str = &ctx.current_class.name;
 
     // `self::`, `static::`, and `parent::` all forward late static binding, so

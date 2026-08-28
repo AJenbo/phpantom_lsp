@@ -75,6 +75,18 @@ pub(crate) use instantiation::{
     extract_generic_arg_from_ancestor, remap_inherited_ctor_subs, type_contains_name,
 };
 
+/// The type of a member access whose name PHP only works out at runtime.
+///
+/// `$obj->{$name}()`, `Cls::{$expr}()`, `$obj->{$name}`, `Cls::${$name}`
+/// and `Cls::{$name}` all name a member no static lookup can find, so the
+/// only honest answer is `mixed` — the type that admits every value.
+/// Answering with nothing instead would say the type engine's resolution
+/// fell short, sending whoever reads the diagnostic looking for a gap in
+/// the engine rather than at code PHP itself leaves open.
+pub(super) fn runtime_named_member_type() -> Vec<ResolvedType> {
+    vec![ResolvedType::from_type_string(PhpType::mixed())]
+}
+
 /// Apply unary `+` or `-` to an already-resolved numeric type.
 ///
 /// Exact literal members remain exact; negating a literal `PHP_INT_MIN`

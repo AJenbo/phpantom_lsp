@@ -258,31 +258,6 @@ No outstanding items.
 
 ## Docblock handling
 
-### B303. A call whose member name is decided at runtime comes back unresolved in situ
-
-**Impact: Low · Complexity: Medium**
-
-2 sites. `TrinaryLogic::{$certainty->name->toString()}()` names a method
-PHP only knows at runtime, so the result is `mixed` — which is what the
-same shape produces in isolation, whether the name is a variable, a
-method call, or a chain, and whether or not the
-`// @phpstan-ignore staticMethod.dynamicName` comment above it is
-present. In place it comes back unresolved instead, so the two reads off
-the assigned variable report that its type could not be worked out:
-
-```php
-$expectedCertaintyValue = TrinaryLogic::{$certainty->name->toString()}();
-…
-if ($expectedCertaintyValue->equals($actualCertaintyValue)) { … }
-$expectedCertaintyValue->describe();
-```
-
-The assignment sits after a run of eight `instanceof`-guarded early
-returns inside a long method, so the next attempt should bisect the
-enclosing method down to a reproducing shape rather than starting from
-the excerpt above — none of the pieces reproduce on their own. Sites:
-`src/Rules/Debug/FileAssertRule.php:222, 227`.
-
 ### B302. A docblock sharing a line with code is invisible to the parameter scan
 
 **Impact: Low · Complexity: Medium**

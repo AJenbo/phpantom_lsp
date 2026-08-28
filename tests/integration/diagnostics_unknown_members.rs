@@ -13880,3 +13880,70 @@ class Provider {
         "both guarded reads resolve to Reflection, got: {diags:?}",
     );
 }
+
+/// A member whose name PHP only works out at runtime names nothing a
+/// static lookup can find, so the read is `mixed` — the type that admits
+/// every value — and the diagnostic on a member of it says so.  Reporting
+/// it as unresolved instead pointed at a gap in the type engine that was
+/// never there, sending the reader hunting for one.
+#[test]
+fn a_member_named_at_runtime_is_mixed_rather_than_unresolved() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class Certainty {
+    public static self $shared;
+    public const KIND = 'yes';
+    public self $inner;
+    public static function createYes(): self { return new self(); }
+    public function describe(): string { return ''; }
+}
+
+function test(Certainty $c, string $name): void {
+    $viaStaticCall = Certainty::{$name}();
+    $viaStaticCall->describe();
+
+    $viaMethodCall = $c->{$name}();
+    $viaMethodCall->describe();
+
+    $viaVariableMethod = $c->$name();
+    $viaVariableMethod->describe();
+
+    $viaProperty = $c->{$name};
+    $viaProperty->describe();
+
+    $viaStaticProperty = Certainty::${$name};
+    $viaStaticProperty->describe();
+
+    $viaClassConstant = Certainty::{$name};
+    $viaClassConstant->describe();
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    for subject in [
+        "$viaStaticCall",
+        "$viaMethodCall",
+        "$viaVariableMethod",
+        "$viaProperty",
+        "$viaStaticProperty",
+        "$viaClassConstant",
+    ] {
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.message.contains(subject) && d.message.contains("is 'mixed'")),
+            "expected `{subject}` to be reported as 'mixed', got: {diags:?}",
+        );
+    }
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.message.contains("could not be resolved")),
+        "no runtime-named member should be reported as unresolved, got: {diags:?}",
+    );
+}
