@@ -916,17 +916,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b303-a-true-issetak-is-not-proof-that-the-element-is-there" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B303. A true <code>isset($a[$k])</code> is not proof that the element is there
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -973,23 +962,6 @@
       </span>
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="Docblock handling">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b302-a-docblock-sharing-a-line-with-code-is-invisible-to-the-parameter-scan" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B302. A docblock sharing a line with code is invisible to the parameter scan
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -1571,17 +1543,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b303-a-true-issetak-is-not-proof-that-the-element-is-there" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B303. A true <code>isset($a[$k])</code> is not proof that the element is there
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1628,23 +1589,6 @@
       </span>
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="Docblock handling">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b302-a-docblock-sharing-a-line-with-code-is-invisible-to-the-parameter-scan" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B302. A docblock sharing a line with code is invisible to the parameter scan
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -1884,25 +1828,6 @@ rather than from the excerpts above. Sites:
   variable still holds the previous iteration's shape;
   <code>src/Parser/RichParser.php:183</code>).</li>
 </ul>
-<h3 id="b303-a-true-issetak-is-not-proof-that-the-element-is-there">B303. A true <code>isset($a[$k])</code> is not proof that the element is there<a class="headerlink" href="#b303-a-true-issetak-is-not-proof-that-the-element-is-there" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<p>Unlike the entries above, this one comes from a Laravel sample project (3
-sites in one controller), and it reproduces on its own:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">$tmp = [];</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">foreach ($row as $key =&gt; $value) {</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">    if (!isset($tmp[$key])) { $tmp[$key] = 0; }</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">    $tmp[$key] = Convert::toDecimal($value)-&gt;add($tmp[$key]);  // we report `int|Decimal|null`</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">}</span>
-</code></pre></div>
-<p>The seed-if-absent idiom leaves the element set on both paths: the
-<code>!isset</code> branch writes it, and the fall-through only runs when <code>isset</code>
-already answered true. We add a <code>null</code> for the fall-through, so the read
-of a variable-index element is typed as if it might be missing even
-where the condition just ruled that out. Spelling the same guard
-<code>!array_key_exists($key, $tmp)</code> resolves correctly, and so does dropping
-the guard and writing unconditionally, which places the defect in what a
-<em>true</em> <code>isset</code> on an array element records rather than in the loop's
-fixed point.</p>
 <h2 id="arithmetic">Arithmetic<a class="headerlink" href="#arithmetic" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
@@ -1910,20 +1835,7 @@ fixed point.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
-<h3 id="b302-a-docblock-sharing-a-line-with-code-is-invisible-to-the-parameter-scan">B302. A docblock sharing a line with code is invisible to the parameter scan<a class="headerlink" href="#b302-a-docblock-sharing-a-line-with-code-is-invisible-to-the-parameter-scan" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<p>The <code>@param</code> scan that types a closure's parameters reads the source
-line by line and only recognises a docblock on a line of its own, so a
-comment written inline between an assignment and the closure it
-documents is skipped:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">$collect = /** @param Arg[] $callArgs */ static function (array $callArgs): void { … };</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">// $callArgs is the bare `array` hint; the annotation is never read</span>
-</code></pre></div>
-<p>The multi-line spelling above the statement works. Both placements are
-the same annotation, so a scanner that understands where a docblock
-begins and ends — rather than which lines look like comment lines —
-would read either. No site in the sample projects; found while working
-the closure-signature entry.</p>
+<p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="not-yet-attributed">Not yet attributed<a class="headerlink" href="#not-yet-attributed" title="Permanent link">&para;</a></h2>
