@@ -884,10 +884,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b270-narrowing-a-repeated-or-non-variable-subject-doesnt-survive" class="md-nav__link">
+  <a href="#b270-a-proof-the-condition-never-states-outright-isnt-reconstructed" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B270. Narrowing a repeated or non-variable subject doesn't survive
+        B270. A proof the condition never states outright isn't reconstructed
       </span>
     </span>
   </a>
@@ -910,6 +910,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         B301. Narrowing defects with a single site each
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b303-a-true-issetak-is-not-proof-that-the-element-is-there" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B303. A true <code>isset($a[$k])</code> is not proof that the element is there
       </span>
     </span>
   </a>
@@ -1528,10 +1539,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b270-narrowing-a-repeated-or-non-variable-subject-doesnt-survive" class="md-nav__link">
+  <a href="#b270-a-proof-the-condition-never-states-outright-isnt-reconstructed" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B270. Narrowing a repeated or non-variable subject doesn't survive
+        B270. A proof the condition never states outright isn't reconstructed
       </span>
     </span>
   </a>
@@ -1554,6 +1565,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         B301. Narrowing defects with a single site each
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b303-a-true-issetak-is-not-proof-that-the-element-is-there" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B303. A true <code>isset($a[$k])</code> is not proof that the element is there
       </span>
     </span>
   </a>
@@ -1682,15 +1704,14 @@ to second-guess upstream output.</p>
 scale defined in <a href="../../todo/"><code>docs/todo.md</code></a>; that table is also where
 each bug's row lives in the current sprint/backlog.</p>
 <p>All entries below come from triage of the PHPStan Source sample project,
-re-swept on 2026-08-27 (180 confirmed false positives after the genuine
-findings were patched in the sample, down from 242 at the 2026-08-25
-triage). Site counts refer to that sweep; every mechanism was either
-reproduced in a minimal project or confirmed by reading the guard
-construct PHPStan honours. The sweep is a snapshot, so a site named here
-may already read differently: re-run the analyser before working an
-entry, and trim the shapes that no longer reproduce. Line numbers drift
-by a line or two between sweeps — match on the surrounding construct, not
-on the number.</p>
+re-swept on 2026-08-28 (98 sites, down from 126 at the start of that
+sweep and from 180 at the 2026-08-27 triage). Site counts refer to that
+sweep; every mechanism was either reproduced in a minimal project or
+confirmed by reading the guard construct PHPStan honours. The sweep is a
+snapshot, so a site named here may already read differently: re-run the
+analyser before working an entry, and trim the shapes that no longer
+reproduce. Line numbers drift by a line or two between sweeps — match on
+the surrounding construct, not on the number.</p>
 <p>Entries are grouped by the mechanism that has to change, not by the
 symptom that surfaced: one entry is one root cause, however many shapes
 it shows up in. Splitting a shape out into its own entry because it
@@ -1699,8 +1720,8 @@ first place. If two entries would be fixed by the same change, they are
 one entry. Defects too small to earn a row of their own are collected in
 <a href="#b301-narrowing-defects-with-a-single-site-each">B301</a> rather than given
 one each.</p>
-<p>Of the 180 sites in the latest sweep, 110 are attributed to an entry
-below. The unattributed remainder is described in
+<p>Of the 93 distinct lines the latest sweep reports, 49 are attributed to
+an entry below. The unattributed remainder is described in
 <a href="#not-yet-attributed">Not yet attributed</a>.</p>
 <h2 id="crashes">Crashes<a class="headerlink" href="#crashes" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
@@ -1711,99 +1732,88 @@ below. The unattributed remainder is described in
 <h2 id="reachability">Reachability<a class="headerlink" href="#reachability" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
-<h3 id="b270-narrowing-a-repeated-or-non-variable-subject-doesnt-survive">B270. Narrowing a repeated or non-variable subject doesn't survive<a class="headerlink" href="#b270-narrowing-a-repeated-or-non-variable-subject-doesnt-survive" title="Permanent link">&para;</a></h3>
+<h3 id="b270-a-proof-the-condition-never-states-outright-isnt-reconstructed">B270. A proof the condition never states outright isn't reconstructed<a class="headerlink" href="#b270-a-proof-the-condition-never-states-outright-isnt-reconstructed" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: High · Complexity: Very High</strong></p>
-<p>42 sites — by far the largest cluster here, and one root cause: what the
-narrowing store keys a proof against, and what invalidates it. PHPStan
-keys specified types by expression string and keeps them until something
-writes to that expression. We handle plain variables reliably and
-everything else fragilely, which surfaces as four shapes. Related to the
-reconciliation engine planned as
-<a href="../type-inference/#t20-type-narrowing-reconciliation-engine">T20</a>.</p>
-<p><strong>a. A guard on a call's result doesn't narrow the same call afterwards</strong>
-(17 sites). This ubiquitous idiom is clean under PHPStan and re-resolved
-from the declaration by us, which hands back the wide type:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">if ($analyserResult-&gt;getDependencies() !== null) {</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    $this-&gt;switchTmpFile($analyserResult-&gt;getDependencies(), ...); // non-null here</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">}</span>
+<p>25 sites — still the largest cluster here, and one root cause: what the
+narrowing store keys a proof against, and what it takes to read that
+proof back. PHPStan keys specified types by expression string and keeps
+them until something writes to that expression, so a proof recorded
+about one spelling is available to every other occurrence of it. Where
+we now match that for a subject the condition names directly, we do not
+where the proof has to be <em>reconstructed</em> — from a disjunction, from a
+boolean that stands for the check, or from a second variable written
+alongside the first. That is the reconciliation engine planned as
+<a href="../type-inference/#t20-type-narrowing-reconciliation-engine">T20</a>, and
+both shapes below want it.</p>
+<p><strong>a. A proof reached through a disjunction, or via a variable assigned
+under it, is lost</strong> (10 sites). Entering the branch means the whole
+condition held, so the guarded spelling is narrowed on every path that
+gets there — but working that out means reasoning about the disjunction
+rather than reading a recorded key:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">// 1. The `||` leg has to be combined with the ternary that reads it back:</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">if (</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    ($stmt-&gt;valueVar instanceof Variable &amp;&amp; is_string($stmt-&gt;valueVar-&gt;name))</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">    &amp;&amp; ($stmt-&gt;keyVar === null || ($stmt-&gt;keyVar instanceof Variable &amp;&amp; is_string($stmt-&gt;keyVar-&gt;name)))</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">) {</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">    $keyVarName = $stmt-&gt;keyVar instanceof Variable ? $stmt-&gt;keyVar-&gt;name : null;  // string|Expr|null</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">}</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">// 2. A flag set inside the guarded branch, tested far below it:</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">$originalValueExpr = null;</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">if ($stmt-&gt;valueVar instanceof Variable &amp;&amp; is_string($stmt-&gt;valueVar-&gt;name)) {</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="x">    $originalValueExpr = new OriginalForeachValueExpr($stmt-&gt;valueVar-&gt;name);</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="x">}</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="x">// … 60 lines on …</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="x">if ($originalValueExpr !== null) { $scope-&gt;getVariableType($stmt-&gt;valueVar-&gt;name); }  // lost</span>
 </code></pre></div>
-<p>Concentrated around reflection accessors (<code>getFileName()</code>,
-<code>getDocComment()</code>, <code>getResolvedPhpDoc()</code>, <code>getDependencies()</code>). The
-ternary spelling of the same idiom narrows correctly now.
-Sites: <code>src/Analyser/NodeScopeResolver.php:1121, 5320, 5366</code>,
-<code>src/Analyser/ResultCache/ResultCacheManager.php:858</code>,
-<code>src/Command/AnalyseApplication.php:329, 333, 337</code>,
-<code>src/PhpDoc/PhpDocInheritanceResolver.php:246, 282</code>,
-<code>src/Reflection/BetterReflection/BetterReflectionProvider.php:302 (×2), 348, 356</code>,
-<code>src/Reflection/Php/PhpClassReflectionExtension.php:299, 313, 678, 682, 823, 866</code>,
-<code>src/Rules/Exceptions/TooWidePropertyHookThrowTypeRule.php:61</code>.</p>
-<p><strong>b. Property fetches, array dims and call chains lose their narrowing</strong>
-(16 sites). <code>instanceof</code> / <code>!== null</code> / <code>is_string()</code> guards whose
-subject is not a plain variable, in specific reproduced shapes:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">// 1. Member use inside the condition breaks the narrowing for the body:</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">if ($this-&gt;pair !== null &amp;&amp; $this-&gt;pair[0] instanceof SubA &amp;&amp; $this-&gt;pair[0]-&gt;n &gt; 0) {</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    $this-&gt;pair[0]-&gt;n;        // &quot;Property &#39;n&#39; not found&quot; — without the third leg it works</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">}</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">// 2. Chained getters re-read in the same condition:</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">if ($h-&gt;getExpr()-&gt;getExpr() instanceof Vari &amp;&amp; is_string($h-&gt;getExpr()-&gt;getExpr()-&gt;name) &amp;&amp; $flag) { ... }</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">// 3. Plain property fetch behind an elseif-continue:</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">if ($tag-&gt;value === null) { continue; } elseif (!($tag-&gt;value instanceof Sub)) { continue; }</span>
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="x">$tag-&gt;value-&gt;n;               // lost</span>
-</code></pre></div>
-<p>Sites: <code>src/Analyser/MutatingScope.php:1778, 2946, 2949</code>,
-<code>src/Analyser/NodeScopeResolver.php:1689, 1702, 2874, 3866, 4838, 4844, 5000, 5103</code>,
-<code>src/Analyser/ExprHandler/AssignHandler.php:1027</code>,
-<code>src/Analyser/TypeSpecifier.php:600</code>,
+<p>The <code>NodeScopeResolver</code> sites are all one <code>foreach</code> handler and all trace
+to <code>$stmt-&gt;valueVar-&gt;name</code> / <code>$stmt-&gt;keyVar-&gt;name</code>; fixing shape 1 is
+likely to take most of them. Two sites are a <em>negated</em> <code>instanceof</code> on a
+property path (<code>$expr instanceof FuncCall &amp;&amp; !$expr-&gt;name instanceof Name</code>)
+that does not reproduce from the construct alone, so start those by
+bisecting the enclosing method. One is not narrowing at all:
+<code>getAttribute()</code> returns <code>mixed</code>, and a <code>!== null</code> guard leaves it
+<code>mixed</code>, which we report as unverifiable and PHPStan does not report on.
+Sites: <code>src/Analyser/NodeScopeResolver.php:1689, 1702, 4838, 4844, 5000, 5103</code>,
+<code>src/Analyser/NodeScopeResolver.php:2874</code>, <code>src/Analyser/TypeSpecifier.php:600</code>
+(both negated <code>instanceof</code>),
+<code>src/Analyser/NodeScopeResolver.php:3866 (×2)</code> (the <code>mixed</code> case),
 <code>src/Rules/FunctionDefinitionCheck.php:195</code> (narrowed <code>$param</code>
-<code>use</code>-captured by a closure),
-<code>src/Rules/PhpDoc/InvalidPhpDocTagValueRule.php:98, 99</code>,
-<code>src/Rules/TooWideTypehints/TooWideTypeCheck.php:214</code>,
-<code>src/Type/Constant/ConstantArrayType.php:2567, 3503</code>,
-<code>src/Type/ValueOfType.php:59</code>.</p>
-<p><strong>c. Re-testing a condition, or a boolean flag holding it, doesn't
-re-apply its narrowing</strong> (8 sites). Three shapes PHPStan's
+<code>use</code>-captured by a closure).</p>
+<p><strong>b. Re-testing a condition, or a boolean flag holding it, doesn't
+re-apply its narrowing</strong> (15 sites). Three shapes PHPStan's
 specified-types machinery handles:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">// 1. The identical condition re-tested later:</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">if (count($args) &gt; 0) { $acceptor = Selector::selectFromArgs(...); }</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">if (count($args) &gt; 0) { use($acceptor); }                    // non-null</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">// 2. A boolean flag recording an instanceof, then read to pick a subject:</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">$constArrayIsI = $types[$i] instanceof ConstantArrayType &amp;&amp; ...;</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">$constArray = $constArrayIsI ? $types[$i] : $types[$j];      // ConstantArrayType</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">// 3. Two variables assigned together; checking one implies the other:</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="x">if ($assertions === null) { return null; } // $acceptor was set iff $assertions was</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">// 1. The identical condition re-tested later:</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">if (count($args) &gt; 0) { $acceptor = Selector::selectFromArgs(...); }</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">if (count($args) &gt; 0) { use($acceptor); }                    // non-null</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">// 2. A boolean flag recording an instanceof, then read to pick a subject:</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">$constArrayIsI = $types[$i] instanceof ConstantArrayType &amp;&amp; ...;</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">$constArray = $constArrayIsI ? $types[$i] : $types[$j];      // ConstantArrayType</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="x">// 3. Two variables assigned together; checking one implies the other:</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="x">if ($assertions === null) { return null; } // $acceptor was set iff $assertions was</span>
 </code></pre></div>
 <p>Shape 2 accounts for the whole <code>TypeCombinator</code> cluster: the flag is
 recorded, but the subject it narrows is an array dim rather than a
 plain variable, so the ternary that reads the flag back hands out the
-declared element type.
+declared element type. Its else arm needs shape 3 as well — <code>!$isI</code>
+combined with the enclosing <code>$isI || $isJ</code> is what proves the other dim.
 Sites: <code>src/Analyser/ExprHandler/FuncCallHandler.php:977, 1042</code>,
 <code>src/Analyser/ExprHandler/MethodCallHandler.php:350</code>,
 <code>src/Analyser/ExprHandler/StaticCallHandler.php:455</code>,
 <code>src/Analyser/NodeScopeResolver.php:693, 707, 727, 732</code>,
 <code>src/Type/TypeCombinator.php:1991, 1994, 2012, 2013, 2020, 2021, 2029</code>.</p>
-<p><strong>d. Reading a property of <code>$this</code> before <code>$this instanceof Subclass</code>
-kills the narrowing</strong> (1 site, isolated to a two-line repro). The store
-drops the proof it should be keeping:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">$description = $this-&gt;className;        // remove this line and the branch resolves</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">if ($this instanceof GenericObjectType) {</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    $this-&gt;getTypes();                  // &quot;Method &#39;getTypes&#39; not found on ObjectType&quot;</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">}</span>
-</code></pre></div>
-<p>Regular and promoted properties both trigger it; same-file and
-cross-file subclasses both fail. Site: <code>src/Type/ObjectType.php:744</code>.</p>
 <h3 id="b274-a-null-seeded-accumulator-filled-in-a-loop-keeps-null-or-loses-its-type-entirely">B274. A null-seeded accumulator filled in a loop keeps <code>null</code> (or loses its type entirely)<a class="headerlink" href="#b274-a-null-seeded-accumulator-filled-in-a-loop-keeps-null-or-loses-its-type-entirely" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: High · Complexity: High</strong></p>
-<p>18 sites, two symptoms of one shape — PHPStan's own scope-merging
+<p>19 sites, two symptoms of one shape — PHPStan's own scope-merging
 idiom, repeated across five files:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">$finalScope = null;</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">foreach ($executionEnds as $e) {</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">    $endScope = $e-&gt;getStatementResult()-&gt;getScope();</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">    if ($finalScope === null) { $finalScope = $endScope; continue; }</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">    $finalScope = $finalScope-&gt;mergeWith($endScope);   // unresolved from here on</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">}</span>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="x">if ($finalScope !== null) { $finalScope-&gt;processNodes(...); }  // still unresolved</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">$finalScope = null;</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">foreach ($executionEnds as $e) {</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">    $endScope = $e-&gt;getStatementResult()-&gt;getScope();</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">    if ($finalScope === null) { $finalScope = $endScope; continue; }</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">    $finalScope = $finalScope-&gt;mergeWith($endScope);   // unresolved from here on</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">}</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">if ($finalScope !== null) { $finalScope-&gt;processNodes(...); }  // still unresolved</span>
 </code></pre></div>
 <p>The <code>=== null</code> early-continue must leave the accumulator non-null on
 the merge line, and the loop fixed point must not poison the variable
@@ -1817,7 +1827,13 @@ array that every branch pushed into (reproduced minimally; also
 rescue it either: the accumulator still leaves the loop nullable, so
 <code>return $parameterSchema;</code> reports the <code>null</code> against a declared
 <code>Schema</code> (<code>src/DependencyInjection/ContainerFactory.php:403</code>).</p>
-<p>Sites: <code>src/Analyser/NodeScopeResolver.php:1103, 1112, 1116, 1903, 2001, 2153, 5406, 5414</code>,
+<p>The damage spreads one hop: <code>$scope = $finalScope-&gt;rememberConstructorScope()</code>
+leaves <code>$scope</code> unresolved too, so the next use of it reports an
+unresolvable receiver of its own
+(<code>src/Analyser/NodeScopeResolver.php:1121</code>, whose subject reads
+<code>$scope-&gt;getClassReflection()</code>). Nothing is wrong with that line —
+recovering the accumulator recovers it.</p>
+<p>Sites: <code>src/Analyser/NodeScopeResolver.php:1103, 1112, 1116, 1121, 1903, 2001, 2153, 5406, 5414</code>,
 <code>src/Rules/Properties/SetNonVirtualPropertyHookAssignRule.php:64, 72, 80, 81, 90</code>,
 <code>src/Rules/TooWideTypehints/TooWideParameterOutTypeCheck.php:47, 56</code>,
 <code>src/Reflection/BetterReflection/SourceLocator/OptimizedDirectorySourceLocator.php:149, 150</code>,
@@ -1836,17 +1852,17 @@ The plain <code>is_float()</code> shape resolves correctly on its own — an
 site reproduces from that shape alone, and neither reproduces from the
 constructs named below either, so what carries the defect is the branch
 structure around them and not any one of these lines:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">// 1. The subject reaches the guard through a swap destructuring,</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">//    starting out int|float|null; we report `null|int|int|float`.</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">if ($min !== null &amp;&amp; $max !== null &amp;&amp; $min &gt; $max) { [$min, $max] = [$max, $min]; }</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">if (is_float($min)) { $min = (int) ceil($min); }</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">IntegerRangeType::fromInterval($min, $max);</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="x">// 2. An inline `@var int|float` subject checked with an elseif;</span>
-<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="x">//    the elseif branch keeps `int|float` where it must be `int`.</span>
-<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="x">/** @var int|float $newAutoIndex */</span>
-<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="x">$newAutoIndex = $offsetValue + 1;</span>
-<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="x">if (is_float($newAutoIndex)) { … } elseif (!$optional) { $this-&gt;nextAutoIndexes = [$newAutoIndex]; }</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">// 1. The subject reaches the guard through a swap destructuring,</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">//    starting out int|float|null; we report `null|int|int|float`.</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">if ($min !== null &amp;&amp; $max !== null &amp;&amp; $min &gt; $max) { [$min, $max] = [$max, $min]; }</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">if (is_float($min)) { $min = (int) ceil($min); }</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">IntegerRangeType::fromInterval($min, $max);</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">// 2. An inline `@var int|float` subject checked with an elseif;</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="x">//    the elseif branch keeps `int|float` where it must be `int`.</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="x">/** @var int|float $newAutoIndex */</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="x">$newAutoIndex = $offsetValue + 1;</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="x">if (is_float($newAutoIndex)) { … } elseif (!$optional) { $this-&gt;nextAutoIndexes = [$newAutoIndex]; }</span>
 </code></pre></div>
 <p>The duplicated <code>int</code> and the surviving <code>null</code> in the first result say
 the assignment, not the guard, is where the type is lost. Both sites sit
@@ -1868,6 +1884,25 @@ rather than from the excerpts above. Sites:
   variable still holds the previous iteration's shape;
   <code>src/Parser/RichParser.php:183</code>).</li>
 </ul>
+<h3 id="b303-a-true-issetak-is-not-proof-that-the-element-is-there">B303. A true <code>isset($a[$k])</code> is not proof that the element is there<a class="headerlink" href="#b303-a-true-issetak-is-not-proof-that-the-element-is-there" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p>Unlike the entries above, this one comes from a Laravel sample project (3
+sites in one controller), and it reproduces on its own:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">$tmp = [];</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">foreach ($row as $key =&gt; $value) {</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">    if (!isset($tmp[$key])) { $tmp[$key] = 0; }</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">    $tmp[$key] = Convert::toDecimal($value)-&gt;add($tmp[$key]);  // we report `int|Decimal|null`</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">}</span>
+</code></pre></div>
+<p>The seed-if-absent idiom leaves the element set on both paths: the
+<code>!isset</code> branch writes it, and the fall-through only runs when <code>isset</code>
+already answered true. We add a <code>null</code> for the fall-through, so the read
+of a variable-index element is typed as if it might be missing even
+where the condition just ruled that out. Spelling the same guard
+<code>!array_key_exists($key, $tmp)</code> resolves correctly, and so does dropping
+the guard and writing unconditionally, which places the defect in what a
+<em>true</em> <code>isset</code> on an array element records rather than in the loop's
+fixed point.</p>
 <h2 id="arithmetic">Arithmetic<a class="headerlink" href="#arithmetic" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
@@ -1881,8 +1916,8 @@ rather than from the excerpts above. Sites:
 line by line and only recognises a docblock on a line of its own, so a
 comment written inline between an assignment and the closure it
 documents is skipped:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">$collect = /** @param Arg[] $callArgs */ static function (array $callArgs): void { … };</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">// $callArgs is the bare `array` hint; the annotation is never read</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">$collect = /** @param Arg[] $callArgs */ static function (array $callArgs): void { … };</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">// $callArgs is the bare `array` hint; the annotation is never read</span>
 </code></pre></div>
 <p>The multi-line spelling above the statement works. Both placements are
 the same annotation, so a scanner that understands where a docblock
@@ -1892,10 +1927,10 @@ the closure-signature entry.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="not-yet-attributed">Not yet attributed<a class="headerlink" href="#not-yet-attributed" title="Permanent link">&para;</a></h2>
-<p>45 of the 2026-08-27 sweep's 180 sites are not attributed to an entry
-above. Most are neighbours of a shape that already has an entry and need
-only a read to place; the recurring ones are recorded here so a future
-triage starts from them rather than rediscovering them.</p>
+<p>44 of the 2026-08-28 sweep's 93 distinct lines are not attributed to an
+entry above. Most are neighbours of a shape that already has an entry and
+need only a read to place; the recurring ones are recorded here so a
+future triage starts from them rather than rediscovering them.</p>
 <ul>
 <li><strong>Four are not our bug.</strong> <code>PHPStan\ExtensionInstaller\GeneratedConfig</code>
   is written at install time and is absent from a plain checkout, so
@@ -1921,16 +1956,14 @@ triage starts from them rather than rediscovering them.</p>
 <li><strong>Unresolved receivers with no entry yet</strong>:
   <code>src/Analyser/ResultCache/ResultCacheManager.php:832, 837</code> (<code>$error</code>),
   <code>src/DependencyInjection/NeonAdapter.php:102, 103</code> (<code>$st</code>),
-  <code>src/Type/Regex/RegexGroupParser.php:160, 168</code> (<code>$child</code>,
-  <code>$children[$i + 1]</code>), <code>src/PhpDoc/StubValidator.php:57</code>
+  <code>src/Type/Regex/RegexGroupParser.php:160</code> (<code>$child</code>),
+  <code>src/PhpDoc/StubValidator.php:57</code>
   (<code>$pathRoutingParser</code>), <code>src/Analyser/ScopeOps.php:511</code> (an empty
   subject name, which is a reporting bug of its own).</li>
 <li><strong><code>src/Analyser/ResultCache/ResultCacheManager.php:727</code></strong> returns
   <code>non-empty-list&lt;int&gt;|list&lt;string&gt;</code> where <code>array&lt;string&gt;</code> is declared —
   an array built in two branches that keeps the key type of one and the
   value type of the other.</li>
-<li><strong><code>src/Rules/Properties/ExistingClassesInPropertyHookTypehintsRule.php:41</code></strong>
-  passes <code>?string</code> to a <code>string</code> parameter.</li>
 </ul>
 
 
