@@ -589,6 +589,7 @@ mod tests {
             if_this_is: None,
             self_out: None,
             is_pure: false,
+            is_impure: false,
         };
         let detail = build_method_detail(&method);
         assert_eq!(detail, Some("(): void".to_string()));
@@ -649,6 +650,7 @@ mod tests {
             if_this_is: None,
             self_out: None,
             is_pure: false,
+            is_impure: false,
         };
         let detail = build_method_detail(&method);
         assert_eq!(

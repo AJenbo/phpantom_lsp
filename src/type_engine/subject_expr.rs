@@ -454,6 +454,57 @@ impl SubjectExpr {
         out
     }
 
+    /// The link below this one when the expression is rendered as a
+    /// forward-walker scope key, or `None` when this node is the base of
+    /// the key.
+    ///
+    /// Property and array-access links are always descended.  So is an
+    /// *argument-less* method call: the AST side keys `$h->get()->name()`
+    /// under its own written form, so everything below it has to render
+    /// in the same format or the two never meet.  A call that carries
+    /// arguments stops the walk, because its key spells the arguments in
+    /// a canonical form that only the AST side can produce.
+    pub fn scope_key_base(&self) -> Option<&SubjectExpr> {
+        match self {
+            SubjectExpr::PropertyChain { base, .. } | SubjectExpr::ArrayAccess { base, .. } => {
+                Some(base.as_ref())
+            }
+            SubjectExpr::CallExpr { callee, args_text } if args_text.trim().is_empty() => {
+                match callee.as_ref() {
+                    SubjectExpr::MethodCall { base, .. } => Some(base.as_ref()),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Whether the base of a scope key path is a variable, `$this`, or one
+    /// of the class keywords — the roots the forward walker tracks.
+    ///
+    /// Walks the same links [`Self::scope_key_base`] does, so a receiver
+    /// reached through calls and element accesses (`$e->getExpr()`,
+    /// `$rows[0]->getExpr()`) counts as rooted just like a direct one.
+    pub fn scope_key_roots_in_variable(&self) -> bool {
+        let mut node = self;
+        loop {
+            if matches!(
+                node,
+                SubjectExpr::This
+                    | SubjectExpr::SelfKw
+                    | SubjectExpr::StaticKw
+                    | SubjectExpr::Parent
+                    | SubjectExpr::Variable(_)
+            ) {
+                return true;
+            }
+            match node.scope_key_base() {
+                Some(base) => node = base,
+                None => return false,
+            }
+        }
+    }
+
     /// Returns `true` if this expression is one of the "current class"
     /// keywords (`$this`, `self`, `static`).
     pub fn is_self_like(&self) -> bool {

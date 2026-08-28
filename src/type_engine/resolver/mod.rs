@@ -1783,11 +1783,14 @@ pub(crate) fn narrowable_call_key(expr: &SubjectExpr) -> Option<String> {
         return None;
     }
     match callee.as_ref() {
-        // Built from the callee rather than the whole expression so the
-        // key is spelled exactly as the AST side spells it, whatever
-        // whitespace stands between the parentheses.
-        SubjectExpr::MethodCall { base, .. } if base_roots_in_variable(base) => {
-            Some(format!("{}()", callee.to_subject_text()))
+        // Rendered through [`subject_scope_key`] rather than
+        // `to_subject_text`, so the key is spelled exactly as the AST side
+        // spells it: whatever whitespace stands between the parentheses,
+        // and `["0"]` rather than `[0]` for an element access on the way
+        // down. The receiver may itself be a call (`$e->getExpr()->getExpr()`),
+        // which the AST side keys the same way.
+        SubjectExpr::MethodCall { base, .. } if base.scope_key_roots_in_variable() => {
+            Some(subject_scope_key(expr))
         }
         _ => None,
     }
@@ -1807,12 +1810,11 @@ pub(crate) fn narrowable_call_key(expr: &SubjectExpr) -> Option<String> {
 fn subject_scope_key(expr: &SubjectExpr) -> String {
     // Collect the spine outermost-first, then render it from the base out.
     let mut spine = vec![expr];
-    while let Some(base) = match spine.last().expect("spine is seeded with `expr`") {
-        SubjectExpr::PropertyChain { base, .. } | SubjectExpr::ArrayAccess { base, .. } => {
-            Some(base.as_ref())
-        }
-        _ => None,
-    } {
+    while let Some(base) = spine
+        .last()
+        .expect("spine is seeded with `expr`")
+        .scope_key_base()
+    {
         spine.push(base);
     }
 
@@ -1842,7 +1844,15 @@ fn subject_scope_key(expr: &SubjectExpr) -> String {
                     }
                 }
             }
-            _ => unreachable!("the spine only descends through property and array access"),
+            SubjectExpr::CallExpr { callee, .. } => {
+                let SubjectExpr::MethodCall { method, .. } = callee.as_ref() else {
+                    unreachable!("only a method call link is descended into")
+                };
+                key.push_str("->");
+                key.push_str(method);
+                key.push_str("()");
+            }
+            _ => unreachable!("the spine only descends through the links rendered here"),
         }
     }
     key

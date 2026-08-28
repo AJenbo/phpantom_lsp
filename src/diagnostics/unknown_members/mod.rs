@@ -57,14 +57,16 @@
 //!    resolved classes, we're done — no diagnostic, no re-resolution.
 //!
 //! 2. **Narrowing fallback** (uncached, rare): when the member is
-//!    NOT found on the coarsely-resolved classes AND the subject is
-//!    a bare variable, re-resolve with the exact cursor position.
-//!    If the re-resolution finds the member (because ternary/`&&`
-//!    narrowing refined the type), suppress the diagnostic.
+//!    NOT found on the coarsely-resolved classes, re-resolve the
+//!    subject with the exact cursor position.  If the re-resolution
+//!    finds the member (because ternary/`&&` narrowing refined the
+//!    type), suppress the diagnostic.
 //!
 //! This makes the common case (member exists) O(1) per unique
 //! subject+scope, while preserving correctness for the rare case
-//! where expression-level narrowing matters.
+//! where expression-level narrowing matters.  The re-resolution runs
+//! only where a diagnostic would otherwise be reported, so a file
+//! with nothing wrong in it never pays for it.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -323,14 +325,12 @@ impl Backend {
                 continue;
             }
 
-            // Whether this subject is a bare variable that could
-            // benefit from expression-level narrowing re-resolution.
-            // $this and $this->prop chains are excluded because their
-            // type is already fully determined by block-level
-            // narrowing (if/else) and assert narrowing.
-            let is_narrowable_variable = subject_text.starts_with('$')
-                && subject_text != "$this"
-                && !subject_text.starts_with("$this->");
+            // Whether this subject could benefit from expression-level
+            // narrowing re-resolution.  Every subject rooted at a
+            // variable can: `$this->pair[0] instanceof Sub && !$this->pair[0]->flag()`
+            // refines the second occurrence with no block to key it on,
+            // and so does `$this instanceof Sub && $this->only()`.
+            let is_narrowable_subject = subject_text.starts_with('$');
 
             // ── Look up or populate the subject cache ───────────────────
             let cache_key = SubjectCacheKey::build(
@@ -518,7 +518,7 @@ impl Backend {
                     // This is the rare path — most accesses find the
                     // member on the coarse type and never reach here.
                     let (result, diags) =
-                        if result != MemberCheckResult::Ok && is_narrowable_variable {
+                        if result != MemberCheckResult::Ok && is_narrowable_subject {
                             let rctx = ResolutionCtx {
                                 current_class,
                                 all_classes: local_classes,

@@ -13947,3 +13947,145 @@ function test(Certainty $c, string $name): void {
         "no runtime-named member should be reported as unresolved, got: {diags:?}",
     );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Narrowing a subject that is not a plain variable
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// `if ($this instanceof Subclass)` narrows `$this` exactly as an
+/// `instanceof` on a parameter narrows that, so a subclass member is
+/// resolvable inside the branch.  Reading any property of `$this` earlier in
+/// the body must not cost the branch its narrowing: the resolution the read
+/// cached was made outside the branch.
+#[test]
+fn reading_a_property_of_this_keeps_a_later_instanceof_on_this() {
+    let backend = create_test_backend();
+    let uri = "file:///narrow_this.php";
+    let text = r#"<?php
+class BaseType {
+    public string $className = '';
+
+    public function describe(): string
+    {
+        $description = $this->className;
+        if ($this instanceof GenericType) {
+            $description .= implode(', ', $this->getTypes());
+        }
+
+        return $description;
+    }
+}
+
+class GenericType extends BaseType {
+    /** @return list<string> */
+    public function getTypes(): array { return []; }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "the instanceof branch should resolve the subclass method, got: {diags:?}",
+    );
+}
+
+/// An `&&` chain narrows an array element read through a property
+/// (`$this->unsealed[0]`) for its own later operands, with no block to key
+/// the narrowing on.  A member access that resolved the subject once for the
+/// whole method body never saw it, and the re-resolution that recovers it
+/// was reached only for bare variables.
+#[test]
+fn an_and_chain_narrows_an_element_of_a_property_for_its_later_operands() {
+    let backend = create_test_backend();
+    let uri = "file:///narrow_element.php";
+    let text = r#"<?php
+class TypeNode {
+    public function describe(): string { return ''; }
+}
+
+class MixedTypeNode extends TypeNode {
+    public function isExplicitMixed(): bool { return false; }
+}
+
+class ShapeType {
+    /** @var array{TypeNode, TypeNode}|null */
+    private ?array $unsealed = null;
+
+    public function describeKey(): string
+    {
+        if ($this->unsealed === null) {
+            return '';
+        }
+
+        $keyDescription = $this->unsealed[0]->describe();
+        $isMixedKey = $this->unsealed[0] instanceof MixedTypeNode
+            && $keyDescription === 'mixed'
+            && !$this->unsealed[0]->isExplicitMixed();
+
+        return $isMixedKey ? 'mixed' : $keyDescription;
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "the third operand should see what the first proved, got: {diags:?}",
+    );
+}
+
+/// The same, with a two-hop call chain as the subject.  The resolver built
+/// the scope key for such a chain from its written text, which quotes array
+/// indices differently from the key the walker records and stops at the
+/// first call link, so the narrowed entry was never found.
+#[test]
+fn an_and_chain_narrows_a_call_chain_subject_for_its_later_operands() {
+    let backend = create_test_backend();
+    let uri = "file:///narrow_chain.php";
+    let text = r#"<?php
+class ExprNode {}
+
+class VariableNode extends ExprNode {
+    public string $name = '';
+}
+
+class Inner {
+    public function getExpr(): ExprNode { return new ExprNode(); }
+}
+
+class Outer {
+    public function getExpr(): Inner { return new Inner(); }
+}
+
+class Reader {
+    public function read(Outer $expressionType, bool $tracked): string
+    {
+        if (
+            $expressionType->getExpr()->getExpr() instanceof VariableNode
+            && $expressionType->getExpr()->getExpr()->name !== ''
+            && $tracked
+        ) {
+            return $expressionType->getExpr()->getExpr()->name;
+        }
+
+        return '';
+    }
+
+    /** @param list<Inner> $statements */
+    public function readIndexed(array $statements): string
+    {
+        if (
+            $statements[0]->getExpr() instanceof VariableNode
+            && $statements[0]->getExpr()->name !== ''
+        ) {
+            return $statements[0]->getExpr()->name;
+        }
+
+        return '';
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "the call chain's narrowing should reach every later read, got: {diags:?}",
+    );
+}

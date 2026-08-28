@@ -2101,3 +2101,132 @@ function f(array $rows): void
 "#,
     );
 }
+
+// ─── Guarding a call and reading it again ───────────────────────────────────
+
+/// A guard on a call's result describes every later occurrence of that
+/// call, and a parameterised array return type is no exception. Seeding the
+/// call's key was skipped for any type that resolved to no class, which
+/// took `list<int>|null` with it and left the guard nothing to narrow.
+#[test]
+fn a_guard_on_a_call_returning_a_parameterised_array_narrows_the_next_one() {
+    assert_no_type_errors(
+        r#"<?php
+namespace Repro;
+
+class Result
+{
+    /** @return array<string, array<string>>|null */
+    public function getDependencies(): ?array { return null; }
+}
+
+/** @param array<string, array<string>> $dependencies */
+function useDependencies(array $dependencies): void {}
+
+function f(Result $result): void
+{
+    if ($result->getDependencies() !== null) {
+        useDependencies($result->getDependencies());
+    }
+}
+"#,
+    );
+}
+
+/// An override that restates no return type says what its ancestor said,
+/// which is the whole point of the `{@inheritDoc}` it carries. Reading the
+/// override's silence as "no type known" left the guard on the call with
+/// nothing to narrow.
+#[test]
+fn a_guard_narrows_a_call_whose_return_type_is_only_declared_upstream() {
+    assert_no_type_errors(
+        r#"<?php
+namespace Repro;
+
+abstract class BaseReflection
+{
+    /** @return string|false */
+    public function getFileName() { return false; }
+}
+
+class ReflectionAdapter extends BaseReflection
+{
+    /**
+     * {@inheritDoc}
+     */
+    public function getFileName() { return false; }
+}
+
+function useFileName(?string $file): void {}
+
+function f(ReflectionAdapter $reflection): void
+{
+    if ($reflection->getFileName() !== false) {
+        useFileName($reflection->getFileName());
+    }
+}
+"#,
+    );
+}
+
+/// Reading a second accessor on the same object is not an event that
+/// unproves a guard on the first. Only a call that changes state behind the
+/// receiver is, which is what its return type (or an `@impure` tag) says.
+#[test]
+fn a_second_getter_on_the_receiver_leaves_the_first_ones_guard_standing() {
+    assert_no_type_errors(
+        r#"<?php
+namespace Repro;
+
+class Reflection
+{
+    /** @return string|false */
+    public function getFileName() { return false; }
+
+    /** @return string|false */
+    public function getDocComment() { return false; }
+}
+
+function useFileName(?string $file): void {}
+
+function f(Reflection $reflection): void
+{
+    if ($reflection->getFileName() !== false && $reflection->getDocComment() !== false) {
+        $doc = $reflection->getDocComment();
+        useFileName($reflection->getFileName());
+        useFileName($doc);
+    }
+}
+"#,
+    );
+}
+
+/// The same receiver, but the intervening call hands nothing back: it was
+/// made for its effect, so the guard on the earlier accessor no longer
+/// describes what the object holds.
+#[test]
+fn a_call_returning_nothing_does_drop_the_receivers_guard() {
+    assert_type_error(
+        r#"<?php
+namespace Repro;
+
+class Reflection
+{
+    /** @return string|false */
+    public function getFileName() { return false; }
+
+    public function reload(): void {}
+}
+
+function useFileName(?string $file): void {}
+
+function f(Reflection $reflection): void
+{
+    if ($reflection->getFileName() !== false) {
+        $reflection->reload();
+        useFileName($reflection->getFileName());
+    }
+}
+"#,
+    );
+}

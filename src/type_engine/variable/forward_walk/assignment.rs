@@ -302,7 +302,8 @@ pub(crate) fn process_expression_statement<'b>(
     process_increment_decrement(expr, scope, ctx);
 }
 
-/// Drop what an impure call could have changed behind its receiver.
+/// Drop what a state-changing call could have altered behind its
+/// receiver.
 ///
 /// A check is only worth remembering while the thing it was made about
 /// still holds. `if ($stmt->fetch('id') !== false)` proves something about
@@ -310,8 +311,10 @@ pub(crate) fn process_expression_statement<'b>(
 /// proof describes a state the program has left. Every synthetic key read
 /// through the receiver goes with it.
 ///
-/// A callee declared `@pure` / `@phpstan-pure` / `@psalm-pure` promises it
-/// changed nothing, so the keys survive it.
+/// Which calls count is [`callee_changes_state`]'s decision, and getting it
+/// wrong the other way is what made guard-then-read fail: a second getter
+/// on the same object (`$r->getFileName() !== false` proved, then
+/// `$r->getDocComment()` read) is not an event that unproves the first.
 pub(crate) fn process_receiver_mutation<'b>(
     expr: &'b Expression<'b>,
     scope: &mut ScopeState,
@@ -379,7 +382,7 @@ fn collect_impure_call_receivers<'b>(
             if !scope_reads_receiver(scope, &receiver) {
                 return;
             }
-            if callee_is_pure(object, bytes_to_str(ident.value), scope, ctx) {
+            if !callee_changes_state(object, bytes_to_str(ident.value), scope, ctx) {
                 return;
             }
             let made = narrowing::expr_to_subject_key(expr);
@@ -403,12 +406,22 @@ fn scope_reads_receiver(scope: &ScopeState, receiver: &str) -> bool {
             .any(|checks| checks.iter().any(|c| reads(&c.subject)))
 }
 
-/// Whether the method `object->method_name()` resolves to a declaration
-/// annotated `@pure`.
+/// Whether calling `object->method_name()` should be read as changing
+/// state behind the receiver.
 ///
-/// An unresolvable receiver or method counts as impure: dropping a check
-/// costs precision, keeping a stale one costs correctness.
-fn callee_is_pure(
+/// Three signals, in order of authority. `@pure` / `@phpstan-pure` /
+/// `@psalm-pure` promises nothing changed; `@impure` / `@phpstan-impure` /
+/// `@psalm-impure` promises something did. With neither, the return type
+/// decides: a method that hands back nothing was called for its effect,
+/// while one that computes a value is read as computing it. That is the
+/// same rule PHPStan applies (`MethodReflection::hasSideEffects()`), and
+/// the reason it matters is that guard-then-read on two getters of the same
+/// object is ordinary code — treating the second getter as a write would
+/// unprove the guard on the first for no reason.
+///
+/// An unresolvable receiver or method counts as changing state: dropping a
+/// check costs precision, keeping a stale one costs correctness.
+fn callee_changes_state(
     object: &Expression<'_>,
     method_name: &str,
     scope: &ScopeState,
@@ -420,7 +433,7 @@ fn callee_is_pure(
         }
         _ => {
             let Some(key) = narrowing::expr_to_subject_key(object) else {
-                return false;
+                return true;
             };
             scope
                 .get(&key)
@@ -430,17 +443,28 @@ fn callee_is_pure(
         }
     };
     if class_names.is_empty() {
-        return false;
+        return true;
     }
-    class_names.iter().all(|name| {
-        (ctx.class_loader)(name).is_some_and(|cls| {
-            let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
-                &cls,
-                ctx.class_loader,
-                ctx.resolved_class_cache,
-            );
-            merged.get_method(method_name).is_some_and(|m| m.is_pure)
-        })
+    class_names.iter().any(|name| {
+        let Some(cls) = (ctx.class_loader)(name) else {
+            return true;
+        };
+        let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
+            &cls,
+            ctx.class_loader,
+            ctx.resolved_class_cache,
+        );
+        let Some(method) = merged.get_method(method_name) else {
+            return true;
+        };
+        if method.is_pure {
+            return false;
+        }
+        method.is_impure
+            || method
+                .return_type
+                .as_ref()
+                .is_some_and(|rt| rt.is_void() || rt.is_never())
     })
 }
 

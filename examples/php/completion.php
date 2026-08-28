@@ -434,23 +434,32 @@ class CompoundNarrowingDemo
     }
 
     /**
-     * A proof lasts as long as the state it was made about.  A call on the
-     * same receiver can change what the checked call answers, so it drops
-     * the proof; a callee declared `@phpstan-pure` cannot, so it keeps it.
+     * A proof lasts as long as the state it was made about.  What a later
+     * call on the same receiver does to it is read off the declaration:
+     * `@phpstan-pure` keeps it, a method that hands nothing back was called
+     * for its effect and drops it, and `@impure` drops it even though the
+     * call returns a value.  Anything else computes a value and keeps it.
      */
     public function callInvalidation(Scaffolding\SpecimenHolder $holder): string
     {
         if ($holder->lookUp('rock') instanceof Scaffolding\Rock) {
             $label = $holder->shelfLabel();       // pure — the proof stands
+            $count = $holder->shelfCount();       // returns a value — so does this
             $rock = $holder->lookUp('rock');      // still Scaffolding\Rock
             $rock->crush();
 
-            $holder->restock();                   // impure — the shelf moved on
+            $holder->restock();                   // returns nothing — the shelf moved on
             // Try: put the cursor after the `->` below.  The call is back to
             // `Rock|Banana|null`, so `crush()` is no longer offered alone.
             // $holder->lookUp('rock')->
 
-            return $label;
+            return $label . $count;
+        }
+
+        if ($holder->lookUp('rock') instanceof Scaffolding\Rock) {
+            $holder->rotate();                    // @impure — same effect on the proof
+            // Try: put the cursor after the `->` below.  Same widened call.
+            // $holder->lookUp('rock')->
         }
 
         return '';

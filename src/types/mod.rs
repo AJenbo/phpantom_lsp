@@ -573,10 +573,20 @@ pub struct MethodInfo {
     /// Whether the method is declared side-effect free via `@pure`,
     /// `@phpstan-pure` or `@psalm-pure`.
     ///
-    /// A call to an impure method can change anything reachable from its
-    /// receiver, so the forward walker drops the checks it recorded about
-    /// that receiver.  A pure call cannot, so those checks survive it.
+    /// A call that changes state behind its receiver invalidates the
+    /// checks the forward walker recorded about that receiver, and this is
+    /// the author's promise that it does not.  See [`Self::is_impure`] for
+    /// the other half of the signal.
     pub is_pure: bool,
+    /// Whether the method is declared to have side effects via `@impure`,
+    /// `@phpstan-impure` or `@psalm-impure`.
+    ///
+    /// Without either tag, whether a call changes state is inferred from
+    /// its return type: a method that returns nothing was called for its
+    /// effect, and one that returns a value is assumed to compute it.  The
+    /// tag is how an author overrides that for the value-returning case
+    /// (`$stmt->execute(): bool`), which the return type cannot express.
+    pub is_impure: bool,
 }
 
 impl MethodInfo {
@@ -615,6 +625,7 @@ impl MethodInfo {
             && self.if_this_is == other.if_this_is
             && self.self_out == other.self_out
             && self.is_pure == other.is_pure
+            && self.is_impure == other.is_impure
             && self.parameters.len() == other.parameters.len()
             && self
                 .parameters
@@ -676,6 +687,7 @@ impl MethodInfo {
             if_this_is: None,
             self_out: None,
             is_pure: false,
+            is_impure: false,
         }
     }
 
@@ -712,6 +724,7 @@ impl MethodInfo {
             if_this_is: None,
             self_out: None,
             is_pure: false,
+            is_impure: false,
         }
     }
 }

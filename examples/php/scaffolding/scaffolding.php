@@ -2016,6 +2016,26 @@ class SpecimenHolder
     {
         return 'specimens';
     }
+
+    /** Counts what is on the shelf without changing it, and says so only by
+     * handing a value back. */
+    public function shelfCount(): int
+    {
+        return 1;
+    }
+
+    /**
+     * Turns the shelf, which changes what `lookUp()` answers. The `bool`
+     * return says nothing about that, so the tag has to.
+     *
+     * @impure
+     */
+    public function rotate(): bool
+    {
+        $this->item = new Banana();
+
+        return true;
+    }
 }
 
 // ─── Ambiguous Variable Support Classes ─────────────────────────────────────

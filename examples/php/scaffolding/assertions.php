@@ -122,13 +122,18 @@ function runDemoAssertions(): void
 
     // ── A proof lasts only as long as the state it was made about ───────
     assert(
-        (new CompoundNarrowingDemo())->callInvalidation(new Scaffolding\SpecimenHolder()) === 'specimens',
-        'a pure call leaves the checked call answering the same thing',
+        (new CompoundNarrowingDemo())->callInvalidation(new Scaffolding\SpecimenHolder()) === 'specimens1',
+        'a pure call and a value-returning one both leave the checked call answering the same thing',
     );
     $shelf = new Scaffolding\SpecimenHolder();
     assert($shelf->shelfLabel() === 'specimens', 'the pure call is genuinely side-effect free');
+    assert($shelf->shelfCount() === 1, 'the untagged accessor only reports what is on the shelf');
+    assert($shelf->item instanceof Scaffolding\Rock, 'neither of them changed what the holder carries');
     $shelf->restock();
     assert($shelf->item instanceof Scaffolding\Banana, 'restock() really does change what the holder carries');
+    $rotated = new Scaffolding\SpecimenHolder();
+    assert($rotated->rotate() === true, 'the @impure call still hands a value back');
+    assert($rotated->item instanceof Scaffolding\Banana, 'and changes what the holder carries, which is why it is tagged');
 
     // ── Two checks that both hold make one value of both types ──────────
     $compound = new CompoundNarrowingDemo();

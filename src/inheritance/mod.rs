@@ -762,7 +762,15 @@ pub(crate) fn resolve_method_return_type(
     // with generic substitutions applied.  Falling through to the cache
     // would return the un-substituted base class (keyed by bare FQN),
     // losing template parameter substitutions like TModel → Product.
-    if let Some(m) = class.get_method(method_name) {
+    //
+    // A declaration that states no return type at all is not an answer,
+    // though: an override written `public function getFileName()` with
+    // `{@inheritDoc}` above it says nothing, and what it means is what the
+    // ancestor said.  That type lives on the merged class, so fall through
+    // to it rather than reporting the override's silence as "unknown".
+    if let Some(m) = class.get_method(method_name)
+        && m.return_type.is_some()
+    {
         return m.return_type.clone();
     }
     let cache = crate::virtual_members::active_resolved_class_cache();

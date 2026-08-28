@@ -132,6 +132,21 @@ pub fn declares_pure(info: &DocblockInfo) -> bool {
         .any(|t| matches!(t.name.as_ref(), "pure" | "phpstan-pure" | "psalm-pure"))
 }
 
+/// Whether a docblock declares the declaration to have side effects via
+/// `@impure`, `@phpstan-impure` or `@psalm-impure`.
+///
+/// The counterpart to [`declares_pure`]: it is how an author says that a
+/// call changes state even though it returns a value, which is the one
+/// case a return type cannot express.
+pub fn declares_impure(info: &DocblockInfo) -> bool {
+    info.tags.iter().any(|t| {
+        matches!(
+            t.name.as_ref(),
+            "impure" | "phpstan-impure" | "psalm-impure"
+        )
+    })
+}
+
 /// Extract the PHP version from a `@removed` PHPDoc tag.
 ///
 /// Handles the format `@removed X.Y` where `X.Y` is a PHP version

@@ -5120,16 +5120,7 @@ fn resolve_member_key_type(
             ctx.class_loader,
         );
         if resolved_classes.is_empty() {
-            // A return type that names nothing loadable is usually a
-            // template parameter or a generic alias, answered better by
-            // the call resolver at the use site, which substitutes from
-            // the receiver.  Seeding the bare hint here would shadow that
-            // with a type no class stands behind.  A hint built entirely
-            // from keyword types (`string|false`, `bool|null`, ...) can
-            // never be a template parameter or alias, though, so seeding
-            // it is safe and lets scalar narrowing apply to call keys the
-            // same way it already does for property keys.
-            if is_call && !is_all_keyword_type(&hint) {
+            if is_call && !hint_says_what_it_says(&hint, ctx.class_loader) {
                 continue;
             }
             ResolvedType::extend_unique(
@@ -5147,17 +5138,77 @@ fn resolve_member_key_type(
     member_results
 }
 
-/// Whether `hint` is built entirely from keyword types (`string`, `false`,
-/// `null`, other scalars and pseudo-types) with no class-like name
-/// anywhere in it.  Such a hint can never be a template parameter or a
-/// generic alias, so it is safe to seed even when it names nothing
-/// loadable.
-fn is_all_keyword_type(hint: &PhpType) -> bool {
+/// Whether a declared type that resolved to no class still means exactly
+/// what it is written as, so seeding it as a call key's type is safe.
+///
+/// Two very different things resolve to no class.  One is a name standing
+/// in for a type the declaration cannot resolve on its own — a `@template`
+/// parameter, or an alias imported from elsewhere.  The call resolver at
+/// the use site answers those properly by substituting from the receiver,
+/// so seeding the unsubstituted name here would shadow a better answer
+/// with a type no class stands behind.  The other is a type that is not a
+/// name at all (`string|false`, `list<int>`, `array{a: int}`,
+/// `int<0, max>`): nothing substitutes into it, so seeding it is what lets
+/// a guard on a call key narrow the same way one on a property key
+/// already does.
+///
+/// The test that separates them is whether every name the type mentions is
+/// one we can account for: a keyword, or a class the loader knows.
+/// `array<string, Foo>` passes, `T[]` does not.  An unevaluated type
+/// operator (`key-of<X>`, `X[K]`) is excluded whatever it names, since its
+/// meaning is still waiting on the operand.
+fn hint_says_what_it_says(
+    hint: &PhpType,
+    class_loader: &dyn Fn(&str) -> Option<std::sync::Arc<crate::types::ClassInfo>>,
+) -> bool {
+    !hint.contains_unevaluated_operator() && every_name_is_known(hint, class_loader)
+}
+
+/// Whether every class-like name in `hint` is a keyword or loads.
+fn every_name_is_known(
+    hint: &PhpType,
+    class_loader: &dyn Fn(&str) -> Option<std::sync::Arc<crate::types::ClassInfo>>,
+) -> bool {
+    let known = |name: &str| crate::php_type::is_keyword_type(name) || class_loader(name).is_some();
     match hint.kind() {
-        TypeKind::Named(name) => crate::php_type::is_keyword_type(name),
-        TypeKind::Nullable(inner) => is_all_keyword_type(inner),
-        TypeKind::Union(members) => members.iter().all(is_all_keyword_type),
-        TypeKind::Literal(_) => true,
+        TypeKind::Named(name) | TypeKind::StaticType(name) | TypeKind::ThisType(name) => {
+            known(name)
+        }
+        TypeKind::Nullable(inner)
+        | TypeKind::Array(inner)
+        | TypeKind::ClassString(Some(inner))
+        | TypeKind::InterfaceString(Some(inner)) => every_name_is_known(inner, class_loader),
+        TypeKind::Union(members) | TypeKind::Intersection(members) => members
+            .iter()
+            .all(|member| every_name_is_known(member, class_loader)),
+        TypeKind::Generic(generic) => {
+            known(&generic.name)
+                && generic
+                    .args
+                    .iter()
+                    .all(|arg| every_name_is_known(arg, class_loader))
+        }
+        TypeKind::ArrayShape(entries) | TypeKind::ObjectShape(entries) => entries
+            .iter()
+            .all(|entry| every_name_is_known(&entry.value_type, class_loader)),
+        TypeKind::Callable(callable) => {
+            known(&callable.kind)
+                && callable
+                    .params
+                    .iter()
+                    .all(|param| every_name_is_known(&param.type_hint, class_loader))
+                && callable
+                    .return_type
+                    .as_ref()
+                    .is_none_or(|ret| every_name_is_known(ret, class_loader))
+        }
+        TypeKind::Literal(_)
+        | TypeKind::IntRange(..)
+        | TypeKind::ClassString(None)
+        | TypeKind::InterfaceString(None) => true,
+        // A conditional return type is decided by the arguments, and a
+        // `Raw` node is text we could not parse; neither says anything a
+        // scope key can hold.
         _ => false,
     }
 }

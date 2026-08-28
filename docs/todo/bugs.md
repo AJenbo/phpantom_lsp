@@ -12,15 +12,14 @@ scale defined in [`docs/todo.md`](../todo.md); that table is also where
 each bug's row lives in the current sprint/backlog.
 
 All entries below come from triage of the PHPStan Source sample project,
-re-swept on 2026-08-27 (180 confirmed false positives after the genuine
-findings were patched in the sample, down from 242 at the 2026-08-25
-triage). Site counts refer to that sweep; every mechanism was either
-reproduced in a minimal project or confirmed by reading the guard
-construct PHPStan honours. The sweep is a snapshot, so a site named here
-may already read differently: re-run the analyser before working an
-entry, and trim the shapes that no longer reproduce. Line numbers drift
-by a line or two between sweeps — match on the surrounding construct, not
-on the number.
+re-swept on 2026-08-28 (98 sites, down from 126 at the start of that
+sweep and from 180 at the 2026-08-27 triage). Site counts refer to that
+sweep; every mechanism was either reproduced in a minimal project or
+confirmed by reading the guard construct PHPStan honours. The sweep is a
+snapshot, so a site named here may already read differently: re-run the
+analyser before working an entry, and trim the shapes that no longer
+reproduce. Line numbers drift by a line or two between sweeps — match on
+the surrounding construct, not on the number.
 
 Entries are grouped by the mechanism that has to change, not by the
 symptom that surfaced: one entry is one root cause, however many shapes
@@ -31,8 +30,8 @@ one entry. Defects too small to earn a row of their own are collected in
 [B301](#b301-narrowing-defects-with-a-single-site-each) rather than given
 one each.
 
-Of the 180 sites in the latest sweep, 110 are attributed to an entry
-below. The unattributed remainder is described in
+Of the 93 distinct lines the latest sweep reports, 49 are attributed to
+an entry below. The unattributed remainder is described in
 [Not yet attributed](#not-yet-attributed).
 
 ## Crashes
@@ -53,68 +52,62 @@ No outstanding items.
 
 ## Narrowing
 
-### B270. Narrowing a repeated or non-variable subject doesn't survive
+### B270. A proof the condition never states outright isn't reconstructed
 
 **Impact: High · Complexity: Very High**
 
-42 sites — by far the largest cluster here, and one root cause: what the
-narrowing store keys a proof against, and what invalidates it. PHPStan
-keys specified types by expression string and keeps them until something
-writes to that expression. We handle plain variables reliably and
-everything else fragilely, which surfaces as four shapes. Related to the
-reconciliation engine planned as
-[T20](type-inference.md#t20-type-narrowing-reconciliation-engine).
+25 sites — still the largest cluster here, and one root cause: what the
+narrowing store keys a proof against, and what it takes to read that
+proof back. PHPStan keys specified types by expression string and keeps
+them until something writes to that expression, so a proof recorded
+about one spelling is available to every other occurrence of it. Where
+we now match that for a subject the condition names directly, we do not
+where the proof has to be *reconstructed* — from a disjunction, from a
+boolean that stands for the check, or from a second variable written
+alongside the first. That is the reconciliation engine planned as
+[T20](type-inference.md#t20-type-narrowing-reconciliation-engine), and
+both shapes below want it.
 
-**a. A guard on a call's result doesn't narrow the same call afterwards**
-(17 sites). This ubiquitous idiom is clean under PHPStan and re-resolved
-from the declaration by us, which hands back the wide type:
-
-```php
-if ($analyserResult->getDependencies() !== null) {
-    $this->switchTmpFile($analyserResult->getDependencies(), ...); // non-null here
-}
-```
-
-Concentrated around reflection accessors (`getFileName()`,
-`getDocComment()`, `getResolvedPhpDoc()`, `getDependencies()`). The
-ternary spelling of the same idiom narrows correctly now.
-Sites: `src/Analyser/NodeScopeResolver.php:1121, 5320, 5366`,
-`src/Analyser/ResultCache/ResultCacheManager.php:858`,
-`src/Command/AnalyseApplication.php:329, 333, 337`,
-`src/PhpDoc/PhpDocInheritanceResolver.php:246, 282`,
-`src/Reflection/BetterReflection/BetterReflectionProvider.php:302 (×2), 348, 356`,
-`src/Reflection/Php/PhpClassReflectionExtension.php:299, 313, 678, 682, 823, 866`,
-`src/Rules/Exceptions/TooWidePropertyHookThrowTypeRule.php:61`.
-
-**b. Property fetches, array dims and call chains lose their narrowing**
-(16 sites). `instanceof` / `!== null` / `is_string()` guards whose
-subject is not a plain variable, in specific reproduced shapes:
+**a. A proof reached through a disjunction, or via a variable assigned
+under it, is lost** (10 sites). Entering the branch means the whole
+condition held, so the guarded spelling is narrowed on every path that
+gets there — but working that out means reasoning about the disjunction
+rather than reading a recorded key:
 
 ```php
-// 1. Member use inside the condition breaks the narrowing for the body:
-if ($this->pair !== null && $this->pair[0] instanceof SubA && $this->pair[0]->n > 0) {
-    $this->pair[0]->n;        // "Property 'n' not found" — without the third leg it works
+// 1. The `||` leg has to be combined with the ternary that reads it back:
+if (
+    ($stmt->valueVar instanceof Variable && is_string($stmt->valueVar->name))
+    && ($stmt->keyVar === null || ($stmt->keyVar instanceof Variable && is_string($stmt->keyVar->name)))
+) {
+    $keyVarName = $stmt->keyVar instanceof Variable ? $stmt->keyVar->name : null;  // string|Expr|null
 }
-// 2. Chained getters re-read in the same condition:
-if ($h->getExpr()->getExpr() instanceof Vari && is_string($h->getExpr()->getExpr()->name) && $flag) { ... }
-// 3. Plain property fetch behind an elseif-continue:
-if ($tag->value === null) { continue; } elseif (!($tag->value instanceof Sub)) { continue; }
-$tag->value->n;               // lost
+// 2. A flag set inside the guarded branch, tested far below it:
+$originalValueExpr = null;
+if ($stmt->valueVar instanceof Variable && is_string($stmt->valueVar->name)) {
+    $originalValueExpr = new OriginalForeachValueExpr($stmt->valueVar->name);
+}
+// … 60 lines on …
+if ($originalValueExpr !== null) { $scope->getVariableType($stmt->valueVar->name); }  // lost
 ```
 
-Sites: `src/Analyser/MutatingScope.php:1778, 2946, 2949`,
-`src/Analyser/NodeScopeResolver.php:1689, 1702, 2874, 3866, 4838, 4844, 5000, 5103`,
-`src/Analyser/ExprHandler/AssignHandler.php:1027`,
-`src/Analyser/TypeSpecifier.php:600`,
+The `NodeScopeResolver` sites are all one `foreach` handler and all trace
+to `$stmt->valueVar->name` / `$stmt->keyVar->name`; fixing shape 1 is
+likely to take most of them. Two sites are a *negated* `instanceof` on a
+property path (`$expr instanceof FuncCall && !$expr->name instanceof Name`)
+that does not reproduce from the construct alone, so start those by
+bisecting the enclosing method. One is not narrowing at all:
+`getAttribute()` returns `mixed`, and a `!== null` guard leaves it
+`mixed`, which we report as unverifiable and PHPStan does not report on.
+Sites: `src/Analyser/NodeScopeResolver.php:1689, 1702, 4838, 4844, 5000, 5103`,
+`src/Analyser/NodeScopeResolver.php:2874`, `src/Analyser/TypeSpecifier.php:600`
+(both negated `instanceof`),
+`src/Analyser/NodeScopeResolver.php:3866 (×2)` (the `mixed` case),
 `src/Rules/FunctionDefinitionCheck.php:195` (narrowed `$param`
-`use`-captured by a closure),
-`src/Rules/PhpDoc/InvalidPhpDocTagValueRule.php:98, 99`,
-`src/Rules/TooWideTypehints/TooWideTypeCheck.php:214`,
-`src/Type/Constant/ConstantArrayType.php:2567, 3503`,
-`src/Type/ValueOfType.php:59`.
+`use`-captured by a closure).
 
-**c. Re-testing a condition, or a boolean flag holding it, doesn't
-re-apply its narrowing** (8 sites). Three shapes PHPStan's
+**b. Re-testing a condition, or a boolean flag holding it, doesn't
+re-apply its narrowing** (15 sites). Three shapes PHPStan's
 specified-types machinery handles:
 
 ```php
@@ -133,32 +126,19 @@ if ($assertions === null) { return null; } // $acceptor was set iff $assertions 
 Shape 2 accounts for the whole `TypeCombinator` cluster: the flag is
 recorded, but the subject it narrows is an array dim rather than a
 plain variable, so the ternary that reads the flag back hands out the
-declared element type.
+declared element type. Its else arm needs shape 3 as well — `!$isI`
+combined with the enclosing `$isI || $isJ` is what proves the other dim.
 Sites: `src/Analyser/ExprHandler/FuncCallHandler.php:977, 1042`,
 `src/Analyser/ExprHandler/MethodCallHandler.php:350`,
 `src/Analyser/ExprHandler/StaticCallHandler.php:455`,
 `src/Analyser/NodeScopeResolver.php:693, 707, 727, 732`,
 `src/Type/TypeCombinator.php:1991, 1994, 2012, 2013, 2020, 2021, 2029`.
 
-**d. Reading a property of `$this` before `$this instanceof Subclass`
-kills the narrowing** (1 site, isolated to a two-line repro). The store
-drops the proof it should be keeping:
-
-```php
-$description = $this->className;        // remove this line and the branch resolves
-if ($this instanceof GenericObjectType) {
-    $this->getTypes();                  // "Method 'getTypes' not found on ObjectType"
-}
-```
-
-Regular and promoted properties both trigger it; same-file and
-cross-file subclasses both fail. Site: `src/Type/ObjectType.php:744`.
-
 ### B274. A null-seeded accumulator filled in a loop keeps `null` (or loses its type entirely)
 
 **Impact: High · Complexity: High**
 
-18 sites, two symptoms of one shape — PHPStan's own scope-merging
+19 sites, two symptoms of one shape — PHPStan's own scope-merging
 idiom, repeated across five files:
 
 ```php
@@ -185,7 +165,14 @@ rescue it either: the accumulator still leaves the loop nullable, so
 `return $parameterSchema;` reports the `null` against a declared
 `Schema` (`src/DependencyInjection/ContainerFactory.php:403`).
 
-Sites: `src/Analyser/NodeScopeResolver.php:1103, 1112, 1116, 1903, 2001, 2153, 5406, 5414`,
+The damage spreads one hop: `$scope = $finalScope->rememberConstructorScope()`
+leaves `$scope` unresolved too, so the next use of it reports an
+unresolvable receiver of its own
+(`src/Analyser/NodeScopeResolver.php:1121`, whose subject reads
+`$scope->getClassReflection()`). Nothing is wrong with that line —
+recovering the accumulator recovers it.
+
+Sites: `src/Analyser/NodeScopeResolver.php:1103, 1112, 1116, 1121, 1903, 2001, 2153, 5406, 5414`,
 `src/Rules/Properties/SetNonVirtualPropertyHookAssignRule.php:64, 72, 80, 81, 90`,
 `src/Rules/TooWideTypehints/TooWideParameterOutTypeCheck.php:47, 56`,
 `src/Reflection/BetterReflection/SourceLocator/OptimizedDirectorySourceLocator.php:149, 150`,
@@ -244,6 +231,31 @@ rather than from the excerpts above. Sites:
   variable still holds the previous iteration's shape;
   `src/Parser/RichParser.php:183`).
 
+### B303. A true `isset($a[$k])` is not proof that the element is there
+
+**Impact: Medium · Complexity: Medium**
+
+Unlike the entries above, this one comes from a Laravel sample project (3
+sites in one controller), and it reproduces on its own:
+
+```php
+$tmp = [];
+foreach ($row as $key => $value) {
+    if (!isset($tmp[$key])) { $tmp[$key] = 0; }
+    $tmp[$key] = Convert::toDecimal($value)->add($tmp[$key]);  // we report `int|Decimal|null`
+}
+```
+
+The seed-if-absent idiom leaves the element set on both paths: the
+`!isset` branch writes it, and the fall-through only runs when `isset`
+already answered true. We add a `null` for the fall-through, so the read
+of a variable-index element is typed as if it might be missing even
+where the condition just ruled that out. Spelling the same guard
+`!array_key_exists($key, $tmp)` resolves correctly, and so does dropping
+the guard and writing unconditionally, which places the defect in what a
+*true* `isset` on an array element records rather than in the loop's
+fixed point.
+
 ## Arithmetic
 
 No outstanding items.
@@ -284,10 +296,10 @@ No outstanding items.
 
 ## Not yet attributed
 
-45 of the 2026-08-27 sweep's 180 sites are not attributed to an entry
-above. Most are neighbours of a shape that already has an entry and need
-only a read to place; the recurring ones are recorded here so a future
-triage starts from them rather than rediscovering them.
+44 of the 2026-08-28 sweep's 93 distinct lines are not attributed to an
+entry above. Most are neighbours of a shape that already has an entry and
+need only a read to place; the recurring ones are recorded here so a
+future triage starts from them rather than rediscovering them.
 
 - **Four are not our bug.** `PHPStan\ExtensionInstaller\GeneratedConfig`
   is written at install time and is absent from a plain checkout, so
@@ -313,13 +325,11 @@ triage starts from them rather than rediscovering them.
 - **Unresolved receivers with no entry yet**:
   `src/Analyser/ResultCache/ResultCacheManager.php:832, 837` (`$error`),
   `src/DependencyInjection/NeonAdapter.php:102, 103` (`$st`),
-  `src/Type/Regex/RegexGroupParser.php:160, 168` (`$child`,
-  `$children[$i + 1]`), `src/PhpDoc/StubValidator.php:57`
+  `src/Type/Regex/RegexGroupParser.php:160` (`$child`),
+  `src/PhpDoc/StubValidator.php:57`
   (`$pathRoutingParser`), `src/Analyser/ScopeOps.php:511` (an empty
   subject name, which is a reporting bug of its own).
 - **`src/Analyser/ResultCache/ResultCacheManager.php:727`** returns
   `non-empty-list<int>|list<string>` where `array<string>` is declared —
   an array built in two branches that keeps the key type of one and the
   value type of the other.
-- **`src/Rules/Properties/ExistingClassesInPropertyHookTypehintsRule.php:41`**
-  passes `?string` to a `string` parameter.
