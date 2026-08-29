@@ -28,8 +28,7 @@ it shows up in. Splitting a shape out into its own entry because it
 reads differently in the source is how this list grew past forty in the
 first place. If two entries would be fixed by the same change, they are
 one entry. Defects too small to earn a row of their own are collected in
-[B301](#b301-narrowing-defects-with-a-single-site-each) rather than given
-one each.
+[B301](#b301-by-reference-out-parameters) rather than given one each.
 
 Of the 74 distinct lines the latest sweep reports, 30 are attributed to
 an entry below. The unattributed remainder is described in
@@ -144,47 +143,11 @@ Sites: `src/Analyser/NodeScopeResolver.php:1103, 1112, 1116, 1121, 5406, 5414`,
 `src/Rules/Properties/SetNonVirtualPropertyHookAssignRule.php:64, 72, 80, 81, 90`,
 `src/Rules/TooWideTypehints/TooWideParameterOutTypeCheck.php:47, 56`.
 
-### B301. Narrowing defects with a single site each
+### B301. By-reference out-parameters
 
 **Impact: Medium · Complexity: Medium-High**
 
-2 sites, two independent mechanisms. Neither is large enough to earn a
-backlog row of its own, so they are collected here rather than filed
-separately. Fixing one does not fix the other — take them one bullet at
-a time.
-
-**b. An `int|float` subject survives a guard that should split it.**
-The plain `is_float()` shape resolves correctly on its own — an
-`int|float` subject comes back as `float` in the `is_float()` branch,
-`int` in the else, and `int` after a branch that reassigns it. Neither
-site reproduces from that shape alone, and neither reproduces from the
-constructs named below either, so what carries the defect is the branch
-structure around them and not any one of these lines:
-
-```php
-// 1. The subject reaches the guard through a swap destructuring,
-//    starting out int|float|null; we report `null|int|int|float`.
-if ($min !== null && $max !== null && $min > $max) { [$min, $max] = [$max, $min]; }
-if (is_float($min)) { $min = (int) ceil($min); }
-IntegerRangeType::fromInterval($min, $max);
-
-// 2. An inline `@var int|float` subject checked with an elseif;
-//    the elseif branch keeps `int|float` where it must be `int`.
-/** @var int|float $newAutoIndex */
-$newAutoIndex = $offsetValue + 1;
-if (is_float($newAutoIndex)) { … } elseif (!$optional) { $this->nextAutoIndexes = [$newAutoIndex]; }
-```
-
-The duplicated `int` and the surviving `null` in the first result say
-the assignment, not the guard, is where the type is lost. Both sites sit
-several branches deep inside long methods, so the next attempt should
-start by bisecting the enclosing method down to a reproducing shape
-rather than from the excerpts above. Sites:
-`src/Reflection/InitializerExprTypeResolver.php:2533 (both args)`,
-`src/Type/Constant/ConstantArrayTypeBuilder.php:242`.
-
-**d. By-reference out-parameters.** Complements
-[T41](type-inference.md#t41-param-out-is-parsed-but-never-read):
+Complements [T41](type-inference.md#t41-param-out-is-parsed-but-never-read):
 
 - A by-ref parameter the callee unconditionally assigns (no
   `@param-out` tag) should get the assigned type after the call

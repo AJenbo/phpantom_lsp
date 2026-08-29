@@ -151,7 +151,12 @@ fn apply_numeric_sign(ty: &PhpType, negated: bool) -> Option<PhpType> {
 /// Collapse only semantically redundant alternatives after joining control-flow
 /// expression branches. Exact literal-only unions remain untouched.
 fn simplify_branch_results(results: Vec<ResolvedType>) -> Vec<ResolvedType> {
-    ResolvedType::collapse_redundant_runtime_literals(results)
+    let mut results = ResolvedType::collapse_redundant_runtime_literals(results);
+    // `mixed_absorbs_siblings: false` — a ternary/match arm that only
+    // resolves to `mixed` (an unresolved call) must not erase a sibling
+    // arm's real, narrower answer; see `drop_subsumed_entries`.
+    ResolvedType::drop_subsumed_entries(&mut results, false);
+    results
 }
 
 /// PHP's runtime truthiness for a ternary condition, when it is a literal

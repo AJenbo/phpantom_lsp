@@ -4903,3 +4903,21 @@ fn truthy_type_strips_null_from_every_nullable_union_member() {
     // A union that is entirely falsy has no truthy half at all.
     assert_eq!(PhpType::parse("null|false").truthy_type(), None);
 }
+
+#[test]
+fn int_widens_to_float_for_compatibility_but_not_for_union_simplification() {
+    // `int` accepts wherever `float` is expected (PHP's silent int→float
+    // coercion), but the two remain distinct scalar domains: simplifying
+    // `int|float` must not collapse it down to `float` the way a genuine
+    // same-domain refinement (`positive-int|int` → `int`) does.
+    assert_eq!(
+        PhpType::parse("int|float").simplified().to_string(),
+        "int|float"
+    );
+    assert_eq!(
+        PhpType::parse("positive-int|float")
+            .simplified()
+            .to_string(),
+        "positive-int|float"
+    );
+}

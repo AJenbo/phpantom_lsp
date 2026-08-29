@@ -2569,3 +2569,70 @@ function process(array $names): void {
         "one entry survives `count($names) > 1`, got: {errors:?}"
     );
 }
+
+/// An `elseif` branch inherits an `is_float()` guard's negative narrowing
+/// from the preceding `if`, so a declared `int|float` subject reads as
+/// plain `int` inside it, not the pre-guard union.
+#[test]
+fn is_float_negative_narrowing_carries_into_a_trailing_elseif() {
+    let backend = create_test_backend();
+    let uri = "file:///repro_elseif.php";
+    let content = r#"<?php
+class C {
+    /** @var array<int, int> */
+    private array $nextAutoIndexes = [];
+    function f(int $offsetValue, bool $optional): void {
+        /** @var int|float $newAutoIndex */
+        $newAutoIndex = $offsetValue + 1;
+        if (is_float($newAutoIndex)) {
+            $newAutoIndex = (int) $newAutoIndex;
+        } elseif (!$optional) {
+            $this->nextAutoIndexes = [$newAutoIndex];
+            $newAutoIndex; // <-- here
+        }
+    }
+}
+"#;
+    let text = hover_marked(&backend, uri, content);
+    assert_eq!(text, "```php\n<?php\n$newAutoIndex = int\n```");
+}
+
+/// An `int|float` subject computed through a swap-guarded, `min()`-merged
+/// branch and then an `is_float()` guard survives as plain `int|null`,
+/// not a union with `int` or `float` duplicated.
+///
+/// Two independent gaps produced the duplication: `int` widens into
+/// `float` for compatibility checks (PHP's silent int→float coercion),
+/// which let scalar-refinement absorption collapse `int|float` down to
+/// bare `float`; and a ternary/`if`-without-`else` branch merge only
+/// deduplicated entries by exact equality, so an entry that was merely a
+/// *subset* of a sibling (a bare `float` beside a `Benevolent(int|float)`
+/// division result) survived as a separate, undeduplicated alternative.
+#[test]
+fn int_float_subject_survives_a_swap_and_guard_chain_without_duplicating() {
+    let backend = create_test_backend();
+    let uri = "file:///repro_swap.php";
+    let content = r#"<?php
+function f(?int $rangeMin, ?int $rangeMax, int $c, bool $isConst): void {
+    if ($isConst) {
+        $min = $rangeMin !== null ? $rangeMin / $c : null;
+    } else {
+        $rangeMinSign = ($rangeMin ?? -INF) <=> 0;
+        $rangeMaxSign = ($rangeMax ?? INF) <=> 0;
+
+        $min1 = $c !== 0 ? $rangeMin / $c : $rangeMinSign * -0.1;
+        $max1 = $c !== 0 ? $rangeMax / $c : $rangeMaxSign * -0.1;
+
+        $min = min($min1, $max1);
+    }
+
+    if (is_float($min)) {
+        $min = (int) ceil($min);
+    }
+
+    $min; // <-- here
+}
+"#;
+    let text = hover_marked(&backend, uri, content);
+    assert_eq!(text, "```php\n<?php\n$min = int|null\n```");
+}

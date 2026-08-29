@@ -565,37 +565,13 @@ impl ScopeState {
             // metadata) while collapsing only redundant non-class values.
             *entry = ResolvedType::collapse_redundant_runtime_literals(std::mem::take(entry));
 
-            // Remove entries whose type is subsumed by a broader entry.
-            // E.g. `string|null` ⊆ `int|string|null` → drop the former.
-            if entry.len() > 1 {
-                let types: Vec<crate::php_type::PhpType> =
-                    entry.iter().map(|rt| rt.type_string.clone()).collect();
-                let mut keep = vec![true; types.len()];
-                for i in 0..types.len() {
-                    if !keep[i] {
-                        continue;
-                    }
-                    for j in 0..types.len() {
-                        if i == j || !keep[j] {
-                            continue;
-                        }
-                        // If j is a strict subset of i, drop j.
-                        if types[j] != types[i]
-                            && (types[j].is_subset_of(&types[i])
-                                || array_snapshot_covered_by(&types[j], &types[i])
-                                || intersection_covered_by(&types[j], &types[i]))
-                        {
-                            keep[j] = false;
-                        }
-                    }
-                }
-                let mut idx = 0;
-                entry.retain(|_| {
-                    let k = keep[idx];
-                    idx += 1;
-                    k
-                });
-            }
+            // Remove entries whose type is subsumed by a broader entry
+            // (e.g. `string|null` ⊆ `int|string|null`). `mixed_absorbs_siblings:
+            // true` — unlike a ternary's arms, a non-exiting `if`'s
+            // narrowing must not survive past the merge: `if ($mixed
+            // instanceof Foo) { … }` with no `else` must leave plain
+            // `mixed` behind, not `Foo|mixed`.
+            ResolvedType::drop_subsumed_entries(entry, true);
         }
 
         self.non_null_implications = implications;
@@ -913,49 +889,6 @@ fn join_implied_narrowings(a: &ScopeState, b: &ScopeState) -> AtomMap<Vec<Implie
     }
 
     joined
-}
-
-/// Whether one array-typed branch snapshot is fully covered by another.
-///
-/// A keyed write (`$rows[$id] = …`) records the type of the *whole*
-/// array, so a variable written in several sibling branches collects one
-/// cumulative snapshot per branch: `array<int, A>` from the first branch,
-/// `array<int, A|B>` from the second, and so on.  These are alternative
-/// descriptions of the same array rather than genuinely different values,
-/// and keeping them all produces self-overlapping unions like
-/// `array{}|array<int, A>|array<int, A|B>`.  Dropping every snapshot a
-/// sibling already covers leaves the single widest one.
-///
-/// A bare `array` never covers a parameterised sibling: it carries no
-/// element information, so collapsing onto it would trade the only useful
-/// snapshot for the least useful one.  Two arrays that describe genuinely
-/// different values (`array<int, int>` and `array<int, string>` from
-/// separate assignments) cover neither way and both survive.
-fn array_snapshot_covered_by(covered: &PhpType, cover: &PhpType) -> bool {
-    covered.is_array_like()
-        && cover.is_array_like()
-        && !matches!(cover.kind(), crate::php_type::TypeKind::Named(_))
-        && covered.is_subtype_of(cover)
-}
-
-/// Whether an intersection produced by one branch is already covered by
-/// a sibling alternative.
-///
-/// `if ($r instanceof Verbose) { … }` narrows `$r` to `Base&Verbose` for
-/// the length of the branch.  The path that skipped the branch still has
-/// a plain `Base`, and every `Base&Verbose` is a `Base`, so the join is
-/// `Base` — keeping both would report `Base|Base&Verbose` and leave the
-/// branch-local proof visible after the branch it belongs to.
-///
-/// Only a part named verbatim by the covering type counts.  Widening a
-/// part to its parent would need the class loader, and the case that
-/// matters (a branch narrowing the very type the sibling path carries)
-/// names it exactly.
-fn intersection_covered_by(covered: &PhpType, cover: &PhpType) -> bool {
-    let crate::php_type::TypeKind::Intersection(parts) = covered.kind() else {
-        return false;
-    };
-    parts.iter().any(|part| part.equivalent(cover))
 }
 
 /// Drop virtual members from `existing`'s class_info that the `incoming`
