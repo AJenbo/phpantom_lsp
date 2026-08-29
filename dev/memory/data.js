@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788030182023,
+  "lastUpdate": 1788033416082,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -25703,6 +25703,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 75,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "9e6a213b0f3d843b34c5b7016663da0f0fd51119",
+          "message": "A call inside a loop that names a member the class does not have says\nso, instead of blaming the variable it was assigned to",
+          "timestamp": "2026-08-29T21:44:01+02:00",
+          "tree_id": "f16ab3cd0ddafa6fe1adf360a2d546ace5614753",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/9e6a213b0f3d843b34c5b7016663da0f0fd51119"
+        },
+        "date": 1788033407871,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 36.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 72.1,
             "unit": "MiB"
           }
         ]
