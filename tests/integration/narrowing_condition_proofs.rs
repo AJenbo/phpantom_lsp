@@ -2370,3 +2370,202 @@ function probe(string $key, bool $flag): void {
         hover_marked(&backend, uri, content)
     );
 }
+
+// ─── A disjunction inside a condition keeps each leg's own proof ────────────
+
+const DISJUNCTION_SCAFFOLD: &str = r#"
+class Expr {}
+class Variable extends Expr {
+    /** @var string|Expr */
+    public $name;
+}
+class ForeachNode {
+    public Expr $valueVar;
+    public ?Expr $keyVar = null;
+}
+function acceptString(string $s): void {}
+"#;
+
+/// Entering the branch proves the whole disjunction, so a check further
+/// down that rules out the `=== null` leg leaves the other one, and with
+/// it the `is_string` the other leg carried.
+#[test]
+fn ruling_out_one_leg_of_a_guard_leaves_the_other_legs_proof() {
+    let backend = create_test_backend();
+    let uri = "file:///disjunction_leg.php";
+    let content = format!(
+        r#"<?php
+{DISJUNCTION_SCAFFOLD}
+function process(ForeachNode $stmt): void {{
+    if (
+        ($stmt->valueVar instanceof Variable && is_string($stmt->valueVar->name))
+        && ($stmt->keyVar === null || ($stmt->keyVar instanceof Variable && is_string($stmt->keyVar->name)))
+    ) {{
+        if ($stmt->keyVar instanceof Variable) {{
+            acceptString($stmt->keyVar->name);
+        }}
+    }}
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert!(
+        errors.is_empty(),
+        "the surviving leg proves the name is a string, got: {errors:?}"
+    );
+}
+
+/// The same read through the ternary the source actually writes it with.
+#[test]
+fn a_ternary_reads_back_what_the_surviving_leg_proved() {
+    let backend = create_test_backend();
+    let uri = "file:///disjunction_ternary.php";
+    let content = format!(
+        r#"<?php
+{DISJUNCTION_SCAFFOLD}
+function process(ForeachNode $stmt): void {{
+    if (
+        ($stmt->valueVar instanceof Variable && is_string($stmt->valueVar->name))
+        && ($stmt->keyVar === null || ($stmt->keyVar instanceof Variable && is_string($stmt->keyVar->name)))
+    ) {{
+        $keyVarName = $stmt->keyVar instanceof Variable ? $stmt->keyVar->name : null;
+        acceptString($keyVarName ?? '');
+    }}
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert!(
+        errors.is_empty(),
+        "the ternary's own check picks the leg that proved a string, got: {errors:?}"
+    );
+}
+
+/// A leg proves nothing on its own: with no check to rule the other leg
+/// out, the read still sees everything the disjunction allows. The
+/// `is_string` one leg carries must not escape it, and neither must the
+/// member path only that leg could read at all.
+#[test]
+fn a_disjunction_alone_proves_only_the_union_of_its_legs() {
+    let backend = create_test_backend();
+    let uri = "file:///disjunction_union.php";
+    let content = format!(
+        r#"<?php
+{DISJUNCTION_SCAFFOLD}
+function process(ForeachNode $stmt): void {{
+    if (
+        ($stmt->valueVar instanceof Variable && is_string($stmt->valueVar->name))
+        && ($stmt->keyVar === null || ($stmt->keyVar instanceof Variable && is_string($stmt->keyVar->name)))
+    ) {{
+        acceptString($stmt->keyVar->name);
+    }}
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert_eq!(
+        errors.len(),
+        1,
+        "the null leg is still live, so the read is unproven, got: {errors:?}"
+    );
+}
+
+// ─── Re-testing a condition re-applies what it proved ───────────────────────
+
+const RETEST_SCAFFOLD: &str = r#"
+class Acceptor {}
+class Reflection {}
+function selectAcceptor(array $args): Acceptor { return new Acceptor(); }
+function acceptAcceptor(Acceptor $a): void {}
+"#;
+
+/// The second `count($args) > 0` re-establishes exactly what the first
+/// one did, and the branch it guarded is the only thing that filled
+/// `$acceptor` — so reaching the second test proves the fill happened.
+#[test]
+fn re_testing_a_count_guard_re_applies_what_the_branch_filled() {
+    let backend = create_test_backend();
+    let uri = "file:///retest_count.php";
+    let content = format!(
+        r#"<?php
+{RETEST_SCAFFOLD}
+function process(array $args): void {{
+    $acceptor = null;
+    if (count($args) > 0) {{
+        $acceptor = selectAcceptor($args);
+    }}
+    echo 'gap';
+    if (count($args) > 0) {{
+        acceptAcceptor($acceptor);
+    }}
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert!(
+        errors.is_empty(),
+        "re-testing the guard proves the branch ran, got: {errors:?}"
+    );
+}
+
+/// A different condition proves nothing about the branch that filled the
+/// variable, so the sentinel is still live.
+#[test]
+fn an_unrelated_guard_does_not_re_apply_the_branchs_proof() {
+    let backend = create_test_backend();
+    let uri = "file:///retest_unrelated.php";
+    let content = format!(
+        r#"<?php
+{RETEST_SCAFFOLD}
+function process(array $args, bool $flag): void {{
+    $acceptor = null;
+    if (count($args) > 0) {{
+        $acceptor = selectAcceptor($args);
+    }}
+    echo 'gap';
+    if ($flag) {{
+        acceptAcceptor($acceptor);
+    }}
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert_eq!(
+        errors.len(),
+        1,
+        "nothing rules the sentinel out here, got: {errors:?}"
+    );
+}
+
+/// A bound further out than "has entries" splits nothing: falling past
+/// `count($x) > 1` leaves one entry exactly as possible as none, so the
+/// fall-through must not be read as an empty array.
+#[test]
+fn a_count_bound_above_one_proves_nothing_on_the_way_past() {
+    let backend = create_test_backend();
+    let uri = "file:///count_bound_two.php";
+    let content = r#"<?php
+function acceptString(string $s): void {}
+/** @param string[] $names */
+function process(array $names): void {
+    if (count($names) > 1) {
+        return;
+    }
+    if ($names === []) {
+        return;
+    }
+    acceptString($names[0]);
+}
+"#;
+
+    let errors = argument_type_errors(&backend, uri, content);
+    assert!(
+        errors.is_empty(),
+        "one entry survives `count($names) > 1`, got: {errors:?}"
+    );
+}

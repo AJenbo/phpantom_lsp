@@ -153,25 +153,12 @@ pub(crate) fn walk_closures_in_expr<'b>(
             // Build a fresh scope for the closure.
             let mut closure_scope = ScopeState::new();
 
-            // PHP closures implicitly capture `$this` from the
-            // enclosing class method.  Seed it from the outer scope
-            // so that `$this->prop` inside the closure resolves
-            // without calling `resolve_variable_types`.
-            let this_types = outer_scope.get("$this");
-            if !this_types.is_empty() {
-                closure_scope.set("$this", this_types.to_vec());
-            }
-
-            // Seed with `use(...)` variables from the outer scope.
-            if let Some(ref use_clause) = closure.use_clause {
-                for use_var in use_clause.variables.iter() {
-                    let var_name = bytes_to_str(use_var.variable.name).to_string();
-                    let from_outer = outer_scope.get(&var_name);
-                    if !from_outer.is_empty() {
-                        closure_scope.set(&var_name, from_outer.to_vec());
-                    }
-                }
-            }
+            // Seed `$this`, the `use (…)` variables, and the paths read
+            // through them from the outer scope, so that `$this->prop`
+            // inside the closure resolves without calling
+            // `resolve_variable_types` and a captured path keeps whatever
+            // the code above the closure proved about it.
+            seed_closure_captures(&mut closure_scope, outer_scope, closure.use_clause.as_ref());
 
             // Seed with parameter types, using callable inference when
             // available.  Filter out any inferred params whose base

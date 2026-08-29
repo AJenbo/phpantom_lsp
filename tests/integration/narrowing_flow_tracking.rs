@@ -2267,3 +2267,111 @@ function totals(array $row): void
 "#
     ));
 }
+
+// ─── A closure captures the paths read through what it captures ─────────────
+
+const CAPTURE_SCAFFOLD: &str = r#"<?php
+namespace Repro;
+
+class Node {}
+
+class Param {
+    public ?Node $type = null;
+}
+
+function acceptNode(Node $n): void {}
+"#;
+
+/// The guard above the closure recorded its proof under `$param->type`,
+/// and `use ($param)` captures the value that path is read through — so
+/// the body sees the narrowed path, not the declaration.
+#[test]
+fn a_closure_keeps_the_narrowing_of_a_path_it_captures() {
+    assert_no_type_errors(&format!(
+        r#"{CAPTURE_SCAFFOLD}
+/** @param Param[] $params */
+function check(array $params): void
+{{
+    foreach ($params as $param) {{
+        if ($param->type === null) {{
+            continue;
+        }}
+        $run = static function () use ($param): void {{
+            acceptNode($param->type);
+        }};
+        $run();
+    }}
+}}
+"#
+    ));
+}
+
+/// The same for `$this`, which a closure captures without naming.
+#[test]
+fn a_closure_keeps_the_narrowing_of_a_path_read_through_this() {
+    assert_no_type_errors(&format!(
+        r#"{CAPTURE_SCAFFOLD}
+class Holder {{
+    public ?Node $node = null;
+
+    public function check(): void
+    {{
+        if ($this->node === null) {{
+            return;
+        }}
+        $run = function (): void {{
+            acceptNode($this->node);
+        }};
+        $run();
+    }}
+}}
+"#
+    ));
+}
+
+/// Nothing above the closure proved anything, so the captured path keeps
+/// the `null` its declaration allows.
+#[test]
+fn an_unguarded_capture_keeps_the_declared_null() {
+    assert_type_error(&format!(
+        r#"{CAPTURE_SCAFFOLD}
+function check(Param $param): void
+{{
+    $run = static function () use ($param): void {{
+        acceptNode($param->type);
+    }};
+    $run();
+}}
+"#
+    ));
+}
+
+// ─── A negated check on a path the same chain narrows the receiver of ───────
+
+/// `$expr->name` can only be looked up once `$expr instanceof FuncCall`
+/// has been applied, so the negated `instanceof` on it has to be read
+/// after the receiver's own narrowing rather than before it.
+#[test]
+fn a_negated_check_on_a_path_narrowed_by_an_earlier_conjunct_applies() {
+    assert_no_type_errors(
+        r#"<?php
+namespace Repro;
+
+class Name {}
+class Expr {}
+class FuncCall extends Expr {
+    /** @var Name|Expr */
+    public $name;
+}
+
+function acceptExpr(Expr $e): void {}
+
+function process(Expr $expr): void
+{
+    if ($expr instanceof FuncCall && !$expr->name instanceof Name) {
+        acceptExpr($expr->name);
+    }
+}
+"#,
+    );
+}

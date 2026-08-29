@@ -549,13 +549,6 @@ pub(crate) fn apply_condition_narrowing<'b>(
     // available).
     let operands = collect_and_chain_operands(condition);
 
-    // First pass: collect all instanceof extractions per variable across
-    // all `&&` operands.  This prevents later operands from overwriting
-    // earlier ones when both narrow the same variable.
-    let scope_snapshot = scope.locals.clone();
-    let scope_resolver = |vn: &str| -> Vec<ResolvedType> {
-        scope_snapshot.get(&atom(vn)).cloned().unwrap_or_default()
-    };
     let mut var_names: Vec<String> = scope.locals.keys().map(|k| k.to_string()).collect();
     // Include variables from instanceof conditions that may not be in
     // scope yet (e.g. undeclared variables used in instanceof checks).
@@ -585,6 +578,153 @@ pub(crate) fn apply_condition_narrowing<'b>(
         }
     }
 
+    commit_chain_instanceof(&operands, &alias_extractions, &var_names, scope, ctx);
+
+    // A key read through a receiver the same chain narrows is only
+    // resolvable once that narrowing has landed:
+    // `$expr instanceof FuncCall && !$expr->name instanceof Name` cannot
+    // look `name` up on `FuncCall` until the first operand has proved that
+    // is what `$expr` is.  Seeding is left until here for those keys, and
+    // the extraction runs again over them alone — the subjects the first
+    // run committed are already narrowed and must not be narrowed twice.
+    let late_keys: Vec<String> = collect_condition_property_keys(condition)
+        .into_iter()
+        .filter(|key| !scope.contains(key))
+        .collect();
+    if !late_keys.is_empty() {
+        for key in &late_keys {
+            seed_synthetic_key_if_needed(key, scope, ctx);
+        }
+        let seeded: Vec<String> = late_keys
+            .into_iter()
+            .filter(|key| scope.contains(key))
+            .collect();
+        if !seeded.is_empty() {
+            commit_chain_instanceof(&operands, &alias_extractions, &seeded, scope, ctx);
+        }
+    }
+
+    // Type guard narrowing: `is_object($x)`, `is_array($x)`, etc.
+    apply_type_guard_narrowing_truthy(condition, scope, ctx);
+
+    // A check on `$x->prop` discriminates a union of objects when only
+    // some of them declare a `prop` that could have passed it.
+    apply_property_discriminant_narrowing(condition, scope, ctx, true);
+
+    // `is_a($x, Class::class, true)` / `class_exists($x)` narrowing:
+    // narrow a string-typed `$x` to `class-string<Class>` / `class-string`.
+    apply_class_string_guard_narrowing(condition, scope, ctx, true);
+
+    // Null narrowing: `if ($x !== null)` — remove null from scope.
+    apply_null_narrowing_truthy(condition, scope, ctx);
+
+    // A proof about a `?->` chain's value is a proof about its receivers.
+    apply_nullsafe_receiver_narrowing(condition, scope, ctx, true);
+
+    // @phpstan-assert-if-true / -if-false narrowing.
+    apply_phpstan_assert_condition_narrowing(condition, scope, ctx, false);
+
+    // in_array($var, $haystack, true) narrowing.
+    apply_in_array_narrowing(condition, scope, ctx, false);
+
+    // property_exists($var, 'name') / method_exists($var, 'name') narrowing.
+    apply_member_exists_narrowing(condition, scope, false);
+
+    // array_key_exists('k', $arr) narrowing on an optional shape key.
+    apply_array_key_exists_narrowing(condition, scope, ctx, false);
+
+    // `if (preg_match(…, $matches))` — the body runs on a successful match,
+    // so `$matches` has the keys the pattern describes.
+    apply_preg_match_narrowing(condition, scope, ctx, true);
+
+    // A conjunct that is itself a disjunction proves only that one of its
+    // legs held.  Splitting it re-uses the branch join, so the scope ends
+    // up carrying both the union of what the legs prove and the record of
+    // which leg proved what.
+    apply_disjunct_operand_narrowing(&operands, scope, ctx);
+
+    // Whatever the passes above proved about one value's null, they
+    // proved about every value whose null it stands for.  Last, so it
+    // sees the narrowed state rather than the state on the way in.
+    apply_non_null_implication_narrowing(scope, ctx);
+}
+
+/// Narrow through an `&&` operand that is itself an `||` chain.
+///
+/// Entering the branch proves the disjunction as a whole, not any one leg,
+/// so the scope inside it is the join of the scopes the legs would each
+/// produce — exactly the shape [`ScopeState::merge_branch`] already
+/// handles for an `if`/`else`.  Going through the join is what records
+/// which leg proved what, so a check further down that rules the other
+/// legs out recovers the surviving leg's conclusions:
+///
+/// ```php
+/// if ($n->keyVar === null || ($n->keyVar instanceof Variable && is_string($n->keyVar->name))) {
+///     $name = $n->keyVar instanceof Variable ? $n->keyVar->name : null;   // string|null
+/// }
+/// ```
+///
+/// Only a chain with a leg that is itself a conjunction is worth
+/// splitting.  A leg that is a single check concludes nothing beyond its
+/// own subject's type, which the existing disjunction extractors already
+/// union, so the split would cost a scope clone per leg to learn nothing
+/// — and a long `||` chain of single checks is a common shape.
+fn apply_disjunct_operand_narrowing<'b>(
+    operands: &[&'b Expression<'b>],
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    for operand in operands {
+        let legs = collect_or_chain_operands(unwrap_parens(operand));
+        if legs.len() < 2
+            || !legs
+                .iter()
+                .any(|leg| collect_and_chain_operands(unwrap_parens(leg)).len() > 1)
+        {
+            continue;
+        }
+
+        let leg_scopes: Vec<ScopeState> = legs
+            .into_iter()
+            .map(|leg| {
+                let mut leg_scope = scope.clone();
+                apply_condition_narrowing(leg, &mut leg_scope, ctx);
+                leg_scope
+            })
+            .collect();
+
+        let mut joined = leg_scopes[0].clone();
+        for leg_scope in &leg_scopes[1..] {
+            joined.merge_branch(leg_scope);
+        }
+        // A path that could not read a member path at all did not narrow
+        // it, and adopting the one leg that could would claim its answer
+        // for the whole disjunction.
+        let refs: Vec<&ScopeState> = leg_scopes.iter().collect();
+        retain_synthetic_keys_common_to_all(&mut joined, &refs);
+        *scope = joined;
+    }
+}
+
+/// Narrow every subject the `&&` chain's operands prove an
+/// `instanceof`-style check about, and write the result to the scope.
+///
+/// Collecting across all operands before committing any of them is what
+/// keeps a later operand from overwriting an earlier one when both narrow
+/// the same subject: `$x instanceof Foo && $x instanceof Bar` has to end
+/// up as `Foo&Bar`, not as whichever operand was looked at last.
+fn commit_chain_instanceof<'b>(
+    operands: &[&'b Expression<'b>],
+    alias_extractions: &[Vec<AliasExtraction>],
+    var_names: &[String],
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    let scope_snapshot = scope.locals.clone();
+    let scope_resolver = |vn: &str| -> Vec<ResolvedType> {
+        scope_snapshot.get(&atom(vn)).cloned().unwrap_or_default()
+    };
+
     // Track which variables have been narrowed by instanceof across
     // `&&` operands so we can merge them, plus where each subject's
     // classes came from so the merge knows whether they are alternatives
@@ -601,7 +741,7 @@ pub(crate) fn apply_condition_narrowing<'b>(
     let mut conjuncts: HashMap<String, Conjuncts> = HashMap::new();
 
     for (op_idx, operand) in operands.iter().enumerate() {
-        for var_name in &var_names {
+        for var_name in var_names {
             // Compound OR instanceof: `$x instanceof A || $x instanceof B`
             if let Some(classes) = narrowing::try_extract_compound_or_instanceof(operand, var_name)
                 && !classes.is_empty()
@@ -790,44 +930,6 @@ pub(crate) fn apply_condition_narrowing<'b>(
         };
         commit_instanceof_narrowing(&var_name, narrowed, shape, scope, ctx, &scope_resolver);
     }
-
-    // Type guard narrowing: `is_object($x)`, `is_array($x)`, etc.
-    apply_type_guard_narrowing_truthy(condition, scope, ctx);
-
-    // A check on `$x->prop` discriminates a union of objects when only
-    // some of them declare a `prop` that could have passed it.
-    apply_property_discriminant_narrowing(condition, scope, ctx, true);
-
-    // `is_a($x, Class::class, true)` / `class_exists($x)` narrowing:
-    // narrow a string-typed `$x` to `class-string<Class>` / `class-string`.
-    apply_class_string_guard_narrowing(condition, scope, ctx, true);
-
-    // Null narrowing: `if ($x !== null)` — remove null from scope.
-    apply_null_narrowing_truthy(condition, scope, ctx);
-
-    // A proof about a `?->` chain's value is a proof about its receivers.
-    apply_nullsafe_receiver_narrowing(condition, scope, ctx, true);
-
-    // @phpstan-assert-if-true / -if-false narrowing.
-    apply_phpstan_assert_condition_narrowing(condition, scope, ctx, false);
-
-    // in_array($var, $haystack, true) narrowing.
-    apply_in_array_narrowing(condition, scope, ctx, false);
-
-    // property_exists($var, 'name') / method_exists($var, 'name') narrowing.
-    apply_member_exists_narrowing(condition, scope, false);
-
-    // array_key_exists('k', $arr) narrowing on an optional shape key.
-    apply_array_key_exists_narrowing(condition, scope, ctx, false);
-
-    // `if (preg_match(…, $matches))` — the body runs on a successful match,
-    // so `$matches` has the keys the pattern describes.
-    apply_preg_match_narrowing(condition, scope, ctx, true);
-
-    // Whatever the passes above proved about one value's null, they
-    // proved about every value whose null it stands for.  Last, so it
-    // sees the narrowed state rather than the state on the way in.
-    apply_non_null_implication_narrowing(scope, ctx);
 }
 
 /// Narrow the `$matches` out-parameter of a `preg_match`/`preg_match_all`
@@ -3113,21 +3215,26 @@ pub(crate) fn apply_null_narrowing_truthy<'b>(
         seed_synthetic_key_if_needed(&var_name, scope, ctx);
         narrow_to_null_in_scope(&var_name, scope);
     }
-    // `$x !== ''` / `$x !== []` — refine to the non-empty counterpart.
-    // `$x === ''` proves the opposite and is handled by the inverse pass.
-    if let Some((var_name, empty, non_empty)) = extract_empty_value_check(condition)
-        && non_empty
-    {
+    // `$x !== ''` / `$x !== []` — refine to the non-empty counterpart, and
+    // `$x === ''` to the empty one.
+    if let Some((var_name, empty, non_empty)) = extract_empty_value_check(condition) {
         seed_synthetic_key_if_needed(&var_name, scope, ctx);
-        refine_non_empty_in_scope(&var_name, empty, scope);
+        if non_empty {
+            refine_non_empty_in_scope(&var_name, empty, scope);
+        } else {
+            refine_empty_in_scope(&var_name, empty, scope);
+        }
     }
     // `count($x) > 0` — the counted subject has entries, which is what a
-    // `foreach` guarded this way reads to know its body runs.
-    if let Some((var_name, non_empty)) = extract_count_emptiness_check(condition)
-        && non_empty
-    {
+    // `foreach` guarded this way reads to know its body runs.  `count($x)
+    // === 0` says the subject is the empty array.
+    if let Some((var_name, non_empty, _)) = extract_count_emptiness_check(condition) {
         seed_synthetic_key_if_needed(&var_name, scope, ctx);
-        refine_non_empty_in_scope(&var_name, EmptyValue::Array, scope);
+        if non_empty {
+            refine_non_empty_in_scope(&var_name, EmptyValue::Array, scope);
+        } else {
+            refine_empty_in_scope(&var_name, EmptyValue::Array, scope);
+        }
     }
     // `$x === 0` / `$x !== []` and the rest of the strict comparisons
     // against a written-out value: the equal branch holds that value, the
@@ -3239,20 +3346,29 @@ pub(crate) fn apply_null_narrowing_inverse<'b>(
     // no null in the subject.
     apply_identity_comparison_null_narrowing(condition, scope, ctx, false);
     // When the condition is `$x === ''` / `$x === []`, the inverse
-    // (else/guard) means $x is non-empty.
-    if let Some((var_name, empty, non_empty)) = extract_empty_value_check(condition)
-        && !non_empty
-    {
+    // (else/guard) means $x is non-empty; when it is `$x !== ''`, the
+    // inverse means $x is exactly the empty value.
+    if let Some((var_name, empty, non_empty)) = extract_empty_value_check(condition) {
         seed_synthetic_key_if_needed(&var_name, scope, ctx);
-        refine_non_empty_in_scope(&var_name, empty, scope);
+        if non_empty {
+            refine_empty_in_scope(&var_name, empty, scope);
+        } else {
+            refine_non_empty_in_scope(&var_name, empty, scope);
+        }
     }
     // When the condition is `count($x) === 0`, the inverse (else, or the
-    // fall-through of a guard that threw) means the subject has entries.
-    if let Some((var_name, non_empty)) = extract_count_emptiness_check(condition)
-        && !non_empty
+    // fall-through of a guard that threw) means the subject has entries;
+    // when it is `count($x) > 0`, the inverse means it has none.  A bound
+    // further out (`count($x) > 1`) proves neither on the way past.
+    if let Some((var_name, non_empty, complement_exact)) = extract_count_emptiness_check(condition)
+        && complement_exact
     {
         seed_synthetic_key_if_needed(&var_name, scope, ctx);
-        refine_non_empty_in_scope(&var_name, EmptyValue::Array, scope);
+        if non_empty {
+            refine_empty_in_scope(&var_name, EmptyValue::Array, scope);
+        } else {
+            refine_non_empty_in_scope(&var_name, EmptyValue::Array, scope);
+        }
     }
     // When the condition is a bare `$x` (truthy check), the inverse means
     // $x is falsy.  For nullable types (`T|null`), narrow to null.
@@ -3528,8 +3644,12 @@ fn apply_non_null_implication_narrowing(scope: &mut ScopeState, ctx: &ForwardWal
     let proven: Vec<(Atom, Vec<ResolvedType>)> = scope
         .implied_narrowings
         .iter()
-        .filter(|(holder, _)| !scope_value_is_nullable(holder, scope))
-        .flat_map(|(_, proofs)| proofs.iter().cloned())
+        .flat_map(|(holder, proofs)| {
+            proofs
+                .iter()
+                .filter(|proof| trigger_holds(proof, holder, scope))
+                .map(|proof| (proof.key, proof.types.clone()))
+        })
         .collect();
     for (key, types) in proven {
         seed_synthetic_key_if_needed(&key, scope, ctx);
@@ -3537,6 +3657,28 @@ fn apply_non_null_implication_narrowing(scope: &mut ScopeState, ctx: &ForwardWal
             scope.set(&key, types);
         }
     }
+}
+
+/// Whether the scope now shows the holder to be what the branch that
+/// recorded `proof` left it as.
+///
+/// A `None` trigger asks only that the holder's `null` is gone, which is
+/// what a `!== null` test below the join establishes. A typed trigger asks
+/// that every type the holder can still be is one the branch's own value
+/// could have been — the join only recorded the proof because that value
+/// is disjoint from what the other path left, so a holder inside it cannot
+/// have come down the other path.
+fn trigger_holds(proof: &ImpliedNarrowing, holder: &Atom, scope: &ScopeState) -> bool {
+    let Some(trigger) = &proof.trigger else {
+        return !scope_value_is_nullable(holder, scope);
+    };
+    let held = scope.get(holder);
+    !held.is_empty()
+        && held.iter().all(|current| {
+            trigger
+                .iter()
+                .any(|want| current.type_string.is_subtype_of(&want.type_string))
+        })
 }
 
 /// Whether a recorded proof still refines what the scope knows.
@@ -4015,9 +4157,14 @@ pub(crate) fn extract_empty_value_check(
 /// neither proves — `count($x) < 5` says nothing, and `count($x) > -1` is
 /// vacuous — yields `None`.
 ///
+/// The second flag says whether the *other* branch proves the opposite.
+/// `count($x) > 1` proves the subject non-empty where it holds, but
+/// falling through it leaves one entry exactly as possible as none, so
+/// nothing may be concluded there.
+///
 /// The literal may be written on either side, and a leading `!` flips the
 /// answer.
-fn extract_count_emptiness_check(expr: &Expression<'_>) -> Option<(String, bool)> {
+fn extract_count_emptiness_check(expr: &Expression<'_>) -> Option<(String, bool, bool)> {
     let (inner, negated) = narrowing::unwrap_condition_negation(expr);
     let Expression::Binary(bin) = inner else {
         return None;
@@ -4052,7 +4199,17 @@ fn extract_count_emptiness_check(expr: &Expression<'_>) -> Option<(String, bool)
         _ => return None,
     };
 
-    Some((subject, non_empty != negated))
+    // The comparison splits emptiness in two only when its boundary sits
+    // at "has at least one entry".  Every arm that proves emptiness does;
+    // of the ones that prove the opposite, only the three that mean
+    // `count($x) >= 1` do.
+    let complement_exact = !non_empty
+        || matches!(
+            (comparison, bound),
+            (Comparison::Greater, 0) | (Comparison::GreaterOrEqual, 1) | (Comparison::NotEqual, 0)
+        );
+
+    Some((subject, non_empty != negated, complement_exact))
 }
 
 /// The comparison a `count()` check is written with, reduced to the six
@@ -4370,6 +4527,74 @@ fn refine_non_empty_type(ty: &PhpType, empty: EmptyValue) -> Option<PhpType> {
             TypeKind::ArrayShape(entries) if entries.is_empty() => None,
             _ => Some(ty.non_empty_array_form()),
         },
+    }
+}
+
+/// Refine a variable's type to its empty counterpart.
+///
+/// The mirror of [`refine_non_empty_in_scope`]: `array<K, V>` becomes
+/// `array{}` and `string` becomes `''`, while a member that promises at
+/// least one entry (`non-empty-array`, a shape with a required key) drops
+/// out of a union because no empty value could have been it. Members
+/// outside the compared domain are left alone, exactly as the non-empty
+/// side leaves them: `count($x) === 0` on a `Countable|array` says nothing
+/// about the object half.
+pub(crate) fn refine_empty_in_scope(var_name: &str, empty: EmptyValue, scope: &mut ScopeState) {
+    let types = scope.get(var_name).to_vec();
+    if types.is_empty() {
+        return;
+    }
+
+    let refined: Vec<ResolvedType> = types
+        .into_iter()
+        .filter_map(|mut rt| {
+            rt.type_string = refine_empty_type(&rt.type_string, empty)?;
+            Some(rt)
+        })
+        .collect();
+
+    if !refined.is_empty() {
+        scope.set(var_name, refined);
+    }
+}
+
+/// Apply [`refine_empty_in_scope`]'s rule to one `PhpType`, returning
+/// `None` when the type cannot hold the empty value at all.
+fn refine_empty_type(ty: &PhpType, empty: EmptyValue) -> Option<PhpType> {
+    if let TypeKind::Union(members) = ty.kind() {
+        let refined: Vec<PhpType> = members
+            .iter()
+            .filter_map(|member| refine_empty_type(member, empty))
+            .collect();
+        return match refined.len() {
+            0 => None,
+            1 => refined.into_iter().next(),
+            _ => Some(PhpType::union(refined)),
+        };
+    }
+
+    match empty {
+        EmptyValue::String => {
+            if let Some(content) = ty.as_literal().and_then(LiteralValue::string_content) {
+                return content.is_empty().then(|| ty.clone());
+            }
+            match ty.kind() {
+                TypeKind::Named(name) if name == "non-empty-string" => None,
+                TypeKind::Named(name) if name == "string" => {
+                    Some(PhpType::literal_string_value(""))
+                }
+                _ => Some(ty.clone()),
+            }
+        }
+        EmptyValue::Array => {
+            if !ty.is_array_like() {
+                return Some(ty.clone());
+            }
+            if ty.is_provably_non_empty() {
+                return None;
+            }
+            Some(PhpType::array_shape(Vec::new()))
+        }
     }
 }
 

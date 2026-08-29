@@ -2011,6 +2011,23 @@ function runDemoAssertions(): void
     assert($proven->afterConditionalWrite(new Scaffolding\Pen('gold'), true)?->color() === 'gold', 'the branch that wrote the element leaves it there');
     assert($proven->afterConditionalWrite(new Scaffolding\Pen('gold'), false) === null, 'the branch that wrote nothing leaves the loop with no iterations');
 
+    // ── Proofs the condition never states outright ──────────────────────
+    $reconstructed = new ReconstructedProofDemo();
+    $loopNode = new Scaffolding\ScaffoldingLoopNode();
+    $loopNode->valueVar->name = 'value';
+    assert($reconstructed->keyName($loopNode) === null, 'the null leg of the guard is the one that held');
+    $loopNode->keyVar = new Scaffolding\ScaffoldingNameNode();
+    $loopNode->keyVar->name = 'key';
+    assert($reconstructed->keyName($loopNode) === 'key', 'the surviving leg proves the key name is a string');
+
+    assert($reconstructed->describeArguments(['a', 'b']) === 'a, b', 'the re-tested count guard proves the acceptor was filled');
+    assert($reconstructed->describeArguments([]) === '', 'neither branch runs when there are no arguments');
+
+    $labelled = new Scaffolding\ScaffoldingOptionalLabel();
+    assert(($reconstructed->labelPrinter($labelled))() === '', 'a null label never reaches the capturing closure');
+    $labelled->label = 'gtd';
+    assert(($reconstructed->labelPrinter($labelled))() === 'GTD', 'the closure runs on the label the guard proved');
+
     echo "All assertions passed.\n";
 }
 

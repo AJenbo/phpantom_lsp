@@ -53,86 +53,55 @@ No outstanding items.
 
 ## Narrowing
 
-### B270. A proof the condition never states outright isn't reconstructed
+### B270. A proof keyed by a value the guard leaves unnarrowed isn't reconstructed
 
-**Impact: High · Complexity: Very High**
+**Impact: Medium · Complexity: Very High**
 
-14 sites, and one root cause: what the narrowing store keys a proof
-against, and what it takes to read that proof back. PHPStan keys
-specified types by expression string and keeps them until something
-writes to that expression, so a proof recorded about one spelling is
-available to every other occurrence of it. Where we now match that for a
-subject the condition names directly, we do not where the proof has to be
-*reconstructed* — from a disjunction, or from the identical condition
-tested a second time. That is the reconciliation engine planned as
-[T20](type-inference.md#t20-type-narrowing-reconciliation-engine), and
-both shapes below want it.
+What the narrowing store keys a proof against, and what it takes to read
+that proof back. PHPStan keys specified types by expression string and
+keeps them until something writes to that expression, so a proof recorded
+about one spelling is available to every other occurrence of it. A branch
+join now records what each path proved under the keys the two paths
+disagree about, and a later test that re-establishes one of those keys
+re-applies the rest — but only when the two paths left that key holding
+values that cannot both be the one in hand. Where they overlap, the test
+proves nothing and the proof is dropped. Two shapes fall in that gap.
 
-**a. A proof reached through a disjunction is lost** (8 sites). Entering
-the branch means the whole condition held, so the guarded spelling is
-narrowed on every path that gets there — but working that out means
-reasoning about the disjunction rather than reading a recorded key. The
-`||` leg has to be combined with the ternary that reads it back:
+**a. A guard on a plain boolean.** Entering `if ($isI)` narrows `$isI` to
+`true`, but the path that skipped it is left with the declared `bool`
+rather than `false`, and `true` is one of the values `bool` spans. So the
+join records nothing and re-testing the flag recovers nothing:
 
 ```php
-if (
-    ($stmt->valueVar instanceof Variable && is_string($stmt->valueVar->name))
-    && ($stmt->keyVar === null || ($stmt->keyVar instanceof Variable && is_string($stmt->keyVar->name)))
-) {
-    $keyVarName = $stmt->keyVar instanceof Variable ? $stmt->keyVar->name : null;  // string|Expr|null
-}
+$a = null;
+if ($isI) { $a = makeA(); }
+return $isI ? takesA($a) : '';                 // $a is still A|null
 ```
 
-The `NodeScopeResolver` sites are all one `foreach` handler and all trace
-to `$stmt->valueVar->name` / `$stmt->keyVar->name`. Two sites are a
-*negated* `instanceof` on a property path
-(`$expr instanceof FuncCall && !$expr->name instanceof Name`) that does
-not reproduce from the construct alone, so start those by bisecting the
-enclosing method. One is not narrowing at all: `getAttribute()` returns
-`mixed`, and a `!== null` guard leaves it `mixed`, which we report as
-unverifiable and PHPStan does not report on.
-Sites: `src/Analyser/NodeScopeResolver.php:1702, 5000, 5103`,
-`src/Analyser/NodeScopeResolver.php:2874`, `src/Analyser/TypeSpecifier.php:600`
-(both negated `instanceof`),
-`src/Analyser/NodeScopeResolver.php:3866 (×2)` (the `mixed` case),
-`src/Rules/FunctionDefinitionCheck.php:195` (narrowed `$param`
-`use`-captured by a closure).
+The same gap makes `instanceof` one hop worse: the else path of
+`if ($id instanceof B)` on an `A` keeps `A`, which spans `B`, so
+re-testing `$id instanceof B` does not recover what the first test's
+branch filled. Both want the negative branch to carry the exclusion the
+condition really proves, which is the representation gap
+[T20](type-inference.md#t20-type-narrowing-reconciliation-engine)'s
+sure/sure-not split closes.
 
-**b. Re-testing a condition doesn't re-apply what it proved the first
-time** (6 sites). Two shapes PHPStan's specified-types machinery
-handles:
+**b. Two variables assigned together, where checking one implies the
+other through an enclosing disjunction.** `!$isI` combined with an
+enclosing `$isI || $isJ` is what proves the other dim:
 
 ```php
-// 1. The identical condition re-tested later:
-if (count($args) > 0) { $acceptor = Selector::selectFromArgs(...); }
-if (count($args) > 0) { use($acceptor); }                    // non-null
-
-// 2. Two variables assigned together; checking one implies the other:
-if ($assertions === null) { return null; } // $acceptor was set iff $assertions was
+if (!$isI && !$isJ) { return null; }
+$constArray = $isI ? $types[$i] : $types[$j];  // the else arm needs $isJ
 ```
 
-Shape 1 is what the three handler sites want. A branch join already
-records what the branch proved under the variable it filled, so a `!==
-null` test on that variable recovers it; what is missing is the same
-thing keyed by the *condition* rather than by a variable, which is the
-step that needs a proof keyed by a required type rather than by
-non-nullness. The one `TypeCombinator` site is the else arm of
-`$constArray = $constArrayIsI ? $types[$i] : $types[$j];`, which needs
-shape 2: `!$isI` combined with the enclosing `$isI || $isJ` is what
-proves the other dim.
+Reading the else arm's proof back means carrying the enclosing
+disjunction as a live clause and resolving it against `!$isI`, which is
+the clause algebra T20 plans rather than anything the join can record.
 
-The two `OptimizedDirectorySourceLocator` sites are shape 1 one hop
-further out: `if ($identifier->isClass()) { … $files = [$file]; }`
-assigns a non-empty array, and the same `isClass()` re-tested below
-guards a `foreach ($files …)` whose body is the only thing that fills
-`$fetchedClassNode`/`$fetchedFile`. Re-applying what the first test
-proved makes the array non-empty there, and a loop over an array proven
-non-empty already clears a `null` sentinel.
-Sites: `src/Analyser/ExprHandler/FuncCallHandler.php:977`,
-`src/Analyser/ExprHandler/MethodCallHandler.php:350`,
-`src/Analyser/ExprHandler/StaticCallHandler.php:455`,
-`src/Type/TypeCombinator.php:1994`,
-`src/Reflection/BetterReflection/SourceLocator/OptimizedDirectorySourceLocator.php:149, 150`.
+Neither shape reproduces in the PHPStan Source sample project any more —
+both constructs were rewritten upstream between sweeps — so the repros
+above are the record of them.
 
 ### B274. An unresolvable call inside a loop erases the accumulator instead of naming what it could not find
 
@@ -226,6 +195,40 @@ rather than from the excerpts above. Sites:
   (`preg_match_all(..., $matches, PREG_OFFSET_CAPTURE)` where the
   variable still holds the previous iteration's shape;
   `src/Parser/RichParser.php:183`).
+
+### B302. An `||` leg's own narrowing is applied as though the leg had held
+
+**Impact: Medium · Complexity: Medium**
+
+Entering a branch guarded by `A || B` proves only that one of them held,
+but every narrowing pass reads the operands of a disjunction as if both
+had, so a leg's conclusion reaches the branch body unconditionally:
+
+```php
+function f(?Variable $v, bool $flag): void {
+    if ($v instanceof Variable || $flag) {
+        acceptVariable($v);        // reported clean; $v is still ?Variable
+    }
+}
+```
+
+This is a false *negative* — the branch body is checked against a type
+narrower than the guard proves — so it hides mismatches rather than
+inventing them. The shape reproduces for `instanceof`, for the type
+guards (`is_string($x) || $flag`), and for the null checks alike.
+
+The disjunction split in `apply_disjunct_operand_narrowing`
+(`type_engine/variable/forward_walk/cond_narrowing.rs`) is the correct
+treatment — narrow one scope per leg and join them — but it runs *after*
+the other passes and takes their already-leaked scope as its base, so it
+can only add to what leaked rather than replace it. It is also limited to
+chains with a conjunctive leg, because the join re-widens a subject that
+an earlier conjunct pinned down when a leg's `instanceof` replaces rather
+than intersects with it
+(`$b instanceof Generic && ($cls === Generic::class || $b instanceof Template)`).
+Fixing this properly means splitting the condition's operands into the
+conjuncts and the disjunctions *first*, running the other passes over the
+conjuncts only, and letting the join own every disjunction.
 
 ## Arithmetic
 

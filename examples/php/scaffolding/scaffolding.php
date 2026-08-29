@@ -2792,3 +2792,47 @@ readonly class ScaffoldingReadonlyPoint
     ) {}
 }
 
+
+// ── Reconstructed-proof scaffolding ─────────────────────────────────────────
+// A node whose key is optional and whose name may or may not be a string is
+// the shape guards are written around: the condition proves the pair together
+// and a later check picks which half of it applies.
+
+class ScaffoldingNameNode
+{
+    /** @var string|ScaffoldingNameNode */
+    public $name = '';
+}
+
+class ScaffoldingLoopNode
+{
+    public ScaffoldingNameNode $valueVar;
+
+    /** @var ScaffoldingNameNode|null */
+    public $keyVar = null;
+
+    public function __construct()
+    {
+        $this->valueVar = new ScaffoldingNameNode();
+    }
+}
+
+class ScaffoldingArgumentAcceptor
+{
+    /** @param string[] $args */
+    public function describe(array $args): string
+    {
+        return implode(', ', $args);
+    }
+}
+
+/** @param string[] $args */
+function scaffoldingSelectAcceptor(array $args): ScaffoldingArgumentAcceptor
+{
+    return new ScaffoldingArgumentAcceptor();
+}
+
+class ScaffoldingOptionalLabel
+{
+    public ?string $label = null;
+}

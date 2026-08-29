@@ -2,6 +2,7 @@ use super::*;
 
 use mago_span::HasSpan;
 use mago_syntax::cst::argument::Argument;
+use mago_syntax::cst::function_like::closure::ClosureUseClause;
 
 use crate::atom::bytes_to_str;
 use crate::php_type::PhpType;
@@ -100,6 +101,57 @@ pub(crate) fn record_return_edge(scope: &ScopeState) {
 
 // ─── Closure handling ───────────────────────────────────────────────────────
 
+/// Seed a closure's own scope with what it captures from the scope it is
+/// written in: `$this`, the `use (…)` variables, and the state recorded
+/// against paths read through either of them.
+///
+/// The paths matter as much as the variables themselves.  A guard above
+/// the closure records what it proved under the spelling it tested —
+///
+/// ```php
+/// if ($param->type === null) { continue; }
+/// $errors[] = static fn () => new Pair($param->type);   // still non-null
+/// ```
+///
+/// — so a closure scope that carries `$param` but not `$param->type` makes
+/// the body fall back to the declaration and report the `null` the guard
+/// has already ruled out.
+pub(crate) fn seed_closure_captures(
+    closure_scope: &mut ScopeState,
+    outer: &ScopeState,
+    use_clause: Option<&ClosureUseClause<'_>>,
+) {
+    let carry_paths_through = |root: &str, closure_scope: &mut ScopeState| {
+        for (key, types) in outer.locals.iter() {
+            if crate::type_engine::types::narrowing::key_reads_variable(key.as_str(), root) {
+                closure_scope.set(key.as_str(), types.clone());
+            }
+        }
+    };
+
+    // PHP closures implicitly capture `$this` from the enclosing class
+    // method.
+    let this_types = outer.get("$this");
+    if !this_types.is_empty() {
+        closure_scope.set("$this", this_types.to_vec());
+        carry_paths_through("$this", closure_scope);
+    }
+
+    let Some(use_clause) = use_clause else {
+        return;
+    };
+    for use_var in use_clause.variables.iter() {
+        let var_name = bytes_to_str(use_var.variable.name).to_string();
+        let from_outer = outer.get(&var_name);
+        if !from_outer.is_empty() {
+            closure_scope.set(&var_name, from_outer.to_vec());
+        } else if outer.contains(&var_name) {
+            closure_scope.set_empty(&var_name);
+        }
+        carry_paths_through(&var_name, closure_scope);
+    }
+}
+
 /// Try to enter a closure or arrow function if the cursor is inside one.
 ///
 /// Returns `true` if the cursor was inside a closure and the scope was
@@ -188,23 +240,7 @@ pub(crate) fn try_enter_closure_expr<'b>(
                 // isolated scope in PHP).
                 let mut closure_scope = ScopeState::new();
 
-                // PHP closures implicitly capture `$this` from the
-                // enclosing class method.
-                let this_types = scope.get("$this");
-                if !this_types.is_empty() {
-                    closure_scope.set("$this", this_types.to_vec());
-                }
-
-                // Seed with `use(...)` variables from the outer scope.
-                if let Some(ref use_clause) = closure.use_clause {
-                    for use_var in use_clause.variables.iter() {
-                        let var_name = bytes_to_str(use_var.variable.name).to_string();
-                        let from_outer = scope.get(&var_name);
-                        if !from_outer.is_empty() {
-                            closure_scope.set(&var_name, from_outer.to_vec());
-                        }
-                    }
-                }
+                seed_closure_captures(&mut closure_scope, scope, closure.use_clause.as_ref());
 
                 // Seed with parameter types, using callable inference
                 // when available.

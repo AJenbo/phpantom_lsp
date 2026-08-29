@@ -5537,3 +5537,73 @@ class MagicConstantDemo
         return __CLASS__;                           // class-string<MagicConstantDemo>
     }
 }
+
+// ── Proofs the condition never states outright ──────────────────────────────
+//
+// A guard records what it proved under the spelling it tested, and three
+// idioms read that proof back through something the condition never names:
+// a disjunction whose surviving leg is picked further down, the identical
+// condition tested a second time, and a closure that captures a value a
+// guard above it already narrowed.
+
+class ReconstructedProofDemo
+{
+    /**
+     * The `||` proves only that one leg held.  Ruling the `=== null` leg
+     * out leaves the other one, and with it the `is_string` it carried.
+     */
+    public function keyName(Scaffolding\ScaffoldingLoopNode $node): ?string
+    {
+        if (
+            is_string($node->valueVar->name)
+            && (
+                $node->keyVar === null
+                || ($node->keyVar instanceof Scaffolding\ScaffoldingNameNode && is_string($node->keyVar->name))
+            )
+        ) {
+            // Try: hover `$node->keyVar->name` — string, not string|ScaffoldingNameNode
+            return $node->keyVar instanceof Scaffolding\ScaffoldingNameNode
+                ? $node->keyVar->name
+                : null;                                 // ?string
+        }
+
+        return null;
+    }
+
+    /**
+     * The second `count($args) > 0` re-establishes what the first one did,
+     * and that branch is the only thing that fills `$acceptor`.
+     *
+     * @param string[] $args
+     */
+    public function describeArguments(array $args): string
+    {
+        $acceptor = null;
+        if (count($args) > 0) {
+            $acceptor = Scaffolding\scaffoldingSelectAcceptor($args);
+        }
+
+        if (count($args) > 0) {
+            // Try: `$acceptor->` — ScaffoldingArgumentAcceptor members, no null
+            return $acceptor->describe($args);      // Scaffolding\ScaffoldingArgumentAcceptor
+        }
+
+        return '';
+    }
+
+    /**
+     * `use ($holder)` captures the value `$holder->label` is read through,
+     * so the guard above the closure still holds inside its body.
+     */
+    public function labelPrinter(Scaffolding\ScaffoldingOptionalLabel $holder): \Closure
+    {
+        if ($holder->label === null) {
+            return static fn (): string => '';
+        }
+
+        return static function () use ($holder): string {
+            // Try: hover `$holder->label` — string, not ?string
+            return strtoupper($holder->label);      // string
+        };
+    }
+}

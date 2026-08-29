@@ -56,6 +56,26 @@ pub(crate) struct PregOutcome {
     pub matches_all: bool,
 }
 
+/// What a branch proved about one value, to be re-applied wherever the
+/// value it hangs off is shown to be the one that branch left behind.
+#[derive(Clone, Debug)]
+pub(crate) struct ImpliedNarrowing {
+    /// The types the holder must be shown to have before the proof
+    /// applies, or `None` when ruling its `null` out is enough.
+    ///
+    /// `null` is the trigger the idiom below a join usually spells out
+    /// (`if ($original !== null)`), and it is the one that needs no types
+    /// of its own.  Every other branch condition proves a *type* instead —
+    /// `count($args) > 0` proves `$args` is a `non-empty-array` — so
+    /// re-testing that condition below the join has to be recognised by
+    /// the type it re-establishes rather than by non-nullness.
+    pub trigger: Option<Vec<ResolvedType>>,
+    /// The key the proof is about.
+    pub key: Atom,
+    /// The types it held on the path that proved it.
+    pub types: Vec<ResolvedType>,
+}
+
 /// The proofs a scope holds about values other than their own types,
 /// borrowed from the scope that recorded them.
 ///
@@ -69,7 +89,7 @@ pub(crate) struct PregOutcome {
 pub(crate) struct ScopeProofs<'a> {
     pub assertions: &'a AtomMap<Vec<VarAssertion>>,
     pub non_null_implications: &'a AtomMap<Vec<Atom>>,
-    pub implied_narrowings: &'a AtomMap<Vec<(Atom, Vec<ResolvedType>)>>,
+    pub implied_narrowings: &'a AtomMap<Vec<ImpliedNarrowing>>,
     pub preg_outcomes: &'a AtomMap<PregOutcome>,
 }
 
@@ -107,8 +127,8 @@ impl ScopeProofs<'_> {
             }
         }
         if let Some(narrowed) = self.implied_narrowings.get(holder) {
-            for (key, _) in narrowed {
-                push(key);
+            for proof in narrowed {
+                push(&proof.key);
             }
         }
         if let Some(outcome) = self.preg_outcomes.get(holder) {
@@ -171,7 +191,7 @@ pub(crate) struct ScopeState {
     /// // … 60 lines on …
     /// if ($original !== null) { $stmt->valueVar->name; }  // still a Variable
     /// ```
-    pub implied_narrowings: AtomMap<Vec<(Atom, Vec<ResolvedType>)>>,
+    pub implied_narrowings: AtomMap<Vec<ImpliedNarrowing>>,
 
     /// Variable name → the `preg_match` outcome its value is.
     ///
@@ -322,7 +342,7 @@ impl ScopeState {
         self.non_null_implications
             .retain(|_, implied| !implied.iter().any(|k| reads_receiver(k)));
         self.implied_narrowings
-            .retain(|_, narrowed| !narrowed.iter().any(|(k, _)| reads_receiver(k)));
+            .retain(|_, narrowed| !narrowed.iter().any(|proof| reads_receiver(&proof.key)));
         if self.assertions.is_empty() {
             return;
         }
@@ -359,7 +379,7 @@ impl ScopeState {
         if !self.implied_narrowings.is_empty() {
             self.implied_narrowings.remove(&key);
             self.implied_narrowings.retain(|holder, narrowed| {
-                !stale(holder) && !narrowed.iter().any(|(k, _)| stale(k))
+                !stale(holder) && !narrowed.iter().any(|proof| stale(&proof.key))
             });
         }
         if !self.preg_outcomes.is_empty() {
@@ -597,19 +617,49 @@ fn same_types(a: &[ResolvedType], b: &[ResolvedType]) -> bool {
         })
 }
 
+/// Whether no single value could be described by both type lists.
+///
+/// Deliberately conservative: two lists count as disjoint only when every
+/// pairing of their members is, and a pair only counts when neither member
+/// is a subtype of the other and they are not both objects (a class the
+/// loader would have to be consulted about is left overlapping rather than
+/// guessed at). Answering "disjoint" wrongly would let a later test
+/// re-apply a proof from a branch that never ran — `bool` and `true` are
+/// the shape that matters, since a branch a plain boolean guards leaves
+/// the flag `bool` on the path that skipped it.
+fn types_are_disjoint(a: &[ResolvedType], b: &[ResolvedType]) -> bool {
+    if a.is_empty() || b.is_empty() {
+        return false;
+    }
+    a.iter().all(|x| {
+        b.iter().all(|y| {
+            let (x, y) = (&x.type_string, &y.type_string);
+            !x.is_subtype_of(y)
+                && !y.is_subtype_of(x)
+                && !(x.is_object_like() && y.is_object_like())
+        })
+    })
+}
+
 /// Whether two implied-narrowing maps record the same proofs.
 fn same_implied_narrowings(
-    a: &AtomMap<Vec<(Atom, Vec<ResolvedType>)>>,
-    b: &AtomMap<Vec<(Atom, Vec<ResolvedType>)>>,
+    a: &AtomMap<Vec<ImpliedNarrowing>>,
+    b: &AtomMap<Vec<ImpliedNarrowing>>,
 ) -> bool {
+    let same_trigger = |x: &Option<Vec<ResolvedType>>, y: &Option<Vec<ResolvedType>>| match (x, y) {
+        (None, None) => true,
+        (Some(x), Some(y)) => same_types(x, y),
+        _ => false,
+    };
     a.len() == b.len()
         && a.iter().all(|(holder, mine)| {
             b.get(holder).is_some_and(|theirs| {
                 mine.len() == theirs.len()
-                    && mine
-                        .iter()
-                        .zip(theirs)
-                        .all(|((k, t), (ok, ot))| k == ok && same_types(t, ot))
+                    && mine.iter().zip(theirs).all(|(p, q)| {
+                        p.key == q.key
+                            && same_types(&p.types, &q.types)
+                            && same_trigger(&p.trigger, &q.trigger)
+                    })
             })
         })
 }
@@ -737,10 +787,11 @@ fn join_non_null_implications(a: &ScopeState, b: &ScopeState) -> AtomMap<Vec<Ato
 /// other path recorded it too, leaves the holder null so the claim is
 /// vacuous there, or already agrees about the key's type.
 ///
-/// The join also *learns* proofs from a variable the two paths disagree
-/// about the nullness of. That variable was written by the path that
-/// narrowed everything else the paths disagree about, so testing it below
-/// the join is testing which path ran:
+/// The join also *learns* proofs from a key the two paths disagree about,
+/// whenever the disagreement is one a later test can settle. That key was
+/// written or narrowed by the path that narrowed everything else the paths
+/// disagree about, so re-establishing its value below the join is testing
+/// which path ran:
 ///
 /// ```php
 /// $original = null;
@@ -748,55 +799,92 @@ fn join_non_null_implications(a: &ScopeState, b: &ScopeState) -> AtomMap<Vec<Ato
 /// if ($original !== null) { /* $stmt->valueVar is a Variable here */ }
 /// ```
 ///
+/// Nullness is one such disagreement, and the one a plain `!== null` test
+/// spells out. Any other pair of *disjoint* types settles the question
+/// just as well, and is what makes re-testing a condition re-apply what it
+/// proved the first time:
+///
+/// ```php
+/// if (count($args) > 0) { $acceptor = Selector::selectFromArgs(…); }
+/// if (count($args) > 0) { /* $acceptor is not null here */ }
+/// ```
+///
+/// Disjointness is what makes either sound. The two paths have to describe
+/// values that cannot both be the one in hand, or a later test that
+/// matches the taken path's type would also have matched the skipped
+/// path's and would prove nothing.
+///
 /// Which keys take part depends on how they are spelled: a plain
 /// variable has to be typed on both paths, since one a path never bound
 /// is a branch-local assignment rather than a narrowing of a value that
 /// existed before the branch. A property path or a call key is readable
 /// on both paths whatever either recorded for it, so the path that
 /// narrowed it contributes even when the other left no entry at all.
-fn join_implied_narrowings(
-    a: &ScopeState,
-    b: &ScopeState,
-) -> AtomMap<Vec<(Atom, Vec<ResolvedType>)>> {
-    let mut joined: AtomMap<Vec<(Atom, Vec<ResolvedType>)>> = AtomMap::default();
-    let mut record = |holder: Atom, key: Atom, types: &[ResolvedType]| {
-        let entry: &mut Vec<(Atom, Vec<ResolvedType>)> = joined.entry(holder).or_default();
-        if !entry.iter().any(|(k, _)| *k == key) {
-            entry.push((key, types.to_vec()));
+fn join_implied_narrowings(a: &ScopeState, b: &ScopeState) -> AtomMap<Vec<ImpliedNarrowing>> {
+    let mut joined: AtomMap<Vec<ImpliedNarrowing>> = AtomMap::default();
+    let mut record = |holder: Atom, proof: ImpliedNarrowing| {
+        let entry: &mut Vec<ImpliedNarrowing> = joined.entry(holder).or_default();
+        let already = entry.iter().any(|p| {
+            p.key == proof.key
+                && match (&p.trigger, &proof.trigger) {
+                    (None, None) => true,
+                    (Some(x), Some(y)) => same_types(x, y),
+                    _ => false,
+                }
+        });
+        if !already {
+            entry.push(proof);
         }
     };
 
-    let survives = |side: &ScopeState, holder: &Atom, key: &Atom, types: &[ResolvedType]| {
-        side.implied_narrowings
-            .get(holder)
-            .is_some_and(|proofs| proofs.iter().any(|(k, t)| k == key && same_types(t, types)))
-            || is_definitely_null(side, holder)
-            || side.locals.get(key).is_some_and(|t| same_types(t, types))
+    let survives = |side: &ScopeState, holder: &Atom, proof: &ImpliedNarrowing| {
+        side.implied_narrowings.get(holder).is_some_and(|proofs| {
+            proofs
+                .iter()
+                .any(|p| p.key == proof.key && same_types(&p.types, &proof.types))
+        }) || match &proof.trigger {
+            None => is_definitely_null(side, holder),
+            Some(trigger) => side
+                .locals
+                .get(holder)
+                .is_some_and(|held| types_are_disjoint(held, trigger)),
+        } || side
+            .locals
+            .get(&proof.key)
+            .is_some_and(|t| same_types(t, &proof.types))
     };
     for (holder, proofs) in a
         .implied_narrowings
         .iter()
         .chain(b.implied_narrowings.iter())
     {
-        for (key, types) in proofs {
-            if survives(a, holder, key, types) && survives(b, holder, key, types) {
-                record(*holder, *key, types);
+        for proof in proofs {
+            if survives(a, holder, proof) && survives(b, holder, proof) {
+                record(*holder, proof.clone());
             }
         }
     }
 
-    // The variables the two paths disagree about the nullness of, paired
-    // with the path that left them holding a value.
-    let flipped = a.locals.keys().filter_map(|key| {
+    // The keys the two paths disagree about, paired with the path whose
+    // value a later test can recognise.  `None` marks the nullness
+    // disagreement, whose test needs no types of its own.
+    let mut flipped: Vec<(Atom, &ScopeState, &ScopeState, Option<Vec<ResolvedType>>)> = Vec::new();
+    for key in a.locals.keys() {
         if is_definitely_null(a, key) && is_definitely_non_null(b, key) {
-            Some((*key, b, a))
+            flipped.push((*key, b, a, None));
         } else if is_definitely_null(b, key) && is_definitely_non_null(a, key) {
-            Some((*key, a, b))
-        } else {
-            None
+            flipped.push((*key, a, b, None));
+        } else if let (Some(mine), Some(theirs)) = (a.locals.get(key), b.locals.get(key))
+            && types_are_disjoint(mine, theirs)
+        {
+            // Either path's value settles which one ran, so both are
+            // worth recording: the `if` arm's type re-proves what the arm
+            // wrote, and the `else` arm's re-proves what that one did.
+            flipped.push((*key, a, b, Some(mine.clone())));
+            flipped.push((*key, b, a, Some(theirs.clone())));
         }
-    });
-    for (holder, taken, skipped) in flipped.collect::<Vec<_>>() {
+    }
+    for (holder, taken, skipped, trigger) in flipped {
         for (key, types) in &taken.locals {
             if *key == holder || types.is_empty() {
                 continue;
@@ -812,7 +900,14 @@ fn join_implied_narrowings(
                 None => is_synthetic_key(key.as_str()),
             };
             if differs {
-                record(holder, *key, types);
+                record(
+                    holder,
+                    ImpliedNarrowing {
+                        trigger: trigger.clone(),
+                        key: *key,
+                        types: types.clone(),
+                    },
+                );
             }
         }
     }

@@ -902,22 +902,7 @@ pub(crate) fn process_by_ref_closure_capture<'b>(
     let full_ctx = ctx.with_cursor_offset(u32::MAX);
     let mut closure_scope = ScopeState::new();
 
-    let this_types = scope.get("$this");
-    if !this_types.is_empty() {
-        closure_scope.set("$this", this_types.to_vec());
-    }
-
-    if let Some(ref use_clause) = closure.use_clause {
-        for use_var in use_clause.variables.iter() {
-            let var_name = bytes_to_str(use_var.variable.name).to_string();
-            let from_outer = scope.get(&var_name);
-            if !from_outer.is_empty() {
-                closure_scope.set(&var_name, from_outer.to_vec());
-            } else if scope.contains(&var_name) {
-                closure_scope.set_empty(&var_name);
-            }
-        }
-    }
+    seed_closure_captures(&mut closure_scope, scope, closure.use_clause.as_ref());
 
     seed_closure_params(
         &mut closure_scope,
