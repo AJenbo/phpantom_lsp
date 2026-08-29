@@ -895,10 +895,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b274-a-null-seeded-accumulator-filled-in-a-loop-keeps-null-or-loses-its-type-entirely" class="md-nav__link">
+  <a href="#b274-an-unresolvable-call-inside-a-loop-erases-the-accumulator-instead-of-naming-what-it-could-not-find" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B274. A null-seeded accumulator filled in a loop keeps <code>null</code> (or loses its type entirely)
+        B274. An unresolvable call inside a loop erases the accumulator instead of naming what it could not find
       </span>
     </span>
   </a>
@@ -1522,10 +1522,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b274-a-null-seeded-accumulator-filled-in-a-loop-keeps-null-or-loses-its-type-entirely" class="md-nav__link">
+  <a href="#b274-an-unresolvable-call-inside-a-loop-erases-the-accumulator-instead-of-naming-what-it-could-not-find" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B274. A null-seeded accumulator filled in a loop keeps <code>null</code> (or loses its type entirely)
+        B274. An unresolvable call inside a loop erases the accumulator instead of naming what it could not find
       </span>
     </span>
   </a>
@@ -1648,14 +1648,15 @@ to second-guess upstream output.</p>
 scale defined in <a href="../../todo/"><code>docs/todo.md</code></a>; that table is also where
 each bug's row lives in the current sprint/backlog.</p>
 <p>All entries below come from triage of the PHPStan Source sample project,
-re-swept on 2026-08-29 (84 sites, down from 98 at the 2026-08-28 sweep,
-126 before it and 180 at the 2026-08-27 triage). Site counts refer to
-that sweep; every mechanism was either reproduced in a minimal project or
-confirmed by reading the guard construct PHPStan honours. The sweep is a
-snapshot, so a site named here may already read differently: re-run the
-analyser before working an entry, and trim the shapes that no longer
-reproduce. Line numbers drift by a line or two between sweeps — match on
-the surrounding construct, not on the number.</p>
+re-swept on 2026-08-29 (79 sites, down from 84 earlier the same day, 98
+at the 2026-08-28 sweep, 126 before it and 180 at the 2026-08-27
+triage). Site counts refer to that sweep; every mechanism was either
+reproduced in a minimal project or confirmed by reading the guard
+construct PHPStan honours. The sweep is a snapshot, so a site named here
+may already read differently: re-run the analyser before working an
+entry, and trim the shapes that no longer reproduce. Line numbers drift
+by a line or two between sweeps — match on the surrounding construct, not
+on the number.</p>
 <p>Entries are grouped by the mechanism that has to change, not by the
 symptom that surfaced: one entry is one root cause, however many shapes
 it shows up in. Splitting a shape out into its own entry because it
@@ -1664,7 +1665,7 @@ first place. If two entries would be fixed by the same change, they are
 one entry. Defects too small to earn a row of their own are collected in
 <a href="#b301-narrowing-defects-with-a-single-site-each">B301</a> rather than given
 one each.</p>
-<p>Of the 79 distinct lines the latest sweep reports, 35 are attributed to
+<p>Of the 74 distinct lines the latest sweep reports, 30 are attributed to
 an entry below. The unattributed remainder is described in
 <a href="#not-yet-attributed">Not yet attributed</a>.</p>
 <h2 id="crashes">Crashes<a class="headerlink" href="#crashes" title="Permanent link">&para;</a></h2>
@@ -1678,7 +1679,7 @@ an entry below. The unattributed remainder is described in
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
 <h3 id="b270-a-proof-the-condition-never-states-outright-isnt-reconstructed">B270. A proof the condition never states outright isn't reconstructed<a class="headerlink" href="#b270-a-proof-the-condition-never-states-outright-isnt-reconstructed" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: High · Complexity: Very High</strong></p>
-<p>12 sites, and one root cause: what the narrowing store keys a proof
+<p>14 sites, and one root cause: what the narrowing store keys a proof
 against, and what it takes to read that proof back. PHPStan keys
 specified types by expression string and keeps them until something
 writes to that expression, so a proof recorded about one spelling is
@@ -1715,7 +1716,7 @@ Sites: <code>src/Analyser/NodeScopeResolver.php:1702, 5000, 5103</code>,
 <code>src/Rules/FunctionDefinitionCheck.php:195</code> (narrowed <code>$param</code>
 <code>use</code>-captured by a closure).</p>
 <p><strong>b. Re-testing a condition doesn't re-apply what it proved the first
-time</strong> (4 sites). Two shapes PHPStan's specified-types machinery
+time</strong> (6 sites). Two shapes PHPStan's specified-types machinery
 handles:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">// 1. The identical condition re-tested later:</span>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">if (count($args) &gt; 0) { $acceptor = Selector::selectFromArgs(...); }</span>
@@ -1732,47 +1733,52 @@ step that needs a proof keyed by a required type rather than by
 non-nullness. The one <code>TypeCombinator</code> site is the else arm of
 <code>$constArray = $constArrayIsI ? $types[$i] : $types[$j];</code>, which needs
 shape 2: <code>!$isI</code> combined with the enclosing <code>$isI || $isJ</code> is what
-proves the other dim.
+proves the other dim.</p>
+<p>The two <code>OptimizedDirectorySourceLocator</code> sites are shape 1 one hop
+further out: <code>if ($identifier-&gt;isClass()) { … $files = [$file]; }</code>
+assigns a non-empty array, and the same <code>isClass()</code> re-tested below
+guards a <code>foreach ($files …)</code> whose body is the only thing that fills
+<code>$fetchedClassNode</code>/<code>$fetchedFile</code>. Re-applying what the first test
+proved makes the array non-empty there, and a loop over an array proven
+non-empty already clears a <code>null</code> sentinel.
 Sites: <code>src/Analyser/ExprHandler/FuncCallHandler.php:977</code>,
 <code>src/Analyser/ExprHandler/MethodCallHandler.php:350</code>,
 <code>src/Analyser/ExprHandler/StaticCallHandler.php:455</code>,
-<code>src/Type/TypeCombinator.php:1994</code>.</p>
-<h3 id="b274-a-null-seeded-accumulator-filled-in-a-loop-keeps-null-or-loses-its-type-entirely">B274. A null-seeded accumulator filled in a loop keeps <code>null</code> (or loses its type entirely)<a class="headerlink" href="#b274-a-null-seeded-accumulator-filled-in-a-loop-keeps-null-or-loses-its-type-entirely" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: High · Complexity: High</strong></p>
-<p>19 sites, two symptoms of one shape — PHPStan's own scope-merging
-idiom, repeated across five files:</p>
+<code>src/Type/TypeCombinator.php:1994</code>,
+<code>src/Reflection/BetterReflection/SourceLocator/OptimizedDirectorySourceLocator.php:149, 150</code>.</p>
+<h3 id="b274-an-unresolvable-call-inside-a-loop-erases-the-accumulator-instead-of-naming-what-it-could-not-find">B274. An unresolvable call inside a loop erases the accumulator instead of naming what it could not find<a class="headerlink" href="#b274-an-unresolvable-call-inside-a-loop-erases-the-accumulator-instead-of-naming-what-it-could-not-find" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: High</strong></p>
+<p>13 sites, all PHPStan's own scope-merging idiom:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">$finalScope = null;</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">foreach ($executionEnds as $e) {</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">    $endScope = $e-&gt;getStatementResult()-&gt;getScope();</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">    $endScope = $e-&gt;getStatementResult()-&gt;getScope();   // Scope, not MutatingScope</span>
 <a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">    if ($finalScope === null) { $finalScope = $endScope; continue; }</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">    $finalScope = $finalScope-&gt;mergeWith($endScope);   // unresolved from here on</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">    $finalScope = $finalScope-&gt;mergeWith($endScope);</span>
 <a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">}</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">if ($finalScope !== null) { $finalScope-&gt;processNodes(...); }  // still unresolved</span>
 </code></pre></div>
-<p>The <code>=== null</code> early-continue must leave the accumulator non-null on
-the merge line, and the loop fixed point must not poison the variable
-so badly that even an explicit <code>!== null</code> guard after the loop can't
-recover it. The same root also leaves the accumulator nullable after a
-loop that provably runs (<code>if (count($xs) &gt; 0) { ... foreach ($xs) ... }</code>
-or a literal <code>$files = [$file]</code>), and after a foreach over a local
-array that every branch pushed into (reproduced minimally; also
-<code>src/Analyser/TypeSpecifier.php:542</code>).</p>
-<p>An inline <code>/** @var … */</code> on the assignment inside the loop does not
-rescue it either: the accumulator still leaves the loop nullable, so
-<code>return $parameterSchema;</code> reports the <code>null</code> against a declared
-<code>Schema</code> (<code>src/DependencyInjection/ContainerFactory.php:403</code>).</p>
-<p>The damage spreads one hop: <code>$scope = $finalScope-&gt;rememberConstructorScope()</code>
-leaves <code>$scope</code> unresolved too, so the next use of it reports an
-unresolvable receiver of its own
-(<code>src/Analyser/NodeScopeResolver.php:1121</code>, whose subject reads
-<code>$scope-&gt;getClassReflection()</code>). Nothing is wrong with that line —
-recovering the accumulator recovers it.</p>
-<p>Sites: <code>src/Analyser/NodeScopeResolver.php:1103, 1112, 1116, 1121, 1903, 2001, 2153, 5406, 5414</code>,
+<p><code>mergeWith()</code> is declared on <code>MutatingScope</code>, not on the <code>Scope</code>
+interface <code>StatementResult::getScope()</code> returns, so a diagnostic on the
+merge line is correct. What is wrong is <em>which</em> diagnostic: an
+assignment whose right-hand side does not resolve records the variable
+as unknown, unknown is the top of the join lattice, and the loop's fixed
+point therefore feeds unknown back into the next iteration. By the last
+walk the seed type is gone, so instead of "method <code>mergeWith</code> not found
+on class <code>Scope</code>" — which is what the same call reports outside a loop —
+the merge line reports "type of <code>$finalScope</code> could not be resolved",
+and the reads below it that would have resolved fine against <code>Scope</code>
+report unresolvable receivers of their own
+(<code>SetNonVirtualPropertyHookAssignRule.php:80, 81, 90</code> call
+<code>hasExpressionType()</code>, which <code>Scope</code> does declare, and
+<code>NodeScopeResolver.php:1121</code> reads <code>$scope-&gt;getClassReflection()</code>).</p>
+<p>The fix is to keep the seed type in the fixed point beside the unknown
+result rather than letting the join collapse to unknown. The collapse is
+deliberate — it is what stops a branch-local proof about an untyped
+subject from escaping a join (see <code>ScopeState::merge_branch</code>) — so this
+needs the join to distinguish "no type was ever known" from "a type was
+known and one path lost it", not a relaxation of the existing rule.</p>
+<p>Sites: <code>src/Analyser/NodeScopeResolver.php:1103, 1112, 1116, 1121, 5406, 5414</code>,
 <code>src/Rules/Properties/SetNonVirtualPropertyHookAssignRule.php:64, 72, 80, 81, 90</code>,
-<code>src/Rules/TooWideTypehints/TooWideParameterOutTypeCheck.php:47, 56</code>,
-<code>src/Reflection/BetterReflection/SourceLocator/OptimizedDirectorySourceLocator.php:149, 150</code>,
-<code>src/Analyser/TypeSpecifier.php:542</code>,
-<code>src/DependencyInjection/ContainerFactory.php:403</code>.</p>
+<code>src/Rules/TooWideTypehints/TooWideParameterOutTypeCheck.php:47, 56</code>.</p>
 <h3 id="b301-narrowing-defects-with-a-single-site-each">B301. Narrowing defects with a single site each<a class="headerlink" href="#b301-narrowing-defects-with-a-single-site-each" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
 <p>2 sites, two independent mechanisms. Neither is large enough to earn a
