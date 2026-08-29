@@ -3371,10 +3371,13 @@ pub(crate) fn apply_null_narrowing_inverse<'b>(
         }
     }
     // When the condition is a bare `$x` (truthy check), the inverse means
-    // $x is falsy.  For nullable types (`T|null`), narrow to null.
-    // This handles `while ($a) { ... }` => after loop, $a is null.
+    // $x is falsy: every member that could not have been drops out, which
+    // is what leaves `while ($a) { … }` with a `null` below it.  A `bool`
+    // keeps its `false` half rather than staying whole, and that is what
+    // lets a branch the flag guards be recognised again where the flag is
+    // re-tested.
     if let Some(var_name) = expr_to_var_name(condition) {
-        narrow_to_null_in_scope(&var_name, scope);
+        narrow_to_falsy_in_scope(&var_name, scope);
     }
     // `isset($x)` — inverse (else) means $x was null: narrow to null.
     for var_name in extract_isset_vars(condition) {
@@ -4645,14 +4648,19 @@ pub(crate) fn narrow_to_null_in_scope(var_name: &str, scope: &mut ScopeState) {
     if types.is_empty() {
         return;
     }
-    // Check whether any existing type contains null (Nullable, Union
-    // with null member, or bare null).  `non_null_type()` returns
-    // `Some` for `?T` and `T|null` unions; `is_null()` catches bare
-    // `null`.
-    let has_null = types
-        .iter()
-        .any(|rt| rt.type_string.non_null_type().is_some() || rt.type_string.is_null());
-    if has_null {
+    // A `null` among the values the variable could hold is what makes
+    // replacing them all with `null` sound.  A union that has none says
+    // the opposite — `bool|string` came out of a falsy branch as `null`
+    // while `non_null_type()` stood in for this check, because a union
+    // with nothing to strip still has a non-null part.
+    fn holds_null(ty: &PhpType) -> bool {
+        match ty.kind() {
+            TypeKind::Nullable(_) => true,
+            TypeKind::Union(members) => members.iter().any(holds_null),
+            _ => ty.is_null(),
+        }
+    }
+    if types.iter().any(|rt| holds_null(&rt.type_string)) {
         scope.set(
             var_name,
             vec![ResolvedType::from_type_string(PhpType::null())],
@@ -4680,6 +4688,58 @@ pub(crate) fn narrow_to_false_in_scope(var_name: &str, scope: &mut ScopeState) {
             var_name,
             vec![ResolvedType::from_type_string(PhpType::false_())],
         );
+    }
+}
+
+/// Keep only what a variable could hold and still be falsy.
+///
+/// The mirror of [`strip_falsy_from_scope`], which is what the branch a
+/// truthy test *enters* applies. Both go through the same rule
+/// ([`PhpType::falsy_type`] / [`PhpType::truthy_type`]), so the two halves
+/// of one `if` agree about what the condition split.
+///
+/// A `bool` is the member that matters: keeping it whole on the path that
+/// skipped the branch makes the two paths look like they could hold the
+/// same value, so a join has nothing to key what the branch filled
+/// against and re-testing the flag below recovers nothing:
+///
+/// ```php
+/// $a = null;
+/// if ($isI) { $a = makeA(); }
+/// if ($isI) { $a->go(); }   // needs the skipped path to say `false`
+/// ```
+///
+/// A variable nothing falsy could have been is left as it was rather than
+/// emptied: the branch is dead, and saying so is the reachability
+/// question rather than this one.
+pub(crate) fn narrow_to_falsy_in_scope(var_name: &str, scope: &mut ScopeState) {
+    let types = scope.get(var_name).to_vec();
+    if types.is_empty() {
+        return;
+    }
+
+    let falsy: Vec<ResolvedType> = types
+        .into_iter()
+        .filter_map(|mut rt| {
+            let falsy = rt.type_string.falsy_type()?;
+            // An object is truthy, so a falsy `?Customer` is a `null` that
+            // no longer names a class.  Leaving the resolved class beside
+            // it makes the entry read as a `Customer` to everything that
+            // consults the class rather than the type, and a join with the
+            // branch's own `Customer` then collapses the pair to whichever
+            // type string came last.
+            let dropped_class = falsy.unwrap_nullable().class_name()
+                != rt.type_string.unwrap_nullable().class_name();
+            if dropped_class {
+                rt.class_info = None;
+            }
+            rt.type_string = falsy;
+            Some(rt)
+        })
+        .collect();
+
+    if !falsy.is_empty() {
+        scope.set(var_name, falsy);
     }
 }
 

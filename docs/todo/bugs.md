@@ -66,23 +66,19 @@ re-applies the rest — but only when the two paths left that key holding
 values that cannot both be the one in hand. Where they overlap, the test
 proves nothing and the proof is dropped. Two shapes fall in that gap.
 
-**a. A guard on a plain boolean.** Entering `if ($isI)` narrows `$isI` to
-`true`, but the path that skipped it is left with the declared `bool`
-rather than `false`, and `true` is one of the values `bool` spans. So the
-join records nothing and re-testing the flag recovers nothing:
+**a. A guard on `instanceof`.** The else path of `if ($id instanceof B)`
+on an `A` keeps `A`, which spans `B`, so re-testing `$id instanceof B`
+does not recover what the first test's branch filled:
 
 ```php
 $a = null;
-if ($isI) { $a = makeA(); }
-return $isI ? takesA($a) : '';                 // $a is still A|null
+if ($id instanceof B) { $a = makeA(); }
+return $id instanceof B ? takesA($a) : '';     // $a is still A|null
 ```
 
-The same gap makes `instanceof` one hop worse: the else path of
-`if ($id instanceof B)` on an `A` keeps `A`, which spans `B`, so
-re-testing `$id instanceof B` does not recover what the first test's
-branch filled. Both want the negative branch to carry the exclusion the
-condition really proves, which is the representation gap
-[T20](type-inference.md#t20-type-narrowing-reconciliation-engine)'s
+This wants the negative branch to carry the exclusion the condition
+really proves ("an `A` that is not a `B`"), which is the representation
+gap [T20](type-inference.md#t20-type-narrowing-reconciliation-engine)'s
 sure/sure-not split closes.
 
 **b. Two variables assigned together, where checking one implies the

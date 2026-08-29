@@ -2045,6 +2045,9 @@ function runDemoAssertions(): void
     $labelled->label = 'gtd';
     assert(($reconstructed->labelPrinter($labelled))() === 'GTD', 'the closure runs on the label the guard proved');
 
+    assert($reconstructed->describeWhenFlagged(['a', 'b'], true) === 'a, b', 'the re-tested flag proves the acceptor was filled');
+    assert($reconstructed->describeWhenFlagged(['a', 'b'], false) === '', 'a flag that skipped the branch is false below it');
+
     echo "All assertions passed.\n";
 }
 

@@ -4905,6 +4905,35 @@ fn truthy_type_strips_null_from_every_nullable_union_member() {
 }
 
 #[test]
+fn falsy_type_keeps_only_what_the_skipped_branch_could_hold() {
+    // The mirror of the truthy side: a `bool` keeps its `false` half and
+    // every nullable member keeps its `null`.
+    assert_eq!(
+        PhpType::parse("?int|?bool|?string|?DateTime")
+            .falsy_type()
+            .unwrap()
+            .to_string(),
+        "int|false|string|null"
+    );
+    // An object is truthy whatever it holds, so it is dropped outright.
+    assert_eq!(
+        PhpType::parse("DateTime|string")
+            .falsy_type()
+            .unwrap()
+            .to_string(),
+        "string"
+    );
+    // A union that is entirely truthy has no falsy half at all.
+    assert_eq!(PhpType::parse("true|DateTime").falsy_type(), None);
+    // Refinements PHP has no plain spelling for are left alone, exactly
+    // as the truthy side leaves `int` rather than excluding `0`.
+    assert_eq!(
+        PhpType::parse("int").falsy_type().unwrap().to_string(),
+        "int"
+    );
+}
+
+#[test]
 fn int_widens_to_float_for_compatibility_but_not_for_union_simplification() {
     // `int` accepts wherever `float` is expected (PHP's silent int→float
     // coercion), but the two remain distinct scalar domains: simplifying

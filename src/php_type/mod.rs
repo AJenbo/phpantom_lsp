@@ -2611,6 +2611,52 @@ impl PhpType {
         }
     }
 
+    /// Return the part of a type that can be falsy.
+    ///
+    /// The mirror of [`Self::truthy_type`], for the branch an `if ($x)`
+    /// skips rather than the one it enters. Members that are *always*
+    /// truthy are dropped and `bool` keeps only its `false` half; `None`
+    /// comes back when nothing the type describes could have been falsy.
+    ///
+    /// As on the truthy side, refinements the test justifies but PHP has
+    /// no plain spelling for are left alone: `string` stays `string`
+    /// rather than becoming the pair of empty spellings that are falsy,
+    /// and `int` stays `int` rather than becoming `0`.
+    pub fn falsy_type(&self) -> Option<PhpType> {
+        let mut falsy = Vec::new();
+        self.push_falsy_members(&mut falsy);
+        match falsy.len() {
+            0 => None,
+            1 => falsy.pop(),
+            _ => Some(PhpType::union(falsy)),
+        }
+    }
+
+    /// Append this type's falsy members to `out`.
+    ///
+    /// The unions and nullables a type is built from are flattened on the
+    /// way, so [`Self::union`] is handed one list of atoms and can
+    /// deduplicate the `null` that every nullable member contributes:
+    /// `?int|?string` is falsy as `int|null|string`, not as a union with
+    /// the same `null` in it twice.
+    fn push_falsy_members(&self, out: &mut Vec<PhpType>) {
+        match self.kind() {
+            // `null` is falsy, so it survives whatever the inner type does.
+            TypeKind::Nullable(inner) => {
+                inner.push_falsy_members(out);
+                out.push(PhpType::null());
+            }
+            TypeKind::Union(members) => {
+                for member in members.iter() {
+                    member.push_falsy_members(out);
+                }
+            }
+            _ if self.truthiness() == Some(true) => {}
+            _ if self.is_bool() => out.push(PhpType::false_()),
+            _ => out.push(self.clone()),
+        }
+    }
+
     /// The non-empty counterpart of an array type: `array<K, V>` becomes
     /// `non-empty-array<K, V>` and `list<T>` becomes `non-empty-list<T>`.
     /// The `T[]` slice spelling is sugar for `array<T>` and refines the

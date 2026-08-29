@@ -2636,3 +2636,174 @@ function f(?int $rangeMin, ?int $rangeMax, int $c, bool $isConst): void {
     let text = hover_marked(&backend, uri, content);
     assert_eq!(text, "```php\n<?php\n$min = int|null\n```");
 }
+
+// ─── What the branch a truthy test skips is left with ──────────────────────
+
+/// The branch a truthy test skips knows the flag was `false`, exactly as
+/// the branch it enters knows the flag was `true`. Leaving it `bool` makes
+/// the check unfalsifiable: every proof keyed against the flag is one the
+/// two paths agree about, so nothing below can tell them apart.
+#[test]
+fn the_else_branch_of_a_boolean_test_leaves_false() {
+    let backend = create_test_backend();
+    let uri = "file:///bool_else.php";
+    let content = r#"<?php
+function f(bool $isI): void {
+    if ($isI) {
+        return;
+    }
+    $isI; // <-- here
+}
+"#;
+    let text = hover_marked(&backend, uri, content);
+    assert_eq!(text, "```php\n<?php\n$isI = false\n```");
+}
+
+/// Only the boolean half is refined. A falsy `string` is falsy without
+/// being `false`, and PHP has no narrower spelling for it than `string`,
+/// so the rest of the union survives untouched.
+#[test]
+fn a_falsy_branch_keeps_the_members_it_cannot_refine() {
+    let backend = create_test_backend();
+    let uri = "file:///bool_union_else.php";
+    let content = r#"<?php
+/** @param bool|string $v */
+function f($v): void {
+    if ($v) {
+        return;
+    }
+    $v; // <-- here
+}
+"#;
+    let text = hover_marked(&backend, uri, content);
+    assert_eq!(text, "```php\n<?php\n$v = false|string\n```");
+}
+
+/// A `while` runs until its subject is falsy, so a boolean loop condition
+/// leaves `false` behind it.
+#[test]
+fn a_boolean_while_condition_leaves_false_below_the_loop() {
+    let backend = create_test_backend();
+    let uri = "file:///bool_while.php";
+    let content = r#"<?php
+function f(bool $more): void {
+    while ($more) {
+        $more = (bool) rand(0, 1);
+    }
+    $more; // <-- here
+}
+"#;
+    let text = hover_marked(&backend, uri, content);
+    assert_eq!(text, "```php\n<?php\n$more = false\n```");
+}
+
+/// What the flag's two halves buy: the branch it guards fills `$a`, and
+/// re-testing the flag below the join is testing whether that branch ran.
+/// Without a `false` on the path that skipped it the two paths look alike,
+/// the join records nothing, and `$a` stays nullable where the source
+/// proved it is not.
+#[test]
+fn re_testing_a_boolean_flag_recovers_what_its_branch_filled() {
+    let backend = create_test_backend();
+    let uri = "file:///bool_flag_proof.php";
+    let content = r#"<?php
+class A {}
+function makeA(): A { return new A(); }
+function f(bool $isI): void {
+    $a = null;
+    if ($isI) {
+        $a = makeA();
+    }
+    if ($isI) {
+        $a; // <-- here
+    }
+}
+"#;
+    let text = hover_marked(&backend, uri, content);
+    assert_eq!(text, "```php\n<?php\n$a = A\n```");
+}
+
+/// The flag has to be the same one. A branch guarded by a *different*
+/// boolean says nothing about what this one's branch wrote, however alike
+/// the two reads look.
+#[test]
+fn a_different_boolean_flag_recovers_nothing() {
+    let backend = create_test_backend();
+    let uri = "file:///bool_flag_other.php";
+    let content = r#"<?php
+class A {}
+function makeA(): A { return new A(); }
+function f(bool $isI, bool $isJ): void {
+    $a = null;
+    if ($isI) {
+        $a = makeA();
+    }
+    if ($isJ) {
+        $a; // <-- here
+    }
+}
+"#;
+    let text = hover_marked(&backend, uri, content);
+    assert_eq!(text, "```php\n<?php\n$a = null|A\n```");
+}
+
+/// A nullable boolean keeps both halves of what a falsy test leaves: the
+/// `null` the declaration allows and the `false` the flag can be.
+#[test]
+fn a_nullable_boolean_keeps_both_falsy_halves() {
+    let backend = create_test_backend();
+    let uri = "file:///nullable_bool_else.php";
+    let content = r#"<?php
+function f(?bool $v): void {
+    if ($v) {
+        return;
+    }
+    $v; // <-- here
+}
+"#;
+    let text = hover_marked(&backend, uri, content);
+    assert_eq!(text, "```php\n<?php\n$v = false|null\n```");
+}
+
+/// An object is truthy whatever it holds, so it is the one member a falsy
+/// branch can drop outright.
+#[test]
+fn a_falsy_branch_drops_the_members_that_are_always_truthy() {
+    let backend = create_test_backend();
+    let uri = "file:///object_union_else.php";
+    let content = r#"<?php
+class Pen {}
+/** @param Pen|string $v */
+function f($v): void {
+    if ($v) {
+        return;
+    }
+    $v; // <-- here
+}
+"#;
+    let text = hover_marked(&backend, uri, content);
+    assert_eq!(text, "```php\n<?php\n$v = string\n```");
+}
+
+/// The branch a truthy test skips is left with `null`, and the class the
+/// value could have been is not still hanging off it: an entry that says
+/// `null` while pointing at a resolved class reads as an object to
+/// everything that consults the class, and the join with the branch's own
+/// value then keeps only one of the two.
+#[test]
+fn a_skipped_object_branch_rejoins_as_the_nullable_it_started_as() {
+    let backend = create_test_backend();
+    let uri = "file:///object_falsy_join.php";
+    let content = r#"<?php
+class Customer {}
+function takes(Customer $c): void {}
+function f(?Customer $customer): void {
+    if ($customer) {
+        takes($customer);
+    }
+    $customer; // <-- here
+}
+"#;
+    let text = hover_marked(&backend, uri, content);
+    assert_eq!(text, "```php\n<?php\n$customer = null|Customer\n```");
+}

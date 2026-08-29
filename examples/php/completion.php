@@ -5626,4 +5626,27 @@ class ReconstructedProofDemo
             return strtoupper($holder->label);      // string
         };
     }
+
+    /**
+     * A plain boolean is a condition of its own.  The branch it guards is
+     * the only thing that fills `$acceptor`, so re-testing the flag is
+     * testing whether that branch ran.
+     *
+     * @param string[] $args
+     */
+    public function describeWhenFlagged(array $args, bool $wanted): string
+    {
+        $acceptor = null;
+        if ($wanted) {
+            $acceptor = Scaffolding\scaffoldingSelectAcceptor($args);
+        }
+
+        if ($wanted) {
+            // Try: `$acceptor->` — ScaffoldingArgumentAcceptor members, no null
+            return $acceptor->describe($args);      // Scaffolding\ScaffoldingArgumentAcceptor
+        }
+
+        // Try: hover `$wanted` — false, since the branch above was skipped
+        return $wanted ? 'unreachable' : '';        // string
+    }
 }
