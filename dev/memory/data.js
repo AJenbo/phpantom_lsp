@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788038742350,
+  "lastUpdate": 1788040647005,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -25805,6 +25805,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 75,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "e4769f9897fbe21ae93f756e27495faa85469cc4",
+          "message": "Iterating an array whose docblock names only a value type binds the key\nPHP really hands out",
+          "timestamp": "2026-08-29T23:44:07+02:00",
+          "tree_id": "8c378996dee25982442bda4ad663baa8204a5b38",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/e4769f9897fbe21ae93f756e27495faa85469cc4"
+        },
+        "date": 1788040639821,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 72,
             "unit": "MiB"
           }
         ]
