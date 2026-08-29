@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788004494659,
+  "lastUpdate": 1788022418460,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -25465,6 +25465,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 71.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "6789da823d7b9d35cab8c5a8357b2abc220fee73",
+          "message": "A proof the condition never states outright is reconstructed where it is\nread",
+          "timestamp": "2026-08-29T18:41:10+02:00",
+          "tree_id": "2c7f74c3f398ef127d64914ae11f521f622a23e5",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/6789da823d7b9d35cab8c5a8357b2abc220fee73"
+        },
+        "date": 1788022411239,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 36,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 69.4,
             "unit": "MiB"
           }
         ]
