@@ -902,23 +902,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Symbol resolution">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b310-an-assignment-expression-as-a-call-receiver-never-resolves" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B310. An assignment expression as a call receiver never resolves
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1496,23 +1479,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Symbol resolution">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b310-an-assignment-expression-as-a-call-receiver-never-resolves" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B310. An assignment expression as a call receiver never resolves
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1598,29 +1564,7 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="arithmetic">Arithmetic<a class="headerlink" href="#arithmetic" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
-<h3 id="b310-an-assignment-expression-as-a-call-receiver-never-resolves">B310. An assignment expression as a call receiver never resolves<a class="headerlink" href="#b310-an-assignment-expression-as-a-call-receiver-never-resolves" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<p>Calling a method directly on a parenthesized assignment loses the
-receiver's type entirely — plain assignment, <code>??=</code> on a variable, and
-<code>??=</code> on an array offset all report
-<code>Cannot verify method 'm' — type of '' could not be resolved</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">if (($x = $map[$key])-&gt;truthy()) { ... }             // unresolved</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">if (($cached ??= $map[$key])-&gt;truthy()) { ... }      // unresolved</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">if (($cache[$key] ??= $map[$key])-&gt;truthy()) { ... } // unresolved</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">$r = $cache[$key] ??= $map[$key];</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">if ($r-&gt;truthy()) { ... }                            // resolves fine</span>
-</code></pre></div>
-<p>Two defects share the root: the subject resolver does not compute a type
-for <code>Assign</code>/<code>AssignOp</code> receiver expressions, and the diagnostic prints
-an empty subject name for them. Curiously, the shapes resolve in a
-small scratch project but fail when the identical file is dropped into
-<code>projects/pdepend</code> or <code>projects/phpstan-src</code> — some small-project
-fallback rescues the case, which is worth understanding during the fix
-but is not the fix: the resolver should handle assignment receivers
-directly. Sweep site: <code>src/Analyser/ScopeOps.php:513</code> (PHPStan Source,
-2026-08-29; the sibling construct at <code>:496</code> uses the assigned-variable
-form and resolves).</p>
+<p>No outstanding items.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
