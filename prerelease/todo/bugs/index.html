@@ -894,17 +894,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b274-an-unresolvable-call-inside-a-loop-erases-the-accumulator-instead-of-naming-what-it-could-not-find" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B274. An unresolvable call inside a loop erases the accumulator instead of naming what it could not find
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1510,17 +1499,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b274-an-unresolvable-call-inside-a-loop-erases-the-accumulator-instead-of-naming-what-it-could-not-find" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B274. An unresolvable call inside a loop erases the accumulator instead of naming what it could not find
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1688,39 +1666,6 @@ the clause algebra T20 plans rather than anything the join can record.</p>
 <p>Neither shape reproduces in the PHPStan Source sample project any more —
 both constructs were rewritten upstream between sweeps — so the repros
 above are the record of them.</p>
-<h3 id="b274-an-unresolvable-call-inside-a-loop-erases-the-accumulator-instead-of-naming-what-it-could-not-find">B274. An unresolvable call inside a loop erases the accumulator instead of naming what it could not find<a class="headerlink" href="#b274-an-unresolvable-call-inside-a-loop-erases-the-accumulator-instead-of-naming-what-it-could-not-find" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: High</strong></p>
-<p>13 sites, all PHPStan's own scope-merging idiom:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">$finalScope = null;</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">foreach ($executionEnds as $e) {</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">    $endScope = $e-&gt;getStatementResult()-&gt;getScope();   // Scope, not MutatingScope</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">    if ($finalScope === null) { $finalScope = $endScope; continue; }</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">    $finalScope = $finalScope-&gt;mergeWith($endScope);</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">}</span>
-</code></pre></div>
-<p><code>mergeWith()</code> is declared on <code>MutatingScope</code>, not on the <code>Scope</code>
-interface <code>StatementResult::getScope()</code> returns, so a diagnostic on the
-merge line is correct. What is wrong is <em>which</em> diagnostic: an
-assignment whose right-hand side does not resolve records the variable
-as unknown, unknown is the top of the join lattice, and the loop's fixed
-point therefore feeds unknown back into the next iteration. By the last
-walk the seed type is gone, so instead of "method <code>mergeWith</code> not found
-on class <code>Scope</code>" — which is what the same call reports outside a loop —
-the merge line reports "type of <code>$finalScope</code> could not be resolved",
-and the reads below it that would have resolved fine against <code>Scope</code>
-report unresolvable receivers of their own
-(<code>SetNonVirtualPropertyHookAssignRule.php:80, 81, 90</code> call
-<code>hasExpressionType()</code>, which <code>Scope</code> does declare, and
-<code>NodeScopeResolver.php:1121</code> reads <code>$scope-&gt;getClassReflection()</code>).</p>
-<p>The fix is to keep the seed type in the fixed point beside the unknown
-result rather than letting the join collapse to unknown. The collapse is
-deliberate — it is what stops a branch-local proof about an untyped
-subject from escaping a join (see <code>ScopeState::merge_branch</code>) — so this
-needs the join to distinguish "no type was ever known" from "a type was
-known and one path lost it", not a relaxation of the existing rule.</p>
-<p>Sites: <code>src/Analyser/NodeScopeResolver.php:1103, 1112, 1116, 1121, 5406, 5414</code>,
-<code>src/Rules/Properties/SetNonVirtualPropertyHookAssignRule.php:64, 72, 80, 81, 90</code>,
-<code>src/Rules/TooWideTypehints/TooWideParameterOutTypeCheck.php:47, 56</code>.</p>
 <h2 id="arithmetic">Arithmetic<a class="headerlink" href="#arithmetic" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
