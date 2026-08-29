@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787931735514,
+  "lastUpdate": 1787993942409,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -25397,6 +25397,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 72.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "f14bb576626549702b372e928765063d6ea06246",
+          "message": "A check a boolean stands for reaches every place the boolean is read",
+          "timestamp": "2026-08-29T10:46:27+02:00",
+          "tree_id": "6bf5e07ee1efc8eed0aa55c64c013662c7a895ae",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/f14bb576626549702b372e928765063d6ea06246"
+        },
+        "date": 1787993935596,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 36.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 73.9,
             "unit": "MiB"
           }
         ]
