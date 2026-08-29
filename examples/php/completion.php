@@ -4754,6 +4754,26 @@ class PassByReferenceDemo
         // Instance method calls ($this->method) with by-ref parameters:
         $this->init($thisPen);
         $thisPen->write();                // $thisPen is now Scaffolding\Pen
+
+        // The declared type says what may go *in*. What the callee assigns
+        // on every path is what comes back out, so the null `?Pen` allows
+        // is gone by the time the call returns and a parameter that will
+        // not take null accepts it.
+        Scaffolding\initPen($writtenPen);
+        Scaffolding\describePen($writtenPen);  // Scaffolding\Pen, never null
+
+        // A callee that only writes on one branch leaves the null in place.
+        Scaffolding\initPenWhen(false, $maybePen);
+        $maybePen?->write();              // still ?Scaffolding\Pen
+
+        // The value an out-parameter already holds is never checked against
+        // the declared type: on the second pass `$matches` still holds the
+        // offset-capture shape the first left behind, and `preg_match_all()`
+        // overwrites it either way.
+        foreach (['a 1', 'b 2'] as $line) {
+            preg_match_all('/(\w+)/', $line, $matches, PREG_OFFSET_CAPTURE);
+            echo $matches[1][0][1] << 1;  // list<array{string, int<-1, max>}>
+        }
     }
 
     private function init(?Scaffolding\Pen &$pen): void

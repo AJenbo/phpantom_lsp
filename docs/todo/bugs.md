@@ -27,8 +27,8 @@ symptom that surfaced: one entry is one root cause, however many shapes
 it shows up in. Splitting a shape out into its own entry because it
 reads differently in the source is how this list grew past forty in the
 first place. If two entries would be fixed by the same change, they are
-one entry. Defects too small to earn a row of their own are collected in
-[B301](#b301-by-reference-out-parameters) rather than given one each.
+one entry. Defects too small to earn a row of their own are collected
+under [Miscellaneous](#miscellaneous) rather than given one each.
 
 Of the 74 distinct lines the latest sweep reports, 30 are attributed to
 an entry below. The unattributed remainder is described in
@@ -143,22 +143,6 @@ Sites: `src/Analyser/NodeScopeResolver.php:1103, 1112, 1116, 1121, 5406, 5414`,
 `src/Rules/Properties/SetNonVirtualPropertyHookAssignRule.php:64, 72, 80, 81, 90`,
 `src/Rules/TooWideTypehints/TooWideParameterOutTypeCheck.php:47, 56`.
 
-### B301. By-reference out-parameters
-
-**Impact: Medium · Complexity: Medium-High**
-
-Complements [T41](type-inference.md#t41-param-out-is-parsed-but-never-read):
-
-- A by-ref parameter the callee unconditionally assigns (no
-  `@param-out` tag) should get the assigned type after the call
-  (`ScopeOps::getTypeFromCache(..., ?string &$key)` always sets a
-  `string`; `src/Analyser/MutatingScope.php:1031`).
-- The *input* type of a by-ref argument that merely creates the
-  variable must not be checked at all — PHPStan skips it
-  (`preg_match_all(..., $matches, PREG_OFFSET_CAPTURE)` where the
-  variable still holds the previous iteration's shape;
-  `src/Parser/RichParser.php:183`).
-
 ### B302. An `||` leg's own narrowing is applied as though the leg had held
 
 **Impact: Medium · Complexity: Medium**
@@ -211,7 +195,38 @@ No outstanding items.
 
 ## Miscellaneous
 
-No outstanding items.
+### B303. A `self::` static call does not create its by-reference arguments
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+class Ops
+{
+    public static function fill(?string &$key): void { $key = 'k'; }
+
+    public static function use(): string
+    {
+        self::fill($key);   // "Undefined variable '$key'"
+        return $key;        // and again here
+    }
+}
+```
+
+`resolve_by_ref_positions` in `diagnostics/undefined_variables/mod.rs`
+resolves a `ByRefCallKind::StaticMethod` by handing the spelled class
+name to `resolve_to_fqn`, which has nothing to say about `self`,
+`static` or `parent`. The by-reference positions therefore come back
+empty and the argument is read as a use of an undefined variable rather
+than the write that creates it. Spelling the class out
+(`Ops::fill($key)`) resolves and stays quiet, so the gap is only in the
+relative names.
+
+The enclosing class is what the resolver is missing:
+`collect_undefined_variable_diagnostics` builds the `ByRefResolver`
+closure once for the whole file and the scope collector calls it without
+saying where in the file the call sits. The fix is to give the resolver
+the call's offset (or the enclosing class) so the three relative names
+can be resolved the way every other consumer resolves them.
 
 ## Not yet attributed
 

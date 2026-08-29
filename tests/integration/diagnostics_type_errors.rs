@@ -11783,3 +11783,145 @@ class Factory
         type_error_messages(&collect(php))
     );
 }
+
+// ─── By-reference out-parameters ────────────────────────────────────────────
+
+/// A file the by-reference passes can read a body out of.
+fn collect_with_body(php: &str) -> Vec<Diagnostic> {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    backend
+        .open_files()
+        .write()
+        .insert(uri.to_string(), std::sync::Arc::new(php.to_string()));
+    backend.update_ast(uri, php);
+    let mut out = Vec::new();
+    backend.collect_argument_type_diagnostics(uri, php, &mut out);
+    out
+}
+
+#[test]
+fn a_by_reference_parameter_the_callee_always_assigns_loses_the_null_it_declares() {
+    let php = r#"<?php
+class Ops
+{
+    public static function keyFor(object $node, ?string &$key): void
+    {
+        $key = self::nodeKey($node);
+    }
+
+    public static function nodeKey(object $node): string
+    {
+        return 'k';
+    }
+}
+
+class Caller
+{
+    public function run(object $node): string
+    {
+        Ops::keyFor($node, $key);
+
+        return $this->takesString($key);
+    }
+
+    private function takesString(string $s): string
+    {
+        return $s;
+    }
+}
+"#;
+    assert!(
+        !has_type_error(&collect_with_body(php)),
+        "`keyFor` assigns `$key` on every path, so the `?string` it declares \
+         is what may go in, not what comes back out: {:?}",
+        type_error_messages(&collect_with_body(php))
+    );
+}
+
+#[test]
+fn a_by_reference_parameter_only_one_branch_assigns_keeps_its_declared_null() {
+    let php = r#"<?php
+class Ops
+{
+    public static function keyFor(bool $flag, ?string &$key): void
+    {
+        if ($flag) {
+            $key = 'k';
+        }
+    }
+}
+
+class Caller
+{
+    public function run(bool $flag): string
+    {
+        Ops::keyFor($flag, $key);
+
+        return $this->takesString($key);
+    }
+
+    private function takesString(string $s): string
+    {
+        return $s;
+    }
+}
+"#;
+    assert!(
+        has_type_error(&collect_with_body(php)),
+        "The other branch leaves `$key` unwritten, so null still reaches the caller"
+    );
+}
+
+#[test]
+fn a_body_that_contradicts_the_declared_out_type_does_not_replace_it() {
+    let php = r#"<?php
+class Ops
+{
+    /** @param int &$count */
+    public static function count(&$count): void
+    {
+        $count = 'not an int';
+    }
+}
+
+class Caller
+{
+    public function run(): int
+    {
+        Ops::count($count);
+
+        return $this->takesInt($count);
+    }
+
+    private function takesInt(int $i): int
+    {
+        return $i;
+    }
+}
+"#;
+    assert!(
+        !has_type_error(&collect_with_body(php)),
+        "A reading of the body may sharpen the declaration, never overrule it: {:?}",
+        type_error_messages(&collect_with_body(php))
+    );
+}
+
+#[test]
+fn the_value_a_by_reference_out_parameter_already_holds_is_not_checked() {
+    let php = r#"<?php declare(strict_types = 1);
+function collectAll(string $text): void
+{
+    foreach ([1, 2] as $_) {
+        preg_match_all('~(\w+)~', $text, $matches, PREG_OFFSET_CAPTURE);
+    }
+}
+"#;
+    assert!(
+        !has_type_error(&collect_with_full_stubs(php)),
+        "On the second pass `$matches` still holds the offset-capture shape \
+         the first left behind, and the declared `?array` describes what \
+         `preg_match_all` writes, not what it accepts: {:?}",
+        type_error_messages(&collect_with_full_stubs(php))
+    );
+}

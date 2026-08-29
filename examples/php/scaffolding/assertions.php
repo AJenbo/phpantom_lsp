@@ -1525,6 +1525,23 @@ function runDemoAssertions(): void
     new Scaffolding\PenBuilder($ctorPen);
     assert($ctorPen instanceof Scaffolding\Pen, 'new Scaffolding\PenBuilder(&$pen) must give $pen type Scaffolding\Pen');
 
+    // A callee that assigns on every path leaves nothing of the declared
+    // null behind; one that assigns on a single branch leaves it in place.
+    $writtenPen = null;
+    Scaffolding\initPen($writtenPen);
+    assert(is_string(Scaffolding\describePen($writtenPen)), 'Scaffolding\initPen(&$pen) writes on every path, so $pen is never null');
+
+    $maybePen = null;
+    Scaffolding\initPenWhen(false, $maybePen);
+    assert($maybePen === null, 'Scaffolding\initPenWhen(false, &$pen) leaves $pen null');
+
+    // The shape an out-parameter already holds is overwritten, not read.
+    $offsetMatches = null;
+    foreach (['a 1', 'b 2'] as $line) {
+        preg_match_all('/(\w+)/', $line, $offsetMatches, PREG_OFFSET_CAPTURE);
+    }
+    assert(is_int($offsetMatches[1][0][1]), 'preg_match_all() with PREG_OFFSET_CAPTURE pairs each match with its offset');
+
     // ── Interface template inheritance (class-string<T>) ────────────────
     $locator = new Scaffolding\ScaffoldingEntityLocator();
     $locatorResult = $locator->find(Scaffolding\Pen::class);

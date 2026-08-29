@@ -2604,6 +2604,18 @@ function initPen(?Pen &$pen): void
     $pen = new Pen();
 }
 
+function initPenWhen(bool $write, ?Pen &$pen): void
+{
+    if ($write) {
+        $pen = new Pen();
+    }
+}
+
+function describePen(Pen $pen): string
+{
+    return $pen->color();
+}
+
 class PenFactory
 {
     public static function create(?Pen &$pen): void

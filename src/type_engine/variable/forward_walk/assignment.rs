@@ -8,6 +8,7 @@ use crate::atom::{Atom, atom, bytes_to_str};
 use crate::docblock::type_strings::split_type_token;
 use crate::parser::with_parsed_program;
 use crate::php_type::{LiteralValue, PhpType, TypeKind};
+use crate::type_engine::call_resolution::{OutParamCallee, effective_out_type};
 use crate::type_engine::resolver::VarResolutionCtx;
 use crate::type_engine::types::narrowing;
 use crate::types::{ClassInfo, ResolvedType};
@@ -2701,26 +2702,6 @@ pub(crate) fn seed_pass_by_ref_in_condition<'b>(
     }
 }
 
-/// The callee whose own `@template` params a by-reference out type may name.
-///
-/// Carried alongside the parameter list so the check below is only made
-/// for calls that actually declare template parameters.
-enum ByRefTemplateOwner {
-    Function(Box<crate::types::FunctionInfo>),
-    Method(std::sync::Arc<ClassInfo>, String),
-}
-
-/// The `@template` parameters the callee declares.
-fn by_ref_template_params(owner: &ByRefTemplateOwner) -> &[crate::atom::Atom] {
-    match owner {
-        ByRefTemplateOwner::Function(fi) => &fi.template_params,
-        ByRefTemplateOwner::Method(cls, name) => match cls.get_method(name) {
-            Some(m) => &m.template_params,
-            None => &[],
-        },
-    }
-}
-
 /// For each variable argument in a call expression that is passed to a
 /// pass-by-reference parameter with a primitive type hint (e.g.
 /// `array &$matches`), seed or refresh the variable in scope. Existing exact
@@ -2758,7 +2739,7 @@ pub(crate) fn seed_pass_by_ref_primitives<'b>(
             (
                 &func_call.argument_list,
                 parameters,
-                ByRefTemplateOwner::Function(Box::new(func_info)),
+                OutParamCallee::Function(Box::new(func_info)),
             )
         }
         Expression::Call(Call::Method(mc)) => {
@@ -2803,7 +2784,7 @@ pub(crate) fn seed_pass_by_ref_primitives<'b>(
             (
                 &mc.argument_list,
                 method.parameters.clone(),
-                ByRefTemplateOwner::Method(merged, method_name),
+                OutParamCallee::Method(merged, atom(&method_name)),
             )
         }
         Expression::Call(Call::NullSafeMethod(mc)) => {
@@ -2848,7 +2829,7 @@ pub(crate) fn seed_pass_by_ref_primitives<'b>(
             (
                 &mc.argument_list,
                 method.parameters.clone(),
-                ByRefTemplateOwner::Method(merged, method_name),
+                OutParamCallee::Method(merged, atom(&method_name)),
             )
         }
         Expression::Call(Call::StaticMethod(sc)) => {
@@ -2881,7 +2862,7 @@ pub(crate) fn seed_pass_by_ref_primitives<'b>(
             (
                 &sc.argument_list,
                 method.parameters.clone(),
-                ByRefTemplateOwner::Method(merged, method_name),
+                OutParamCallee::Method(merged, atom(&method_name)),
             )
         }
         _ => return,
@@ -2898,9 +2879,9 @@ pub(crate) fn seed_pass_by_ref_primitives<'b>(
     // binding for them. Applied raw it would replace a precise argument
     // type (`TargetClass<ContainerExtension>[]`) with an array of a name
     // nothing can resolve, so the variable is left as it was instead.
-    let callee_templates = by_ref_template_params(&template_owner);
+    let callee_templates = template_owner.template_params();
 
-    for (param, arg_expr) in parameters.iter().zip(bound.iter()) {
+    for (param_index, (param, arg_expr)) in parameters.iter().zip(bound.iter()).enumerate() {
         let arg_expr = match arg_expr {
             Some(expr) => *expr,
             None => continue,
@@ -2918,7 +2899,9 @@ pub(crate) fn seed_pass_by_ref_primitives<'b>(
         }
 
         let already_in_scope = !scope.get(&var_name).is_empty();
-        if let Some(out_hint) = param.out_type() {
+        let mut seeded = false;
+        if let Some(out_hint) = effective_out_type(param, param_index, &template_owner, ctx.backend)
+        {
             if out_hint.references_any_name(callee_templates) {
                 continue;
             }
@@ -2957,17 +2940,24 @@ pub(crate) fn seed_pass_by_ref_primitives<'b>(
                     // which is exactly what the call invalidates. It is a
                     // subtype of every array hint, so without this it would
                     // survive the call and claim the result is still empty.
+                    // A bare `null` (`$key = null;` before the call) says the
+                    // same thing about a nullable out type, and keeping it
+                    // would claim the callee wrote nothing at all.
                     .filter(|existing| !existing.shape_entries().is_some_and(<[_]>::is_empty))
+                    .filter(|existing| !existing.is_null())
                     .filter(|existing| existing.is_subtype_of(&effective_hint))
                     .map(|existing| existing.widen_scalar_literals())
                     .unwrap_or(effective_hint);
                 scope.set(&var_name, vec![ResolvedType::from_type_string(refined)]);
+                seeded = true;
             }
-        } else if !already_in_scope {
+        }
+        if !seeded && !already_in_scope && param.type_hint.is_none() {
             // Untyped pass-by-reference parameters (e.g. `&$matches`
             // in `preg_match`, `&$result` in `parse_str`) are most
             // commonly arrays. Seed only new variables as `array`; an
-            // existing value has no sounder replacement without a hint.
+            // existing value has no sounder replacement without a hint,
+            // and neither has one the callee's body did not give up.
             scope.set(
                 &var_name,
                 vec![ResolvedType::from_type_string(PhpType::named(atom(

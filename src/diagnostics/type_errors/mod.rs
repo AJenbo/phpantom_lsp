@@ -611,6 +611,22 @@ impl Backend {
                     continue;
                 }
 
+                // An out-parameter's declared type describes what the
+                // callee *writes* through the reference, not what the
+                // caller has to hand over. The value going in is whatever
+                // the variable happened to hold, and the standard library
+                // — where nearly every parameter of this shape comes from
+                // — does not check it: `preg_match_all(…, $matches,
+                // PREG_OFFSET_CAPTURE)` inside a loop is handed the
+                // previous iteration's shape, and PHP accepts a `$matches`
+                // holding a string just as readily as one that does not
+                // exist yet. There is nothing here for this check to
+                // compare against; what the *call* leaves behind is typed
+                // by the by-reference write-back instead.
+                if param.is_reference && param.defaults_to_null() {
+                    continue;
+                }
+
                 // Skip if parameter has no type hint.
                 let param_type = match &param.type_hint {
                     Some(t) if !t.is_untyped() && !t.is_mixed() => t,
