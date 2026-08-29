@@ -342,21 +342,27 @@ fn infer_element_type<'b>(
             if let Some(t) = scope_type {
                 return Some(t);
             }
-            // Iterable docblock (e.g. `@var list<User> $items`) for a
-            // variable the scope has nothing for.
-            if let Some(t) =
+            // A `@var`/`@param` annotation read straight out of the source
+            // (e.g. `@var list<User> $items`), for a variable nothing above
+            // could type.
+            let annotated = || {
                 docblock::find_iterable_raw_type_in_source(ctx.content, offset, &var_text)
-            {
-                return Some(crate::util::resolve_php_type_names(&t, ctx.class_loader));
-            }
+                    .map(|t| crate::util::resolve_php_type_names(&t, ctx.class_loader))
+            };
+            // Inside the forward walker the scope above was the only
+            // narrowing-aware answer on offer: running the full pipeline
+            // here would walk the enclosing body all over again.  The
+            // annotation is what is left.
             if ctx.scope_var_resolver.is_some() {
-                return None;
+                return annotated();
             }
-            // Fall back to the full variable type resolution pipeline
-            // (parameter type hints, @param docblocks, assignments,
-            // foreach bindings, etc.).  This handles cases like
-            // `string $trackingUserId` where the variable is a scalar
-            // parameter, not an iterable.
+            // Outside the walker the full pipeline (parameter type hints,
+            // `@param`/`@var` docblocks, assignments, foreach bindings)
+            // answers this, and it goes first because it reads the same
+            // annotations *and* the narrowing that holds where the literal
+            // is written.  A `[$n]` under `if (is_int($n))` builds
+            // `array{int}`, not the `int|float` the annotation states for
+            // the assignment above it.
             let current_class = ctx
                 .all_classes
                 .iter()
@@ -372,6 +378,7 @@ fn infer_element_type<'b>(
                 ctx.backend,
                 ctx.loaders,
             )
+            .or_else(annotated)
         }
         // ── Parenthesized ──
         Expression::Parenthesized(p) => infer_element_type(p.expression, ctx),

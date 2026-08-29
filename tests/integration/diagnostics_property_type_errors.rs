@@ -2598,3 +2598,93 @@ class Job {
         property_error_messages(&diags)
     );
 }
+
+// ─── An inline `@var` union narrowed by a type guard ───────────────────────
+
+/// A variable typed by an inline `/** @var int|float $n */` is narrowed by
+/// a guard the same way a `@param` one is, and an array literal built from
+/// it in the guarded branch carries the narrowed element.
+#[test]
+fn type_guard_narrows_an_inline_var_union_inside_an_array_literal() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+class Builder {
+    /** @param list<int> $indexes */
+    public function __construct(private array $indexes) {}
+
+    public function push(int $offset): void {
+        /** @var int|float $next */
+        $next = $offset + 1;
+        if (is_int($next)) {
+            $this->indexes = [$next];
+        }
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        property_error_messages(&diags).is_empty(),
+        "is_int() should narrow the inline @var union to int, got: {:?}",
+        property_error_messages(&diags)
+    );
+}
+
+/// The negation of the guard narrows the `elseif` branches of the chain,
+/// not just a bare `else`.
+#[test]
+fn a_negated_guard_narrows_an_inline_var_union_in_an_elseif_branch() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+class Builder {
+    /** @param list<int> $indexes */
+    public function __construct(private array $indexes) {}
+
+    public function push(bool $optional, int $offset): void {
+        /** @var int|float $next */
+        $next = $offset + 1;
+        if (is_float($next)) {
+            $this->indexes = [];
+        } elseif (!$optional) {
+            $this->indexes = [$next];
+        } else {
+            $this->indexes[] = $next;
+        }
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        property_error_messages(&diags).is_empty(),
+        "a failed is_float() should leave the inline @var union as int, got: {:?}",
+        property_error_messages(&diags)
+    );
+}
+
+/// The narrowing above is the guard's doing, not a blanket exemption for
+/// annotated variables: with no guard in the way the union still has to
+/// fit the property.
+#[test]
+fn an_unguarded_inline_var_union_is_still_flagged_in_an_array_literal() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+class Builder {
+    /** @param list<int> $indexes */
+    public function __construct(private array $indexes) {}
+
+    public function push(int $offset): void {
+        /** @var int|float $next */
+        $next = $offset + 1;
+        $this->indexes = [$next];
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_property_error(&diags),
+        "an unguarded int|float element should not fit list<int>, got: {:?}",
+        property_error_messages(&diags)
+    );
+}
