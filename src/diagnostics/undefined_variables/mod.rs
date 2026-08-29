@@ -117,9 +117,15 @@ impl Backend {
         // and method signatures.  This lets the scope collector mark
         // by-ref arguments as writes for user-defined functions, static
         // methods, and constructors — not just the hardcoded table.
-        let resolver: ByRefResolver<'_> = &|call_kind: &ByRefCallKind<'_>| {
-            self.resolve_by_ref_positions(call_kind, &file_use_map, &file_namespace)
-        };
+        let resolver: ByRefResolver<'_> =
+            &|call_kind: &ByRefCallKind<'_>, enclosing_class_name: Option<&str>| {
+                self.resolve_by_ref_positions(
+                    call_kind,
+                    enclosing_class_name,
+                    &file_use_map,
+                    &file_namespace,
+                )
+            };
 
         with_parsed_program(content, "unknown_variable", |program, content| {
             let mut ctx = DiagnosticCtx {
@@ -144,6 +150,7 @@ impl Backend {
     fn resolve_by_ref_positions(
         &self,
         call_kind: &ByRefCallKind<'_>,
+        enclosing_class_name: Option<&str>,
         file_use_map: &std::collections::HashMap<String, String>,
         file_namespace: &Option<String>,
     ) -> Option<Vec<usize>> {
@@ -167,10 +174,12 @@ impl Backend {
                 Some(positions)
             }
             ByRefCallKind::StaticMethod(class_name, method_name) => {
-                let fqn = crate::util::resolve_to_fqn(class_name, file_use_map, file_namespace);
-                let cls = self
-                    .find_or_load_class(&fqn)
-                    .or_else(|| self.find_or_load_class(class_name))?;
+                let cls = self.resolve_call_class(
+                    class_name,
+                    enclosing_class_name,
+                    file_use_map,
+                    file_namespace,
+                )?;
                 let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
                     &cls,
                     &|name| self.find_or_load_class(name),
@@ -187,10 +196,12 @@ impl Backend {
                 Some(positions)
             }
             ByRefCallKind::Constructor(class_name) => {
-                let fqn = crate::util::resolve_to_fqn(class_name, file_use_map, file_namespace);
-                let cls = self
-                    .find_or_load_class(&fqn)
-                    .or_else(|| self.find_or_load_class(class_name))?;
+                let cls = self.resolve_call_class(
+                    class_name,
+                    enclosing_class_name,
+                    file_use_map,
+                    file_namespace,
+                )?;
                 let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
                     &cls,
                     &|name| self.find_or_load_class(name),
@@ -227,6 +238,34 @@ impl Backend {
                 Some(positions)
             }
         }
+    }
+
+    /// Resolve a `Cls::method()`/`new Cls()` class name to its
+    /// [`ClassInfo`], handling the relative names `self`, `static`, and
+    /// `parent` by resolving them against the class enclosing the call
+    /// site rather than treating them as a literal class name.
+    fn resolve_call_class(
+        &self,
+        class_name: &str,
+        enclosing_class_name: Option<&str>,
+        file_use_map: &std::collections::HashMap<String, String>,
+        file_namespace: &Option<String>,
+    ) -> Option<std::sync::Arc<crate::types::ClassInfo>> {
+        if crate::class_lookup::is_class_keyword(class_name) {
+            let enclosing_name = enclosing_class_name?;
+            let enclosing_fqn =
+                crate::util::resolve_to_fqn(enclosing_name, file_use_map, file_namespace);
+            let enclosing_class = self
+                .find_or_load_class(&enclosing_fqn)
+                .or_else(|| self.find_or_load_class(enclosing_name))?;
+            let fqn =
+                crate::class_lookup::resolve_class_keyword(class_name, Some(&enclosing_class))?;
+            return self.find_or_load_class(&fqn);
+        }
+
+        let fqn = crate::util::resolve_to_fqn(class_name, file_use_map, file_namespace);
+        self.find_or_load_class(&fqn)
+            .or_else(|| self.find_or_load_class(class_name))
     }
 }
 

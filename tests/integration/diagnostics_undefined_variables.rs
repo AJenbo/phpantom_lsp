@@ -1944,6 +1944,98 @@ function test(string $data): void {
 }
 
 #[test]
+fn no_diagnostic_for_self_static_method_byref_param() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+class Ops {
+    public static function fill(?string &$key): void {
+        $key = 'k';
+    }
+
+    public static function use(): string {
+        self::fill($key);
+        return $key;
+    }
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "self::method() with by-ref param should not flag $key. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn no_diagnostic_for_static_static_method_byref_param() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+class Ops {
+    public static function fill(?string &$key): void {
+        $key = 'k';
+    }
+
+    public static function use(): string {
+        static::fill($key);
+        return $key;
+    }
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "static::method() with by-ref param should not flag $key. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn no_diagnostic_for_parent_static_method_byref_param() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+class Base {
+    public static function fill(?string &$key): void {
+        $key = 'k';
+    }
+}
+class Ops extends Base {
+    public static function use(): string {
+        parent::fill($key);
+        return $key;
+    }
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "parent::method() with by-ref param should not flag $key. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn no_diagnostic_for_self_constructor_byref_param() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+class Parser {
+    public function __construct(string $input, array &$warnings) {
+        $warnings = [];
+    }
+
+    public static function make(string $src): self {
+        return new self($src, $warnings);
+    }
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "new self() with by-ref param should not flag $warnings. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
 fn no_diagnostic_for_constructor_byref_param() {
     let diags = undefined_var_diagnostics(
         r#"<?php

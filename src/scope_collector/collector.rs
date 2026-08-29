@@ -877,7 +877,7 @@ fn walk_function_call_arguments(func_call: &FunctionCall<'_>, collector: &mut Co
         Some(positions)
     } else if let Some(ref resolver) = collector.by_ref_resolver {
         let kind = ByRefCallKind::Function(func_name);
-        if let Some(positions) = resolver(&kind) {
+        if let Some(positions) = resolver(&kind, collector.enclosing_class_name()) {
             resolved_positions = positions;
             if resolved_positions.is_empty() {
                 None
@@ -1005,7 +1005,7 @@ fn walk_method_call_arguments_inner(
 
     if let Some(ref resolver) = collector.by_ref_resolver {
         let kind = ByRefCallKind::InstanceMethod(class_name, method_name);
-        if let Some(positions) = resolver(&kind)
+        if let Some(positions) = resolver(&kind, collector.enclosing_class_name())
             && !positions.is_empty()
         {
             for (idx, arg) in argument_list.arguments.iter().enumerate() {
@@ -1049,7 +1049,7 @@ fn walk_static_method_call_arguments(
 
     if let Some(ref resolver) = collector.by_ref_resolver {
         let kind = ByRefCallKind::StaticMethod(class_name, method_name);
-        if let Some(positions) = resolver(&kind)
+        if let Some(positions) = resolver(&kind, collector.enclosing_class_name())
             && !positions.is_empty()
         {
             for (idx, arg) in static_call.argument_list.arguments.iter().enumerate() {
@@ -1087,7 +1087,7 @@ fn walk_constructor_arguments(
 
     if let Some(ref resolver) = collector.by_ref_resolver {
         let kind = ByRefCallKind::Constructor(class_name);
-        if let Some(positions) = resolver(&kind)
+        if let Some(positions) = resolver(&kind, collector.enclosing_class_name())
             && !positions.is_empty()
         {
             for (idx, arg) in args.arguments.iter().enumerate() {

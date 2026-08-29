@@ -195,38 +195,7 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B303. A `self::` static call does not create its by-reference arguments
-
-**Impact: Medium · Complexity: Low-Medium**
-
-```php
-class Ops
-{
-    public static function fill(?string &$key): void { $key = 'k'; }
-
-    public static function use(): string
-    {
-        self::fill($key);   // "Undefined variable '$key'"
-        return $key;        // and again here
-    }
-}
-```
-
-`resolve_by_ref_positions` in `diagnostics/undefined_variables/mod.rs`
-resolves a `ByRefCallKind::StaticMethod` by handing the spelled class
-name to `resolve_to_fqn`, which has nothing to say about `self`,
-`static` or `parent`. The by-reference positions therefore come back
-empty and the argument is read as a use of an undefined variable rather
-than the write that creates it. Spelling the class out
-(`Ops::fill($key)`) resolves and stays quiet, so the gap is only in the
-relative names.
-
-The enclosing class is what the resolver is missing:
-`collect_undefined_variable_diagnostics` builds the `ByRefResolver`
-closure once for the whole file and the scope collector calls it without
-saying where in the file the call sits. The fix is to give the resolver
-the call's offset (or the enclosing class) so the three relative names
-can be resolved the way every other consumer resolves them.
+No outstanding items.
 
 ## Not yet attributed
 
