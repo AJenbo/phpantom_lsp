@@ -974,23 +974,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b303-a-self-static-call-does-not-create-its-by-reference-arguments" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B303. A <code>self::</code> static call does not create its by-reference arguments
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1618,23 +1601,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b303-a-self-static-call-does-not-create-its-by-reference-arguments" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B303. A <code>self::</code> static call does not create its by-reference arguments
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1817,33 +1783,7 @@ conjuncts only, and letting the join own every disjunction.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b303-a-self-static-call-does-not-create-its-by-reference-arguments">B303. A <code>self::</code> static call does not create its by-reference arguments<a class="headerlink" href="#b303-a-self-static-call-does-not-create-its-by-reference-arguments" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">class Ops</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">{</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">    public static function fill(?string &amp;$key): void { $key = &#39;k&#39;; }</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">    public static function use(): string</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">    {</span>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="x">        self::fill($key);   // &quot;Undefined variable &#39;$key&#39;&quot;</span>
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="x">        return $key;        // and again here</span>
-<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="x">    }</span>
-<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="x">}</span>
-</code></pre></div>
-<p><code>resolve_by_ref_positions</code> in <code>diagnostics/undefined_variables/mod.rs</code>
-resolves a <code>ByRefCallKind::StaticMethod</code> by handing the spelled class
-name to <code>resolve_to_fqn</code>, which has nothing to say about <code>self</code>,
-<code>static</code> or <code>parent</code>. The by-reference positions therefore come back
-empty and the argument is read as a use of an undefined variable rather
-than the write that creates it. Spelling the class out
-(<code>Ops::fill($key)</code>) resolves and stays quiet, so the gap is only in the
-relative names.</p>
-<p>The enclosing class is what the resolver is missing:
-<code>collect_undefined_variable_diagnostics</code> builds the <code>ByRefResolver</code>
-closure once for the whole file and the scope collector calls it without
-saying where in the file the call sits. The fix is to give the resolver
-the call's offset (or the enclosing class) so the three relative names
-can be resolved the way every other consumer resolves them.</p>
+<p>No outstanding items.</p>
 <h2 id="not-yet-attributed">Not yet attributed<a class="headerlink" href="#not-yet-attributed" title="Permanent link">&para;</a></h2>
 <p>44 of the 2026-08-28 sweep's 93 distinct lines are not attributed to an
 entry above. Most are neighbours of a shape that already has an entry and
