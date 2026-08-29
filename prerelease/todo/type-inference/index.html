@@ -2260,7 +2260,11 @@ writes.</p>
 <code>closure_this_type</code>, and have <code>out_type()</code> prefer it over both the
 declared type and the null-default heuristic. Then the two write-back
 paths (<code>seed_pass_by_ref_primitives</code> and
-<code>try_apply_pass_by_reference_type</code>) pick it up with no further change.
+<code>try_apply_pass_by_reference_type</code>) pick it up with no further change,
+both going through <code>effective_out_type</code> in
+<code>type_engine/call_resolution/out_param.rs</code>. A declared tag is the
+author's word on what the callee writes, so it must also win over the
+reading that helper takes from the body.
 Once it is read, the pcre stub patches can declare <code>preg_match</code>'s and
 <code>preg_match_all</code>'s out types directly rather than inheriting
 phpstorm-stubs' <code>null|string[]</code>.</p>
