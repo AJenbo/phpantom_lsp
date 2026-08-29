@@ -3121,6 +3121,14 @@ pub(crate) fn apply_null_narrowing_truthy<'b>(
         seed_synthetic_key_if_needed(&var_name, scope, ctx);
         refine_non_empty_in_scope(&var_name, empty, scope);
     }
+    // `count($x) > 0` — the counted subject has entries, which is what a
+    // `foreach` guarded this way reads to know its body runs.
+    if let Some((var_name, non_empty)) = extract_count_emptiness_check(condition)
+        && non_empty
+    {
+        seed_synthetic_key_if_needed(&var_name, scope, ctx);
+        refine_non_empty_in_scope(&var_name, EmptyValue::Array, scope);
+    }
     // `$x === 0` / `$x !== []` and the rest of the strict comparisons
     // against a written-out value: the equal branch holds that value, the
     // unequal one holds everything else the subject could be.
@@ -3237,6 +3245,14 @@ pub(crate) fn apply_null_narrowing_inverse<'b>(
     {
         seed_synthetic_key_if_needed(&var_name, scope, ctx);
         refine_non_empty_in_scope(&var_name, empty, scope);
+    }
+    // When the condition is `count($x) === 0`, the inverse (else, or the
+    // fall-through of a guard that threw) means the subject has entries.
+    if let Some((var_name, non_empty)) = extract_count_emptiness_check(condition)
+        && !non_empty
+    {
+        seed_synthetic_key_if_needed(&var_name, scope, ctx);
+        refine_non_empty_in_scope(&var_name, EmptyValue::Array, scope);
     }
     // When the condition is a bare `$x` (truthy check), the inverse means
     // $x is falsy.  For nullable types (`T|null`), narrow to null.
@@ -3986,6 +4002,134 @@ pub(crate) fn extract_empty_value_check(
     };
     let name = expr_to_var_name(subject).or_else(|| narrowing::expr_to_subject_key(subject))?;
     Some((name, empty, non_empty))
+}
+
+/// Extract the subject of a `count()`/`sizeof()` comparison against an
+/// integer literal, plus whether the condition holds exactly when the
+/// subject has entries.
+///
+/// `count($x) > 0`, `count($x) !== 0` and `count($x) >= 1` all prove the
+/// subject is non-empty; `count($x) === 0` and `count($x) < 1` prove the
+/// opposite, which is what the inverse branch of the same `if` (or the
+/// fall-through of `if (count($x) === 0) { throw; }`) reads. A bound that
+/// neither proves — `count($x) < 5` says nothing, and `count($x) > -1` is
+/// vacuous — yields `None`.
+///
+/// The literal may be written on either side, and a leading `!` flips the
+/// answer.
+fn extract_count_emptiness_check(expr: &Expression<'_>) -> Option<(String, bool)> {
+    let (inner, negated) = narrowing::unwrap_condition_negation(expr);
+    let Expression::Binary(bin) = inner else {
+        return None;
+    };
+
+    // `count($x) OP n`, or `n OP count($x)` with the comparison flipped so
+    // the subject is always on the left.
+    let (subject, comparison, bound) =
+        match (count_call_subject(bin.lhs), count_call_subject(bin.rhs)) {
+            (Some(subject), _) => (
+                subject,
+                Comparison::of(&bin.operator)?,
+                count_bound(bin.rhs)?,
+            ),
+            (_, Some(subject)) => (
+                subject,
+                Comparison::of(&bin.operator)?.flipped(),
+                count_bound(bin.lhs)?,
+            ),
+            _ => return None,
+        };
+
+    // `count()` never returns a negative number, so a bound below zero
+    // makes the comparison say nothing about the subject either way.
+    let non_empty = match comparison {
+        Comparison::Greater if bound >= 0 => true,
+        Comparison::GreaterOrEqual if bound >= 1 => true,
+        Comparison::NotEqual if bound == 0 => true,
+        Comparison::Equal if bound == 0 => false,
+        Comparison::Less if bound == 1 => false,
+        Comparison::LessOrEqual if bound == 0 => false,
+        _ => return None,
+    };
+
+    Some((subject, non_empty != negated))
+}
+
+/// The comparison a `count()` check is written with, reduced to the six
+/// orderings so the subject can be moved to the left of it.
+#[derive(Clone, Copy)]
+enum Comparison {
+    Less,
+    LessOrEqual,
+    Greater,
+    GreaterOrEqual,
+    Equal,
+    NotEqual,
+}
+
+impl Comparison {
+    fn of(operator: &BinaryOperator<'_>) -> Option<Comparison> {
+        Some(match operator {
+            BinaryOperator::LessThan(_) => Comparison::Less,
+            BinaryOperator::LessThanOrEqual(_) => Comparison::LessOrEqual,
+            BinaryOperator::GreaterThan(_) => Comparison::Greater,
+            BinaryOperator::GreaterThanOrEqual(_) => Comparison::GreaterOrEqual,
+            BinaryOperator::Equal(_) | BinaryOperator::Identical(_) => Comparison::Equal,
+            BinaryOperator::NotEqual(_) | BinaryOperator::NotIdentical(_) => Comparison::NotEqual,
+            _ => return None,
+        })
+    }
+
+    /// The comparison that holds when its two operands swap places.
+    fn flipped(self) -> Comparison {
+        match self {
+            Comparison::Less => Comparison::Greater,
+            Comparison::LessOrEqual => Comparison::GreaterOrEqual,
+            Comparison::Greater => Comparison::Less,
+            Comparison::GreaterOrEqual => Comparison::LessOrEqual,
+            Comparison::Equal => Comparison::Equal,
+            Comparison::NotEqual => Comparison::NotEqual,
+        }
+    }
+}
+
+/// The subject of a `count($x)`/`sizeof($x)` call, as a narrowing key.
+fn count_call_subject(expr: &Expression<'_>) -> Option<String> {
+    let Expression::Call(Call::Function(call)) = unwrap_parens(expr) else {
+        return None;
+    };
+    let Expression::Identifier(ident) = call.function else {
+        return None;
+    };
+    let name = crate::util::strip_fqn_prefix(bytes_to_str(ident.value())).to_ascii_lowercase();
+    if name != "count" && name != "sizeof" {
+        return None;
+    }
+    // `count($x, COUNT_RECURSIVE)` still counts the top level's entries,
+    // so the second argument does not change what a zero/non-zero result
+    // proves about the subject.
+    let first = call.argument_list.arguments.first()?;
+    let arg = match first {
+        Argument::Positional(pos) => pos.value,
+        Argument::Named(named) => named.value,
+    };
+    expr_to_var_name(arg).or_else(|| narrowing::expr_to_subject_key(arg))
+}
+
+/// The bound a `count()` comparison is written against: a plain decimal
+/// integer literal, optionally negated. A hexadecimal, octal, or
+/// separator-laden literal is not worth decoding for the handful of bounds
+/// this reads.
+fn count_bound(expr: &Expression<'_>) -> Option<i64> {
+    match unwrap_parens(expr) {
+        Expression::Literal(Literal::Integer(lit)) => bytes_to_str(lit.raw).parse().ok(),
+        Expression::UnaryPrefix(prefix)
+            if matches!(prefix.operator, UnaryPrefixOperator::Negation(_)) =>
+        {
+            count_bound(prefix.operand).map(|value| -value)
+        }
+        _ => None,
+    }
 }
 
 /// Extract the subject of a strict comparison against a literal value:

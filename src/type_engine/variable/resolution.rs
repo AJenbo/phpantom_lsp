@@ -1824,6 +1824,22 @@ pub(super) fn merge_nested_array_write(
     keys: &[ArrayWriteKey],
     value_type: &PhpType,
 ) -> PhpType {
+    // Every level a write descends through holds at least the entry the
+    // write put there, so the result is non-empty even when the tracked
+    // key/value pair says nothing about which keys those are. That is what
+    // lets a later `foreach` over the array know its body runs, and so
+    // keeps a `null` sentinel assigned ahead of that loop from surviving
+    // it. A write on only some paths gives the promise back at the branch
+    // join, where `array{} | non-empty-array<K, V>` widens to
+    // `array<K, V>`.
+    merge_nested_array_write_inner(base, keys, value_type).non_empty_array_form()
+}
+
+fn merge_nested_array_write_inner(
+    base: &PhpType,
+    keys: &[ArrayWriteKey],
+    value_type: &PhpType,
+) -> PhpType {
     debug_assert!(!keys.is_empty());
     match &keys[0] {
         ArrayWriteKey::Shape(key) => {

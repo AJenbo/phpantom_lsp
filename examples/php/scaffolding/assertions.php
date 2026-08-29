@@ -2001,6 +2001,16 @@ function runDemoAssertions(): void
 
     assert((new ClosureParamInferenceDemo())->docblockedClosure() === 'blue', 'a closure typed by the docblock above its assignment runs on the values that docblock describes');
 
+    // ── Arrays the code proved have entries ─────────────────────────────
+    $proven = new ProvenNonEmptyDemo();
+    $penList = [new Scaffolding\Pen('red'), new Scaffolding\Pen('blue')];
+    assert($proven->afterCountGuard($penList)->color() === 'blue', 'a loop guarded by count() > 0 runs, so the sentinel is gone');
+    assert($proven->afterCountGuard([])->color() === 'black', 'the empty case never enters the guarded branch');
+    assert($proven->afterEmptyGuard($penList)->color() === 'blue', 'the fall-through of a count() === 0 guard iterates at least once');
+    assert($proven->afterElementWrite(new Scaffolding\Pen('green'))->color() === 'green', 'an array an element was written to has that element to iterate');
+    assert($proven->afterConditionalWrite(new Scaffolding\Pen('gold'), true)?->color() === 'gold', 'the branch that wrote the element leaves it there');
+    assert($proven->afterConditionalWrite(new Scaffolding\Pen('gold'), false) === null, 'the branch that wrote nothing leaves the loop with no iterations');
+
     echo "All assertions passed.\n";
 }
 

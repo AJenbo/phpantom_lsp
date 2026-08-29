@@ -2210,3 +2210,163 @@ function process(Holder $holder, Expr $other): void {{
         "the `&&` operand proves more than the branch did, got: {errors:?}"
     );
 }
+
+// ─── `count()` and element writes prove an array has entries ────────────────
+
+/// `count($xs) > 0` is the ordinary way to ask whether an array has
+/// entries, so the branch it guards has to carry that proof — which is
+/// what a `foreach` inside it reads to know its body runs.
+#[test]
+fn a_positive_count_proves_the_array_has_entries() {
+    let backend = create_test_backend();
+    let uri = "file:///count_positive.php";
+    let content = r#"<?php
+/** @param string[] $xs */
+function probe(array $xs): void {
+    if (count($xs) > 0) {
+        echo $xs; // <-- here
+    }
+}
+"#;
+    assert!(
+        hover_marked(&backend, uri, content).contains("$xs = non-empty-array<string>"),
+        "got: {}",
+        hover_marked(&backend, uri, content)
+    );
+}
+
+/// The same proof read off the other side of the comparison, and off the
+/// fall-through of a guard clause that ruled the empty case out.
+#[test]
+fn a_zero_count_guard_leaves_the_array_non_empty_below_it() {
+    let backend = create_test_backend();
+    let uri = "file:///count_zero_guard.php";
+    let content = r#"<?php
+/** @param string[] $xs */
+function probe(array $xs): void {
+    if (count($xs) === 0) {
+        throw new RuntimeException('empty');
+    }
+    echo $xs; // <-- here
+}
+"#;
+    assert!(
+        hover_marked(&backend, uri, content).contains("$xs = non-empty-array<string>"),
+        "got: {}",
+        hover_marked(&backend, uri, content)
+    );
+
+    let uri = "file:///count_zero_flipped.php";
+    let content = r#"<?php
+/** @param string[] $xs */
+function probe(array $xs): void {
+    if (0 < count($xs)) {
+        echo $xs; // <-- here
+    }
+}
+"#;
+    assert!(
+        hover_marked(&backend, uri, content).contains("$xs = non-empty-array<string>"),
+        "got: {}",
+        hover_marked(&backend, uri, content)
+    );
+}
+
+/// A bound `count()` cannot fall below says nothing: `count($xs) < 5` is
+/// true of the empty array too.
+#[test]
+fn a_count_bound_that_proves_nothing_leaves_the_array_alone() {
+    let backend = create_test_backend();
+    let uri = "file:///count_weak_bound.php";
+    let content = r#"<?php
+/** @param string[] $xs */
+function probe(array $xs): void {
+    if (count($xs) < 5) {
+        echo $xs; // <-- here
+    }
+}
+"#;
+    assert!(
+        hover_marked(&backend, uri, content).contains("$xs = array<string>"),
+        "got: {}",
+        hover_marked(&backend, uri, content)
+    );
+}
+
+/// A loop the caller proved runs cannot leave the `null` a sentinel was
+/// seeded with: every iteration assigns it, and there is at least one.
+#[test]
+fn a_loop_over_a_counted_array_clears_the_null_sentinel() {
+    let backend = create_test_backend();
+    let uri = "file:///counted_loop_sentinel.php";
+    let content = r#"<?php
+class Pen {}
+/** @param string[] $xs */
+function probe(array $xs): void {
+    $last = null;
+    if (count($xs) > 0) {
+        foreach ($xs as $x) {
+            $last = new Pen();
+        }
+        echo $last; // <-- here
+    }
+}
+"#;
+    assert!(
+        hover_marked(&backend, uri, content).contains("$last = Pen"),
+        "got: {}",
+        hover_marked(&backend, uri, content)
+    );
+}
+
+/// An element write puts an entry there, so the array it wrote into has
+/// one — and a `foreach` over it afterwards runs.
+#[test]
+fn an_element_write_proves_the_array_has_entries() {
+    let backend = create_test_backend();
+    let uri = "file:///write_non_empty.php";
+    let content = r#"<?php
+class Pen {}
+function probe(string $key): void {
+    $items = [];
+    $items[] = $key;
+    $last = null;
+    foreach ($items as $item) {
+        $last = new Pen();
+    }
+    echo $last; // <-- here
+}
+"#;
+    assert!(
+        hover_marked(&backend, uri, content).contains("$last = Pen"),
+        "got: {}",
+        hover_marked(&backend, uri, content)
+    );
+}
+
+/// A write on only one path gives the promise back at the join, so the
+/// sentinel survives a loop over what it produced.
+#[test]
+fn a_conditional_element_write_leaves_the_array_possibly_empty() {
+    let backend = create_test_backend();
+    let uri = "file:///conditional_write_empty.php";
+    let content = r#"<?php
+class Pen {}
+function probe(string $key, bool $flag): void {
+    $items = [];
+    if ($flag) {
+        $items[] = $key;
+    }
+    $last = null;
+    foreach ($items as $item) {
+        $last = new Pen();
+    }
+    echo $last; // <-- here
+}
+"#;
+    assert!(
+        hover_marked(&backend, uri, content).contains("$last = null|Pen"),
+        "got: {}",
+        hover_marked(&backend, uri, content)
+    );
+}

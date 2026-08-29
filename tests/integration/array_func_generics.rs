@@ -673,8 +673,8 @@ function probe(string $contents, int $start): void {
         content,
         &[
             ("$offsets", "array<int, string>"),
-            ("$doubled", "array<int, string>"),
-            ("$counted", "array<int, string>"),
+            ("$doubled", "non-empty-array<int, string>"),
+            ("$counted", "non-empty-array<int, string>"),
         ],
     );
 }

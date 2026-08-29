@@ -681,14 +681,17 @@ function test(bool $flag, string $key, $iterator, $union_iterator) {
         resolve_literal_test_var(content, "$nested"),
         "array{meta: array{'a'|'b'}}"
     );
-    assert_eq!(resolve_literal_test_var(content, "$pushed"), "list<string>");
+    assert_eq!(
+        resolve_literal_test_var(content, "$pushed"),
+        "non-empty-list<string>"
+    );
     assert_eq!(
         resolve_literal_test_var(content, "$written"),
         "array{state: string}"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$dynamic"),
-        "array<string, int>"
+        "non-empty-array<string, int>"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$from_variable"),
@@ -885,59 +888,59 @@ function test(bool $flag, ?int $nullable_key, string $broad_string_key) {
 
     assert_eq!(
         resolve_literal_test_var(content, "$int_map"),
-        "array<int, string>"
+        "non-empty-array<int, string>"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$float_map"),
-        "array<int, string>"
+        "non-empty-array<int, string>"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$union_map"),
-        "array<int|string, string>"
+        "non-empty-array<int|string, string>"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$null_map"),
-        "array<string, string>"
+        "non-empty-array<string, string>"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$nullable_map"),
-        "array<int|string, string>"
+        "non-empty-array<int|string, string>"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$decimal_string_map"),
-        "array<int, string>"
+        "non-empty-array<int, string>"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$leading_zero_map"),
-        "array<string, string>"
+        "non-empty-array<string, string>"
     );
     // A broad `string` key stays `string`: only a *literal* decimal-integer
     // string is known to become an int key at runtime.
     assert_eq!(
         resolve_literal_test_var(content, "$broad_string_map"),
-        "array<string, string>"
+        "non-empty-array<string, string>"
     );
     // An explicit `(string)` cast and an int-typed step expression keep their
     // own key domain rather than falling back to `array-key`.
     assert_eq!(
         resolve_literal_test_var(content, "$cast_map"),
-        "array<string, string>"
+        "non-empty-array<string, string>"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$pre_increment_map"),
-        "array<int, string>"
+        "non-empty-array<int, string>"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$post_increment_map"),
-        "array<int, string>"
+        "non-empty-array<int, string>"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$direct_decimal_map"),
-        "array<int, string>"
+        "non-empty-array<int, string>"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$direct_negative_map"),
-        "array<int, string>"
+        "non-empty-array<int, string>"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$direct_leading_zero_map"),
@@ -1021,7 +1024,7 @@ fn element_writes_refine_the_type_they_are_written_into() {
             vec![shape("rows"), ArrayWriteKey::Append],
             "string",
         ),
-        "array{rows: list<string>}"
+        "array{rows: non-empty-list<string>}"
     );
     // A dynamic key may land on any entry, so the shape widens instead of
     // standing still.
@@ -1034,26 +1037,29 @@ fn element_writes_refine_the_type_they_are_written_into() {
             }],
             "int",
         ),
-        "array<string, string|int>"
+        "non-empty-array<string, string|int>"
     );
     // A keyed array keeps its key and value types through a literal-key
     // write and through an append.
     assert_eq!(
         write("array<string, int>", vec![shape("name")], "int"),
-        "array<string, int>"
+        "non-empty-array<string, int>"
     );
     assert_eq!(
         write("array<string, int>", vec![ArrayWriteKey::Append], "int"),
-        "array<string|int, int>"
+        "non-empty-array<string|int, int>"
     );
     // An auto-vivified level starts from what the base says sits there.
+    // The written key is non-empty afterwards, but it joins the entries
+    // the write did not touch, so the outer value domain stays the wider
+    // `list<string>`.
     assert_eq!(
         write(
             "array<string, list<string>>",
             vec![shape("words"), ArrayWriteKey::Append],
             "string",
         ),
-        "array<string, list<string>>"
+        "non-empty-array<string, list<string>>"
     );
 }
 
@@ -1298,8 +1304,8 @@ function test() {
         "List element type should contain User, got: {ts}"
     );
     assert!(
-        ts.starts_with("list<"),
-        "Should be a list<> type, got: {ts}"
+        ts.starts_with("non-empty-list<"),
+        "Should be a non-empty-list<> type, got: {ts}"
     );
 }
 
@@ -1362,7 +1368,7 @@ function test() {
     assert!(!results.is_empty(), "Should resolve $items to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
     assert_eq!(
-        ts, "list<string>",
+        ts, "non-empty-list<string>",
         "Duplicate pushes of same type should not duplicate, got: {ts}"
     );
 }
@@ -1396,7 +1402,7 @@ function test() {
     assert!(!results.is_empty(), "Should resolve $x to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
     assert_eq!(
-        ts, "list<string>",
+        ts, "non-empty-list<string>",
         "Reassignment should reset; only 'string' push should remain, got: {ts}"
     );
 }

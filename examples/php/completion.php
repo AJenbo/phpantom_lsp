@@ -5024,6 +5024,79 @@ class ConditionalLoopShapeDemo
 }
 
 
+// ── Arrays the code proved have entries ─────────────────────────────────────
+//
+// A `null` seeded above a loop only survives the loop if the loop might run
+// zero times.  `count($xs) > 0`, the fall-through of `count($xs) === 0`, and
+// writing an element all say the array has entries, so a loop over it runs at
+// least once and the sentinel is gone by the time the code below reads it.
+
+class ProvenNonEmptyDemo
+{
+    /** @param list<Scaffolding\Pen> $pens */
+    public function afterCountGuard(array $pens): Scaffolding\Pen
+    {
+        $last = null;
+        if (count($pens) > 0) {
+            foreach ($pens as $pen) {
+                $last = $pen;
+            }
+
+            // Try: `$last->` — Scaffolding\Pen, not Scaffolding\Pen|null
+            return $last;                         // Scaffolding\Pen
+        }
+
+        return new Scaffolding\Pen('black');
+    }
+
+    /** @param list<Scaffolding\Pen> $pens */
+    public function afterEmptyGuard(array $pens): Scaffolding\Pen
+    {
+        if (count($pens) === 0) {
+            throw new \RuntimeException('no pens');
+        }
+
+        // $pens is non-empty-list<Scaffolding\Pen> below the guard.
+        $last = null;
+        foreach ($pens as $pen) {
+            $last = $pen;
+        }
+
+        return $last;                             // Scaffolding\Pen
+    }
+
+    public function afterElementWrite(Scaffolding\Pen $pen): Scaffolding\Pen
+    {
+        $collected = [];
+        $collected[] = $pen;                      // non-empty-list<Scaffolding\Pen>
+
+        $last = null;
+        foreach ($collected as $item) {
+            $last = $item;
+        }
+
+        return $last;                             // Scaffolding\Pen
+    }
+
+    /** A write on only one path gives the promise back where they join. */
+    public function afterConditionalWrite(Scaffolding\Pen $pen, bool $keep): ?Scaffolding\Pen
+    {
+        $collected = [];
+        if ($keep) {
+            $collected[] = $pen;                  // array{}|non-empty-list<Scaffolding\Pen>
+        }
+
+        $last = null;
+        foreach ($collected as $item) {
+            $last = $item;
+        }
+
+        // Try: hover `$last` — Scaffolding\Pen|null, since the loop may not run
+        return $last;                             // Scaffolding\Pen|null
+    }
+}
+
+
 // ── Conditional Shape Key Completion ────────────────────────────────────────
 // When an array shape gains a key inside an if-block, completion resolves
 // through the union of shapes produced by branch merging.

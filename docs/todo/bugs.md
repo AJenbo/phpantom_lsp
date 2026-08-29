@@ -12,14 +12,15 @@ scale defined in [`docs/todo.md`](../todo.md); that table is also where
 each bug's row lives in the current sprint/backlog.
 
 All entries below come from triage of the PHPStan Source sample project,
-re-swept on 2026-08-29 (84 sites, down from 98 at the 2026-08-28 sweep,
-126 before it and 180 at the 2026-08-27 triage). Site counts refer to
-that sweep; every mechanism was either reproduced in a minimal project or
-confirmed by reading the guard construct PHPStan honours. The sweep is a
-snapshot, so a site named here may already read differently: re-run the
-analyser before working an entry, and trim the shapes that no longer
-reproduce. Line numbers drift by a line or two between sweeps — match on
-the surrounding construct, not on the number.
+re-swept on 2026-08-29 (79 sites, down from 84 earlier the same day, 98
+at the 2026-08-28 sweep, 126 before it and 180 at the 2026-08-27
+triage). Site counts refer to that sweep; every mechanism was either
+reproduced in a minimal project or confirmed by reading the guard
+construct PHPStan honours. The sweep is a snapshot, so a site named here
+may already read differently: re-run the analyser before working an
+entry, and trim the shapes that no longer reproduce. Line numbers drift
+by a line or two between sweeps — match on the surrounding construct, not
+on the number.
 
 Entries are grouped by the mechanism that has to change, not by the
 symptom that surfaced: one entry is one root cause, however many shapes
@@ -30,7 +31,7 @@ one entry. Defects too small to earn a row of their own are collected in
 [B301](#b301-narrowing-defects-with-a-single-site-each) rather than given
 one each.
 
-Of the 79 distinct lines the latest sweep reports, 35 are attributed to
+Of the 74 distinct lines the latest sweep reports, 30 are attributed to
 an entry below. The unattributed remainder is described in
 [Not yet attributed](#not-yet-attributed).
 
@@ -56,7 +57,7 @@ No outstanding items.
 
 **Impact: High · Complexity: Very High**
 
-12 sites, and one root cause: what the narrowing store keys a proof
+14 sites, and one root cause: what the narrowing store keys a proof
 against, and what it takes to read that proof back. PHPStan keys
 specified types by expression string and keeps them until something
 writes to that expression, so a proof recorded about one spelling is
@@ -98,7 +99,7 @@ Sites: `src/Analyser/NodeScopeResolver.php:1702, 5000, 5103`,
 `use`-captured by a closure).
 
 **b. Re-testing a condition doesn't re-apply what it proved the first
-time** (4 sites). Two shapes PHPStan's specified-types machinery
+time** (6 sites). Two shapes PHPStan's specified-types machinery
 handles:
 
 ```php
@@ -119,55 +120,60 @@ non-nullness. The one `TypeCombinator` site is the else arm of
 `$constArray = $constArrayIsI ? $types[$i] : $types[$j];`, which needs
 shape 2: `!$isI` combined with the enclosing `$isI || $isJ` is what
 proves the other dim.
+
+The two `OptimizedDirectorySourceLocator` sites are shape 1 one hop
+further out: `if ($identifier->isClass()) { … $files = [$file]; }`
+assigns a non-empty array, and the same `isClass()` re-tested below
+guards a `foreach ($files …)` whose body is the only thing that fills
+`$fetchedClassNode`/`$fetchedFile`. Re-applying what the first test
+proved makes the array non-empty there, and a loop over an array proven
+non-empty already clears a `null` sentinel.
 Sites: `src/Analyser/ExprHandler/FuncCallHandler.php:977`,
 `src/Analyser/ExprHandler/MethodCallHandler.php:350`,
 `src/Analyser/ExprHandler/StaticCallHandler.php:455`,
-`src/Type/TypeCombinator.php:1994`.
+`src/Type/TypeCombinator.php:1994`,
+`src/Reflection/BetterReflection/SourceLocator/OptimizedDirectorySourceLocator.php:149, 150`.
 
-### B274. A null-seeded accumulator filled in a loop keeps `null` (or loses its type entirely)
+### B274. An unresolvable call inside a loop erases the accumulator instead of naming what it could not find
 
-**Impact: High · Complexity: High**
+**Impact: Medium · Complexity: High**
 
-19 sites, two symptoms of one shape — PHPStan's own scope-merging
-idiom, repeated across five files:
+13 sites, all PHPStan's own scope-merging idiom:
 
 ```php
 $finalScope = null;
 foreach ($executionEnds as $e) {
-    $endScope = $e->getStatementResult()->getScope();
+    $endScope = $e->getStatementResult()->getScope();   // Scope, not MutatingScope
     if ($finalScope === null) { $finalScope = $endScope; continue; }
-    $finalScope = $finalScope->mergeWith($endScope);   // unresolved from here on
+    $finalScope = $finalScope->mergeWith($endScope);
 }
-if ($finalScope !== null) { $finalScope->processNodes(...); }  // still unresolved
 ```
 
-The `=== null` early-continue must leave the accumulator non-null on
-the merge line, and the loop fixed point must not poison the variable
-so badly that even an explicit `!== null` guard after the loop can't
-recover it. The same root also leaves the accumulator nullable after a
-loop that provably runs (`if (count($xs) > 0) { ... foreach ($xs) ... }`
-or a literal `$files = [$file]`), and after a foreach over a local
-array that every branch pushed into (reproduced minimally; also
-`src/Analyser/TypeSpecifier.php:542`).
+`mergeWith()` is declared on `MutatingScope`, not on the `Scope`
+interface `StatementResult::getScope()` returns, so a diagnostic on the
+merge line is correct. What is wrong is *which* diagnostic: an
+assignment whose right-hand side does not resolve records the variable
+as unknown, unknown is the top of the join lattice, and the loop's fixed
+point therefore feeds unknown back into the next iteration. By the last
+walk the seed type is gone, so instead of "method `mergeWith` not found
+on class `Scope`" — which is what the same call reports outside a loop —
+the merge line reports "type of `$finalScope` could not be resolved",
+and the reads below it that would have resolved fine against `Scope`
+report unresolvable receivers of their own
+(`SetNonVirtualPropertyHookAssignRule.php:80, 81, 90` call
+`hasExpressionType()`, which `Scope` does declare, and
+`NodeScopeResolver.php:1121` reads `$scope->getClassReflection()`).
 
-An inline `/** @var … */` on the assignment inside the loop does not
-rescue it either: the accumulator still leaves the loop nullable, so
-`return $parameterSchema;` reports the `null` against a declared
-`Schema` (`src/DependencyInjection/ContainerFactory.php:403`).
+The fix is to keep the seed type in the fixed point beside the unknown
+result rather than letting the join collapse to unknown. The collapse is
+deliberate — it is what stops a branch-local proof about an untyped
+subject from escaping a join (see `ScopeState::merge_branch`) — so this
+needs the join to distinguish "no type was ever known" from "a type was
+known and one path lost it", not a relaxation of the existing rule.
 
-The damage spreads one hop: `$scope = $finalScope->rememberConstructorScope()`
-leaves `$scope` unresolved too, so the next use of it reports an
-unresolvable receiver of its own
-(`src/Analyser/NodeScopeResolver.php:1121`, whose subject reads
-`$scope->getClassReflection()`). Nothing is wrong with that line —
-recovering the accumulator recovers it.
-
-Sites: `src/Analyser/NodeScopeResolver.php:1103, 1112, 1116, 1121, 1903, 2001, 2153, 5406, 5414`,
+Sites: `src/Analyser/NodeScopeResolver.php:1103, 1112, 1116, 1121, 5406, 5414`,
 `src/Rules/Properties/SetNonVirtualPropertyHookAssignRule.php:64, 72, 80, 81, 90`,
-`src/Rules/TooWideTypehints/TooWideParameterOutTypeCheck.php:47, 56`,
-`src/Reflection/BetterReflection/SourceLocator/OptimizedDirectorySourceLocator.php:149, 150`,
-`src/Analyser/TypeSpecifier.php:542`,
-`src/DependencyInjection/ContainerFactory.php:403`.
+`src/Rules/TooWideTypehints/TooWideParameterOutTypeCheck.php:47, 56`.
 
 ### B301. Narrowing defects with a single site each
 

@@ -879,6 +879,11 @@ pub(crate) fn absorb_non_empty_refinements(types: &mut Vec<PhpType>) -> bool {
         return false;
     }
 
+    let mut changed = absorb_empty_shape_into_non_empty_array(types);
+    if types.len() < 2 {
+        return true;
+    }
+
     let keep: Vec<bool> = types
         .iter()
         .map(|ty| match unrefined_base(ty) {
@@ -896,7 +901,42 @@ pub(crate) fn absorb_non_empty_refinements(types: &mut Vec<PhpType>) -> bool {
         index += 1;
         retain
     });
-    types.len() != before
+    changed |= types.len() != before;
+    changed
+}
+
+/// Widen `array{} | non-empty-array<K, V>` back to `array<K, V>`.
+///
+/// The empty shape supplies the one value the refinement rules out, so
+/// between them the two members are exactly the unrefined base. This is
+/// the join a conditional element write produces (`$rows = []; if ($c) {
+/// $rows[$id] = …; }`), where spelling both halves out would read as two
+/// different types and would let a read of any key pick up the empty
+/// half's missing-key `null`.
+///
+/// Only array refinements pair with an empty *array* shape; a
+/// `non-empty-string` beside one is an unrelated union member.
+fn absorb_empty_shape_into_non_empty_array(types: &mut Vec<PhpType>) -> bool {
+    if !types.iter().any(PhpType::is_empty_array_shape)
+        || !types.iter().any(is_non_empty_array_refinement)
+    {
+        return false;
+    }
+    for ty in types.iter_mut() {
+        if is_non_empty_array_refinement(ty)
+            && let Some(base) = unrefined_base(ty)
+        {
+            *ty = base;
+        }
+    }
+    types.retain(|ty| !ty.is_empty_array_shape());
+    true
+}
+
+/// Whether a type is a `non-empty-` refinement of an array type, as
+/// opposed to `non-empty-string` and friends.
+fn is_non_empty_array_refinement(ty: &PhpType) -> bool {
+    is_non_empty_refinement(ty) && ty.is_array_like()
 }
 
 /// The name a `non-empty-` type refines, or `None` for anything else.

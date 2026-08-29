@@ -444,7 +444,7 @@ function test(bool $flag): void {
 
     let pushed = hover_at(&backend, uri, content, 7, 42).expect("hover on $pushed");
     assert!(
-        hover_text(&pushed).contains("$pushed = list<string>"),
+        hover_text(&pushed).contains("$pushed = non-empty-list<string>"),
         "a push after construction should widen the stored values: {}",
         hover_text(&pushed)
     );
@@ -469,7 +469,7 @@ function test(array $words): void {
 
     let grouped = hover_at(&backend, uri, content, 9, 10).expect("hover on $grouped");
     assert!(
-        hover_text(&grouped).contains("$grouped = array<int, list<string>>"),
+        hover_text(&grouped).contains("$grouped = array<int, non-empty-list<string>>"),
         "an append below a dynamic key should refine the inner element type: {}",
         hover_text(&grouped)
     );
@@ -477,7 +477,7 @@ function test(array $words): void {
     // The key is optional because a zero-iteration loop never writes it.
     let by_letter = hover_at(&backend, uri, content, 9, 20).expect("hover on $byLetter");
     assert!(
-        hover_text(&by_letter).contains("$byLetter = array{all?: list<string>}"),
+        hover_text(&by_letter).contains("$byLetter = array{all?: non-empty-list<string>}"),
         "an append below a literal key should refine that shape entry: {}",
         hover_text(&by_letter)
     );
@@ -512,7 +512,7 @@ function test(string $key): void {
 
     let groups = hover_at(&backend, uri, content, 12, 16).expect("hover on $groups");
     assert!(
-        hover_text(&groups).contains("$groups = array{pens: list<Pen>}"),
+        hover_text(&groups).contains("$groups = array{pens: non-empty-list<Pen>}"),
         "an append below a key refines what that key holds instead of \
          leaving the literal it was initialised with: {}",
         hover_text(&groups)
@@ -520,7 +520,7 @@ function test(string $key): void {
 
     let slots = hover_at(&backend, uri, content, 12, 26).expect("hover on $slots");
     assert!(
-        hover_text(&slots).contains("$slots = array<string, int>"),
+        hover_text(&slots).contains("$slots = non-empty-array<string, int>"),
         "a dynamic key may land on any entry, so the shape widens: {}",
         hover_text(&slots)
     );
@@ -544,14 +544,14 @@ function test(array $counts, array $words): void {
 
     let counts = hover_at(&backend, uri, content, 8, 10).expect("hover on $counts");
     assert!(
-        hover_text(&counts).contains("$counts = array<string, int>"),
+        hover_text(&counts).contains("$counts = non-empty-array<string, int>"),
         "a write to one key says nothing about the keys already there: {}",
         hover_text(&counts)
     );
 
     let words = hover_at(&backend, uri, content, 8, 20).expect("hover on $words");
     assert!(
-        hover_text(&words).contains("$words = array<string, list<string>>"),
+        hover_text(&words).contains("$words = non-empty-array<string, list<string>>"),
         "an append below a key builds on the value type the array declares: {}",
         hover_text(&words)
     );

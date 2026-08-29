@@ -2613,6 +2613,8 @@ impl PhpType {
 
     /// The non-empty counterpart of an array type: `array<K, V>` becomes
     /// `non-empty-array<K, V>` and `list<T>` becomes `non-empty-list<T>`.
+    /// The `T[]` slice spelling is sugar for `array<T>` and refines the
+    /// same way.
     ///
     /// Everything else comes back unchanged, including a shape (its own
     /// entries already say whether it can be empty) and a type that is
@@ -2626,6 +2628,9 @@ impl PhpType {
             }
             TypeKind::Generic(generic) if generic.name == "list" => {
                 PhpType::generic_atom(atom("non-empty-list"), generic.args.clone())
+            }
+            TypeKind::Array(element) => {
+                PhpType::generic_atom(atom("non-empty-array"), vec![element.clone()])
             }
             _ => self.clone(),
         }

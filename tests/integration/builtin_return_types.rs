@@ -350,7 +350,10 @@ final class Excerpt {
             .lines()
             .find_map(|l| l.split_once(" = ").map(|(_, ty)| ty.trim().to_string()))
             .unwrap_or_else(|| panic!("no assignment in hover on line {line}: {}", markup.value));
-        assert_eq!(&got, "array<int, string>", "$result on line {line}");
+        assert_eq!(
+            &got, "non-empty-array<int, string>",
+            "$result on line {line}"
+        );
         checked += 1;
     }
     assert_eq!(
