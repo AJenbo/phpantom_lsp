@@ -1384,6 +1384,15 @@ function runDemoAssertions(): void
         }
         assert(is_string($openKey), 'Past an `is_int` guard the surviving key must be string');
     }
+    $collectedKeys = [];
+    foreach ($keyedOpen as $collectedKey => $collectedPen) {
+        assert($collectedPen instanceof Scaffolding\Pen, 'An open-keyed foreach value must be Scaffolding\Pen');
+        $collectedKeys[] = $collectedKey;
+    }
+    foreach ($collectedKeys as $collected) {
+        assert(is_int($collected) || is_string($collected),
+            'Keys collected out of a `Pen[]` stay the whole array-key domain');
+    }
 
     // ── Literal values surviving an array read ──────────────────────────
     $litNumbers = [1, 1.5, '123'];

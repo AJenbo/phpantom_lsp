@@ -101,7 +101,6 @@ unlikely to move the needle for most users.
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Medium      |
 |     | **[Bugs](todo/bugs.md)**                                                                                                                                                    |             |             |
 | B310 | [An assignment expression as a call receiver never resolves](todo/bugs.md#b310-an-assignment-expression-as-a-call-receiver-never-resolves)                                  | Medium      | Medium      |
-| B311 | [A benevolent union loses its leniency once collected into an array](todo/bugs.md#b311-a-benevolent-union-loses-its-leniency-once-collected-into-an-array)                  | Medium      | Medium      |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |

@@ -408,6 +408,89 @@ function probe(array $config, array $guarded): void
     );
 }
 
+/// Collecting an invented union into an array keeps its leniency: the
+/// element type of the array is still the union nobody wrote, so a declared
+/// element type that covers one branch of it is satisfied. A member the code
+/// did spell out is enforced as usual, whichever side contributed it.
+#[test]
+fn a_benevolent_element_keeps_its_leniency_inside_a_container() {
+    let content = r#"<?php
+declare(strict_types=1);
+
+/**
+ * @param mixed[] $config
+ * @return string[]
+ */
+function appended(array $config): array
+{
+    $out = [];
+    foreach ($config as $key => $value) {
+        $out[] = $key;
+    }
+    return $out;
+}
+
+/**
+ * @param mixed[] $config
+ * @return string[]
+ */
+function keyed(array $config): array
+{
+    $out = [];
+    foreach ($config as $key => $value) {
+        $out[$key] = $key;
+    }
+    return $out;
+}
+
+/**
+ * @param mixed[] $config
+ * @return string[]
+ */
+function alsoSpelledOut(array $config): array
+{
+    $out = [];
+    foreach ($config as $key => $value) {
+        $out[] = $key;
+        $out[] = 5;
+    }
+    return $out;
+}
+
+/**
+ * @param array<string, int> $config
+ * @return string[]
+ */
+function declaredElement(array $config): array
+{
+    $out = [];
+    foreach ($config as $key => $value) {
+        $out[] = $value;
+    }
+    return $out;
+}
+"#;
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///benevolent_container_element.php";
+    backend.update_ast(uri, content);
+    let mut diagnostics = Vec::new();
+    backend.collect_return_type_diagnostics(uri, content, &mut diagnostics);
+    let messages: Vec<String> = diagnostics.into_iter().map(|d| d.message).collect();
+    assert!(
+        messages.iter().any(|m| m.contains("list<int|string>")),
+        "a spelled-out `int` beside the invented union is still enforced: {messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m.contains("list<int>")),
+        "an element the docblock declared is still enforced: {messages:?}"
+    );
+    assert_eq!(
+        messages.len(),
+        2,
+        "an array collected out of open key-domain keys must not be reported: {messages:?}"
+    );
+}
+
 /// An array the walk watched being built inside a loop keeps its element
 /// type when a later iteration reads it back through a destructuring
 /// `foreach`. The first walk of the outer loop reaches the inner `foreach`

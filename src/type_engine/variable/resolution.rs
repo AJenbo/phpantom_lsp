@@ -2137,7 +2137,8 @@ pub(super) fn merge_push_type(base: &PhpType, value_type: &PhpType) -> PhpType {
     let value_type = value_type.widen_scalar_literals();
 
     // Extract existing element types from the base.
-    if let Some(existing_elem) = base.iterable_element_type() {
+    let existing_elem = base.iterable_element_type();
+    if let Some(existing_elem) = &existing_elem {
         for member in existing_elem.union_members() {
             if !member.is_empty() {
                 elem_types.push(member.clone());
@@ -2156,9 +2157,34 @@ pub(super) fn merge_push_type(base: &PhpType, value_type: &PhpType) -> PhpType {
         return PhpType::array();
     }
 
-    let elem_type = PhpType::join_runtime_value_types(elem_types);
+    let elem_type = join_element_types(elem_types, &value_type, existing_elem.as_ref());
 
     PhpType::list(elem_type)
+}
+
+/// Join the member types collected for a container's element position,
+/// keeping the benevolence marker the collection dropped.
+///
+/// Splitting a union into its members loses the marker sitting above them,
+/// and an element type that was lenient on its own has to stay lenient once
+/// it is inside `list<…>` / `array<…, …>`: the element comparison is the
+/// same comparison a direct return makes, so a union nobody wrote down
+/// would otherwise be enforced against every declared element type the
+/// moment it is collected into a container. The marker only survives while
+/// every contributing source carried it — a member the code did spell out
+/// makes the whole element type worth enforcing again.
+fn join_element_types(
+    members: Vec<PhpType>,
+    value_type: &PhpType,
+    existing_elem: Option<&PhpType>,
+) -> PhpType {
+    let joined = PhpType::join_runtime_value_types(members);
+    let existing_is_lenient =
+        existing_elem.is_none_or(|elem| elem.is_empty() || elem.is_benevolent());
+    if value_type.is_benevolent() && existing_is_lenient {
+        return PhpType::benevolent(joined);
+    }
+    joined
 }
 
 /// Merge a keyed element type into an existing `PhpType` to produce
@@ -2206,7 +2232,8 @@ pub(super) fn merge_keyed_type(
 
     // Collect existing value types from the base.
     let mut elem_types: Vec<PhpType> = Vec::new();
-    if let Some(existing_elem) = base.iterable_element_type() {
+    let existing_elem = base.iterable_element_type();
+    if let Some(existing_elem) = &existing_elem {
         for member in existing_elem.union_members() {
             if !member.is_empty() {
                 elem_types.push(member.clone());
@@ -2224,7 +2251,7 @@ pub(super) fn merge_keyed_type(
         return PhpType::array();
     }
 
-    let val_type = PhpType::join_runtime_value_types(elem_types);
+    let val_type = join_element_types(elem_types, &value_type, existing_elem.as_ref());
 
     if key_types.is_empty() {
         // No key type information — use a single-param generic.

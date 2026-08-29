@@ -3658,6 +3658,16 @@ class IterationDemo
             strtoupper($openKey);         // string (the guard ruled the ints out)
         }
 
+        // Collecting those keys keeps them exactly as lenient: the element
+        // type of the array is the same open key domain the loop bound, so
+        // an array built out of them is accepted wherever one key would be.
+        $collectedKeys = [];
+        foreach ($src->openKeyed() as $collectedKey => $collectedPen) {
+            $collectedKeys[] = $collectedKey; // list<int|string>
+            $collectedPen->write();
+        }
+        implode(', ', $collectedKeys);
+
         // WeakMap keys
         /** @var \WeakMap<Scaffolding\Pen, Scaffolding\Pencil> $mapping */
         $mapping = new \WeakMap();

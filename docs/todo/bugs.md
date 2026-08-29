@@ -73,54 +73,7 @@ form and resolves).
 
 ## Array types
 
-### B311. A benevolent union loses its leniency once collected into an array
-
-**Impact: Medium · Complexity: Medium**
-
-A union nobody wrote down is tagged benevolent so a single branch of it
-satisfies a declared type. The marker survives a direct return but not a
-write into an array: the element type comes back as the plain union, so
-under `declare(strict_types=1)` (where no coercion rescues it) the
-container is reported against every declared element type that only
-covers one branch.
-
-```php
-<?php declare(strict_types = 1);
-
-/**
- * @param mixed[] $m
- * @return string
- */
-function scalarReturn(array $m): string
-{
-    foreach ($m as $k => $v) {
-        return $k;      // accepted: the key union is benevolent
-    }
-    return '';
-}
-
-/**
- * @param mixed[] $m
- * @return string[]
- */
-function containerReturn(array $m): array
-{
-    $out = [];
-    foreach ($m as $k => $v) {
-        $out[] = $k;    // the marker is dropped here
-    }
-    return $out;        // reports "list<int|string> is incompatible with array<string>"
-}
-```
-
-The fix belongs where an element type is folded into a container type,
-not at the compatibility check: a benevolent member has to stay
-benevolent inside `list<…>` / `array<…, …>` so the element comparison
-sees it. PHPStan keeps its `BenevolentUnionType` as an array item type
-for the same reason.
-
-Sweep site (PHPStan Source, 2026-08-29):
-`src/Analyser/ResultCache/ResultCacheManager.php:565`.
+No outstanding items.
 
 ## Docblock handling
 
