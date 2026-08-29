@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788028502925,
+  "lastUpdate": 1788030182023,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -25669,6 +25669,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 73.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "1082bb7ba7fcbbd10a2a16769479eaa47f4be244",
+          "message": "A branch that narrows a value to two classes at once no longer erases\nwhat the other path carried",
+          "timestamp": "2026-08-29T20:49:42+02:00",
+          "tree_id": "ac4798299c38133c1788922f60ed49c9be7e7919",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/1082bb7ba7fcbbd10a2a16769479eaa47f4be244"
+        },
+        "date": 1788030174227,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 36,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 75,
             "unit": "MiB"
           }
         ]
