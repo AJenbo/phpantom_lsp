@@ -52,51 +52,7 @@ No outstanding items.
 
 ## Narrowing
 
-### B270. A proof keyed by a value the guard leaves unnarrowed isn't reconstructed
-
-**Impact: Medium · Complexity: Very High**
-
-What the narrowing store keys a proof against, and what it takes to read
-that proof back. PHPStan keys specified types by expression string and
-keeps them until something writes to that expression, so a proof recorded
-about one spelling is available to every other occurrence of it. A branch
-join now records what each path proved under the keys the two paths
-disagree about, and a later test that re-establishes one of those keys
-re-applies the rest — but only when the two paths left that key holding
-values that cannot both be the one in hand. Where they overlap, the test
-proves nothing and the proof is dropped. Two shapes fall in that gap.
-
-**a. A guard on `instanceof`.** The else path of `if ($id instanceof B)`
-on an `A` keeps `A`, which spans `B`, so re-testing `$id instanceof B`
-does not recover what the first test's branch filled:
-
-```php
-$a = null;
-if ($id instanceof B) { $a = makeA(); }
-return $id instanceof B ? takesA($a) : '';     // $a is still A|null
-```
-
-This wants the negative branch to carry the exclusion the condition
-really proves ("an `A` that is not a `B`"), which is the representation
-gap [T20](type-inference.md#t20-type-narrowing-reconciliation-engine)'s
-sure/sure-not split closes.
-
-**b. Two variables assigned together, where checking one implies the
-other through an enclosing disjunction.** `!$isI` combined with an
-enclosing `$isI || $isJ` is what proves the other dim:
-
-```php
-if (!$isI && !$isJ) { return null; }
-$constArray = $isI ? $types[$i] : $types[$j];  // the else arm needs $isJ
-```
-
-Reading the else arm's proof back means carrying the enclosing
-disjunction as a live clause and resolving it against `!$isI`, which is
-the clause algebra T20 plans rather than anything the join can record.
-
-Neither shape reproduces in the PHPStan Source sample project any more —
-both constructs were rewritten upstream between sweeps — so the repros
-above are the record of them.
+No outstanding items.
 
 ## Arithmetic
 

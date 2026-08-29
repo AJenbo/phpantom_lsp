@@ -834,6 +834,7 @@ fn commit_chain_instanceof<'b>(
                         ResolvedType::apply_narrowing(&mut results, |class_list| {
                             narrowing::apply_instanceof_exclusion(cls, &var_ctx, class_list)
                         });
+                        scope.record_exclusion(var_name, cls);
                     }
                     if !results.is_empty() {
                         scope.set(var_name, results);
@@ -866,6 +867,7 @@ fn commit_chain_instanceof<'b>(
                             ResolvedType::apply_narrowing(&mut results, |classes| {
                                 narrowing::apply_instanceof_exclusion(target, &var_ctx, classes)
                             });
+                            scope.record_exclusion(var_name, target);
                         }
                         if !results.is_empty() {
                             scope.set(var_name, results);
@@ -926,6 +928,7 @@ fn commit_chain_instanceof<'b>(
                             classes,
                         )
                     });
+                    scope.record_exclusion(var_name, &extraction.class_type);
                     // Negated instanceof exclusion does NOT eliminate
                     // null — `!$x instanceof Foo` is true when $x is
                     // null, so null stays in the union.  No stripping.
@@ -1482,6 +1485,7 @@ pub(crate) fn apply_condition_narrowing_inverse_single<'b>(
                 ResolvedType::apply_narrowing(&mut results, |class_list| {
                     narrowing::apply_instanceof_exclusion(&cls, &var_ctx, class_list)
                 });
+                scope.record_exclusion(var_name, &cls);
             }
             if !results.is_empty() {
                 scope.set(var_name, results);
@@ -1518,6 +1522,7 @@ pub(crate) fn apply_condition_narrowing_inverse_single<'b>(
                 ResolvedType::apply_narrowing(&mut results, |class_list| {
                     narrowing::apply_instanceof_exclusion(cls_type, &var_ctx, class_list)
                 });
+                scope.record_exclusion(var_name, cls_type);
             }
             if !results.is_empty() {
                 scope.set(var_name, results);
@@ -1563,6 +1568,7 @@ pub(crate) fn apply_condition_narrowing_inverse_single<'b>(
                         ResolvedType::apply_narrowing(&mut results, |classes| {
                             narrowing::apply_instanceof_exclusion(target, &var_ctx, classes)
                         });
+                        scope.record_exclusion(var_name, target);
                     }
                     if !results.is_empty() {
                         scope.set(var_name, results);
@@ -1620,6 +1626,7 @@ pub(crate) fn apply_condition_narrowing_inverse_single<'b>(
                 ResolvedType::apply_narrowing(&mut results, |classes| {
                     narrowing::apply_instanceof_exclusion(&extraction.class_type, &var_ctx, classes)
                 });
+                scope.record_exclusion(var_name, &extraction.class_type);
                 if !results.is_empty() {
                     scope.set(var_name, results);
                 } else if had_types {
@@ -3723,26 +3730,35 @@ fn apply_non_null_implication_narrowing(scope: &mut ScopeState, ctx: &ForwardWal
     }
 }
 
-/// Whether the scope now shows the holder to be what the branch that
-/// recorded `proof` left it as.
+/// Whether the scope now shows the holder to have taken the branch that
+/// recorded `proof`.
 ///
-/// A `None` trigger asks only that the holder's `null` is gone, which is
-/// what a `!== null` test below the join establishes. A typed trigger asks
-/// that every type the holder can still be is one the branch's own value
-/// could have been — the join only recorded the proof because that value
-/// is disjoint from what the other path left, so a holder inside it cannot
-/// have come down the other path.
+/// A [`ProofTrigger::NonNull`] asks only that the holder's `null` is gone,
+/// which is what a `!== null` test below the join establishes. A
+/// [`ProofTrigger::Within`] asks that every type the holder can still be
+/// is one the branch's own value could have been — the join only recorded
+/// the proof because a holder inside that value cannot have come down the
+/// other path. A [`ProofTrigger::Outside`] is the complement: nothing the
+/// holder can still be is a value the *other* path left, so that path is
+/// the one that did not run.
 fn trigger_holds(proof: &ImpliedNarrowing, holder: &Atom, scope: &ScopeState) -> bool {
-    let Some(trigger) = &proof.trigger else {
-        return !scope_value_is_nullable(holder, scope);
-    };
     let held = scope.get(holder);
-    !held.is_empty()
-        && held.iter().all(|current| {
-            trigger
-                .iter()
-                .any(|want| current.type_string.is_subtype_of(&want.type_string))
-        })
+    match &proof.trigger {
+        ProofTrigger::NonNull => !scope_value_is_nullable(holder, scope),
+        ProofTrigger::Within(trigger) => {
+            !held.is_empty()
+                && held.iter().all(|current| {
+                    trigger
+                        .iter()
+                        .any(|want| current.type_string.is_subtype_of(&want.type_string))
+                })
+        }
+        // Conservatively: two classes only count as contradicting each
+        // other when the loader has been consulted, which
+        // `types_are_disjoint` declines to guess at.  An `A` that is not
+        // *spelled* `B` may still be one.
+        ProofTrigger::Outside(trigger) => types_are_disjoint(held, trigger),
+    }
 }
 
 /// Whether a recorded proof still refines what the scope knows.
@@ -3754,11 +3770,20 @@ fn trigger_holds(proof: &ImpliedNarrowing, holder: &Atom, scope: &ScopeState) ->
 /// and overwriting that with the coarser branch type would lose the more
 /// specific answer.  An entry with no type is the one exception: unknown
 /// is the top of the lattice, so anything recorded is narrower.
+///
+/// Which is also why a recorded `mixed` refines nothing.  It sits at the
+/// same top of the lattice a missing entry does, so a branch that left the
+/// key `mixed` beside a class the scope also holds says nothing the scope
+/// does not already say — and applying it would drop that class, which is
+/// the half every member lookup needs.
 fn recorded_narrows_current(
     recorded: &[ResolvedType],
     current: &[ResolvedType],
     ctx: &ForwardWalkCtx<'_>,
 ) -> bool {
+    if recorded.iter().any(|r| r.type_string.is_mixed()) {
+        return false;
+    }
     if current.is_empty() {
         return true;
     }

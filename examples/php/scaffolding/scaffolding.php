@@ -2848,3 +2848,13 @@ class ScaffoldingOptionalLabel
 {
     public ?string $label = null;
 }
+
+/**
+ * A subclass is what makes an `instanceof` guard's two paths look alike:
+ * the path that failed the check keeps the parent, which spans the child,
+ * so the types alone do not say which one ran.
+ */
+class ScaffoldingQualifiedName extends ScaffoldingNameNode
+{
+    public string $namespacePrefix = '';
+}

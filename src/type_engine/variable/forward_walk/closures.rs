@@ -13,7 +13,11 @@ use crate::php_type::PhpType;
 enum ReturnFrame {
     /// Accumulates the states that `return` out of the body being walked.
     /// `None` until the first `return` is seen.
-    Open(Option<ScopeState>),
+    ///
+    /// Boxed because a `ScopeState` is far larger than the other variant,
+    /// and the stack holds one frame per body being walked rather than one
+    /// per statement, so the indirection is paid once per closure.
+    Open(Option<Box<ScopeState>>),
     /// A nested body's returns say nothing about the body outside it.
     Barrier,
 }
@@ -44,7 +48,7 @@ pub(crate) fn push_return_frame() {
 /// out, or `None` when the body has no reachable `return`.
 pub(crate) fn pop_return_frame() -> Option<ScopeState> {
     RETURN_EDGES.with(|frames| match frames.borrow_mut().pop() {
-        Some(ReturnFrame::Open(state)) => state,
+        Some(ReturnFrame::Open(state)) => state.map(|s| *s),
         _ => None,
     })
 }
@@ -93,7 +97,7 @@ pub(crate) fn record_return_edge(scope: &ScopeState) {
         if let Some(ReturnFrame::Open(state)) = frames.borrow_mut().last_mut() {
             match state {
                 Some(accumulated) => accumulated.merge_branch(scope),
-                None => *state = Some(scope.clone()),
+                None => *state = Some(Box::new(scope.clone())),
             }
         }
     });

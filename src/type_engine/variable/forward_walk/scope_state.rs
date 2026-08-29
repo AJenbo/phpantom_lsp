@@ -56,20 +56,43 @@ pub(crate) struct PregOutcome {
     pub matches_all: bool,
 }
 
-/// What a branch proved about one value, to be re-applied wherever the
-/// value it hangs off is shown to be the one that branch left behind.
+/// What has to be shown about a proof's holder before the proof applies.
+#[derive(Clone, Debug)]
+pub(crate) enum ProofTrigger {
+    /// The holder's `null` is gone.
+    ///
+    /// The idiom below a join usually spells this out
+    /// (`if ($original !== null)`), and it is the one trigger that needs
+    /// no types of its own.
+    NonNull,
+    /// The holder is one of these — the value the path that recorded the
+    /// proof left it as.
+    ///
+    /// Every branch condition other than a null check proves a *type*:
+    /// `count($args) > 0` proves `$args` is a `non-empty-array`, so
+    /// re-testing that condition below the join is recognised by the type
+    /// it re-establishes.
+    Within(Vec<ResolvedType>),
+    /// The holder is none of these — the value the *other* path left it
+    /// as.
+    ///
+    /// The complement of [`Self::Within`], and the only reading available
+    /// when the path that proved something left the holder exactly as it
+    /// found it: a value that contradicts what the other path left is
+    /// proof that path did not run, and the two paths of a join are
+    /// exhaustive, so this one did.  `if (!$isI && !$isJ) { return; }` is
+    /// the shape that needs it — past the guard, `$isI` being `false` is
+    /// the only thing that says `$isJ` held, and the path that proved
+    /// `$isJ` never tested `$isI` at all.
+    Outside(Vec<ResolvedType>),
+}
+
+/// What a branch proved about one value, to be re-applied wherever its
+/// holder is shown to have taken that branch.
 #[derive(Clone, Debug)]
 pub(crate) struct ImpliedNarrowing {
-    /// The types the holder must be shown to have before the proof
-    /// applies, or `None` when ruling its `null` out is enough.
-    ///
-    /// `null` is the trigger the idiom below a join usually spells out
-    /// (`if ($original !== null)`), and it is the one that needs no types
-    /// of its own.  Every other branch condition proves a *type* instead —
-    /// `count($args) > 0` proves `$args` is a `non-empty-array` — so
-    /// re-testing that condition below the join has to be recognised by
-    /// the type it re-establishes rather than by non-nullness.
-    pub trigger: Option<Vec<ResolvedType>>,
+    /// What the holder has to be shown to be before the proof applies.
+    pub trigger: ProofTrigger,
     /// The key the proof is about.
     pub key: Atom,
     /// The types it held on the path that proved it.
@@ -211,6 +234,23 @@ pub(crate) struct ScopeState {
     /// erasing anything.  See [`ScopeState::merge_branch`].
     pub unresolved: AtomSet,
 
+    /// Scope key → the classes this path has shown the value is *not*.
+    ///
+    /// The failing side of an `instanceof` is the one narrowing PHP's type
+    /// language cannot spell: the else of `if ($id instanceof B)` on an
+    /// `A` leaves `A` behind, because "an `A` that is not a `B`" has no
+    /// notation.  So the two paths of that `if` describe values that
+    /// cannot both be the one in hand, while the types they leave say they
+    /// overlap.  Recording the class the check ruled out is what tells
+    /// [`Self::merge_branch`] otherwise, and so lets a later re-test of
+    /// the same check recover what the branch it guarded wrote.
+    ///
+    /// Only the join reads this, so it does not travel with
+    /// [`ScopeProofs`]: below the join the exclusion holds only where both
+    /// incoming paths made it, which is exactly what the join leaves
+    /// behind.
+    pub ruled_out: AtomMap<Vec<PhpType>>,
+
     /// No value can reach this program point.
     ///
     /// Set when a condition narrows some variable down to nothing — the
@@ -231,6 +271,7 @@ impl ScopeState {
             implied_narrowings: AtomMap::default(),
             preg_outcomes: AtomMap::default(),
             unresolved: AtomSet::default(),
+            ruled_out: AtomMap::default(),
             unreachable: false,
         }
     }
@@ -427,6 +468,21 @@ impl ScopeState {
             self.preg_outcomes
                 .retain(|holder, outcome| !stale(holder) && !stale(&outcome.matches_var));
         }
+        if !self.ruled_out.is_empty() {
+            self.ruled_out.retain(|subject, _| !stale(subject));
+        }
+    }
+
+    /// Record that a check on this path ruled `excluded` out for
+    /// `var_name`.
+    ///
+    /// See [`Self::ruled_out`] for why the exclusion has to be written
+    /// down rather than left to the narrowed type to carry.
+    pub fn record_exclusion(&mut self, var_name: &str, excluded: &PhpType) {
+        let entry = self.ruled_out.entry(atom(var_name)).or_default();
+        if !entry.contains(excluded) {
+            entry.push(excluded.clone());
+        }
     }
 
     /// Record that proving `holder` non-null proves each of `implied`
@@ -503,6 +559,15 @@ impl ScopeState {
         // token-dispatch `switch` with fifty arms from re-unioning the
         // whole scope once per arm.
         if self.describes_same_state_as(other) {
+            // The exclusions are still joined: two paths can leave the
+            // same types behind while only one of them ruled a class out,
+            // and keeping that one's word for it would let a later join
+            // read a proof off a check the other path never made.  They
+            // are deliberately not part of `describes_same_state_as`,
+            // because re-running the union over identical locals is not a
+            // no-op — `mixed` absorbs its siblings there — and a scope
+            // that says the same thing must come out saying it.
+            self.ruled_out = join_ruled_out(self, other);
             return;
         }
 
@@ -519,6 +584,7 @@ impl ScopeState {
         // unioned below, because both answers read the per-path types.
         let implications = join_non_null_implications(self, other);
         let narrowings = join_implied_narrowings(self, other);
+        let exclusions = join_ruled_out(self, other);
 
         // Likewise for a stored match outcome: a path that never ran the
         // call, or reassigned either half of it, leaves the boolean
@@ -562,6 +628,14 @@ impl ScopeState {
                 self.locals.insert(*name, Vec::new());
                 continue;
             }
+
+            // Whether the two paths already say the same thing about this
+            // key, which decides how far the subsumption pass below may
+            // go.
+            let agreed = self
+                .locals
+                .get(name)
+                .is_some_and(|existing| same_type_strings(existing, other_types));
 
             let entry = self.locals.entry(*name).or_default();
 
@@ -662,11 +736,21 @@ impl ScopeState {
             // narrowing must not survive past the merge: `if ($mixed
             // instanceof Foo) { … }` with no `else` must leave plain
             // `mixed` behind, not `Foo|mixed`.
-            ResolvedType::drop_subsumed_entries(entry, true);
+            //
+            // That is a decision about what the *join* brought together,
+            // so it is off for a key both paths already agreed about.
+            // There the `mixed` and the class beside it are one value the
+            // scope has been carrying all along — `$a = f() ?? $arg;` on a
+            // `mixed`-returning `f()` — and absorbing the class would turn
+            // a receiver every member lookup resolves through into one
+            // that resolves to nothing, without any branch having narrowed
+            // anything.
+            ResolvedType::drop_subsumed_entries(entry, !agreed);
         }
 
         self.non_null_implications = implications;
         self.implied_narrowings = narrowings;
+        self.ruled_out = exclusions;
     }
 }
 
@@ -708,16 +792,97 @@ pub(crate) fn types_are_disjoint(a: &[ResolvedType], b: &[ResolvedType]) -> bool
     })
 }
 
+/// Whether `side` has shown that `key` cannot be holding any of `types`.
+///
+/// What a failed `instanceof` proves is not in the type it leaves behind —
+/// an `A` that is not a `B` is still spelled `A` — so a value the other
+/// path narrowed to `B` reads as one this path could be holding too. The
+/// recorded exclusion is what says otherwise.
+///
+/// The two spellings are compared by class name as well as by subtyping:
+/// the exclusion is written down as the condition spelled it, while the
+/// other path's type carries the name the class loader resolved it to.
+fn path_rules_out(side: &ScopeState, key: &Atom, types: &[ResolvedType]) -> bool {
+    if types.is_empty() {
+        return false;
+    }
+    let Some(excluded) = side.ruled_out.get(key) else {
+        return false;
+    };
+    let same_class = |held: &PhpType, gone: &PhpType| match (
+        held.unwrap_nullable().class_name(),
+        gone.unwrap_nullable().class_name(),
+    ) {
+        (Some(h), Some(g)) => h
+            .trim_start_matches('\\')
+            .eq_ignore_ascii_case(g.trim_start_matches('\\')),
+        _ => false,
+    };
+    types.iter().all(|held| {
+        excluded
+            .iter()
+            .any(|gone| held.type_string.is_subtype_of(gone) || same_class(&held.type_string, gone))
+    })
+}
+
+/// The exclusions that survive a join: a value is only known not to be a
+/// class when neither incoming path could have left it as one.
+fn join_ruled_out(a: &ScopeState, b: &ScopeState) -> AtomMap<Vec<PhpType>> {
+    if a.ruled_out.is_empty() || b.ruled_out.is_empty() {
+        return AtomMap::default();
+    }
+    let mut joined: AtomMap<Vec<PhpType>> = AtomMap::default();
+    for (key, mine) in &a.ruled_out {
+        let Some(theirs) = b.ruled_out.get(key) else {
+            continue;
+        };
+        let both: Vec<PhpType> = mine
+            .iter()
+            .filter(|ty| theirs.contains(ty))
+            .cloned()
+            .collect();
+        if !both.is_empty() {
+            joined.insert(*key, both);
+        }
+    }
+    joined
+}
+
+/// Whether two proofs ask the same thing of their holder.
+fn same_trigger(a: &ProofTrigger, b: &ProofTrigger) -> bool {
+    match (a, b) {
+        (ProofTrigger::NonNull, ProofTrigger::NonNull) => true,
+        (ProofTrigger::Within(x), ProofTrigger::Within(y))
+        | (ProofTrigger::Outside(x), ProofTrigger::Outside(y)) => same_types(x, y),
+        _ => false,
+    }
+}
+
+/// Whether two type lists spell out the same alternatives, in order.
+///
+/// Weaker than [`same_types`], which also requires a shared `class_info`
+/// allocation.  Two paths can describe a value identically while having
+/// rebuilt its class along the way, and for deciding whether a join
+/// brought anything new together the spelling is what matters.
+fn same_type_strings(a: &[ResolvedType], b: &[ResolvedType]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.type_string == y.type_string)
+}
+
+/// Whether every value `narrow` describes is one `wide` describes too.
+fn types_within(narrow: &[ResolvedType], wide: &[ResolvedType]) -> bool {
+    !narrow.is_empty()
+        && !wide.is_empty()
+        && narrow.iter().all(|n| {
+            wide.iter()
+                .any(|w| n.type_string.is_subtype_of(&w.type_string))
+        })
+}
+
 /// Whether two implied-narrowing maps record the same proofs.
 fn same_implied_narrowings(
     a: &AtomMap<Vec<ImpliedNarrowing>>,
     b: &AtomMap<Vec<ImpliedNarrowing>>,
 ) -> bool {
-    let same_trigger = |x: &Option<Vec<ResolvedType>>, y: &Option<Vec<ResolvedType>>| match (x, y) {
-        (None, None) => true,
-        (Some(x), Some(y)) => same_types(x, y),
-        _ => false,
-    };
     a.len() == b.len()
         && a.iter().all(|(holder, mine)| {
             b.get(holder).is_some_and(|theirs| {
@@ -891,14 +1056,9 @@ fn join_implied_narrowings(a: &ScopeState, b: &ScopeState) -> AtomMap<Vec<Implie
     let mut joined: AtomMap<Vec<ImpliedNarrowing>> = AtomMap::default();
     let mut record = |holder: Atom, proof: ImpliedNarrowing| {
         let entry: &mut Vec<ImpliedNarrowing> = joined.entry(holder).or_default();
-        let already = entry.iter().any(|p| {
-            p.key == proof.key
-                && match (&p.trigger, &proof.trigger) {
-                    (None, None) => true,
-                    (Some(x), Some(y)) => same_types(x, y),
-                    _ => false,
-                }
-        });
+        let already = entry
+            .iter()
+            .any(|p| p.key == proof.key && same_trigger(&p.trigger, &proof.trigger));
         if !already {
             entry.push(proof);
         }
@@ -910,11 +1070,18 @@ fn join_implied_narrowings(a: &ScopeState, b: &ScopeState) -> AtomMap<Vec<Implie
                 .iter()
                 .any(|p| p.key == proof.key && same_types(&p.types, &proof.types))
         }) || match &proof.trigger {
-            None => is_definitely_null(side, holder),
-            Some(trigger) => side
+            // The proof is vacuous on a path whose holder could never meet
+            // the trigger: that path cannot be the one a later test
+            // showing the trigger is pointing at.
+            ProofTrigger::NonNull => is_definitely_null(side, holder),
+            ProofTrigger::Within(trigger) => side
                 .locals
                 .get(holder)
                 .is_some_and(|held| types_are_disjoint(held, trigger)),
+            ProofTrigger::Outside(trigger) => side
+                .locals
+                .get(holder)
+                .is_some_and(|held| types_within(held, trigger)),
         } || side
             .locals
             .get(&proof.key)
@@ -932,26 +1099,75 @@ fn join_implied_narrowings(a: &ScopeState, b: &ScopeState) -> AtomMap<Vec<Implie
         }
     }
 
-    // The keys the two paths disagree about, paired with the path whose
-    // value a later test can recognise.  `None` marks the nullness
-    // disagreement, whose test needs no types of its own.
-    let mut flipped: Vec<(Atom, &ScopeState, &ScopeState, Option<Vec<ResolvedType>>)> = Vec::new();
+    // The keys the two paths disagree about, each with the triggers that
+    // recognise the path whose value proved something.  Grouped by which
+    // path that is, because reading a path's proofs off costs a walk of
+    // everything it holds and one walk answers for every trigger that
+    // points at it.
+    let mut flipped: Vec<(Atom, bool, Vec<ProofTrigger>)> = Vec::new();
     for key in a.locals.keys() {
+        // Triggers that identify `a` as the path that ran, and ones that
+        // identify `b`.
+        let (mut from_a, mut from_b) = (Vec::new(), Vec::new());
         if is_definitely_null(a, key) && is_definitely_non_null(b, key) {
-            flipped.push((*key, b, a, None));
+            from_b.push(ProofTrigger::NonNull);
         } else if is_definitely_null(b, key) && is_definitely_non_null(a, key) {
-            flipped.push((*key, a, b, None));
-        } else if let (Some(mine), Some(theirs)) = (a.locals.get(key), b.locals.get(key))
-            && types_are_disjoint(mine, theirs)
-        {
-            // Either path's value settles which one ran, so both are
-            // worth recording: the `if` arm's type re-proves what the arm
-            // wrote, and the `else` arm's re-proves what that one did.
-            flipped.push((*key, a, b, Some(mine.clone())));
-            flipped.push((*key, b, a, Some(theirs.clone())));
+            from_a.push(ProofTrigger::NonNull);
+        } else if let (Some(mine), Some(theirs)) = (a.locals.get(key), b.locals.get(key)) {
+            if types_are_disjoint(mine, theirs) {
+                // Either path's value settles which one ran, so both are
+                // worth recording: the `if` arm's type re-proves what the
+                // arm wrote, and the `else` arm's re-proves what that one
+                // did.
+                from_a.push(ProofTrigger::Within(mine.clone()));
+                from_b.push(ProofTrigger::Within(theirs.clone()));
+            } else {
+                // Types that overlap on paper but not in fact, because
+                // the check one path failed took its proof with it.
+                // Recognising a path by its own value only works in the
+                // direction the exclusion covers: the path that ruled the
+                // other's value out cannot be holding it, while its own
+                // value is one the excluding path's type still spans.
+                if path_rules_out(b, key, mine) {
+                    from_a.push(ProofTrigger::Within(mine.clone()));
+                }
+                if path_rules_out(a, key, theirs) {
+                    from_b.push(ProofTrigger::Within(theirs.clone()));
+                }
+                // Whichever way round, a value that contradicts what one
+                // path left is proof that path did not run — and the two
+                // paths are exhaustive, so the other one did.  This is the
+                // only reading available when the path that proved
+                // something left the holder exactly as it found it, which
+                // is what an `||` guard's fall-through does to the flag
+                // its *other* leg tested.
+                //
+                // Only where one path's value sits strictly inside the
+                // other's, which is the disagreement this reading is for:
+                // one path narrowed the holder and the other left it
+                // spanning what that narrowing picked out.  Between values
+                // that merely fail to contain one another the trigger
+                // still holds, but it is met by any later narrowing of the
+                // holder at all, whether or not the guard had anything to
+                // do with it — a proof per differing key at every join, to
+                // re-apply what a path did not touch.
+                if types_within(mine, theirs) && !types_within(theirs, mine) {
+                    from_b.push(ProofTrigger::Outside(mine.clone()));
+                }
+                if types_within(theirs, mine) && !types_within(mine, theirs) {
+                    from_a.push(ProofTrigger::Outside(theirs.clone()));
+                }
+            }
+        }
+        if !from_a.is_empty() {
+            flipped.push((*key, true, from_a));
+        }
+        if !from_b.is_empty() {
+            flipped.push((*key, false, from_b));
         }
     }
-    for (holder, taken, skipped, trigger) in flipped {
+    for (holder, taken_is_a, triggers) in flipped {
+        let (taken, skipped) = if taken_is_a { (a, b) } else { (b, a) };
         for (key, types) in &taken.locals {
             if *key == holder || types.is_empty() {
                 continue;
@@ -966,7 +1182,10 @@ fn join_implied_narrowings(a: &ScopeState, b: &ScopeState) -> AtomMap<Vec<Implie
                 // entry only means this one recorded no narrowing for it.
                 None => is_synthetic_key(key.as_str()),
             };
-            if differs {
+            if !differs {
+                continue;
+            }
+            for trigger in &triggers {
                 record(
                     holder,
                     ImpliedNarrowing {

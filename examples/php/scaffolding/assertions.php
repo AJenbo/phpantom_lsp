@@ -2050,6 +2050,15 @@ function runDemoAssertions(): void
     assert($reconstructed->describeWhenFlagged(['a', 'b'], true) === 'a, b', 'the re-tested flag proves the acceptor was filled');
     assert($reconstructed->describeWhenFlagged(['a', 'b'], false) === '', 'a flag that skipped the branch is false below it');
 
+    $plainName = new Scaffolding\ScaffoldingNameNode();
+    $qualifiedName = new Scaffolding\ScaffoldingQualifiedName();
+    $qualifiedName->namespacePrefix = 'App\\';
+    assert($reconstructed->qualifiedLabel($qualifiedName) === 'q', 'the re-tested instanceof proves the acceptor was filled');
+    assert($reconstructed->qualifiedLabel($plainName) === '', 'the path that failed the check filled nothing');
+    assert($reconstructed->eitherPrefix($plainName, $qualifiedName) === 'App\\', 'ruling the first flag out leaves what the second proved');
+    assert($reconstructed->eitherPrefix($qualifiedName, $plainName) === 'App\\', 'the first flag holding proves its own subject');
+    assert($reconstructed->eitherPrefix($plainName, $plainName) === '', 'neither flag holding leaves the guard');
+
     echo "All assertions passed.\n";
 }
 

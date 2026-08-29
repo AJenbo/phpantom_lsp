@@ -2785,6 +2785,262 @@ function f($v): void {
     assert_eq!(text, "```php\n<?php\n$v = string\n```");
 }
 
+// ─── Ruling one leg of a disjunction out leaves the other ──────────────────
+
+const FLAG_PAIR_SCAFFOLD: &str = r#"
+class Ty {}
+class ConstantArrayType extends Ty {}
+function takesConstant(ConstantArrayType $c): void {}
+"#;
+
+/// Past `if (!$isI && !$isJ) { return; }` at least one of the two flags
+/// held, so the arm that knows `$isI` is `false` knows `$isJ` is not —
+/// and with it everything the check `$isJ` stands for proved. The path
+/// that proved `$isJ` left `$isI` exactly as it found it, so recognising
+/// it by its own value is not available: what identifies it is the value
+/// it rules *out*.
+#[test]
+fn ruling_out_one_flag_of_a_guard_leaves_what_the_other_proved() {
+    let backend = create_test_backend();
+    let uri = "file:///disjunction_guard.php";
+    let content = format!(
+        r#"<?php
+{FLAG_PAIR_SCAFFOLD}
+function f(Ty $t1, Ty $t2): void {{
+    $isI = $t1 instanceof ConstantArrayType;
+    $isJ = $t2 instanceof ConstantArrayType;
+    if (!$isI && !$isJ) {{
+        return;
+    }}
+    takesConstant($isI ? $t1 : $t2);
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert!(
+        errors.is_empty(),
+        "the else arm ran because $isJ held, got: {errors:?}"
+    );
+}
+
+/// The same proof read through an `if`/`else` rather than a ternary.
+#[test]
+fn ruling_out_one_flag_narrows_an_else_body() {
+    let backend = create_test_backend();
+    let uri = "file:///disjunction_guard_else.php";
+    let content = format!(
+        r#"<?php
+{FLAG_PAIR_SCAFFOLD}
+function f(Ty $t1, Ty $t2): void {{
+    $isI = $t1 instanceof ConstantArrayType;
+    $isJ = $t2 instanceof ConstantArrayType;
+    if (!$isI && !$isJ) {{
+        return;
+    }}
+    if ($isI) {{
+        takesConstant($t1);
+    }} else {{
+        takesConstant($t2);
+    }}
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert!(
+        errors.is_empty(),
+        "each arm knows which flag held, got: {errors:?}"
+    );
+}
+
+/// Three flags leave nothing to pin down: `!$isI` still allows either of
+/// the other two, so it says nothing about which one held.
+#[test]
+fn ruling_out_one_of_three_flags_proves_nothing() {
+    let backend = create_test_backend();
+    let uri = "file:///disjunction_guard_three.php";
+    let content = format!(
+        r#"<?php
+{FLAG_PAIR_SCAFFOLD}
+function f(Ty $t1, Ty $t2, Ty $t3): void {{
+    $isI = $t1 instanceof ConstantArrayType;
+    $isJ = $t2 instanceof ConstantArrayType;
+    $isK = $t3 instanceof ConstantArrayType;
+    if (!$isI && !$isJ && !$isK) {{
+        return;
+    }}
+    takesConstant($isI ? $t1 : $t2);
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert_eq!(
+        errors.len(),
+        1,
+        "$isK could be the one that held, got: {errors:?}"
+    );
+}
+
+/// Writing to the other flag between the guard and the read drops the
+/// proof: what the guard established is about the value it tested.
+#[test]
+fn writing_the_other_flag_drops_the_disjunction_proof() {
+    let backend = create_test_backend();
+    let uri = "file:///disjunction_guard_reassigned.php";
+    let content = format!(
+        r#"<?php
+{FLAG_PAIR_SCAFFOLD}
+function f(Ty $t1, Ty $t2, bool $other): void {{
+    $isI = $t1 instanceof ConstantArrayType;
+    $isJ = $t2 instanceof ConstantArrayType;
+    if (!$isI && !$isJ) {{
+        return;
+    }}
+    $isJ = $other;
+    takesConstant($isI ? $t1 : $t2);
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert_eq!(
+        errors.len(),
+        1,
+        "the reassigned flag is not what the guard proved, got: {errors:?}"
+    );
+}
+
+// ─── What the branch an `instanceof` skips is left with ────────────────────
+
+/// Re-testing an `instanceof` recovers what the first test's branch
+/// filled. The branch that skipped it left the subject spanning the
+/// checked class, so nothing in the *type* tells the two paths apart —
+/// what does is the exclusion the failing check proves, which the skipped
+/// path has to carry for the join to read.
+#[test]
+fn re_testing_an_instanceof_recovers_what_its_branch_filled() {
+    let backend = create_test_backend();
+    let uri = "file:///instanceof_proof.php";
+    let content = r#"<?php
+class A {}
+class B extends A {}
+function makeA(): A { return new A(); }
+function f(A $id): void {
+    $a = null;
+    if ($id instanceof B) {
+        $a = makeA();
+    }
+    if ($id instanceof B) {
+        $a; // <-- here
+    }
+}
+"#;
+    let text = hover_marked(&backend, uri, content);
+    assert_eq!(text, "```php\n<?php\n$a = A\n```");
+}
+
+/// The proof reaches an expression position too: a ternary re-testing the
+/// condition narrows its then-arm the same way a second `if` does.
+#[test]
+fn re_testing_an_instanceof_in_a_ternary_recovers_what_its_branch_filled() {
+    let backend = create_test_backend();
+    let uri = "file:///instanceof_proof_ternary.php";
+    let content = r#"<?php
+class A {}
+class B extends A {}
+function makeA(): A { return new A(); }
+function takesA(A $a): string { return ''; }
+function f(A $id): string {
+    $a = null;
+    if ($id instanceof B) {
+        $a = makeA();
+    }
+    return $id instanceof B ? takesA($a) : '';
+}
+"#;
+    let errors = argument_type_errors(&backend, uri, content);
+    assert!(
+        errors.is_empty(),
+        "the re-test proves the branch that filled $a ran, got: {errors:?}"
+    );
+}
+
+/// A *different* class recovers nothing. `$id instanceof C` can hold on
+/// the path that skipped the `B` branch, so it does not say which one ran.
+#[test]
+fn re_testing_a_different_class_recovers_nothing() {
+    let backend = create_test_backend();
+    let uri = "file:///instanceof_proof_other.php";
+    let content = r#"<?php
+class A {}
+class B extends A {}
+class C extends A {}
+function makeA(): A { return new A(); }
+function f(A $id): void {
+    $a = null;
+    if ($id instanceof B) {
+        $a = makeA();
+    }
+    if ($id instanceof C) {
+        $a; // <-- here
+    }
+}
+"#;
+    let text = hover_marked(&backend, uri, content);
+    assert_eq!(text, "```php\n<?php\n$a = null|A\n```");
+}
+
+/// Testing a *supertype* of the checked class recovers nothing either: an
+/// `A` that is not a `B` is still an `A`, so the test holds on both paths.
+#[test]
+fn re_testing_a_supertype_recovers_nothing() {
+    let backend = create_test_backend();
+    let uri = "file:///instanceof_proof_supertype.php";
+    let content = r#"<?php
+class A {}
+class B extends A {}
+function makeA(): A { return new A(); }
+function f(A $id): void {
+    $a = null;
+    if ($id instanceof B) {
+        $a = makeA();
+    }
+    if ($id instanceof A) {
+        $a; // <-- here
+    }
+}
+"#;
+    let text = hover_marked(&backend, uri, content);
+    assert_eq!(text, "```php\n<?php\n$a = null|A\n```");
+}
+
+/// Writing to the subject between the two tests drops the proof: the
+/// second check is about a different value than the first one was.
+#[test]
+fn writing_the_instanceof_subject_drops_the_proof() {
+    let backend = create_test_backend();
+    let uri = "file:///instanceof_proof_reassigned.php";
+    let content = r#"<?php
+class A {}
+class B extends A {}
+function makeA(): A { return new A(); }
+function f(A $id, A $other): void {
+    $a = null;
+    if ($id instanceof B) {
+        $a = makeA();
+    }
+    $id = $other;
+    if ($id instanceof B) {
+        $a; // <-- here
+    }
+}
+"#;
+    let text = hover_marked(&backend, uri, content);
+    assert_eq!(text, "```php\n<?php\n$a = null|A\n```");
+}
+
 /// The branch a truthy test skips is left with `null`, and the class the
 /// value could have been is not still hanging off it: an entry that says
 /// `null` while pointing at a resolved class reads as an object to

@@ -5673,4 +5673,45 @@ class ReconstructedProofDemo
         // Try: hover `$wanted` — false, since the branch above was skipped
         return $wanted ? 'unreachable' : '';        // string
     }
+
+    /**
+     * The path that failed `instanceof ScaffoldingQualifiedName` keeps the
+     * parent class, which spans the one the check named, so the types the
+     * two paths leave behind say nothing about which of them ran.  What
+     * does is the class the failing check ruled out.
+     */
+    public function qualifiedLabel(Scaffolding\ScaffoldingNameNode $node): string
+    {
+        $acceptor = null;
+        if ($node instanceof Scaffolding\ScaffoldingQualifiedName) {
+            $acceptor = Scaffolding\scaffoldingSelectAcceptor(['q']);
+        }
+
+        // Try: `$acceptor->` — ScaffoldingArgumentAcceptor members, no null
+        return $node instanceof Scaffolding\ScaffoldingQualifiedName
+            ? $acceptor->describe(['q'])            // Scaffolding\ScaffoldingArgumentAcceptor
+            : '';
+    }
+
+    /**
+     * Past the guard at least one of the two flags held, so the arm that
+     * knows `$firstIsQualified` is false knows `$secondIsQualified` is
+     * not, and with it what the check behind that flag proved about
+     * `$second`.  Neither arm names the flag it relies on.
+     */
+    public function eitherPrefix(
+        Scaffolding\ScaffoldingNameNode $first,
+        Scaffolding\ScaffoldingNameNode $second
+    ): string {
+        $firstIsQualified = $first instanceof Scaffolding\ScaffoldingQualifiedName;
+        $secondIsQualified = $second instanceof Scaffolding\ScaffoldingQualifiedName;
+        if (!$firstIsQualified && !$secondIsQualified) {
+            return '';
+        }
+
+        // Try: `$qualified->` — ScaffoldingQualifiedName members from both arms
+        $qualified = $firstIsQualified ? $first : $second;
+
+        return $qualified->namespacePrefix;         // string
+    }
 }

@@ -10199,11 +10199,22 @@ function run(array $items): void {
 
     let hover = hover_at(&backend, uri, content, 22, 5).expect("expected hover on $rows");
     let text = hover_text(&hover);
-    assert!(
-        text.contains("array<int, array{a: int}|array{b: int}|array{c: int}>"),
+    // One array type holding all three shapes, not one array per write.
+    // The shapes are matched individually rather than as one spelling:
+    // which order they come out in is down to the order the walk settles
+    // them, and it says nothing about whether the writes merged.
+    assert_eq!(
+        text.matches("array<int, ").count(),
+        1,
         "Sibling writes to the same key should merge into one array type, got: {}",
         text
     );
+    for shape in ["array{a: int}", "array{b: int}", "array{c: int}"] {
+        assert!(
+            text.contains(shape),
+            "expected {shape} among the merged element types, got: {text}"
+        );
+    }
 }
 
 /// A conditional keyed write starts from `array{}`, which the write's own
