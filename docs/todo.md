@@ -102,7 +102,6 @@ unlikely to move the needle for most users.
 |     | **[Bugs](todo/bugs.md)**                                                                                                                                                    |             |             |
 | B310 | [An assignment expression as a call receiver never resolves](todo/bugs.md#b310-an-assignment-expression-as-a-call-receiver-never-resolves)                                  | Medium      | Medium      |
 | B311 | [A benevolent union loses its leniency once collected into an array](todo/bugs.md#b311-a-benevolent-union-loses-its-leniency-once-collected-into-an-array)                  | Medium      | Medium      |
-| B309 | [Re-testing a call result does not recover what the first test's branch assigned](todo/bugs.md#b309-re-testing-a-call-result-does-not-recover-what-the-first-tests-branch-assigned) | Medium      | High        |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |

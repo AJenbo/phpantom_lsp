@@ -3444,7 +3444,17 @@ pub(crate) fn apply_null_narrowing_inverse<'b>(
     // keeps its `false` half rather than staying whole, and that is what
     // lets a branch the flag guards be recognised again where the flag is
     // re-tested.
-    if let Some(var_name) = expr_to_var_name(condition) {
+    //
+    // A path (`$row->id`) or a call (`$id->isClass()`) is tested exactly
+    // as a variable is, and the truthy side already narrows both under
+    // their own key.  The skipped path has to say `false` about the same
+    // key or the two sides of the `if` describe values that could be the
+    // same one, and the join has nothing to key the branch's writes
+    // against.
+    if let Some(var_name) =
+        expr_to_var_name(condition).or_else(|| narrowing::expr_to_subject_key(condition))
+    {
+        seed_synthetic_key_if_needed(&var_name, scope, ctx);
         narrow_to_falsy_in_scope(&var_name, scope);
     }
     // `isset($x)` — inverse (else) means $x was null: narrow to null.

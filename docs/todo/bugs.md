@@ -34,43 +34,7 @@ No outstanding items.
 
 ## Narrowing
 
-### B309. Re-testing a call result does not recover what the first test's branch assigned
-
-**Impact: Medium · Complexity: High**
-
-PHPStan remembers the types of arbitrary expressions, keyed by their
-printed form — including method calls. After
-`if ($id->isClass()) { $files = ['a']; }` merges, a later
-`if ($id->isClass())` re-selects the branch facts: inside it, `$files`
-is the non-empty literal again, so a `foreach` over it provably runs and
-its loop variables are definitely assigned. Our walker keys only
-variables, so the second test proves nothing and the loop variables stay
-possibly-`null`:
-
-```php
-if ($identifier->isClass()) {
-    $files = ['a.php'];
-} elseif ($identifier->isFunction()) {
-    $files = $this->findFilesByFunction();   // list<string>, may be empty
-} else {
-    return null;
-}
-
-if ($identifier->isClass()) {
-    $node = null;
-    foreach ($files as $file) {              // provably non-empty here
-        $node = $this->fetch($file);
-    }
-    $this->takesNode($node);                 // reports null|Node
-}
-```
-
-The fix direction is the expression-string keying PHPStan uses: record
-call results in the scope alongside variables so a repeated test
-correlates the branches. (Whether a call is safe to remember — purity,
-intervening writes to the receiver — is part of the design.) Sweep
-sites: `src/Reflection/BetterReflection/SourceLocator/OptimizedDirectorySourceLocator.php:149-150`
-(PHPStan Source, 2026-08-29).
+No outstanding items.
 
 ## Arithmetic
 

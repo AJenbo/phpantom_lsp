@@ -2512,6 +2512,122 @@ function process(array $args): void {{
     );
 }
 
+const RETEST_CALL_SCAFFOLD: &str = r#"
+class Node {}
+class Identifier {
+    public function isClass(): bool { return true; }
+    public function isFunction(): bool { return true; }
+}
+function acceptNode(Node $node): void {}
+"#;
+
+/// The second `$identifier->isClass()` re-selects the branch the first one
+/// guarded, so `$files` is the non-empty literal again and the `foreach`
+/// over it provably runs — leaving `$node` a `Node`, not `Node|null`.
+#[test]
+fn re_testing_a_call_re_applies_what_the_branch_filled() {
+    let backend = create_test_backend();
+    let uri = "file:///retest_call.php";
+    let content = format!(
+        r#"<?php
+{RETEST_CALL_SCAFFOLD}
+class Locator {{
+    /** @return list<string> */
+    private function findFilesByFunction(): array {{ return []; }}
+    private function fetch(string $file): Node {{ return new Node(); }}
+
+    public function locate(Identifier $identifier): void {{
+        if ($identifier->isClass()) {{
+            $files = ['a.php'];
+        }} elseif ($identifier->isFunction()) {{
+            $files = $this->findFilesByFunction();
+        }} else {{
+            return;
+        }}
+
+        if ($identifier->isClass()) {{
+            $node = null;
+            foreach ($files as $file) {{
+                $node = $this->fetch($file);
+            }}
+            acceptNode($node);
+        }}
+    }}
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert!(
+        errors.is_empty(),
+        "re-testing the call proves the literal branch ran, got: {errors:?}"
+    );
+}
+
+/// A property path is tested exactly as a call is, so re-reading it
+/// re-selects the branch it guarded.
+#[test]
+fn re_testing_a_property_path_re_applies_what_the_branch_filled() {
+    let backend = create_test_backend();
+    let uri = "file:///retest_property.php";
+    let content = format!(
+        r#"<?php
+{RETEST_CALL_SCAFFOLD}
+class Row {{
+    public bool $active = true;
+}}
+function makeNode(): Node {{ return new Node(); }}
+function process(Row $row): void {{
+    $node = null;
+    if ($row->active) {{
+        $node = makeNode();
+    }}
+    echo 'gap';
+    if ($row->active) {{
+        acceptNode($node);
+    }}
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert!(
+        errors.is_empty(),
+        "re-testing the path proves the branch ran, got: {errors:?}"
+    );
+}
+
+/// Writing to the receiver between the two tests makes the second one a
+/// question about a different object, so it recovers nothing.
+#[test]
+fn a_write_to_the_receiver_breaks_a_re_tested_call() {
+    let backend = create_test_backend();
+    let uri = "file:///retest_call_rewritten.php";
+    let content = format!(
+        r#"<?php
+{RETEST_CALL_SCAFFOLD}
+function makeNode(): Node {{ return new Node(); }}
+function process(Identifier $identifier, Identifier $other): void {{
+    $node = null;
+    if ($identifier->isClass()) {{
+        $node = makeNode();
+    }}
+    $identifier = $other;
+    if ($identifier->isClass()) {{
+        acceptNode($node);
+    }}
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert_eq!(
+        errors.len(),
+        1,
+        "the second test asks about a different object, got: {errors:?}"
+    );
+}
+
 /// A different condition proves nothing about the branch that filled the
 /// variable, so the sentinel is still live.
 #[test]
