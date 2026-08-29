@@ -1560,3 +1560,115 @@ function build(object $bound, bool $flag): void {
         "got {messages:?}"
     );
 }
+
+/// Entering `A || B` says one of them held, so an `instanceof` sitting
+/// beside an unrelated operand proves nothing about its subject.  Reading
+/// it as though it had held hid the `null` the guard never ruled out.
+#[test]
+fn an_instanceof_beside_an_unrelated_operand_narrows_nothing() {
+    let backend = create_test_backend();
+    let uri = "file:///or_leg_instanceof.php";
+    let text = r#"<?php
+namespace Repro;
+
+class Variable {}
+
+function needVariable(Variable $v): void {}
+
+function f(?Variable $v, bool $flag): void {
+    if ($v instanceof Variable || $flag) {
+        needVariable($v);
+    }
+}
+"#;
+    let messages = type_error_messages(&backend, uri, text);
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("?Repro\\Variable") || messages[0].contains("?Variable"));
+}
+
+/// Two legs checking two different subjects narrow neither: whichever one
+/// let the branch in, the other was never tested.
+#[test]
+fn or_legs_on_separate_subjects_narrow_neither() {
+    let backend = create_test_backend();
+    let uri = "file:///or_legs_two_subjects.php";
+    let text = r#"<?php
+namespace Repro;
+
+class Variable {}
+
+function needVariable(Variable $v): void {}
+
+function f(?Variable $a, ?Variable $b): void {
+    if ($a instanceof Variable || $b instanceof Variable) {
+        needVariable($a);
+        needVariable($b);
+    }
+}
+"#;
+    let messages = type_error_messages(&backend, uri, text);
+    assert_eq!(messages.len(), 2, "got {messages:?}");
+}
+
+/// The legs join, so a check the whole disjunction admits still narrows:
+/// both legs name a class, and the branch body gets their union.
+#[test]
+fn or_legs_naming_one_subject_join_to_their_union() {
+    let backend = create_test_backend();
+    let uri = "file:///or_legs_union.php";
+    let text = r#"<?php
+namespace Repro;
+
+class Node {}
+class Name extends Node {}
+class Value extends Node {}
+
+function needNode(Node $n): void {}
+function needName(Name $n): void {}
+
+function f(object $n): void {
+    if ($n instanceof Name || $n instanceof Value) {
+        needNode($n);
+        needName($n);
+    }
+}
+"#;
+    let messages = type_error_messages(&backend, uri, text);
+    assert_eq!(
+        messages.len(),
+        1,
+        "only the Name call may fail: {messages:?}"
+    );
+    assert!(
+        messages[0].contains("Name|Repro\\Value") || messages[0].contains("Name|Value"),
+        "got {messages:?}"
+    );
+}
+
+/// A leg the branch already ruled out describes a run that cannot happen,
+/// so what it concluded stays out of the join.  `$price` holds an `Amount`
+/// outright here, which makes the `is_null()` half unreachable; joining
+/// the `null` it writes would hand the body a type nothing could have.
+#[test]
+fn an_impossible_leg_does_not_put_back_what_the_scope_ruled_out() {
+    let backend = create_test_backend();
+    let uri = "file:///impossible_or_leg.php";
+    let text = r#"<?php
+namespace Repro;
+
+class Amount {
+    public function isZero(): bool { return true; }
+}
+
+function needAmount(Amount $a): void {}
+
+function f(): void {
+    $price = new Amount();
+    if (is_null($price) || $price->isZero()) {
+        needAmount($price);
+    }
+}
+"#;
+    let messages = type_error_messages(&backend, uri, text);
+    assert!(messages.is_empty(), "got {messages:?}");
+}

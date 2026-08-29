@@ -559,6 +559,8 @@ function runDemoAssertions(): void
     assert($negated->demo(new Scaffolding\ScaffoldingMotor()) === 'other', 'A bare motor must be ruled out by the guard');
     assert($negated->keepsSubclass(new Scaffolding\ScaffoldingSportSedan()) === 'launch', 'A subclass must pass a check on its parent');
     assert($negated->keepsSubclass(new Scaffolding\ScaffoldingCoupe()) === 'race', 'A failed check must leave only the coupe');
+    assert($negated->provesOneLegOnly(new Scaffolding\ScaffoldingMotor(), true) === 'motor', 'A flag leg must let a bare motor in');
+    assert($negated->provesOneLegOnly(new Scaffolding\ScaffoldingCoupe(), false) === 'motor', 'A coupe must take the instanceof leg');
     assert(
         (new Scaffolding\ScaffoldingSportSedan()) instanceof Scaffolding\ScaffoldingSedan,
         'Scaffolding\ScaffoldingSportSedan must extend Scaffolding\ScaffoldingSedan'

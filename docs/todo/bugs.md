@@ -139,39 +139,35 @@ Sites: `src/Analyser/NodeScopeResolver.php:1103, 1112, 1116, 1121, 5406, 5414`,
 `src/Rules/Properties/SetNonVirtualPropertyHookAssignRule.php:64, 72, 80, 81, 90`,
 `src/Rules/TooWideTypehints/TooWideParameterOutTypeCheck.php:47, 56`.
 
-### B302. An `||` leg's own narrowing is applied as though the leg had held
+### B303. A branch join drops the other path's type when one path narrowed to an intersection
 
 **Impact: Medium · Complexity: Medium**
 
-Entering a branch guarded by `A || B` proves only that one of them held,
-but every narrowing pass reads the operands of a disjunction as if both
-had, so a leg's conclusion reaches the branch body unconditionally:
+`ScopeState::merge_branch` folds an incoming type into an existing entry
+whenever the two name the same class, and widens the existing spelling
+only when the incoming one is a superset of it. Neither spelling being a
+superset of the other is the case it has no answer for: it keeps the
+existing entry and drops the incoming one, so the whole of the other
+path's type is lost.
+
+An intersection is the shape that reaches it. `Variable&Node` and
+`?Variable` both name `Variable`, and neither is a member-wise superset
+of the other, so the branch that carries the nullable half contributes
+nothing:
 
 ```php
-function f(?Variable $v, bool $flag): void {
-    if ($v instanceof Variable || $flag) {
-        acceptVariable($v);        // reported clean; $v is still ?Variable
-    }
+function r(?Variable $v): void {
+    if ($v instanceof Node) { echo 1; } else { echo 2; }
+    acceptString($v);        // reported as Variable&Node; the else path's ?Variable is gone
 }
 ```
 
-This is a false *negative* — the branch body is checked against a type
-narrower than the guard proves — so it hides mismatches rather than
-inventing them. The shape reproduces for `instanceof`, for the type
-guards (`is_string($x) || $flag`), and for the null checks alike.
-
-The disjunction split in `apply_disjunct_operand_narrowing`
-(`type_engine/variable/forward_walk/cond_narrowing.rs`) is the correct
-treatment — narrow one scope per leg and join them — but it runs *after*
-the other passes and takes their already-leaked scope as its base, so it
-can only add to what leaked rather than replace it. It is also limited to
-chains with a conjunctive leg, because the join re-widens a subject that
-an earlier conjunct pinned down when a leg's `instanceof` replaces rather
-than intersects with it
-(`$b instanceof Generic && ($cls === Generic::class || $b instanceof Template)`).
-Fixing this properly means splitting the condition's operands into the
-conjuncts and the disjunctions *first*, running the other passes over the
-conjuncts only, and letting the join own every disjunction.
+It is order-dependent, which is the tell: with the operands the other way
+round the join answers `?Variable|Variable&Node`, so the same two paths
+give two different results depending on which one the merge starts from.
+The fix is for the same-class fold to union the two spellings rather than
+pick one, or to leave the incoming entry alone when neither subsumes the
+other.
 
 ## Arithmetic
 

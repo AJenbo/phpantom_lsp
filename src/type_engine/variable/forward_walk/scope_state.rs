@@ -603,7 +603,7 @@ fn same_types(a: &[ResolvedType], b: &[ResolvedType]) -> bool {
 /// re-apply a proof from a branch that never ran — `bool` and `true` are
 /// the shape that matters, since a branch a plain boolean guards leaves
 /// the flag `bool` on the path that skipped it.
-fn types_are_disjoint(a: &[ResolvedType], b: &[ResolvedType]) -> bool {
+pub(crate) fn types_are_disjoint(a: &[ResolvedType], b: &[ResolvedType]) -> bool {
     if a.is_empty() || b.is_empty() {
         return false;
     }

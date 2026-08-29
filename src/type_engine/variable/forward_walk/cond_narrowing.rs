@@ -547,7 +547,16 @@ pub(crate) fn apply_condition_narrowing<'b>(
     // applies both narrowings as a union (intersection semantics: the
     // variable satisfies both checks, so members from both types are
     // available).
-    let operands = collect_and_chain_operands(condition);
+    //
+    // An operand that is itself a disjunction is held back from that
+    // decomposition: entering the branch proves the disjunction, not any
+    // one of its legs, and every pass below narrows what it is handed as
+    // though it had held.  The join at the end of this function owns them
+    // instead, so a leg's own conclusion never reaches the branch body
+    // unless every other leg proves it too.
+    let (disjunctions, operands): (Vec<_>, Vec<_>) = collect_and_chain_operands(condition)
+        .into_iter()
+        .partition(|operand| collect_or_chain_operands(unwrap_parens(operand)).len() > 1);
 
     let mut var_names: Vec<String> = scope.locals.keys().map(|k| k.to_string()).collect();
     // Include variables from instanceof conditions that may not be in
@@ -578,7 +587,7 @@ pub(crate) fn apply_condition_narrowing<'b>(
         }
     }
 
-    commit_chain_instanceof(&operands, &alias_extractions, &var_names, scope, ctx);
+    let mut pinned = commit_chain_instanceof(&operands, &alias_extractions, &var_names, scope, ctx);
 
     // A key read through a receiver the same chain narrows is only
     // resolvable once that narrowing has landed:
@@ -600,9 +609,22 @@ pub(crate) fn apply_condition_narrowing<'b>(
             .filter(|key| scope.contains(key))
             .collect();
         if !seeded.is_empty() {
-            commit_chain_instanceof(&operands, &alias_extractions, &seeded, scope, ctx);
+            pinned.extend(commit_chain_instanceof(
+                &operands,
+                &alias_extractions,
+                &seeded,
+                scope,
+                ctx,
+            ));
         }
     }
+
+    // The passes below still read the whole condition, disjunctions and
+    // all.  Each of them either decomposes `&&` and stops at an operand it
+    // does not recognise, or reads the condition as one expression — so a
+    // disjunction is opaque to them and none of a leg's conclusions can
+    // escape through them.  A new pass that looks *inside* an `||` belongs
+    // in the leg walk below, not here.
 
     // Type guard narrowing: `is_object($x)`, `is_array($x)`, etc.
     apply_type_guard_narrowing_truthy(condition, scope, ctx);
@@ -637,11 +659,11 @@ pub(crate) fn apply_condition_narrowing<'b>(
     // so `$matches` has the keys the pattern describes.
     apply_preg_match_narrowing(condition, scope, ctx, true);
 
-    // A conjunct that is itself a disjunction proves only that one of its
+    // Each disjunction the chain held back proves only that one of its
     // legs held.  Splitting it re-uses the branch join, so the scope ends
     // up carrying both the union of what the legs prove and the record of
     // which leg proved what.
-    apply_disjunct_operand_narrowing(&operands, scope, ctx);
+    apply_disjunct_operand_narrowing(&disjunctions, &pinned, scope, ctx);
 
     // Whatever the passes above proved about one value's null, they
     // proved about every value whose null it stands for.  Last, so it
@@ -664,23 +686,28 @@ pub(crate) fn apply_condition_narrowing<'b>(
 /// }
 /// ```
 ///
-/// Only a chain with a leg that is itself a conjunction is worth
-/// splitting.  A leg that is a single check concludes nothing beyond its
-/// own subject's type, which the existing disjunction extractors already
-/// union, so the split would cost a scope clone per leg to learn nothing
-/// — and a long `||` chain of single checks is a common shape.
+/// The join is the *only* treatment a disjunction gets: the passes that
+/// run before it are handed the chain's plain conjuncts alone, so what
+/// they leave behind is the base every leg starts from.  That ordering is
+/// what keeps a leg's own conclusion out of the branch body — reading
+/// `$v instanceof Variable || $flag` as though the `instanceof` had held
+/// dropped the `null` the guard never ruled out.
+///
+/// `pinned` names the subjects a conjunct already narrowed to a definite
+/// class.  Those the join leaves alone: `$b instanceof Generic && ($cls
+/// === Generic::class || $b instanceof Template)` proves `$b` is a
+/// `Generic`, and a leg naming an unrelated class replaces rather than
+/// intersects, so joining the legs would answer `Generic|Template` and
+/// lose what the conjunct established.
 fn apply_disjunct_operand_narrowing<'b>(
-    operands: &[&'b Expression<'b>],
+    disjunctions: &[&'b Expression<'b>],
+    pinned: &[String],
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    for operand in operands {
+    for operand in disjunctions {
         let legs = collect_or_chain_operands(unwrap_parens(operand));
-        if legs.len() < 2
-            || !legs
-                .iter()
-                .any(|leg| collect_and_chain_operands(unwrap_parens(leg)).len() > 1)
-        {
+        if legs.len() < 2 {
             continue;
         }
 
@@ -689,6 +716,7 @@ fn apply_disjunct_operand_narrowing<'b>(
             .map(|leg| {
                 let mut leg_scope = scope.clone();
                 apply_condition_narrowing(leg, &mut leg_scope, ctx);
+                drop_leg_answers_the_base_rules_out(&mut leg_scope, scope);
                 leg_scope
             })
             .collect();
@@ -702,7 +730,34 @@ fn apply_disjunct_operand_narrowing<'b>(
         // for the whole disjunction.
         let refs: Vec<&ScopeState> = leg_scopes.iter().collect();
         retain_synthetic_keys_common_to_all(&mut joined, &refs);
+        for subject in pinned {
+            let key = atom(subject);
+            if let Some(types) = scope.locals.get(&key) {
+                joined.locals.insert(key, types.clone());
+            }
+        }
         *scope = joined;
+    }
+}
+
+/// Undo what a leg concluded about a subject the branch already knew
+/// something else about.
+///
+/// The legs start from what the chain's conjuncts — and everything above
+/// the `if` — proved, and a leg can only refine that. When a leg lands on
+/// a type the base rules out, the leg describes a run that cannot happen:
+/// the `is_null($price)` half of `is_null($price) || $price->isZero()` on
+/// a `$price` a guard already proved non-null. Joining the `null` it
+/// wrote back in would hand the branch body the very type the guard
+/// removed, so the base's answer stands for that subject instead.
+fn drop_leg_answers_the_base_rules_out(leg: &mut ScopeState, base: &ScopeState) {
+    for (name, base_types) in &base.locals {
+        let Some(leg_types) = leg.locals.get(name) else {
+            continue;
+        };
+        if types_are_disjoint(leg_types, base_types) {
+            leg.locals.insert(*name, base_types.clone());
+        }
     }
 }
 
@@ -713,13 +768,17 @@ fn apply_disjunct_operand_narrowing<'b>(
 /// keeps a later operand from overwriting an earlier one when both narrow
 /// the same subject: `$x instanceof Foo && $x instanceof Bar` has to end
 /// up as `Foo&Bar`, not as whichever operand was looked at last.
+///
+/// Returns the subjects an operand pinned to a definite class, which is
+/// what [`apply_disjunct_operand_narrowing`] reads to know whose type a
+/// disjunction further along the chain must not widen back.
 fn commit_chain_instanceof<'b>(
     operands: &[&'b Expression<'b>],
     alias_extractions: &[Vec<AliasExtraction>],
     var_names: &[String],
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
-) {
+) -> Vec<String> {
     let scope_snapshot = scope.locals.clone();
     let scope_resolver = |vn: &str| -> Vec<ResolvedType> {
         scope_snapshot.get(&atom(vn)).cloned().unwrap_or_default()
@@ -930,6 +989,8 @@ fn commit_chain_instanceof<'b>(
         };
         commit_instanceof_narrowing(&var_name, narrowed, shape, scope, ctx, &scope_resolver);
     }
+
+    conjuncts.into_keys().collect()
 }
 
 /// Narrow the `$matches` out-parameter of a `preg_match`/`preg_match_all`

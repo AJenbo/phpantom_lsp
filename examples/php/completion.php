@@ -1192,6 +1192,30 @@ class NegatedDisjunctionDemo
         // ruled it out here too and only the coupe is left.
         return $motor->race();                    // Scaffolding\ScaffoldingCoupe
     }
+
+    /**
+     * A disjunction proves that one of its legs held, not that any
+     * particular one did. Which is why a check standing beside an
+     * unrelated operand narrows nothing, while two checks on the same
+     * subject leave the union of what they name.
+     */
+    public function provesOneLegOnly(Scaffolding\ScaffoldingMotor $motor, bool $flag): string
+    {
+        if ($motor instanceof Scaffolding\ScaffoldingCoupe || $flag) {
+            // The flag gets in on its own, so `$motor` is still the
+            // Scaffolding\ScaffoldingMotor it was on the way in and race()
+            // is not offered here.
+            $motor->start();                      // Scaffolding\ScaffoldingMotor
+        }
+
+        if ($motor instanceof Scaffolding\ScaffoldingSedan
+            || $motor instanceof Scaffolding\ScaffoldingCoupe) {
+            // Try: completion here offers start(), which both legs share.
+            $motor->start();                      // Sedan|Coupe
+        }
+
+        return 'motor';
+    }
 }
 
 
