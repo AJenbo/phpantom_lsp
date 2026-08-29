@@ -1564,6 +1564,15 @@ pub(crate) fn process_assignment_expr<'b>(
     // `($a = expr);` is a parenthesized assignment statement — written by
     // hand, or produced by the Blade preprocessor for `@php($a = expr)`.
     if let Expression::Assignment(assignment) = unwrap_parens(expr) {
+        // An assignment buried in the value runs before the target here is
+        // written, and the rest of the value reads what it wrote:
+        // `$ok = ($x = $map[$key])->truthy();`.  A right-hand side that
+        // *is* an assignment is left to the chain handling below, which
+        // knows shapes (destructuring, indexed writes) this does not.
+        if !matches!(unwrap_parens(assignment.rhs), Expression::Assignment(_)) {
+            process_nested_assignments(assignment.rhs, scope, ctx);
+        }
+
         if !assignment.operator.is_assign() {
             // Compound assignment: $x op= expr.
             // The type depends on the operator.
@@ -1717,6 +1726,10 @@ pub(crate) fn process_assignment_expr<'b>(
         // `$ok = preg_match('/…/', $s, $m)` makes `$ok` stand for the
         // match's outcome, so testing it later narrows `$m`.
         record_preg_outcome(&lhs_name, assignment.rhs, scope, ctx);
+    } else {
+        // The expression assigns nothing at its root but may still assign
+        // inside itself: `return ($x = $map[$key])->truthy();`.
+        process_nested_assignments(expr, scope, ctx);
     }
 }
 

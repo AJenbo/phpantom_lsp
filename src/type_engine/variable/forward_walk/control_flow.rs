@@ -60,7 +60,7 @@ pub(crate) fn process_if<'b>(
     }
 
     // Assignment in condition: `if ($x = expr())`
-    process_condition_assignment(if_stmt.condition, scope, ctx);
+    process_nested_assignments(if_stmt.condition, scope, ctx);
 
     // Pass-by-reference in condition: `if (preg_match(..., $matches))`
     seed_pass_by_ref_in_condition(if_stmt.condition, scope, ctx);
@@ -188,7 +188,7 @@ pub(crate) fn process_if_statement_body<'b>(
                 // truthy test can strip its falsy members, and
                 // `elseif (preg_match(…, $m))` has to seed `$m` before the
                 // test can rule out the failed match.
-                process_condition_assignment(ei.condition, scope, ctx);
+                process_nested_assignments(ei.condition, scope, ctx);
                 seed_pass_by_ref_in_condition(ei.condition, scope, ctx);
                 apply_condition_narrowing(ei.condition, scope, ctx);
                 walk_body_forward(std::iter::once(ei.statement), scope, ctx);
@@ -238,7 +238,7 @@ pub(crate) fn process_if_statement_body<'b>(
         // An `elseif`'s own `&&` / `||` chain narrows its later operands
         // just as the leading `if`'s does.
         record_short_circuit_snapshots(ei.condition, &ei_scope, ctx);
-        process_condition_assignment(ei.condition, &mut ei_scope, ctx);
+        process_nested_assignments(ei.condition, &mut ei_scope, ctx);
         seed_pass_by_ref_in_condition(ei.condition, &mut ei_scope, ctx);
         apply_condition_narrowing(ei.condition, &mut ei_scope, ctx);
         walk_body_forward(std::iter::once(ei.statement), &mut ei_scope, ctx);
@@ -476,7 +476,7 @@ pub(crate) fn process_if_colon_body<'b>(
             for prev_ei in body.else_if_clauses.iter().take(idx) {
                 apply_condition_narrowing_inverse(prev_ei.condition, scope, ctx);
             }
-            process_condition_assignment(ei.condition, scope, ctx);
+            process_nested_assignments(ei.condition, scope, ctx);
             seed_pass_by_ref_in_condition(ei.condition, scope, ctx);
             apply_condition_narrowing(ei.condition, scope, ctx);
             walk_body_forward(ei.statements.iter(), scope, ctx);
@@ -531,7 +531,7 @@ pub(crate) fn process_if_colon_body<'b>(
         // An `elseif`'s own `&&` / `||` chain narrows its later operands
         // just as the leading `if`'s does.
         record_short_circuit_snapshots(ei.condition, &ei_scope, ctx);
-        process_condition_assignment(ei.condition, &mut ei_scope, ctx);
+        process_nested_assignments(ei.condition, &mut ei_scope, ctx);
         seed_pass_by_ref_in_condition(ei.condition, &mut ei_scope, ctx);
         apply_condition_narrowing(ei.condition, &mut ei_scope, ctx);
         walk_body_forward(ei.statements.iter(), &mut ei_scope, ctx);
@@ -2335,7 +2335,7 @@ pub(crate) fn process_while<'b>(
     // narrowing below so a condition that assigns and checks in one
     // expression (`while (($line = fgets($h)) !== false)`) finds the
     // variable in scope and can strip the sentinel from it.
-    process_condition_assignment(while_stmt.condition, scope, ctx);
+    process_nested_assignments(while_stmt.condition, scope, ctx);
 
     // Pass-by-reference in condition: `while (preg_match(..., $matches))`
     seed_pass_by_ref_in_condition(while_stmt.condition, scope, ctx);
@@ -2394,7 +2394,7 @@ pub(crate) fn process_while<'b>(
             if point != LoopSeedPoint::Entry {
                 return;
             }
-            process_condition_assignment(while_stmt.condition, next_scope, ctx);
+            process_nested_assignments(while_stmt.condition, next_scope, ctx);
             seed_pass_by_ref_in_condition(while_stmt.condition, next_scope, ctx);
             apply_condition_narrowing(while_stmt.condition, next_scope, ctx);
         },
@@ -2461,7 +2461,7 @@ pub(crate) fn process_for<'b>(
     // Process condition assignments (e.g. `for (; $x = nextItem(); )`)
     // and pass-by-ref in conditions (e.g. `for (; preg_match(..., $m); )`).
     for cond_expr in for_stmt.conditions.iter() {
-        process_condition_assignment(cond_expr, scope, ctx);
+        process_nested_assignments(cond_expr, scope, ctx);
         seed_pass_by_ref_in_condition(cond_expr, scope, ctx);
     }
 
@@ -2551,7 +2551,7 @@ pub(crate) fn process_for<'b>(
             }
             LoopSeedPoint::Entry => {
                 for cond_expr in for_stmt.conditions.iter() {
-                    process_condition_assignment(cond_expr, next_scope, ctx);
+                    process_nested_assignments(cond_expr, next_scope, ctx);
                     seed_pass_by_ref_in_condition(cond_expr, next_scope, ctx);
                     apply_condition_narrowing(cond_expr, next_scope, ctx);
                 }
@@ -2672,7 +2672,7 @@ pub(crate) fn process_do_while<'b>(
                 apply_condition_narrowing(dw.condition, next_scope, ctx);
             }
             LoopSeedPoint::Entry => {
-                process_condition_assignment(dw.condition, next_scope, ctx);
+                process_nested_assignments(dw.condition, next_scope, ctx);
                 seed_pass_by_ref_in_condition(dw.condition, next_scope, ctx);
                 // The assignment above re-runs `$c = $c->getParent()` on
                 // the merged scope, which puts the declared `?Category`

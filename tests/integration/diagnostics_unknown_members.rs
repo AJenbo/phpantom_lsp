@@ -14214,3 +14214,89 @@ class Collector {
         "an untyped assignment must not leave the `null` seed behind, got: {diags:?}",
     );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Assignments used as values
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// An assignment is an expression, so it can be the receiver of the call
+/// that reads it back: `($x = $map[$key])->truthy()`.  The receiver has
+/// the type the assignment just wrote, whether the target is a variable,
+/// a `??=` variable, or a `??=` array offset, and whether the expression
+/// sits in a condition, a `return`, another assignment's value, or a
+/// short-circuit chain.
+#[test]
+fn an_assignment_used_as_a_call_receiver_has_the_type_it_assigned() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///assignment_receiver.php";
+    let text = r#"<?php
+class Node {
+    public function truthy(): bool { return true; }
+}
+
+class Registry {
+    /** @var array<string, Node> */
+    private array $map = [];
+    /** @var array<string, Node> */
+    private array $cache = [];
+
+    public function plainAssignment(string $key): bool {
+        if (($x = $this->map[$key])->truthy()) { return true; }
+        return false;
+    }
+
+    public function coalesceOnVariable(string $key): bool {
+        $cached = null;
+        if (($cached ??= $this->map[$key])->truthy()) { return true; }
+        return false;
+    }
+
+    public function coalesceOnOffset(string $key): bool {
+        if (($this->cache[$key] ??= $this->map[$key])->truthy()) { return true; }
+        return false;
+    }
+
+    public function throughAVariable(string $key): bool {
+        $r = $this->cache[$key] ??= $this->map[$key];
+        if ($r->truthy()) { return true; }
+        return false;
+    }
+
+    public function coalesceReadInTheBody(string $key): bool {
+        $cached = null;
+        if ($cached ??= $this->map[$key]) { return $cached->truthy(); }
+        return false;
+    }
+
+    public function inAReturn(string $key): bool {
+        return ($x = $this->map[$key])->truthy();
+    }
+
+    public function inAnotherAssignment(string $key): bool {
+        $ok = ($x = $this->map[$key])->truthy();
+        return $ok;
+    }
+
+    public function inAWhileCondition(string $key): bool {
+        while (($x = $this->map[$key])->truthy()) { return true; }
+        return false;
+    }
+
+    public function inAShortCircuitChain(string $key): bool {
+        return $key !== '' && ($x = $this->map[$key])->truthy();
+    }
+}
+"#;
+    backend.update_ast(uri, text);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    assert!(
+        diags.is_empty(),
+        "an assignment used as a call receiver must resolve to what it assigned, got: {diags:?}",
+    );
+}

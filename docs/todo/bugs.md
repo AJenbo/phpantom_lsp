@@ -42,34 +42,7 @@ No outstanding items.
 
 ## Symbol resolution
 
-### B310. An assignment expression as a call receiver never resolves
-
-**Impact: Medium · Complexity: Medium**
-
-Calling a method directly on a parenthesized assignment loses the
-receiver's type entirely — plain assignment, `??=` on a variable, and
-`??=` on an array offset all report
-`Cannot verify method 'm' — type of '' could not be resolved`:
-
-```php
-if (($x = $map[$key])->truthy()) { ... }             // unresolved
-if (($cached ??= $map[$key])->truthy()) { ... }      // unresolved
-if (($cache[$key] ??= $map[$key])->truthy()) { ... } // unresolved
-
-$r = $cache[$key] ??= $map[$key];
-if ($r->truthy()) { ... }                            // resolves fine
-```
-
-Two defects share the root: the subject resolver does not compute a type
-for `Assign`/`AssignOp` receiver expressions, and the diagnostic prints
-an empty subject name for them. Curiously, the shapes resolve in a
-small scratch project but fail when the identical file is dropped into
-`projects/pdepend` or `projects/phpstan-src` — some small-project
-fallback rescues the case, which is worth understanding during the fix
-but is not the fix: the resolver should handle assignment receivers
-directly. Sweep site: `src/Analyser/ScopeOps.php:513` (PHPStan Source,
-2026-08-29; the sibling construct at `:496` uses the assigned-variable
-form and resolves).
+No outstanding items.
 
 ## Array types
 

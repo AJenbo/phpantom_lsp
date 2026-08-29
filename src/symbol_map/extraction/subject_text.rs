@@ -155,6 +155,18 @@ fn lower_spine_base<'a>(expr: &'a Expression<'a>) -> Option<SubjectExpr> {
 
         Expression::Parenthesized(paren) => expr_to_subject_expr(paren.expression),
 
+        // An assignment used as a value (`($x = $map[$key])->m()`,
+        // `($c ??= $map[$key])->m()`) evaluates to whatever its target
+        // holds once it has run, so it lowers to the target.  That is the
+        // same subject the equivalent two-statement form produces, which
+        // is what keeps the two spellings resolving alike.  A target with
+        // no subject representation (list destructuring, a dynamic
+        // property) falls back to the assigned value.
+        Expression::Assignment(assign) => match expr_to_subject_expr(assign.lhs) {
+            Some(se) if !se.to_subject_text().is_empty() => Some(se),
+            _ => expr_to_subject_expr(assign.rhs),
+        },
+
         // `clone $expr` preserves the type of the operand.
         Expression::Clone(clone) => expr_to_subject_expr(clone.object),
 
