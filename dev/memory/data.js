@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788022418460,
+  "lastUpdate": 1788024702904,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -25499,6 +25499,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 69.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "6c8c06f2e9f6e5407321fb833ef9e72e31bde5c7",
+          "message": "A by-reference out-parameter is typed by what the callee writes, and the\nvalue it already held is left alone",
+          "timestamp": "2026-08-29T18:51:44+02:00",
+          "tree_id": "284bbe1fae3b5ddfcd8a6c44870fa37f9cb19074",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/6c8c06f2e9f6e5407321fb833ef9e72e31bde5c7"
+        },
+        "date": 1788024694012,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 36.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 71.5,
             "unit": "MiB"
           }
         ]
