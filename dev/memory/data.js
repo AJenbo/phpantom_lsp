@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787993942409,
+  "lastUpdate": 1788004494659,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -25431,6 +25431,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 73.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "a7ed660e36011adff555dc2df2a669039775a8d9",
+          "message": "A loop over an array the code proved has entries no longer leaves the\nsentinel above it behind",
+          "timestamp": "2026-08-29T13:41:30+02:00",
+          "tree_id": "c04edf0193e7c8bfbcb161bc04cd6d1d4d05e844",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/a7ed660e36011adff555dc2df2a669039775a8d9"
+        },
+        "date": 1788004487286,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 71.1,
             "unit": "MiB"
           }
         ]
