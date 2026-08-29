@@ -505,17 +505,31 @@ impl ScopeState {
             // losing nullable information.
             for rt in other_types.iter() {
                 let mut merged_into_existing = false;
+                // Set when an existing entry names the same class but
+                // neither spelling covers the other, so the incoming
+                // type has to be kept beside it rather than folded in.
+                let mut keep_beside_same_class = false;
                 if let Some(ref rt_cls) = rt.class_info {
                     for existing in entry.iter_mut() {
                         if let Some(ref ex_cls) = existing.class_info
                             && ex_cls.name == rt_cls.name
                         {
                             // Same class.  If the incoming type is
-                            // broader, adopt it.
-                            if existing.type_string != rt.type_string
-                                && existing.type_string.is_subset_of(&rt.type_string)
-                            {
-                                existing.type_string = rt.type_string.clone();
+                            // broader, adopt it.  If neither spelling
+                            // covers the other (`?A` against the `A&B`
+                            // an `instanceof` proved on the other path),
+                            // there is nothing to fold into: keep
+                            // looking, and let the incoming type be
+                            // added as its own alternative below rather
+                            // than be swallowed by whichever path the
+                            // join happened to start from.
+                            if existing.type_string != rt.type_string {
+                                if existing.type_string.is_subset_of(&rt.type_string) {
+                                    existing.type_string = rt.type_string.clone();
+                                } else if !rt.type_string.is_subset_of(&existing.type_string) {
+                                    keep_beside_same_class = true;
+                                    continue;
+                                }
                             }
                             // A virtual member that only one branch's
                             // class_info carries (e.g. a member injected by
@@ -554,7 +568,16 @@ impl ScopeState {
                         }
                     }
                 }
-                if !merged_into_existing {
+                if merged_into_existing {
+                    continue;
+                }
+                if keep_beside_same_class {
+                    // `push_unique` keys on the class name alone, so it
+                    // would drop this as a duplicate of the entry the
+                    // fold above just declined.  The subsumption pass
+                    // below is what decides which spelling survives.
+                    entry.push(rt.clone());
+                } else {
                     ResolvedType::push_unique(entry, rt.clone());
                 }
             }

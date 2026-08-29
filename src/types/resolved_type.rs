@@ -785,6 +785,11 @@ fn array_snapshot_covered_by(covered: &PhpType, cover: &PhpType) -> bool {
 /// `Base` — keeping both would report `Base|Base&Verbose` and leave the
 /// branch-local proof visible after the branch it belongs to.
 ///
+/// The covering type may name the part as one alternative among several
+/// rather than on its own: the path that skipped the branch above often
+/// carries `?Base`, and `Base&Verbose` is still one of the values that
+/// describes.
+///
 /// Only a part named verbatim by the covering type counts.  Widening a
 /// part to its parent would need the class loader, and the case that
 /// matters (a branch narrowing the very type the sibling path carries)
@@ -793,5 +798,5 @@ fn intersection_covered_by(covered: &PhpType, cover: &PhpType) -> bool {
     let TypeKind::Intersection(parts) = covered.kind() else {
         return false;
     };
-    parts.iter().any(|part| part.equivalent(cover))
+    parts.iter().any(|part| part.is_subset_of(cover))
 }

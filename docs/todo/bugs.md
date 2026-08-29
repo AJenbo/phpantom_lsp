@@ -139,36 +139,6 @@ Sites: `src/Analyser/NodeScopeResolver.php:1103, 1112, 1116, 1121, 5406, 5414`,
 `src/Rules/Properties/SetNonVirtualPropertyHookAssignRule.php:64, 72, 80, 81, 90`,
 `src/Rules/TooWideTypehints/TooWideParameterOutTypeCheck.php:47, 56`.
 
-### B303. A branch join drops the other path's type when one path narrowed to an intersection
-
-**Impact: Medium · Complexity: Medium**
-
-`ScopeState::merge_branch` folds an incoming type into an existing entry
-whenever the two name the same class, and widens the existing spelling
-only when the incoming one is a superset of it. Neither spelling being a
-superset of the other is the case it has no answer for: it keeps the
-existing entry and drops the incoming one, so the whole of the other
-path's type is lost.
-
-An intersection is the shape that reaches it. `Variable&Node` and
-`?Variable` both name `Variable`, and neither is a member-wise superset
-of the other, so the branch that carries the nullable half contributes
-nothing:
-
-```php
-function r(?Variable $v): void {
-    if ($v instanceof Node) { echo 1; } else { echo 2; }
-    acceptString($v);        // reported as Variable&Node; the else path's ?Variable is gone
-}
-```
-
-It is order-dependent, which is the tell: with the operands the other way
-round the join answers `?Variable|Variable&Node`, so the same two paths
-give two different results depending on which one the merge starts from.
-The fix is for the same-class fold to union the two spellings rather than
-pick one, or to leave the incoming entry alone when neither subsumes the
-other.
-
 ## Arithmetic
 
 No outstanding items.
