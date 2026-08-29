@@ -1687,20 +1687,16 @@ disagree about, and a later test that re-establishes one of those keys
 re-applies the rest — but only when the two paths left that key holding
 values that cannot both be the one in hand. Where they overlap, the test
 proves nothing and the proof is dropped. Two shapes fall in that gap.</p>
-<p><strong>a. A guard on a plain boolean.</strong> Entering <code>if ($isI)</code> narrows <code>$isI</code> to
-<code>true</code>, but the path that skipped it is left with the declared <code>bool</code>
-rather than <code>false</code>, and <code>true</code> is one of the values <code>bool</code> spans. So the
-join records nothing and re-testing the flag recovers nothing:</p>
+<p><strong>a. A guard on <code>instanceof</code>.</strong> The else path of <code>if ($id instanceof B)</code>
+on an <code>A</code> keeps <code>A</code>, which spans <code>B</code>, so re-testing <code>$id instanceof B</code>
+does not recover what the first test's branch filled:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">$a = null;</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">if ($isI) { $a = makeA(); }</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">return $isI ? takesA($a) : &#39;&#39;;                 // $a is still A|null</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">if ($id instanceof B) { $a = makeA(); }</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">return $id instanceof B ? takesA($a) : &#39;&#39;;     // $a is still A|null</span>
 </code></pre></div>
-<p>The same gap makes <code>instanceof</code> one hop worse: the else path of
-<code>if ($id instanceof B)</code> on an <code>A</code> keeps <code>A</code>, which spans <code>B</code>, so
-re-testing <code>$id instanceof B</code> does not recover what the first test's
-branch filled. Both want the negative branch to carry the exclusion the
-condition really proves, which is the representation gap
-<a href="../type-inference/#t20-type-narrowing-reconciliation-engine">T20</a>'s
+<p>This wants the negative branch to carry the exclusion the condition
+really proves ("an <code>A</code> that is not a <code>B</code>"), which is the representation
+gap <a href="../type-inference/#t20-type-narrowing-reconciliation-engine">T20</a>'s
 sure/sure-not split closes.</p>
 <p><strong>b. Two variables assigned together, where checking one implies the
 other through an enclosing disjunction.</strong> <code>!$isI</code> combined with an
