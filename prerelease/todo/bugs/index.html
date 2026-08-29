@@ -880,6 +880,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Narrowing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b309-re-testing-a-call-result-does-not-recover-what-the-first-tests-branch-assigned" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B309. Re-testing a call result does not recover what the first test's branch assigned
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -902,6 +919,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Symbol resolution">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b310-an-assignment-expression-as-a-call-receiver-never-resolves" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B310. An assignment expression as a call receiver never resolves
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -912,6 +946,23 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Array types">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b307-foreach-over-an-array-with-no-declared-key-type-yields-an-int-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B307. Foreach over an array with no declared key type yields an <code>int</code> key
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -931,17 +982,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         Miscellaneous
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#not-yet-attributed" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Not yet attributed
       </span>
     </span>
   </a>
@@ -1468,6 +1508,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Narrowing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b309-re-testing-a-call-result-does-not-recover-what-the-first-tests-branch-assigned" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B309. Re-testing a call result does not recover what the first test's branch assigned
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1490,6 +1547,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Symbol resolution">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b310-an-assignment-expression-as-a-call-receiver-never-resolves" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B310. An assignment expression as a call receiver never resolves
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1500,6 +1574,23 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Array types">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b307-foreach-over-an-array-with-no-declared-key-type-yields-an-int-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B307. Foreach over an array with no declared key type yields an <code>int</code> key
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1519,17 +1610,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         Miscellaneous
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#not-yet-attributed" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Not yet attributed
       </span>
     </span>
   </a>
@@ -1569,26 +1649,10 @@ to second-guess upstream output.</p>
 <p>Each entry below carries an <strong>Impact · Complexity</strong> rating using the same
 scale defined in <a href="../../todo/"><code>docs/todo.md</code></a>; that table is also where
 each bug's row lives in the current sprint/backlog.</p>
-<p>All entries below come from triage of the PHPStan Source sample project,
-re-swept on 2026-08-29 (79 sites, down from 84 earlier the same day, 98
-at the 2026-08-28 sweep, 126 before it and 180 at the 2026-08-27
-triage). Site counts refer to that sweep; every mechanism was either
-reproduced in a minimal project or confirmed by reading the guard
-construct PHPStan honours. The sweep is a snapshot, so a site named here
-may already read differently: re-run the analyser before working an
-entry, and trim the shapes that no longer reproduce. Line numbers drift
-by a line or two between sweeps — match on the surrounding construct, not
-on the number.</p>
-<p>Entries are grouped by the mechanism that has to change, not by the
-symptom that surfaced: one entry is one root cause, however many shapes
-it shows up in. Splitting a shape out into its own entry because it
-reads differently in the source is how this list grew past forty in the
-first place. If two entries would be fixed by the same change, they are
-one entry. Defects too small to earn a row of their own are collected
-under <a href="#miscellaneous">Miscellaneous</a> rather than given one each.</p>
-<p>Of the 74 distinct lines the latest sweep reports, 30 are attributed to
-an entry below. The unattributed remainder is described in
-<a href="#not-yet-attributed">Not yet attributed</a>.</p>
+<p>Bugs land here from wherever they surface: found while working on another
+task, or sweeps of the sample projects under <code>projects/</code>. Entries are
+grouped by the mechanism that has to change, not by the symptom that
+surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="crashes">Crashes<a class="headerlink" href="#crashes" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="type-comparison">Type comparison<a class="headerlink" href="#type-comparison" title="Permanent link">&para;</a></h2>
@@ -1598,56 +1662,96 @@ an entry below. The unattributed remainder is described in
 <h2 id="reachability">Reachability<a class="headerlink" href="#reachability" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b309-re-testing-a-call-result-does-not-recover-what-the-first-tests-branch-assigned">B309. Re-testing a call result does not recover what the first test's branch assigned<a class="headerlink" href="#b309-re-testing-a-call-result-does-not-recover-what-the-first-tests-branch-assigned" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: High</strong></p>
+<p>PHPStan remembers the types of arbitrary expressions, keyed by their
+printed form — including method calls. After
+<code>if ($id-&gt;isClass()) { $files = ['a']; }</code> merges, a later
+<code>if ($id-&gt;isClass())</code> re-selects the branch facts: inside it, <code>$files</code>
+is the non-empty literal again, so a <code>foreach</code> over it provably runs and
+its loop variables are definitely assigned. Our walker keys only
+variables, so the second test proves nothing and the loop variables stay
+possibly-<code>null</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">if ($identifier-&gt;isClass()) {</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    $files = [&#39;a.php&#39;];</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">} elseif ($identifier-&gt;isFunction()) {</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">    $files = $this-&gt;findFilesByFunction();   // list&lt;string&gt;, may be empty</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">} else {</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">    return null;</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">}</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">if ($identifier-&gt;isClass()) {</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">    $node = null;</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="x">    foreach ($files as $file) {              // provably non-empty here</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="x">        $node = $this-&gt;fetch($file);</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="x">    }</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="x">    $this-&gt;takesNode($node);                 // reports null|Node</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="x">}</span>
+</code></pre></div>
+<p>The fix direction is the expression-string keying PHPStan uses: record
+call results in the scope alongside variables so a repeated test
+correlates the branches. (Whether a call is safe to remember — purity,
+intervening writes to the receiver — is part of the design.) Sweep
+sites: <code>src/Reflection/BetterReflection/SourceLocator/OptimizedDirectorySourceLocator.php:149-150</code>
+(PHPStan Source, 2026-08-29).</p>
 <h2 id="arithmetic">Arithmetic<a class="headerlink" href="#arithmetic" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b310-an-assignment-expression-as-a-call-receiver-never-resolves">B310. An assignment expression as a call receiver never resolves<a class="headerlink" href="#b310-an-assignment-expression-as-a-call-receiver-never-resolves" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p>Calling a method directly on a parenthesized assignment loses the
+receiver's type entirely — plain assignment, <code>??=</code> on a variable, and
+<code>??=</code> on an array offset all report
+<code>Cannot verify method 'm' — type of '' could not be resolved</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">if (($x = $map[$key])-&gt;truthy()) { ... }             // unresolved</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">if (($cached ??= $map[$key])-&gt;truthy()) { ... }      // unresolved</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">if (($cache[$key] ??= $map[$key])-&gt;truthy()) { ... } // unresolved</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">$r = $cache[$key] ??= $map[$key];</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">if ($r-&gt;truthy()) { ... }                            // resolves fine</span>
+</code></pre></div>
+<p>Two defects share the root: the subject resolver does not compute a type
+for <code>Assign</code>/<code>AssignOp</code> receiver expressions, and the diagnostic prints
+an empty subject name for them. Curiously, the shapes resolve in a
+small scratch project but fail when the identical file is dropped into
+<code>projects/pdepend</code> or <code>projects/phpstan-src</code> — some small-project
+fallback rescues the case, which is worth understanding during the fix
+but is not the fix: the resolver should handle assignment receivers
+directly. Sweep site: <code>src/Analyser/ScopeOps.php:513</code> (PHPStan Source,
+2026-08-29; the sibling construct at <code>:496</code> uses the assigned-variable
+form and resolves).</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b307-foreach-over-an-array-with-no-declared-key-type-yields-an-int-key">B307. Foreach over an array with no declared key type yields an <code>int</code> key<a class="headerlink" href="#b307-foreach-over-an-array-with-no-declared-key-type-yields-an-int-key" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium-High · Complexity: Medium</strong></p>
+<p>Docblocks that say nothing about keys — <code>mixed[]</code>, <code>T[]</code>, <code>array&lt;T&gt;</code> —
+have key type <code>array-key</code>, and a <code>foreach</code> over such a value should
+bind the key as <code>int|string</code>. We bind it as <code>int</code>, dropping the string
+half, so string keys reaching string parameters report
+<code>expects string, got int</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">/** @param mixed[] $config */</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">function f(array $config): void</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">{</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">    foreach ($config as $type =&gt; $tags) {</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">        takesString($type);   // reports &quot;expects string, got int&quot;</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">    }</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">}</span>
+</code></pre></div>
+<p>The same wrong key also explains the odd return-type report where a
+list built from the keys merges with a string-literal fallback branch as
+<code>non-empty-list&lt;int&gt;|non-empty-list&lt;string&gt;</code> against a declared
+<code>array&lt;string&gt;</code> — with the key fixed the loop arm becomes
+<code>list&lt;int|string&gt;</code> and the report collapses to the genuine half. Once
+the key is <code>int|string</code>, confirm that an <code>is_int($key) { continue; }</code>
+guard narrows the survivor path to <code>string</code> (the isolated <code>is_int</code>
+negation on a <code>@param int|string</code> already narrows correctly).</p>
+<p>Sweep sites (PHPStan Source, 2026-08-29):
+<code>src/DependencyInjection/ConditionalTagsExtension.php:45</code>,
+<code>src/Rules/PhpDoc/WrongVariableNameInVarTagRule.php:376</code>,
+<code>src/Analyser/ResultCache/ResultCacheManager.php:727</code>.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
-<h2 id="not-yet-attributed">Not yet attributed<a class="headerlink" href="#not-yet-attributed" title="Permanent link">&para;</a></h2>
-<p>44 of the 2026-08-28 sweep's 93 distinct lines are not attributed to an
-entry above. Most are neighbours of a shape that already has an entry and
-need only a read to place; the recurring ones are recorded here so a
-future triage starts from them rather than rediscovering them.</p>
-<ul>
-<li><strong>Four are not our bug.</strong> <code>PHPStan\ExtensionInstaller\GeneratedConfig</code>
-  is written at install time and is absent from a plain checkout, so
-  <code>GeneratedConfig::EXTENSIONS</code> genuinely names a class that is not
-  there (<code>src/Analyser/ResultCache/ResultCacheManager.php:1396</code>,
-  <code>src/Command/CommandHelper.php:309</code>,
-  <code>src/Diagnose/PHPStanDiagnoseExtension.php:132, 142</code>). They are
-  correct findings against the sample as checked out, not false
-  positives; a sweep that counts them is counting four too many.</li>
-<li><strong><code>src/Testing/TestCaseSourceLocatorFactory.php:75</code> is also not our
-  bug.</strong> <code>dirname($vendorDirProperty-&gt;getValue($classLoader))</code> reads
-  Composer's <code>ClassLoader::$vendorDir</code>, which its own docblock types
-  <code>string|null</code>, and nothing between the <code>hasProperty()</code> guard and the
-  call rules the <code>null</code> out. <code>dirname()</code> rejects it under
-  <code>strict_types</code>. PHPStan stays quiet only because reflection reads are
-  <code>mixed</code> to it, so this is a place where we are the more accurate of the
-  two rather than a false positive.</li>
-<li><strong>A <code>foreach</code> key reaching a <code>string</code> parameter</strong> —
-  <code>src/DependencyInjection/ConditionalTagsExtension.php:45</code> and
-  <code>src/Rules/PhpDoc/WrongVariableNameInVarTagRule.php:376</code> both report
-  "expects string, got int", so the key type of an array whose keys are
-  strings is coming back as the <code>int</code> half of <code>array-key</code>.</li>
-<li><strong>Unresolved receivers with no entry yet</strong>:
-  <code>src/Analyser/ResultCache/ResultCacheManager.php:832, 837</code> (<code>$error</code>),
-  <code>src/DependencyInjection/NeonAdapter.php:102, 103</code> (<code>$st</code>),
-  <code>src/Type/Regex/RegexGroupParser.php:160</code> (<code>$child</code>),
-  <code>src/PhpDoc/StubValidator.php:57</code>
-  (<code>$pathRoutingParser</code>), <code>src/Analyser/ScopeOps.php:511</code> (an empty
-  subject name, which is a reporting bug of its own).</li>
-<li><strong><code>src/Analyser/ResultCache/ResultCacheManager.php:727</code></strong> returns
-  <code>non-empty-list&lt;int&gt;|list&lt;string&gt;</code> where <code>array&lt;string&gt;</code> is declared —
-  an array built in two branches that keeps the key type of one and the
-  value type of the other.</li>
-</ul>
 
 
 
