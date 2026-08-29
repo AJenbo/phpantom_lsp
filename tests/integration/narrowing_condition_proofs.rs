@@ -2108,3 +2108,105 @@ trait LonelyTrait
         "with no using class the trait is still the best answer, got: {hover}"
     );
 }
+
+// ─── The proof reaches a test on the variable the branch filled ─────────────
+
+const BRANCH_SCAFFOLD: &str = r#"
+class Expr {}
+class Variable extends Expr {
+    public string $name = '';
+}
+class Holder {
+    public Expr $value;
+}
+class Marker {}
+function acceptVariable(Variable $v): void {}
+"#;
+
+/// The `!== null` guard names the variable the branch filled, not the
+/// subject the branch narrowed — but reaching it proves the branch ran,
+/// so the narrowing holds again.
+#[test]
+fn a_variable_filled_under_a_guard_stands_for_that_guard() {
+    let backend = create_test_backend();
+    let uri = "file:///branch_proof_variable.php";
+    let content = format!(
+        r#"<?php
+{BRANCH_SCAFFOLD}
+function process(Expr $expr): void {{
+    $marker = null;
+    if ($expr instanceof Variable) {{
+        $marker = new Marker();
+    }}
+    echo 'gap';
+    if ($marker !== null) {{
+        acceptVariable($expr);
+    }}
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert!(
+        errors.is_empty(),
+        "reaching the `!== null` guard proves the branch ran, got: {errors:?}"
+    );
+}
+
+/// The same for a subject reached through a property path, which the
+/// implicit else never records a narrowing for at all.
+#[test]
+fn a_variable_filled_under_a_guard_stands_for_a_property_path_proof() {
+    let backend = create_test_backend();
+    let uri = "file:///branch_proof_property.php";
+    let content = format!(
+        r#"<?php
+{BRANCH_SCAFFOLD}
+function process(Holder $holder): void {{
+    $marker = null;
+    if ($holder->value instanceof Variable && is_string($holder->value->name)) {{
+        $marker = new Marker();
+    }}
+    echo 'gap';
+    if ($marker !== null) {{
+        acceptVariable($holder->value);
+    }}
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert!(
+        errors.is_empty(),
+        "the property path the branch narrowed is narrowed again past the \
+         guard, got: {errors:?}"
+    );
+}
+
+/// A guard closer to the read has already proven more, and the recorded
+/// branch proof must not widen it back.
+#[test]
+fn a_branch_proof_never_widens_a_closer_guard() {
+    let backend = create_test_backend();
+    let uri = "file:///branch_proof_no_widening.php";
+    let content = format!(
+        r#"<?php
+{BRANCH_SCAFFOLD}
+function process(Holder $holder, Expr $other): void {{
+    $marker = null;
+    if ($other instanceof Variable) {{
+        $marker = new Marker();
+    }}
+    if ($marker !== null && $holder->value instanceof Variable) {{
+        acceptVariable($holder->value);
+    }}
+}}
+"#
+    );
+
+    let errors = argument_type_errors(&backend, uri, &content);
+    assert!(
+        errors.is_empty(),
+        "the `&&` operand proves more than the branch did, got: {errors:?}"
+    );
+}

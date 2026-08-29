@@ -8,6 +8,7 @@ use crate::Backend;
 use crate::atom::AtomMap;
 
 use crate::php_type::PhpType;
+use crate::type_engine::variable::forward_walk::ScopeProofs;
 use crate::types::*;
 
 // ─── Thread-local chain resolution cache ────────────────────────────────────
@@ -270,6 +271,15 @@ pub(crate) struct VarResolutionCtx<'a> {
     /// variable's types from the forward walker's in-progress
     /// `ScopeState`.
     pub scope_var_resolver: ScopeVarResolverFn<'a>,
+    /// The proofs that scope holds which are not variable types: what a
+    /// boolean stands for, which `preg_match` outcome a variable is, and
+    /// whose null a value's null stands for.
+    ///
+    /// Set alongside `scope_var_resolver`; `None` where no walker scope
+    /// exists.  Narrowing a ternary arm or a `match` arm reads these, so
+    /// a condition that tests a boolean recording an earlier check
+    /// narrows that check's subject instead of only the boolean.
+    pub scope_proofs: Option<ScopeProofs<'a>>,
 }
 
 impl<'a> VarResolutionCtx<'a> {
@@ -338,6 +348,7 @@ impl<'a> VarResolutionCtx<'a> {
             branch_aware: self.branch_aware,
             match_arm_narrowing: self.match_arm_narrowing.clone(),
             scope_var_resolver: self.scope_var_resolver,
+            scope_proofs: self.scope_proofs,
         }
     }
 
@@ -384,6 +395,7 @@ impl<'a> VarResolutionCtx<'a> {
             branch_aware: self.branch_aware,
             match_arm_narrowing,
             scope_var_resolver: self.scope_var_resolver,
+            scope_proofs: self.scope_proofs,
         }
     }
 }

@@ -1862,7 +1862,12 @@ pub(crate) fn resolve_foreach_expr_via_subject<'b>(
             .cloned()
             .unwrap_or_default()
     };
-    let var_ctx = ctx.var_ctx_for_with_scope("$__foreach", expr_span.start.offset, &scope_resolver);
+    let var_ctx = ctx.var_ctx_for_with_scope(
+        "$__foreach",
+        expr_span.start.offset,
+        &scope_resolver,
+        Some(scope.proofs()),
+    );
     let rctx = var_ctx.as_resolution_ctx();
 
     let resolved = crate::type_engine::resolver::resolve_target_classes(

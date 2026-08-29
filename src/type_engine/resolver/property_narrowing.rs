@@ -118,6 +118,7 @@ pub(crate) fn apply_property_narrowing(
                 branch_aware: false,
                 match_arm_narrowing: HashMap::new(),
                 scope_var_resolver: None,
+                scope_proofs: None,
             };
             walk_property_narrowing_in_statements(
                 program.statements.iter(),

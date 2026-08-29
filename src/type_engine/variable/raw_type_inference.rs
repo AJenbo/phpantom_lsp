@@ -638,6 +638,7 @@ fn infer_callback_return_type(
         branch_aware: false,
         match_arm_narrowing: std::collections::HashMap::new(),
         scope_var_resolver: Some(&scope_resolver),
+        scope_proofs: None,
     };
 
     super::foreach_resolution::resolve_expression_type(body_expr, &infer_ctx)

@@ -23,6 +23,11 @@ pub(crate) struct VarAssertion {
     pub subject: Atom,
     /// The type checked against.
     pub class_type: PhpType,
+    /// The further types the check allows, when the boolean was assigned
+    /// an `||` chain over one subject
+    /// (`$isNode = $n instanceof Stmt || $n instanceof Expr`).  The
+    /// subject is one of `class_type` and these, not all of them.
+    pub alternatives: Vec<PhpType>,
     /// The check was written negated (`$notHtml = !$raw instanceof …`).
     pub negated: bool,
     /// Exact class identity (`get_class($raw) === …`) rather than a
@@ -49,6 +54,67 @@ pub(crate) struct PregOutcome {
     /// The call was `preg_match_all`, whose failed match is shaped
     /// differently from `preg_match`'s.
     pub matches_all: bool,
+}
+
+/// The proofs a scope holds about values other than their own types,
+/// borrowed from the scope that recorded them.
+///
+/// A condition is narrowed against a `ScopeState` built for the occasion
+/// in [`condition_arm_narrowing`](super::condition_arm_narrowing), which
+/// only knows the types of the subjects the condition names.  A boolean
+/// standing for a check, a `preg_match` result, and a pair of variables
+/// filled together are all proofs the condition never names outright, so
+/// they have to travel with the resolution context to reach it.
+#[derive(Clone, Copy)]
+pub(crate) struct ScopeProofs<'a> {
+    pub assertions: &'a AtomMap<Vec<VarAssertion>>,
+    pub non_null_implications: &'a AtomMap<Vec<Atom>>,
+    pub implied_narrowings: &'a AtomMap<Vec<(Atom, Vec<ResolvedType>)>>,
+    pub preg_outcomes: &'a AtomMap<PregOutcome>,
+}
+
+impl ScopeProofs<'_> {
+    /// Whether nothing is recorded at all, which is the common case and
+    /// lets callers skip the seeding work entirely.
+    pub fn is_empty(&self) -> bool {
+        self.assertions.is_empty()
+            && self.non_null_implications.is_empty()
+            && self.implied_narrowings.is_empty()
+            && self.preg_outcomes.is_empty()
+    }
+
+    /// The keys the proofs recorded under `holder` are about.
+    ///
+    /// Reading a proof back needs the subject's own type in scope: an
+    /// `instanceof` recorded under `$isFoo` narrows `$node`, so a
+    /// condition that only names `$isFoo` still has to have `$node`
+    /// seeded before the narrowing has anything to act on.
+    pub fn subjects_of(&self, holder: &Atom, out: &mut Vec<String>) {
+        let mut push = |key: &Atom| {
+            let key = key.to_string();
+            if !out.contains(&key) {
+                out.push(key);
+            }
+        };
+        if let Some(checks) = self.assertions.get(holder) {
+            for check in checks {
+                push(&check.subject);
+            }
+        }
+        if let Some(implied) = self.non_null_implications.get(holder) {
+            for key in implied {
+                push(key);
+            }
+        }
+        if let Some(narrowed) = self.implied_narrowings.get(holder) {
+            for (key, _) in narrowed {
+                push(key);
+            }
+        }
+        if let Some(outcome) = self.preg_outcomes.get(holder) {
+            push(&outcome.matches_var);
+        }
+    }
 }
 
 /// The type-state of all variables at a single program point.
@@ -88,6 +154,25 @@ pub(crate) struct ScopeState {
     /// Either way the proof is one the guard's own condition never names.
     pub non_null_implications: AtomMap<Vec<Atom>>,
 
+    /// Scope key → the types other keys held on the path that left it
+    /// holding a value.
+    ///
+    /// What [`Self::non_null_implications`] is to `null`, for every other
+    /// narrowing a branch made.  A branch that narrows a subject and
+    /// fills a variable in the same step makes the variable stand for the
+    /// narrowing, so a test on the variable anywhere below is a test of
+    /// whether the branch ran:
+    ///
+    /// ```php
+    /// $original = null;
+    /// if ($stmt->valueVar instanceof Variable) {
+    ///     $original = new OriginalValue($stmt->valueVar->name);
+    /// }
+    /// // … 60 lines on …
+    /// if ($original !== null) { $stmt->valueVar->name; }  // still a Variable
+    /// ```
+    pub implied_narrowings: AtomMap<Vec<(Atom, Vec<ResolvedType>)>>,
+
     /// Variable name → the `preg_match` outcome its value is.
     ///
     /// The same idea as `assertions`, for the one check whose subject is
@@ -111,9 +196,28 @@ impl ScopeState {
             locals: AtomMap::default(),
             assertions: AtomMap::default(),
             non_null_implications: AtomMap::default(),
+            implied_narrowings: AtomMap::default(),
             preg_outcomes: AtomMap::default(),
             unreachable: false,
         }
+    }
+
+    /// Borrow the proofs this scope holds that are not variable types.
+    pub fn proofs(&self) -> ScopeProofs<'_> {
+        ScopeProofs {
+            assertions: &self.assertions,
+            non_null_implications: &self.non_null_implications,
+            implied_narrowings: &self.implied_narrowings,
+            preg_outcomes: &self.preg_outcomes,
+        }
+    }
+
+    /// Copy another scope's proofs into this one.
+    pub fn adopt_proofs(&mut self, proofs: &ScopeProofs<'_>) {
+        self.assertions = proofs.assertions.clone();
+        self.non_null_implications = proofs.non_null_implications.clone();
+        self.implied_narrowings = proofs.implied_narrowings.clone();
+        self.preg_outcomes = proofs.preg_outcomes.clone();
     }
 
     /// Look up a variable's types.  Returns an empty slice when the
@@ -217,6 +321,8 @@ impl ScopeState {
         self.locals.retain(|key, _| !reads_receiver(key));
         self.non_null_implications
             .retain(|_, implied| !implied.iter().any(|k| reads_receiver(k)));
+        self.implied_narrowings
+            .retain(|_, narrowed| !narrowed.iter().any(|(k, _)| reads_receiver(k)));
         if self.assertions.is_empty() {
             return;
         }
@@ -250,6 +356,12 @@ impl ScopeState {
             self.non_null_implications
                 .retain(|holder, implied| !stale(holder) && !implied.iter().any(stale));
         }
+        if !self.implied_narrowings.is_empty() {
+            self.implied_narrowings.remove(&key);
+            self.implied_narrowings.retain(|holder, narrowed| {
+                !stale(holder) && !narrowed.iter().any(|(k, _)| stale(k))
+            });
+        }
         if !self.preg_outcomes.is_empty() {
             self.preg_outcomes.remove(&key);
             self.preg_outcomes
@@ -276,22 +388,13 @@ impl ScopeState {
             || self.assertions != other.assertions
             || self.non_null_implications != other.non_null_implications
             || self.preg_outcomes != other.preg_outcomes
+            || !same_implied_narrowings(&self.implied_narrowings, &other.implied_narrowings)
         {
             return false;
         }
-        self.locals.iter().all(|(name, types)| {
-            other.locals.get(name).is_some_and(|theirs| {
-                types.len() == theirs.len()
-                    && types.iter().zip(theirs).all(|(a, b)| {
-                        a.type_string == b.type_string
-                            && match (&a.class_info, &b.class_info) {
-                                (Some(x), Some(y)) => Arc::ptr_eq(x, y),
-                                (None, None) => true,
-                                _ => false,
-                            }
-                    })
-            })
-        })
+        self.locals
+            .iter()
+            .all(|(name, types)| other.locals.get(name).is_some_and(|t| same_types(types, t)))
     }
 
     /// Merge another scope into `self`.
@@ -349,6 +452,7 @@ impl ScopeState {
         // from the two paths disagreeing.  Computed before the locals are
         // unioned below, because both answers read the per-path types.
         let implications = join_non_null_implications(self, other);
+        let narrowings = join_implied_narrowings(self, other);
 
         // Likewise for a stored match outcome: a path that never ran the
         // call, or reassigned either half of it, leaves the boolean
@@ -475,7 +579,39 @@ impl ScopeState {
         }
 
         self.non_null_implications = implications;
+        self.implied_narrowings = narrowings;
     }
+}
+
+/// Whether two type lists say the same thing, comparing a shared
+/// `class_info` by pointer rather than walking the class.
+fn same_types(a: &[ResolvedType], b: &[ResolvedType]) -> bool {
+    a.len() == b.len()
+        && a.iter().zip(b).all(|(x, y)| {
+            x.type_string == y.type_string
+                && match (&x.class_info, &y.class_info) {
+                    (Some(p), Some(q)) => Arc::ptr_eq(p, q),
+                    (None, None) => true,
+                    _ => false,
+                }
+        })
+}
+
+/// Whether two implied-narrowing maps record the same proofs.
+fn same_implied_narrowings(
+    a: &AtomMap<Vec<(Atom, Vec<ResolvedType>)>>,
+    b: &AtomMap<Vec<(Atom, Vec<ResolvedType>)>>,
+) -> bool {
+    a.len() == b.len()
+        && a.iter().all(|(holder, mine)| {
+            b.get(holder).is_some_and(|theirs| {
+                mine.len() == theirs.len()
+                    && mine
+                        .iter()
+                        .zip(theirs)
+                        .all(|((k, t), (ok, ot))| k == ok && same_types(t, ot))
+            })
+        })
 }
 
 /// Whether a scope's entry for `key` holds exactly `null` and nothing else.
@@ -587,6 +723,96 @@ fn join_non_null_implications(a: &ScopeState, b: &ScopeState) -> AtomMap<Vec<Ato
         for holder in group.iter() {
             for implied in group.iter().filter(|k| *k != holder) {
                 record(*holder, *implied);
+            }
+        }
+    }
+
+    joined
+}
+
+/// The narrowings that hold at the join of two paths, conditional on a
+/// key holding a value.
+///
+/// A proof either path recorded survives when it is true of both: the
+/// other path recorded it too, leaves the holder null so the claim is
+/// vacuous there, or already agrees about the key's type.
+///
+/// The join also *learns* proofs from a variable the two paths disagree
+/// about the nullness of. That variable was written by the path that
+/// narrowed everything else the paths disagree about, so testing it below
+/// the join is testing which path ran:
+///
+/// ```php
+/// $original = null;
+/// if ($stmt->valueVar instanceof Variable) { $original = new Value(); }
+/// if ($original !== null) { /* $stmt->valueVar is a Variable here */ }
+/// ```
+///
+/// Which keys take part depends on how they are spelled: a plain
+/// variable has to be typed on both paths, since one a path never bound
+/// is a branch-local assignment rather than a narrowing of a value that
+/// existed before the branch. A property path or a call key is readable
+/// on both paths whatever either recorded for it, so the path that
+/// narrowed it contributes even when the other left no entry at all.
+fn join_implied_narrowings(
+    a: &ScopeState,
+    b: &ScopeState,
+) -> AtomMap<Vec<(Atom, Vec<ResolvedType>)>> {
+    let mut joined: AtomMap<Vec<(Atom, Vec<ResolvedType>)>> = AtomMap::default();
+    let mut record = |holder: Atom, key: Atom, types: &[ResolvedType]| {
+        let entry: &mut Vec<(Atom, Vec<ResolvedType>)> = joined.entry(holder).or_default();
+        if !entry.iter().any(|(k, _)| *k == key) {
+            entry.push((key, types.to_vec()));
+        }
+    };
+
+    let survives = |side: &ScopeState, holder: &Atom, key: &Atom, types: &[ResolvedType]| {
+        side.implied_narrowings
+            .get(holder)
+            .is_some_and(|proofs| proofs.iter().any(|(k, t)| k == key && same_types(t, types)))
+            || is_definitely_null(side, holder)
+            || side.locals.get(key).is_some_and(|t| same_types(t, types))
+    };
+    for (holder, proofs) in a
+        .implied_narrowings
+        .iter()
+        .chain(b.implied_narrowings.iter())
+    {
+        for (key, types) in proofs {
+            if survives(a, holder, key, types) && survives(b, holder, key, types) {
+                record(*holder, *key, types);
+            }
+        }
+    }
+
+    // The variables the two paths disagree about the nullness of, paired
+    // with the path that left them holding a value.
+    let flipped = a.locals.keys().filter_map(|key| {
+        if is_definitely_null(a, key) && is_definitely_non_null(b, key) {
+            Some((*key, b, a))
+        } else if is_definitely_null(b, key) && is_definitely_non_null(a, key) {
+            Some((*key, a, b))
+        } else {
+            None
+        }
+    });
+    for (holder, taken, skipped) in flipped.collect::<Vec<_>>() {
+        for (key, types) in &taken.locals {
+            if *key == holder || types.is_empty() {
+                continue;
+            }
+            let differs = match skipped.locals.get(key) {
+                Some(other) => !same_types(types, other),
+                // A path that never bound a plain variable did not
+                // narrow it, it never had it: what the other path left
+                // there is an assignment rather than a proof about a
+                // value that existed before the branch.  A property path
+                // or a call key is readable on both paths, so an absent
+                // entry only means this one recorded no narrowing for it.
+                None => is_synthetic_key(key.as_str()),
+            };
+            if differs {
+                record(holder, *key, types);
             }
         }
     }
@@ -926,6 +1152,7 @@ impl<'a> ForwardWalkCtx<'a> {
         var_name: &'b str,
         cursor_offset: u32,
         scope_resolver: &'b dyn Fn(&str) -> Vec<ResolvedType>,
+        scope_proofs: Option<ScopeProofs<'b>>,
     ) -> VarResolutionCtx<'b>
     where
         'a: 'b,
@@ -945,6 +1172,7 @@ impl<'a> ForwardWalkCtx<'a> {
             branch_aware: false,
             match_arm_narrowing: HashMap::new(),
             scope_var_resolver: Some(scope_resolver),
+            scope_proofs,
         }
     }
 }

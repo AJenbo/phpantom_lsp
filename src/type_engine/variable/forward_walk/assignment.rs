@@ -1263,7 +1263,8 @@ pub(crate) fn resolve_rhs_native_type(
     let scope_resolver = move |vn: &str| -> Vec<ResolvedType> {
         scope_snapshot.get(&atom(vn)).cloned().unwrap_or_default()
     };
-    let var_ctx = ctx.var_ctx_for_with_scope("$__rhs_check", 0, &scope_resolver);
+    let var_ctx =
+        ctx.var_ctx_for_with_scope("$__rhs_check", 0, &scope_resolver, Some(scope.proofs()));
     super::super::resolution::extract_native_type_from_rhs(rhs, &var_ctx)
 }
 
@@ -2081,7 +2082,8 @@ pub(crate) fn resolve_rhs_with_scope<'b>(
             .cloned()
             .unwrap_or_default()
     };
-    let var_ctx = ctx.var_ctx_for_with_scope(dummy_var, rhs_offset, &scope_resolver);
+    let var_ctx =
+        ctx.var_ctx_for_with_scope(dummy_var, rhs_offset, &scope_resolver, Some(scope.proofs()));
 
     let result = super::super::rhs_resolution::resolve_rhs_expression(rhs, &var_ctx);
     if !result.is_empty() {
@@ -2162,7 +2164,8 @@ pub(crate) fn resolve_rhs_via_subject(
             .cloned()
             .unwrap_or_default()
     };
-    let var_ctx = ctx.var_ctx_for_with_scope("$__rhs_subject", 0, &scope_resolver);
+    let var_ctx =
+        ctx.var_ctx_for_with_scope("$__rhs_subject", 0, &scope_resolver, Some(scope.proofs()));
     let rctx = var_ctx.as_resolution_ctx();
 
     // Determine the access kind from the expression text.
@@ -2213,6 +2216,7 @@ pub(crate) fn process_destructuring_assignment<'b>(
         branch_aware: false,
         match_arm_narrowing: HashMap::new(),
         scope_var_resolver: Some(&scope_resolver),
+        scope_proofs: Some(scope.proofs()),
     };
 
     // Try inline @var docblock first, then fall back to RHS expression.
@@ -2580,6 +2584,7 @@ pub(crate) fn process_pass_by_ref<'b>(
             branch_aware: false,
             match_arm_narrowing: HashMap::new(),
             scope_var_resolver: Some(&scope_resolver),
+            scope_proofs: Some(scope.proofs()),
         };
         let before = scope.get(&var_name).to_vec();
         let mut results = before.clone();
@@ -3080,6 +3085,7 @@ fn preg_flag_bits<'b>(
         branch_aware: false,
         match_arm_narrowing: HashMap::new(),
         scope_var_resolver: Some(&scope_resolver),
+        scope_proofs: Some(scope.proofs()),
     };
     let flags =
         crate::type_engine::variable::foreach_resolution::resolve_expression_type(expr, &var_ctx)
@@ -3310,6 +3316,7 @@ pub(crate) fn process_assert_narrowing<'b>(
             branch_aware: false,
             match_arm_narrowing: HashMap::new(),
             scope_var_resolver: Some(&scope_resolver),
+            scope_proofs: Some(scope.proofs()),
         };
         let before = scope.get(&var_name).to_vec();
         let mut results = before.clone();
@@ -3458,6 +3465,7 @@ pub(crate) fn process_self_out_narrowing<'b>(
         branch_aware: false,
         match_arm_narrowing: HashMap::new(),
         scope_var_resolver: Some(&scope_resolver),
+        scope_proofs: Some(scope.proofs()),
     };
     let rctx = var_ctx.as_resolution_ctx();
 

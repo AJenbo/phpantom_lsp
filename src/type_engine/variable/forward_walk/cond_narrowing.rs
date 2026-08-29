@@ -245,6 +245,11 @@ pub(crate) fn apply_cursor_ternary_narrowing<'b>(
 /// are recorded; anything else in the expression (`$flag`, a comparison,
 /// a call) contributes no assertion and is skipped, which still leaves
 /// the recorded conjuncts sound for a truthy test.
+///
+/// A conjunct may itself be an `||` chain over one subject
+/// (`$shouldCheck = $n instanceof Function_ || $n instanceof ClassMethod`),
+/// which proves the subject is one of the listed classes exactly as the
+/// same chain written straight into an `if` does.
 pub(crate) fn record_assertion_variable<'b>(
     lhs_name: &str,
     rhs: &'b Expression<'b>,
@@ -260,12 +265,25 @@ pub(crate) fn record_assertion_variable<'b>(
             if subject == lhs_name {
                 continue;
             }
+            if let Some(mut classes) = or_chain_alternatives(operand, &subject) {
+                let class_type = classes.remove(0);
+                checks.push(VarAssertion {
+                    subject: atom(&subject),
+                    class_type,
+                    alternatives: classes,
+                    negated: false,
+                    exact: false,
+                    allow_string: false,
+                });
+                break;
+            }
             if let Some(extraction) =
                 narrowing::try_extract_instanceof_with_negation(operand, &subject)
             {
                 checks.push(VarAssertion {
                     subject: atom(&subject),
                     class_type: extraction.class_type,
+                    alternatives: Vec::new(),
                     negated: extraction.negated,
                     exact: extraction.exact,
                     allow_string: extraction.allow_string,
@@ -277,6 +295,66 @@ pub(crate) fn record_assertion_variable<'b>(
     if !checks.is_empty() {
         scope.assertions.insert(atom(lhs_name), checks);
     }
+}
+
+/// The classes an `||` chain over `subject` proves it is one of.
+///
+/// Every leg has to be a positive check on the same subject: a leg about
+/// some other value, or a negated one, leaves the disjunction proving
+/// nothing about `subject`, and collecting only the legs that do match
+/// would claim a narrowing the chain never made.
+fn or_chain_alternatives(expr: &Expression<'_>, subject: &str) -> Option<Vec<PhpType>> {
+    fn walk(expr: &Expression<'_>, subject: &str, out: &mut Vec<PhpType>) -> bool {
+        match expr {
+            Expression::Parenthesized(inner) => walk(inner.expression, subject, out),
+            Expression::Binary(bin)
+                if matches!(
+                    bin.operator,
+                    BinaryOperator::Or(_) | BinaryOperator::LowOr(_)
+                ) =>
+            {
+                walk(bin.lhs, subject, out) && walk(bin.rhs, subject, out)
+            }
+            _ => match narrowing::try_extract_instanceof_with_negation(expr, subject) {
+                Some(extraction) if !extraction.negated => {
+                    if !out.contains(&extraction.class_type) {
+                        out.push(extraction.class_type);
+                    }
+                    true
+                }
+                _ => false,
+            },
+        }
+    }
+
+    let is_or_chain = matches!(
+        narrowing::fold_negation_pairs(expr),
+        Expression::Binary(bin) if matches!(bin.operator, BinaryOperator::Or(_) | BinaryOperator::LowOr(_))
+    );
+    if !is_or_chain {
+        return None;
+    }
+    let mut classes = Vec::new();
+    (walk(expr, subject, &mut classes) && classes.len() > 1).then_some(classes)
+}
+
+/// Every class an alias check allows, its own first.
+fn alias_classes(alias: &AliasExtraction) -> Vec<PhpType> {
+    let mut classes = Vec::with_capacity(alias.alternatives.len() + 1);
+    classes.push(alias.extraction.class_type.clone());
+    classes.extend(alias.alternatives.iter().cloned());
+    classes
+}
+
+/// One check a boolean stands for, expanded for the condition testing it.
+pub(in crate::type_engine) struct AliasExtraction {
+    /// Scope key the check narrows.
+    pub subject: String,
+    /// The check itself, with the operand's own negation folded in.
+    pub extraction: narrowing::InstanceofExtraction,
+    /// The further classes an `||` chain allows.  Empty for a check that
+    /// names a single class.
+    pub alternatives: Vec<PhpType>,
 }
 
 /// Expand a bare boolean operand into the checks it stands for.
@@ -292,7 +370,7 @@ pub(crate) fn record_assertion_variable<'b>(
 pub(in crate::type_engine) fn assertion_alias_extractions(
     expr: &Expression<'_>,
     scope: &ScopeState,
-) -> Vec<(String, narrowing::InstanceofExtraction)> {
+) -> Vec<AliasExtraction> {
     if scope.assertions.is_empty() {
         return Vec::new();
     }
@@ -322,16 +400,15 @@ pub(in crate::type_engine) fn assertion_alias_extractions(
 
     checks
         .iter()
-        .map(|c| {
-            (
-                c.subject.to_string(),
-                narrowing::InstanceofExtraction {
-                    class_type: c.class_type.clone(),
-                    negated: c.negated != negated,
-                    exact: c.exact,
-                    allow_string: c.allow_string,
-                },
-            )
+        .map(|c| AliasExtraction {
+            subject: c.subject.to_string(),
+            extraction: narrowing::InstanceofExtraction {
+                class_type: c.class_type.clone(),
+                negated: c.negated != negated,
+                exact: c.exact,
+                allow_string: c.allow_string,
+            },
+            alternatives: c.alternatives.clone(),
         })
         .collect()
 }
@@ -498,11 +575,11 @@ pub(crate) fn apply_condition_narrowing<'b>(
     // (`$isHtml` from `$isHtml = $raw instanceof HtmlString`) into the
     // check itself, and make sure its subject is narrowed below even
     // when the condition never names it.
-    let alias_extractions: Vec<Vec<(String, narrowing::InstanceofExtraction)>> = operands
+    let alias_extractions: Vec<Vec<AliasExtraction>> = operands
         .iter()
         .map(|operand| assertion_alias_extractions(operand, scope))
         .collect();
-    for subject in alias_extractions.iter().flatten().map(|(s, _)| s) {
+    for subject in alias_extractions.iter().flatten().map(|a| &a.subject) {
         if !var_names.contains(subject) {
             var_names.push(subject.clone());
         }
@@ -537,6 +614,40 @@ pub(crate) fn apply_condition_narrowing<'b>(
                         entry,
                         union.into_iter().map(ResolvedType::from_class).collect(),
                     );
+                }
+                continue;
+            }
+
+            // The same disjunction reached through a boolean that stands
+            // for it (`$isNode = $n instanceof Stmt || $n instanceof Expr;
+            // if ($isNode)`).
+            if let Some(alias) = alias_extractions[op_idx]
+                .iter()
+                .find(|a| a.subject == *var_name && !a.alternatives.is_empty())
+            {
+                let var_ctx = build_var_ctx(var_name, ctx, &scope_resolver);
+                let classes = alias_classes(alias);
+                if alias.extraction.negated {
+                    // `!$isNode` — no leg of the chain held, so every one
+                    // of them is excluded.
+                    let mut results = scope.get(var_name).to_vec();
+                    for cls in &classes {
+                        ResolvedType::apply_narrowing(&mut results, |class_list| {
+                            narrowing::apply_instanceof_exclusion(cls, &var_ctx, class_list)
+                        });
+                    }
+                    if !results.is_empty() {
+                        scope.set(var_name, results);
+                    }
+                } else {
+                    let union = narrowing::resolve_class_names_to_union(&classes, &var_ctx);
+                    if !union.is_empty() {
+                        let entry = alternative_results.entry(var_name.clone()).or_default();
+                        ResolvedType::extend_unique(
+                            entry,
+                            union.into_iter().map(ResolvedType::from_class).collect(),
+                        );
+                    }
                 }
                 continue;
             }
@@ -600,8 +711,8 @@ pub(crate) fn apply_condition_narrowing<'b>(
                 narrowing::try_extract_instanceof_with_negation(operand, var_name).or_else(|| {
                     alias_extractions[op_idx]
                         .iter()
-                        .find(|(subject, _)| subject == var_name)
-                        .map(|(_, e)| e.clone())
+                        .find(|a| a.subject == *var_name)
+                        .map(|a| a.extraction.clone())
                 })
             {
                 let var_ctx = build_var_ctx(var_name, ctx, &scope_resolver);
@@ -1188,12 +1299,52 @@ pub(crate) fn apply_condition_narrowing_inverse_single<'b>(
     // the condition: `if (!$isHtml) { return; }` leaves `$raw` narrowed
     // to `HtmlString` after the guard.
     let alias_extractions = assertion_alias_extractions(condition, scope);
-    for (subject, _) in &alias_extractions {
-        if !var_names.contains(subject) {
-            var_names.push(subject.clone());
+    for a in &alias_extractions {
+        if !var_names.contains(&a.subject) {
+            var_names.push(a.subject.clone());
         }
     }
     for var_name in &var_names {
+        // The inverse of a disjunction the condition names, or of one a
+        // boolean stands for: neither leg held, so every class it lists
+        // is excluded.
+        let alias_or = alias_extractions
+            .iter()
+            .find(|a| a.subject == *var_name && !a.alternatives.is_empty());
+        if let Some(alias) = alias_or.filter(|a| !a.extraction.negated) {
+            let var_ctx = build_var_ctx(var_name, ctx, &scope_resolver);
+            let had_types = !scope.get(var_name).is_empty();
+            let mut results = scope.get(var_name).to_vec();
+            for cls in alias_classes(alias) {
+                ResolvedType::apply_narrowing(&mut results, |class_list| {
+                    narrowing::apply_instanceof_exclusion(&cls, &var_ctx, class_list)
+                });
+            }
+            if !results.is_empty() {
+                scope.set(var_name, results);
+            } else if had_types {
+                scope.unreachable = true;
+            }
+            continue;
+        }
+        // The inverse of `!$isNode`: the chain did hold, so the subject
+        // is one of the classes it lists.
+        if let Some(alias) = alias_or {
+            let var_ctx = build_var_ctx(var_name, ctx, &scope_resolver);
+            let union = narrowing::resolve_class_names_to_union(&alias_classes(alias), &var_ctx);
+            if !union.is_empty() {
+                commit_instanceof_narrowing(
+                    var_name,
+                    union.into_iter().map(ResolvedType::from_class).collect(),
+                    CheckShape::default(),
+                    scope,
+                    ctx,
+                    &scope_resolver,
+                );
+            }
+            continue;
+        }
+
         if let Some(classes) = narrowing::try_extract_compound_or_instanceof(condition, var_name)
             && !classes.is_empty()
         {
@@ -1264,8 +1415,8 @@ pub(crate) fn apply_condition_narrowing_inverse_single<'b>(
             narrowing::try_extract_instanceof_with_negation(condition, var_name).or_else(|| {
                 alias_extractions
                     .iter()
-                    .find(|(subject, _)| subject == var_name)
-                    .map(|(_, e)| e.clone())
+                    .find(|a| a.subject == *var_name)
+                    .map(|a| a.extraction.clone())
             })
         {
             let var_ctx = build_var_ctx(var_name, ctx, &scope_resolver);
@@ -1448,6 +1599,16 @@ pub(crate) fn condition_arm_narrowing<'b>(
     }
 
     let mut scope = ScopeState::new();
+    // A condition that tests a boolean standing for an earlier check
+    // (`$isFoo ? … : …`) names only the boolean, so the check's own
+    // subject has to be seeded before there is anything to narrow.
+    if let Some(proofs) = ctx.scope_proofs.filter(|p| !p.is_empty()) {
+        scope.adopt_proofs(&proofs);
+        let holders: Vec<Atom> = subjects.iter().map(|s| atom(s)).collect();
+        for holder in &holders {
+            proofs.subjects_of(holder, &mut subjects);
+        }
+    }
     for subject in &subjects {
         let types = resolver(subject);
         if !types.is_empty() {
@@ -2388,7 +2549,10 @@ fn apply_assertion_to_key(
 /// Build a [`VarResolutionCtx`] from a variable name and forward-walk context.
 ///
 /// Shared helper used by the narrowing functions in this module to avoid
-/// repeating the struct construction at every call site.
+/// repeating the struct construction at every call site.  It carries no
+/// scope proofs: the callers use it to resolve the class names a check
+/// mentions, which is a question about declarations rather than about
+/// what the values flowing through the scope have been proven to be.
 pub(crate) fn build_var_ctx<'a>(
     var_name: &'a str,
     ctx: &'a ForwardWalkCtx<'_>,
@@ -2409,6 +2573,7 @@ pub(crate) fn build_var_ctx<'a>(
         branch_aware: false,
         match_arm_narrowing: HashMap::new(),
         scope_var_resolver: Some(scope_resolver),
+        scope_proofs: None,
     }
 }
 
@@ -3328,19 +3493,75 @@ pub(crate) fn record_nullsafe_origin<'b>(
 /// condition ruled the null out of, whichever shape the guard was written
 /// in (`instanceof`, `!== null`, a bare truthy test, an assertion helper).
 fn apply_non_null_implication_narrowing(scope: &mut ScopeState, ctx: &ForwardWalkCtx<'_>) {
-    if scope.non_null_implications.is_empty() {
+    if !scope.non_null_implications.is_empty() {
+        let proven: Vec<Atom> = scope
+            .non_null_implications
+            .iter()
+            .filter(|(holder, _)| !scope_value_is_nullable(holder, scope))
+            .flat_map(|(_, implieds)| implieds.iter().copied())
+            .collect();
+        for implied in proven {
+            seed_synthetic_key_if_needed(&implied, scope, ctx);
+            strip_null_from_scope(&implied, scope);
+        }
+    }
+
+    if scope.implied_narrowings.is_empty() {
         return;
     }
-    let proven: Vec<Atom> = scope
-        .non_null_implications
+    let proven: Vec<(Atom, Vec<ResolvedType>)> = scope
+        .implied_narrowings
         .iter()
         .filter(|(holder, _)| !scope_value_is_nullable(holder, scope))
-        .flat_map(|(_, implieds)| implieds.iter().copied())
+        .flat_map(|(_, proofs)| proofs.iter().cloned())
         .collect();
-    for implied in proven {
-        seed_synthetic_key_if_needed(&implied, scope, ctx);
-        strip_null_from_scope(&implied, scope);
+    for (key, types) in proven {
+        seed_synthetic_key_if_needed(&key, scope, ctx);
+        if recorded_narrows_current(&types, scope.get(&key), ctx) {
+            scope.set(&key, types);
+        }
     }
+}
+
+/// Whether a recorded proof still refines what the scope knows.
+///
+/// The proof describes the value the key held on the branch that ran, so
+/// it can only ever add to what is known — never replace it.  A guard
+/// closer to the read has already narrowed further (the `&&` chain that
+/// re-proves `$node->dim instanceof FuncCall` right where it is used),
+/// and overwriting that with the coarser branch type would lose the more
+/// specific answer.  An entry with no type is the one exception: unknown
+/// is the top of the lattice, so anything recorded is narrower.
+fn recorded_narrows_current(
+    recorded: &[ResolvedType],
+    current: &[ResolvedType],
+    ctx: &ForwardWalkCtx<'_>,
+) -> bool {
+    if current.is_empty() {
+        return true;
+    }
+    let within = |narrow: &ResolvedType, wide: &ResolvedType| {
+        if narrow.type_string == wide.type_string
+            || narrow.type_string.is_subtype_of(&wide.type_string)
+        {
+            return true;
+        }
+        match (
+            narrow.type_string.unwrap_nullable().class_name(),
+            wide.type_string.unwrap_nullable().class_name(),
+        ) {
+            (Some(child), Some(parent)) => is_subclass_of(child, parent, ctx.class_loader),
+            _ => false,
+        }
+    };
+    let identical = recorded.len() == current.len()
+        && recorded
+            .iter()
+            .all(|r| current.iter().any(|c| c.type_string == r.type_string));
+    !identical
+        && recorded
+            .iter()
+            .all(|r| current.iter().any(|c| within(r, c)))
 }
 
 /// Whether the scope's entry for `key` still admits `null`.

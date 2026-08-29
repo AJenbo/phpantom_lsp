@@ -479,6 +479,28 @@ function runDemoAssertions(): void
         assert($specimen2 instanceof Scaffolding\Banana, 'Not Scaffolding\Rock must be Scaffolding\Banana');
     }
 
+    // ── Type narrowing: a boolean standing for a check ──────────────────
+    $stored = Scaffolding\pickRockOrBanana();
+    $isRock = $stored instanceof Scaffolding\Rock;
+    $chosen = $isRock ? $stored : new Scaffolding\Rock();
+    assert($chosen instanceof Scaffolding\Rock, 'the ternary arm a boolean check picks really yields a Scaffolding\Rock');
+    assert(Scaffolding\crushOneRock($chosen) === 'smash!', 'the value the arm yields really is what Scaffolding\crushOneRock() accepts');
+
+    $shelved = Scaffolding\pickRockOrBanana();
+    $isKnown = $shelved instanceof Scaffolding\Rock || $shelved instanceof Scaffolding\Banana;
+    assert($isKnown, 'the `||` chain really covers everything Scaffolding\pickRockOrBanana() returns');
+    assert(is_float($shelved->weigh()), 'both classes the chain lists really declare weigh()');
+
+    // ── Type narrowing: a variable a guarded branch filled ──────────────
+    $weighed = Scaffolding\pickRockOrBanana();
+    $label = null;
+    if ($weighed instanceof Scaffolding\Rock) {
+        $label = new Scaffolding\SpecimenLabel('rock');
+    }
+    if ($label !== null) {
+        assert($weighed instanceof Scaffolding\Rock, 'reaching the `!== null` test really means the branch ran');
+    }
+
     // ── Type narrowing: assert() ────────────────────────────────────────
     $target = Scaffolding\pickRockOrBanana();
     if ($target instanceof Scaffolding\Banana) {

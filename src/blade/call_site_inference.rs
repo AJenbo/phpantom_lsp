@@ -1026,6 +1026,7 @@ impl Backend {
                     branch_aware: false,
                     match_arm_narrowing: HashMap::new(),
                     scope_var_resolver: None,
+                    scope_proofs: None,
                 };
 
                 let mut vars: Vec<PassedVar> = Vec::new();
@@ -1225,6 +1226,7 @@ impl Backend {
                             branch_aware: false,
                             match_arm_narrowing: HashMap::new(),
                             scope_var_resolver: None,
+                            scope_proofs: None,
                         };
                         let ty = crate::type_engine::variable::foreach_resolution::resolve_expression_type(
                         expr, &var_ctx,

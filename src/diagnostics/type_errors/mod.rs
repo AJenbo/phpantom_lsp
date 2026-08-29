@@ -385,6 +385,7 @@ impl Backend {
                         branch_aware: true,
                         match_arm_narrowing: HashMap::new(),
                         scope_var_resolver: None,
+                        scope_proofs: None,
                     };
 
                     let mut resolved_args = Vec::with_capacity(exprs.len());

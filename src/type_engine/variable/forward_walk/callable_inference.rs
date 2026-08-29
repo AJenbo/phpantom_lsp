@@ -38,7 +38,12 @@ pub(crate) fn infer_callable_params_from_function_fw(
             .cloned()
             .unwrap_or_default()
     };
-    let var_ctx = ctx.var_ctx_for_with_scope("$__infer", ctx.cursor_offset, &scope_resolver);
+    let var_ctx = ctx.var_ctx_for_with_scope(
+        "$__infer",
+        ctx.cursor_offset,
+        &scope_resolver,
+        Some(scope.proofs()),
+    );
     let rctx = var_ctx.as_resolution_ctx();
     let func_info = if let Some(fl) = rctx.function_loader {
         fl(func_name, 0)
@@ -92,7 +97,8 @@ pub(crate) fn infer_callable_params_from_receiver_fw(
             .cloned()
             .unwrap_or_default()
     };
-    let var_ctx = ctx.var_ctx_for_with_scope("$__infer", obj_start, &scope_resolver);
+    let var_ctx =
+        ctx.var_ctx_for_with_scope("$__infer", obj_start, &scope_resolver, Some(scope.proofs()));
     let rctx = var_ctx.as_resolution_ctx();
     // Keep the raw ResolvedTypes so we can extract generic args from
     // the receiver's type_string (e.g. `Builder<Product>` carries the
@@ -392,7 +398,12 @@ pub(crate) fn infer_callable_params_from_static_receiver_fw(
                 .cloned()
                 .unwrap_or_default()
         };
-        let var_ctx = ctx.var_ctx_for_with_scope("$__infer", ctx.cursor_offset, &scope_resolver);
+        let var_ctx = ctx.var_ctx_for_with_scope(
+            "$__infer",
+            ctx.cursor_offset,
+            &scope_resolver,
+            Some(scope.proofs()),
+        );
         template_subs.extend(method_template_subs_for_call(
             cls,
             method_name,

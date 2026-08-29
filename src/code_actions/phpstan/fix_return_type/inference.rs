@@ -204,6 +204,7 @@ pub(crate) fn infer_return_type(
                     branch_aware: true,
                     match_arm_narrowing: HashMap::new(),
                     scope_var_resolver: None,
+                    scope_proofs: None,
                 };
 
                 let ty = resolve_expression_type(expr, &ctx).unwrap_or_else(PhpType::mixed);

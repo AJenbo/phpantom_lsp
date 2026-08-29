@@ -367,6 +367,7 @@ pub(crate) fn resolve_variable_types(
             match_arm_narrowing: HashMap::new(),
 
             scope_var_resolver: None,
+            scope_proofs: None,
         };
 
         resolve_variable_in_statements(program.statements.iter(), &ctx)
@@ -816,6 +817,7 @@ pub(in crate::type_engine) fn resolve_variable_in_statements<'b>(
             branch_aware: ctx.branch_aware,
             match_arm_narrowing: ctx.match_arm_narrowing.clone(),
             scope_var_resolver: ctx.scope_var_resolver,
+            scope_proofs: ctx.scope_proofs,
         };
         &ctx_with_tls
     } else {

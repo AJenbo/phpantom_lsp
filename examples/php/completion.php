@@ -322,6 +322,31 @@ class TypeNarrowingDemo
         }
         echo $isRock ? $stored->crush() : $stored->peel();   // both branches narrowed
 
+        // The value a ternary arm *yields* is narrowed too, not just the
+        // members reachable inside it.
+        $chosen = $isRock ? $stored : new Scaffolding\Rock();
+        Scaffolding\crushOneRock($chosen);        // Scaffolding\Rock, from the $isRock arm
+
+        // A boolean holding an `||` chain stands for the whole disjunction:
+        // the subject is one of the classes it lists.
+        $shelved = Scaffolding\pickRockOrBanana();
+        $isKnown = $shelved instanceof Scaffolding\Rock || $shelved instanceof Scaffolding\Banana;
+        if ($isKnown) {
+            $shelved->weigh();                    // Scaffolding\Rock|Scaffolding\Banana
+        }
+
+        // A variable a guarded branch fills stands for the guard itself:
+        // reaching the `!== null` test means the branch ran, so whatever
+        // it narrowed is narrowed again.
+        $weighed = Scaffolding\pickRockOrBanana();
+        $label = null;
+        if ($weighed instanceof Scaffolding\Rock) {
+            $label = new Scaffolding\SpecimenLabel('rock');
+        }
+        if ($label !== null) {
+            Scaffolding\crushOneRock($weighed);    // Scaffolding\Rock, proven by $label
+        }
+
         // The negated form works as a guard clause too.
         $held = Scaffolding\pickRockOrBanana();
         $isBanana = $held instanceof Scaffolding\Banana;

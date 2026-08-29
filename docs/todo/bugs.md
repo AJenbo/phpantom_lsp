@@ -12,9 +12,9 @@ scale defined in [`docs/todo.md`](../todo.md); that table is also where
 each bug's row lives in the current sprint/backlog.
 
 All entries below come from triage of the PHPStan Source sample project,
-re-swept on 2026-08-28 (98 sites, down from 126 at the start of that
-sweep and from 180 at the 2026-08-27 triage). Site counts refer to that
-sweep; every mechanism was either reproduced in a minimal project or
+re-swept on 2026-08-29 (84 sites, down from 98 at the 2026-08-28 sweep,
+126 before it and 180 at the 2026-08-27 triage). Site counts refer to
+that sweep; every mechanism was either reproduced in a minimal project or
 confirmed by reading the guard construct PHPStan honours. The sweep is a
 snapshot, so a site named here may already read differently: re-run the
 analyser before working an entry, and trim the shapes that no longer
@@ -30,7 +30,7 @@ one entry. Defects too small to earn a row of their own are collected in
 [B301](#b301-narrowing-defects-with-a-single-site-each) rather than given
 one each.
 
-Of the 93 distinct lines the latest sweep reports, 49 are attributed to
+Of the 79 distinct lines the latest sweep reports, 35 are attributed to
 an entry below. The unattributed remainder is described in
 [Not yet attributed](#not-yet-attributed).
 
@@ -56,83 +56,73 @@ No outstanding items.
 
 **Impact: High · Complexity: Very High**
 
-25 sites — still the largest cluster here, and one root cause: what the
-narrowing store keys a proof against, and what it takes to read that
-proof back. PHPStan keys specified types by expression string and keeps
-them until something writes to that expression, so a proof recorded
-about one spelling is available to every other occurrence of it. Where
-we now match that for a subject the condition names directly, we do not
-where the proof has to be *reconstructed* — from a disjunction, from a
-boolean that stands for the check, or from a second variable written
-alongside the first. That is the reconciliation engine planned as
+12 sites, and one root cause: what the narrowing store keys a proof
+against, and what it takes to read that proof back. PHPStan keys
+specified types by expression string and keeps them until something
+writes to that expression, so a proof recorded about one spelling is
+available to every other occurrence of it. Where we now match that for a
+subject the condition names directly, we do not where the proof has to be
+*reconstructed* — from a disjunction, or from the identical condition
+tested a second time. That is the reconciliation engine planned as
 [T20](type-inference.md#t20-type-narrowing-reconciliation-engine), and
 both shapes below want it.
 
-**a. A proof reached through a disjunction, or via a variable assigned
-under it, is lost** (10 sites). Entering the branch means the whole
-condition held, so the guarded spelling is narrowed on every path that
-gets there — but working that out means reasoning about the disjunction
-rather than reading a recorded key:
+**a. A proof reached through a disjunction is lost** (8 sites). Entering
+the branch means the whole condition held, so the guarded spelling is
+narrowed on every path that gets there — but working that out means
+reasoning about the disjunction rather than reading a recorded key. The
+`||` leg has to be combined with the ternary that reads it back:
 
 ```php
-// 1. The `||` leg has to be combined with the ternary that reads it back:
 if (
     ($stmt->valueVar instanceof Variable && is_string($stmt->valueVar->name))
     && ($stmt->keyVar === null || ($stmt->keyVar instanceof Variable && is_string($stmt->keyVar->name)))
 ) {
     $keyVarName = $stmt->keyVar instanceof Variable ? $stmt->keyVar->name : null;  // string|Expr|null
 }
-// 2. A flag set inside the guarded branch, tested far below it:
-$originalValueExpr = null;
-if ($stmt->valueVar instanceof Variable && is_string($stmt->valueVar->name)) {
-    $originalValueExpr = new OriginalForeachValueExpr($stmt->valueVar->name);
-}
-// … 60 lines on …
-if ($originalValueExpr !== null) { $scope->getVariableType($stmt->valueVar->name); }  // lost
 ```
 
 The `NodeScopeResolver` sites are all one `foreach` handler and all trace
-to `$stmt->valueVar->name` / `$stmt->keyVar->name`; fixing shape 1 is
-likely to take most of them. Two sites are a *negated* `instanceof` on a
-property path (`$expr instanceof FuncCall && !$expr->name instanceof Name`)
-that does not reproduce from the construct alone, so start those by
-bisecting the enclosing method. One is not narrowing at all:
-`getAttribute()` returns `mixed`, and a `!== null` guard leaves it
-`mixed`, which we report as unverifiable and PHPStan does not report on.
-Sites: `src/Analyser/NodeScopeResolver.php:1689, 1702, 4838, 4844, 5000, 5103`,
+to `$stmt->valueVar->name` / `$stmt->keyVar->name`. Two sites are a
+*negated* `instanceof` on a property path
+(`$expr instanceof FuncCall && !$expr->name instanceof Name`) that does
+not reproduce from the construct alone, so start those by bisecting the
+enclosing method. One is not narrowing at all: `getAttribute()` returns
+`mixed`, and a `!== null` guard leaves it `mixed`, which we report as
+unverifiable and PHPStan does not report on.
+Sites: `src/Analyser/NodeScopeResolver.php:1702, 5000, 5103`,
 `src/Analyser/NodeScopeResolver.php:2874`, `src/Analyser/TypeSpecifier.php:600`
 (both negated `instanceof`),
 `src/Analyser/NodeScopeResolver.php:3866 (×2)` (the `mixed` case),
 `src/Rules/FunctionDefinitionCheck.php:195` (narrowed `$param`
 `use`-captured by a closure).
 
-**b. Re-testing a condition, or a boolean flag holding it, doesn't
-re-apply its narrowing** (15 sites). Three shapes PHPStan's
-specified-types machinery handles:
+**b. Re-testing a condition doesn't re-apply what it proved the first
+time** (4 sites). Two shapes PHPStan's specified-types machinery
+handles:
 
 ```php
 // 1. The identical condition re-tested later:
 if (count($args) > 0) { $acceptor = Selector::selectFromArgs(...); }
 if (count($args) > 0) { use($acceptor); }                    // non-null
 
-// 2. A boolean flag recording an instanceof, then read to pick a subject:
-$constArrayIsI = $types[$i] instanceof ConstantArrayType && ...;
-$constArray = $constArrayIsI ? $types[$i] : $types[$j];      // ConstantArrayType
-
-// 3. Two variables assigned together; checking one implies the other:
+// 2. Two variables assigned together; checking one implies the other:
 if ($assertions === null) { return null; } // $acceptor was set iff $assertions was
 ```
 
-Shape 2 accounts for the whole `TypeCombinator` cluster: the flag is
-recorded, but the subject it narrows is an array dim rather than a
-plain variable, so the ternary that reads the flag back hands out the
-declared element type. Its else arm needs shape 3 as well — `!$isI`
-combined with the enclosing `$isI || $isJ` is what proves the other dim.
-Sites: `src/Analyser/ExprHandler/FuncCallHandler.php:977, 1042`,
+Shape 1 is what the three handler sites want. A branch join already
+records what the branch proved under the variable it filled, so a `!==
+null` test on that variable recovers it; what is missing is the same
+thing keyed by the *condition* rather than by a variable, which is the
+step that needs a proof keyed by a required type rather than by
+non-nullness. The one `TypeCombinator` site is the else arm of
+`$constArray = $constArrayIsI ? $types[$i] : $types[$j];`, which needs
+shape 2: `!$isI` combined with the enclosing `$isI || $isJ` is what
+proves the other dim.
+Sites: `src/Analyser/ExprHandler/FuncCallHandler.php:977`,
 `src/Analyser/ExprHandler/MethodCallHandler.php:350`,
 `src/Analyser/ExprHandler/StaticCallHandler.php:455`,
-`src/Analyser/NodeScopeResolver.php:693, 707, 727, 732`,
-`src/Type/TypeCombinator.php:1991, 1994, 2012, 2013, 2020, 2021, 2029`.
+`src/Type/TypeCombinator.php:1994`.
 
 ### B274. A null-seeded accumulator filled in a loop keeps `null` (or loses its type entirely)
 

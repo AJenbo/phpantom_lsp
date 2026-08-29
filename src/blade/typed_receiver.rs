@@ -151,6 +151,7 @@ impl Backend {
                     branch_aware: false,
                     match_arm_narrowing: HashMap::new(),
                     scope_var_resolver: None,
+                    scope_proofs: None,
                 };
                 let Some(ty) =
                     crate::type_engine::variable::foreach_resolution::resolve_expression_type(
