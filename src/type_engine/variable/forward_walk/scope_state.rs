@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use mago_span::HasSpan;
 
-use crate::atom::{Atom, AtomMap, atom, bytes_to_str};
+use crate::atom::{Atom, AtomMap, AtomSet, atom, bytes_to_str};
 use crate::parser::extract_hint_type;
 use crate::php_type::PhpType;
 use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
@@ -199,6 +199,18 @@ pub(crate) struct ScopeState {
     /// an out-parameter rather than the tested expression itself.
     pub preg_outcomes: AtomMap<PregOutcome>,
 
+    /// The names whose empty [`Self::locals`] entry stands for a value
+    /// the engine failed to work out, rather than one that could be
+    /// anything.
+    ///
+    /// The two are the same thing to a reader — nothing is known either
+    /// way — but they are opposites at a join.  A value that could be
+    /// anything is the top of the lattice and swallows what the other
+    /// path proved; a value we simply could not compute is a gap in our
+    /// own analysis, reported where it happened, and has no business
+    /// erasing anything.  See [`ScopeState::merge_branch`].
+    pub unresolved: AtomSet,
+
     /// No value can reach this program point.
     ///
     /// Set when a condition narrows some variable down to nothing — the
@@ -218,6 +230,7 @@ impl ScopeState {
             non_null_implications: AtomMap::default(),
             implied_narrowings: AtomMap::default(),
             preg_outcomes: AtomMap::default(),
+            unresolved: AtomSet::default(),
             unreachable: false,
         }
     }
@@ -260,7 +273,9 @@ impl ScopeState {
         if types.is_empty() {
             return;
         }
-        self.locals.insert(atom(var_name), types);
+        let key = atom(var_name);
+        self.unresolved.remove(&key);
+        self.locals.insert(key, types);
     }
 
     /// Record that a variable exists in scope with an empty type list,
@@ -276,8 +291,29 @@ impl ScopeState {
     /// is what an assignment whose right-hand side resolves to nothing
     /// records, since the old value is gone whether or not the new one
     /// could be typed.
+    ///
+    /// The entry is flagged in [`Self::unresolved`], which is what keeps
+    /// it from erasing the other paths' types at the next join.
     pub fn set_unknown(&mut self, var_name: &str) {
-        self.locals.insert(atom(var_name), Vec::new());
+        let key = atom(var_name);
+        self.locals.insert(key, Vec::new());
+        self.unresolved.insert(key);
+    }
+
+    /// Replace whatever was known about a variable with "could be
+    /// anything".
+    ///
+    /// The counterpart to [`Self::set_unknown`], for a narrowing that
+    /// landed on a class the loader cannot supply
+    /// (`assert($n instanceof SomeUnindexedClass)`).  The constraint the
+    /// program states is real and it does bound the value; we just have
+    /// nothing in scope that spells it out.  That is the top of the
+    /// lattice, so it absorbs at a join instead of standing aside the
+    /// way an unresolved entry does.
+    pub fn set_untyped(&mut self, var_name: &str) {
+        let key = atom(var_name);
+        self.locals.insert(key, Vec::new());
+        self.unresolved.remove(&key);
     }
 
     /// Insert a variable's types from parameter seeding.
@@ -285,12 +321,16 @@ impl ScopeState {
         if types.is_empty() {
             return;
         }
-        self.locals.insert(atom(var_name), types);
+        let key = atom(var_name);
+        self.unresolved.remove(&key);
+        self.locals.insert(key, types);
     }
 
     /// Remove a variable (e.g. after `unset($x)`).
     pub fn remove(&mut self, var_name: &str) {
-        self.locals.remove(&atom(var_name));
+        let key = atom(var_name);
+        self.locals.remove(&key);
+        self.unresolved.remove(&key);
         self.invalidate_proofs(var_name);
     }
 
@@ -405,6 +445,7 @@ impl ScopeState {
     /// `class_info` compares by pointer and never walks a class.
     fn describes_same_state_as(&self, other: &ScopeState) -> bool {
         if self.locals.len() != other.locals.len()
+            || self.unresolved != other.unresolved
             || self.assertions != other.assertions
             || self.non_null_implications != other.non_null_implications
             || self.preg_outcomes != other.preg_outcomes
@@ -429,6 +470,11 @@ impl ScopeState {
     ///   what stops a branch-local proof about an untyped subject
     ///   (`if ($version instanceof Foo)` on a `stdClass` property) from
     ///   escaping the join.
+    /// - Present in both, one side [`unresolved`](Self::unresolved): the
+    ///   other side's types, because that path did not *observe* a value
+    ///   that could be anything, it failed to work one out.  The failure
+    ///   is reported where it happened, and the join has no more reason
+    ///   to spread it than an unreachable path has to contribute types.
     /// - Present in only one: keep it with the existing types (variable
     ///   was assigned in only one branch — it *might* have those types).
     ///
@@ -483,14 +529,36 @@ impl ScopeState {
         }
 
         for (name, other_types) in &other.locals {
-            // An entry both paths carry but at least one of them has no
-            // type for is unknown at the join.  Only a name the other
-            // path never bound at all is adopted wholesale: that is a
-            // branch-local assignment, which the walker reports as a
-            // possible type rather than dropping.
-            if let Some(existing) = self.locals.get(name)
+            // A path that failed to resolve the value says nothing about
+            // it, so it leaves what this side carries alone.  Only a name
+            // this side has never seen picks the failure up, so that a
+            // later join still knows the entry stands for a gap rather
+            // than for a value that could be anything.
+            if other_types.is_empty() && other.unresolved.contains(name) {
+                if !self.locals.contains_key(name) {
+                    self.locals.insert(*name, Vec::new());
+                    self.unresolved.insert(*name);
+                }
+                continue;
+            }
+
+            // The same, the other way round: whatever this side lost, the
+            // other path's answer stands for.  An `other_types` that is
+            // empty here is a value that could be anything, which is the
+            // top of the lattice and so the answer either way.
+            let self_lost =
+                self.unresolved.contains(name) && self.locals.get(name).is_some_and(Vec::is_empty);
+            if self_lost {
+                self.unresolved.remove(name);
+                self.locals.insert(*name, Vec::new());
+            } else if let Some(existing) = self.locals.get(name)
                 && (existing.is_empty() || other_types.is_empty())
             {
+                // An entry both paths carry but at least one of them has
+                // no type for is unknown at the join.  Only a name the
+                // other path never bound at all is adopted wholesale:
+                // that is a branch-local assignment, which the walker
+                // reports as a possible type rather than dropping.
                 self.locals.insert(*name, Vec::new());
                 continue;
             }

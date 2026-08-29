@@ -98,47 +98,6 @@ Neither shape reproduces in the PHPStan Source sample project any more —
 both constructs were rewritten upstream between sweeps — so the repros
 above are the record of them.
 
-### B274. An unresolvable call inside a loop erases the accumulator instead of naming what it could not find
-
-**Impact: Medium · Complexity: High**
-
-13 sites, all PHPStan's own scope-merging idiom:
-
-```php
-$finalScope = null;
-foreach ($executionEnds as $e) {
-    $endScope = $e->getStatementResult()->getScope();   // Scope, not MutatingScope
-    if ($finalScope === null) { $finalScope = $endScope; continue; }
-    $finalScope = $finalScope->mergeWith($endScope);
-}
-```
-
-`mergeWith()` is declared on `MutatingScope`, not on the `Scope`
-interface `StatementResult::getScope()` returns, so a diagnostic on the
-merge line is correct. What is wrong is *which* diagnostic: an
-assignment whose right-hand side does not resolve records the variable
-as unknown, unknown is the top of the join lattice, and the loop's fixed
-point therefore feeds unknown back into the next iteration. By the last
-walk the seed type is gone, so instead of "method `mergeWith` not found
-on class `Scope`" — which is what the same call reports outside a loop —
-the merge line reports "type of `$finalScope` could not be resolved",
-and the reads below it that would have resolved fine against `Scope`
-report unresolvable receivers of their own
-(`SetNonVirtualPropertyHookAssignRule.php:80, 81, 90` call
-`hasExpressionType()`, which `Scope` does declare, and
-`NodeScopeResolver.php:1121` reads `$scope->getClassReflection()`).
-
-The fix is to keep the seed type in the fixed point beside the unknown
-result rather than letting the join collapse to unknown. The collapse is
-deliberate — it is what stops a branch-local proof about an untyped
-subject from escaping a join (see `ScopeState::merge_branch`) — so this
-needs the join to distinguish "no type was ever known" from "a type was
-known and one path lost it", not a relaxation of the existing rule.
-
-Sites: `src/Analyser/NodeScopeResolver.php:1103, 1112, 1116, 1121, 5406, 5414`,
-`src/Rules/Properties/SetNonVirtualPropertyHookAssignRule.php:64, 72, 80, 81, 90`,
-`src/Rules/TooWideTypehints/TooWideParameterOutTypeCheck.php:47, 56`.
-
 ## Arithmetic
 
 No outstanding items.

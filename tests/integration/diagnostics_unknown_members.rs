@@ -14089,3 +14089,128 @@ class Reader {
         "the call chain's narrowing should reach every later read, got: {diags:?}",
     );
 }
+
+/// An accumulator whose merge call names a member the receiver's class does
+/// not declare must report that member, not the receiver.
+///
+/// `$finalScope = $finalScope->mergeWith($endScope);` inside a loop records
+/// the accumulator as unknown, and unknown used to be the top of the join
+/// lattice, so the loop's fixed point fed it back into the next walk. By the
+/// last walk the seed type was gone and the merge line blamed the receiver
+/// instead of naming the method — while every read below it, including ones
+/// the interface does declare, reported an unresolvable receiver of its own.
+#[test]
+fn a_failed_merge_inside_a_loop_names_the_member_it_could_not_find() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///merge_loop.php";
+    let text = r#"<?php
+interface Scope {
+    public function hasExpressionType(): bool;
+}
+
+interface MutatingScope extends Scope {
+    public function mergeWith(?self $other): self;
+}
+
+class StatementResult {
+    public function getScope(): Scope { return new class implements Scope {
+        public function hasExpressionType(): bool { return true; }
+    }; }
+}
+
+class Merger {
+    /** @param list<StatementResult> $ends */
+    public function merge(array $ends): void
+    {
+        $finalScope = null;
+        foreach ($ends as $end) {
+            $endScope = $end->getScope();
+            if ($finalScope === null) {
+                $finalScope = $endScope;
+                continue;
+            }
+
+            $finalScope = $finalScope->mergeWith($endScope);
+        }
+
+        if ($finalScope === null) {
+            return;
+        }
+
+        $finalScope->hasExpressionType();
+    }
+}
+"#;
+    backend.update_ast(uri, text);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    assert!(
+        diags.iter().any(|d| d.message.contains("mergeWith")
+            && d.message.contains("not found")
+            && d.message.contains("Scope")),
+        "the merge line should name the method the interface lacks, got: {diags:?}",
+    );
+    assert!(
+        !diags.iter().any(|d| d.message.contains("$finalScope")),
+        "no read of the accumulator should blame the accumulator itself, got: {diags:?}",
+    );
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.message.contains("hasExpressionType")),
+        "a member the interface does declare must resolve below the loop, got: {diags:?}",
+    );
+}
+
+/// The same loop, with a plain variable on the right-hand side instead of a
+/// call, must leave the accumulator unknown.
+///
+/// `$found = $candidate;` where `$candidate` has no type does not *lose* a
+/// type — it passes on the answer it already had, which is "could be
+/// anything". Standing that aside at the join the way a failed member lookup
+/// is stood aside would leave the accumulator holding its `null` seed, and
+/// every read below the loop would be reported against `null`.
+#[test]
+fn an_untyped_assignment_inside_a_loop_leaves_the_accumulator_unknown() {
+    let backend = create_test_backend();
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.unresolved_member_access = Some(true);
+        backend.set_config(cfg);
+    }
+    let uri = "file:///untyped_loop.php";
+    let text = r#"<?php
+class Collector {
+    public function collect(array $candidates): void
+    {
+        $found = null;
+        foreach ($candidates as $candidate) {
+            if (! $candidate instanceof UnindexedNode) {
+                continue;
+            }
+
+            $found = $candidate;
+        }
+
+        if ($found === null) {
+            return;
+        }
+
+        $found->getName();
+    }
+}
+"#;
+    backend.update_ast(uri, text);
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("getName")
+            && (d.message.contains("'null'") || d.message.contains("not found"))),
+        "an untyped assignment must not leave the `null` seed behind, got: {diags:?}",
+    );
+}

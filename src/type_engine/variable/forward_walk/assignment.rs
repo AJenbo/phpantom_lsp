@@ -1685,14 +1685,28 @@ pub(crate) fn process_assignment_expr<'b>(
         scope.invalidate_proofs(&lhs_name);
         if !rhs_types.is_empty() {
             scope.set(&lhs_name, rhs_types);
-        } else {
+        } else if !scope.get(&lhs_name).is_empty()
+            && rhs_fails_on_resolved_receiver(assignment.rhs, scope)
+        {
             // The right-hand side did not resolve, so nothing is known
             // about what the variable now holds — but the value it held
             // before the assignment is gone either way. Keeping the old
             // type is what made `$acc = $acc->merge($x)` (with `$x`
             // unresolved) report a member access on the `null` that
             // `$acc` was initialised with.
+            //
+            // Flagging it as unresolved is what keeps the loss local: a
+            // join with a path that still knows the type takes that
+            // path's answer, so `$acc = $acc->missing()` inside a loop
+            // reports the missing member rather than turning `$acc`
+            // unknown for the rest of the body.
             scope.set_unknown(&lhs_name);
+        } else {
+            // Nothing was known about the variable beforehand, or the
+            // failure came from somewhere the answer was already "could
+            // be anything". Neither is a type this walk lost, so the
+            // entry is the plain unknown a join treats as top.
+            scope.set_untyped(&lhs_name);
         }
         // `$isHtml = $raw instanceof HtmlString` makes `$isHtml` stand
         // for the check, so testing it later narrows `$raw`.
@@ -1704,6 +1718,41 @@ pub(crate) fn process_assignment_expr<'b>(
         // match's outcome, so testing it later narrows `$m`.
         record_preg_outcome(&lhs_name, assignment.rhs, scope, ctx);
     }
+}
+
+/// Whether a right-hand side that resolved to nothing failed on a member
+/// of a class the walker did resolve.
+///
+/// This is the one shape where the failure is the walker's own and it
+/// says so out loud: the receiver is a known class, the member is not on
+/// it, and `unknown_member` is reported on this very line. Anything else
+/// — a value that had no type to start with, a chain that already lost
+/// the thread further up — is a failure inherited from somewhere the
+/// answer was already "could be anything", and passing it on is all the
+/// assignment does.
+///
+/// The receiver is read straight out of the scope rather than resolved,
+/// so this costs nothing on a path that is already a dead end. It also
+/// keeps the answer to the accumulator idiom the flag exists for —
+/// `$acc = $acc->…`, whose receiver is the variable being written — and
+/// leaves a longer chain alone, which is the right way round: the deeper
+/// the chain, the likelier it is that what failed was some link of it
+/// rather than the member on the end.
+fn rhs_fails_on_resolved_receiver(rhs: &Expression<'_>, scope: &ScopeState) -> bool {
+    let receiver = match rhs {
+        Expression::Call(Call::Method(call)) => call.object,
+        Expression::Call(Call::NullSafeMethod(call)) => call.object,
+        Expression::Access(Access::Property(access)) => access.object,
+        Expression::Access(Access::NullSafeProperty(access)) => access.object,
+        _ => return false,
+    };
+    let Expression::Variable(Variable::Direct(var)) = receiver else {
+        return false;
+    };
+    scope
+        .get(bytes_to_str(var.name))
+        .iter()
+        .any(|rt| rt.class_info.is_some())
 }
 
 /// Whether `$obj->prop = …` writes through the subject class's `__set`
@@ -3353,7 +3402,7 @@ pub(crate) fn process_assert_narrowing<'b>(
                 // UnresolvableClass)).  Explicitly clear the variable so
                 // that diagnostics see "unknown type" and suppress false
                 // positives.  `scope.set()` is a no-op for empty vecs.
-                scope.locals.insert(var_name, vec![]);
+                scope.set_untyped(&var_name);
             } else {
                 scope.set(&var_name, results);
             }

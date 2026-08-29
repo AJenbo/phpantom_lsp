@@ -1197,7 +1197,7 @@ fn commit_instanceof_narrowing(
     }
     if narrowed.is_empty() {
         // Empty narrowed list means the target was unresolvable.
-        scope.locals.insert(atom(var_name), vec![]);
+        scope.set_untyped(var_name);
         return;
     }
 
