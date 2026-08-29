@@ -771,6 +771,13 @@ class ScaffoldingIteration
 
     /** @return array<Pen, Pencil> */
     public function crossRef(): array { return []; }
+
+    /**
+     * Shorthand `Pen[]` names only the value type, so the keys stay open.
+     *
+     * @return Pen[]
+     */
+    public function openKeyed(): array { return ['blue' => new Pen('blue'), 7 => new Pen('red')]; }
 }
 
 class ScaffoldingArrayFunc

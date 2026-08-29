@@ -3645,6 +3645,19 @@ class IterationDemo
             $shapePen->write();
         }
 
+        // A `Pen[]` shorthand names only the value type, so its keys are
+        // whatever PHP allows. Passing one to `strlen()` is accepted because
+        // the union stands in for an annotation nobody wrote, and `is_int()`
+        // narrows the rest of the loop to the other half.
+        foreach ($src->openKeyed() as $openKey => $openPen) {
+            strlen($openKey);             // int|string (the whole key domain)
+            $openPen->write();
+            if (is_int($openKey)) {
+                continue;
+            }
+            strtoupper($openKey);         // string (the guard ruled the ints out)
+        }
+
         // WeakMap keys
         /** @var \WeakMap<Scaffolding\Pen, Scaffolding\Pencil> $mapping */
         $mapping = new \WeakMap();

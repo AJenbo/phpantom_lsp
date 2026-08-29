@@ -301,6 +301,113 @@ function spelledOut($declared): void
     );
 }
 
+/// A docblock that names only a value type (`mixed[]`, `T[]`, `array<T>`)
+/// leaves the keys open, so iterating one binds the whole key domain PHP
+/// allows rather than the `int` half of it. `list<T>` does promise `int`
+/// keys, and a spelled-out key type is reported verbatim.
+#[test]
+fn foreach_over_an_open_key_domain_binds_the_whole_key_domain() {
+    let content = r#"<?php
+class Tag {}
+
+/**
+ * @param mixed[] $config
+ * @param Tag[] $tags
+ * @param array<Tag> $open
+ * @param non-empty-array<Tag> $filled
+ * @param list<Tag> $sequential
+ * @param array<string, Tag> $named
+ */
+function probe(
+    array $config,
+    array $tags,
+    array $open,
+    array $filled,
+    array $sequential,
+    array $named,
+): void {
+    foreach ($config as $type => $ignoredA) {
+        echo /*SHORTHAND_MIXED*/$type;
+    }
+    foreach ($tags as $tagKey => $ignoredB) {
+        echo /*SHORTHAND*/$tagKey;
+    }
+    foreach ($open as $openKey => $ignoredC) {
+        echo /*OPEN*/$openKey;
+    }
+    foreach ($filled as $filledKey => $ignoredD) {
+        echo /*FILLED*/$filledKey;
+    }
+    foreach ($sequential as $listKey => $ignoredE) {
+        echo /*LIST*/$listKey;
+    }
+    foreach ($named as $namedKey => $ignoredF) {
+        echo /*NAMED*/$namedKey;
+    }
+}
+"#;
+    assert_marked_types(
+        content,
+        &[
+            ("SHORTHAND_MIXED", "int|string"),
+            ("SHORTHAND", "int|string"),
+            ("OPEN", "int|string"),
+            ("FILLED", "int|string"),
+            ("LIST", "int"),
+            ("NAMED", "string"),
+        ],
+    );
+}
+
+/// The whole-key-domain union an open key domain binds is invented rather
+/// than declared, so a single branch of it satisfies a parameter — and an
+/// `is_int` guard still narrows the survivor to the other branch.
+#[test]
+fn an_open_key_domain_foreach_key_is_benevolent_but_narrowable() {
+    let content = r#"<?php
+declare(strict_types=1);
+
+function takesString(string $s): void {}
+
+/**
+ * @param mixed[] $config
+ * @param mixed[] $guarded
+ */
+function probe(array $config, array $guarded): void
+{
+    foreach ($config as $type => $value) {
+        takesString($type);
+        echo $value;
+    }
+    foreach ($guarded as $key => $value) {
+        if (is_int($key)) {
+            continue;
+        }
+        echo /*NARROWED*/$key;
+        takesString($key);
+    }
+}
+"#;
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///open_key_domain_foreach.php";
+    backend.update_ast(uri, content);
+    assert_eq!(
+        type_at_marker(&backend, uri, content, "NARROWED"),
+        "string",
+        "an `is_int` guard has to narrow the survivor path"
+    );
+    let mut diagnostics = Vec::new();
+    backend.collect_argument_type_diagnostics(uri, content, &mut diagnostics);
+    let messages: Vec<String> = diagnostics
+        .into_iter()
+        .map(|d| format!("{}: {}", d.range.start.line, d.message))
+        .collect();
+    assert!(
+        messages.is_empty(),
+        "an open key domain must not be held to both branches: {messages:?}"
+    );
+}
+
 /// An array the walk watched being built inside a loop keeps its element
 /// type when a later iteration reads it back through a destructuring
 /// `foreach`. The first walk of the outer loop reaches the inner `foreach`

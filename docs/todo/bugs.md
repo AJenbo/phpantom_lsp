@@ -109,39 +109,54 @@ form and resolves).
 
 ## Array types
 
-### B307. Foreach over an array with no declared key type yields an `int` key
+### B311. A benevolent union loses its leniency once collected into an array
 
-**Impact: Medium-High · Complexity: Medium**
+**Impact: Medium · Complexity: Medium**
 
-Docblocks that say nothing about keys — `mixed[]`, `T[]`, `array<T>` —
-have key type `array-key`, and a `foreach` over such a value should
-bind the key as `int|string`. We bind it as `int`, dropping the string
-half, so string keys reaching string parameters report
-`expects string, got int`:
+A union nobody wrote down is tagged benevolent so a single branch of it
+satisfies a declared type. The marker survives a direct return but not a
+write into an array: the element type comes back as the plain union, so
+under `declare(strict_types=1)` (where no coercion rescues it) the
+container is reported against every declared element type that only
+covers one branch.
 
 ```php
-/** @param mixed[] $config */
-function f(array $config): void
+<?php declare(strict_types = 1);
+
+/**
+ * @param mixed[] $m
+ * @return string
+ */
+function scalarReturn(array $m): string
 {
-    foreach ($config as $type => $tags) {
-        takesString($type);   // reports "expects string, got int"
+    foreach ($m as $k => $v) {
+        return $k;      // accepted: the key union is benevolent
     }
+    return '';
+}
+
+/**
+ * @param mixed[] $m
+ * @return string[]
+ */
+function containerReturn(array $m): array
+{
+    $out = [];
+    foreach ($m as $k => $v) {
+        $out[] = $k;    // the marker is dropped here
+    }
+    return $out;        // reports "list<int|string> is incompatible with array<string>"
 }
 ```
 
-The same wrong key also explains the odd return-type report where a
-list built from the keys merges with a string-literal fallback branch as
-`non-empty-list<int>|non-empty-list<string>` against a declared
-`array<string>` — with the key fixed the loop arm becomes
-`list<int|string>` and the report collapses to the genuine half. Once
-the key is `int|string`, confirm that an `is_int($key) { continue; }`
-guard narrows the survivor path to `string` (the isolated `is_int`
-negation on a `@param int|string` already narrows correctly).
+The fix belongs where an element type is folded into a container type,
+not at the compatibility check: a benevolent member has to stay
+benevolent inside `list<…>` / `array<…, …>` so the element comparison
+sees it. PHPStan keeps its `BenevolentUnionType` as an array item type
+for the same reason.
 
-Sweep sites (PHPStan Source, 2026-08-29):
-`src/DependencyInjection/ConditionalTagsExtension.php:45`,
-`src/Rules/PhpDoc/WrongVariableNameInVarTagRule.php:376`,
-`src/Analyser/ResultCache/ResultCacheManager.php:727`.
+Sweep site (PHPStan Source, 2026-08-29):
+`src/Analyser/ResultCache/ResultCacheManager.php:565`.
 
 ## Docblock handling
 

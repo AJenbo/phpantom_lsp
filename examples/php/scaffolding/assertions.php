@@ -1374,6 +1374,16 @@ function runDemoAssertions(): void
         assert(is_string($shapeKey), 'A string-keyed shape foreach key must be string');
         assert($shapePen instanceof Scaffolding\Pen, 'A shape foreach value must be Scaffolding\Pen');
     }
+    $keyedOpen = (new Scaffolding\ScaffoldingIteration())->openKeyed();
+    foreach ($keyedOpen as $openKey => $openPen) {
+        assert(is_int($openKey) || is_string($openKey),
+            'A `Pen[]` names no key type, so its foreach key is the whole array-key domain');
+        assert($openPen instanceof Scaffolding\Pen, 'An open-keyed foreach value must be Scaffolding\Pen');
+        if (is_int($openKey)) {
+            continue;
+        }
+        assert(is_string($openKey), 'Past an `is_int` guard the surviving key must be string');
+    }
 
     // ── Literal values surviving an array read ──────────────────────────
     $litNumbers = [1, 1.5, '123'];
