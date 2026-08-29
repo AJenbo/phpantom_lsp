@@ -1648,9 +1648,9 @@ to second-guess upstream output.</p>
 scale defined in <a href="../../todo/"><code>docs/todo.md</code></a>; that table is also where
 each bug's row lives in the current sprint/backlog.</p>
 <p>All entries below come from triage of the PHPStan Source sample project,
-re-swept on 2026-08-28 (98 sites, down from 126 at the start of that
-sweep and from 180 at the 2026-08-27 triage). Site counts refer to that
-sweep; every mechanism was either reproduced in a minimal project or
+re-swept on 2026-08-29 (84 sites, down from 98 at the 2026-08-28 sweep,
+126 before it and 180 at the 2026-08-27 triage). Site counts refer to
+that sweep; every mechanism was either reproduced in a minimal project or
 confirmed by reading the guard construct PHPStan honours. The sweep is a
 snapshot, so a site named here may already read differently: re-run the
 analyser before working an entry, and trim the shapes that no longer
@@ -1664,7 +1664,7 @@ first place. If two entries would be fixed by the same change, they are
 one entry. Defects too small to earn a row of their own are collected in
 <a href="#b301-narrowing-defects-with-a-single-site-each">B301</a> rather than given
 one each.</p>
-<p>Of the 93 distinct lines the latest sweep reports, 49 are attributed to
+<p>Of the 79 distinct lines the latest sweep reports, 35 are attributed to
 an entry below. The unattributed remainder is described in
 <a href="#not-yet-attributed">Not yet attributed</a>.</p>
 <h2 id="crashes">Crashes<a class="headerlink" href="#crashes" title="Permanent link">&para;</a></h2>
@@ -1678,75 +1678,65 @@ an entry below. The unattributed remainder is described in
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
 <h3 id="b270-a-proof-the-condition-never-states-outright-isnt-reconstructed">B270. A proof the condition never states outright isn't reconstructed<a class="headerlink" href="#b270-a-proof-the-condition-never-states-outright-isnt-reconstructed" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: High · Complexity: Very High</strong></p>
-<p>25 sites — still the largest cluster here, and one root cause: what the
-narrowing store keys a proof against, and what it takes to read that
-proof back. PHPStan keys specified types by expression string and keeps
-them until something writes to that expression, so a proof recorded
-about one spelling is available to every other occurrence of it. Where
-we now match that for a subject the condition names directly, we do not
-where the proof has to be <em>reconstructed</em> — from a disjunction, from a
-boolean that stands for the check, or from a second variable written
-alongside the first. That is the reconciliation engine planned as
+<p>12 sites, and one root cause: what the narrowing store keys a proof
+against, and what it takes to read that proof back. PHPStan keys
+specified types by expression string and keeps them until something
+writes to that expression, so a proof recorded about one spelling is
+available to every other occurrence of it. Where we now match that for a
+subject the condition names directly, we do not where the proof has to be
+<em>reconstructed</em> — from a disjunction, or from the identical condition
+tested a second time. That is the reconciliation engine planned as
 <a href="../type-inference/#t20-type-narrowing-reconciliation-engine">T20</a>, and
 both shapes below want it.</p>
-<p><strong>a. A proof reached through a disjunction, or via a variable assigned
-under it, is lost</strong> (10 sites). Entering the branch means the whole
-condition held, so the guarded spelling is narrowed on every path that
-gets there — but working that out means reasoning about the disjunction
-rather than reading a recorded key:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">// 1. The `||` leg has to be combined with the ternary that reads it back:</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">if (</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    ($stmt-&gt;valueVar instanceof Variable &amp;&amp; is_string($stmt-&gt;valueVar-&gt;name))</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">    &amp;&amp; ($stmt-&gt;keyVar === null || ($stmt-&gt;keyVar instanceof Variable &amp;&amp; is_string($stmt-&gt;keyVar-&gt;name)))</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">) {</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">    $keyVarName = $stmt-&gt;keyVar instanceof Variable ? $stmt-&gt;keyVar-&gt;name : null;  // string|Expr|null</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">}</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">// 2. A flag set inside the guarded branch, tested far below it:</span>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">$originalValueExpr = null;</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">if ($stmt-&gt;valueVar instanceof Variable &amp;&amp; is_string($stmt-&gt;valueVar-&gt;name)) {</span>
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="x">    $originalValueExpr = new OriginalForeachValueExpr($stmt-&gt;valueVar-&gt;name);</span>
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="x">}</span>
-<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="x">// … 60 lines on …</span>
-<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="x">if ($originalValueExpr !== null) { $scope-&gt;getVariableType($stmt-&gt;valueVar-&gt;name); }  // lost</span>
+<p><strong>a. A proof reached through a disjunction is lost</strong> (8 sites). Entering
+the branch means the whole condition held, so the guarded spelling is
+narrowed on every path that gets there — but working that out means
+reasoning about the disjunction rather than reading a recorded key. The
+<code>||</code> leg has to be combined with the ternary that reads it back:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">if (</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    ($stmt-&gt;valueVar instanceof Variable &amp;&amp; is_string($stmt-&gt;valueVar-&gt;name))</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    &amp;&amp; ($stmt-&gt;keyVar === null || ($stmt-&gt;keyVar instanceof Variable &amp;&amp; is_string($stmt-&gt;keyVar-&gt;name)))</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">) {</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">    $keyVarName = $stmt-&gt;keyVar instanceof Variable ? $stmt-&gt;keyVar-&gt;name : null;  // string|Expr|null</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">}</span>
 </code></pre></div>
 <p>The <code>NodeScopeResolver</code> sites are all one <code>foreach</code> handler and all trace
-to <code>$stmt-&gt;valueVar-&gt;name</code> / <code>$stmt-&gt;keyVar-&gt;name</code>; fixing shape 1 is
-likely to take most of them. Two sites are a <em>negated</em> <code>instanceof</code> on a
-property path (<code>$expr instanceof FuncCall &amp;&amp; !$expr-&gt;name instanceof Name</code>)
-that does not reproduce from the construct alone, so start those by
-bisecting the enclosing method. One is not narrowing at all:
-<code>getAttribute()</code> returns <code>mixed</code>, and a <code>!== null</code> guard leaves it
-<code>mixed</code>, which we report as unverifiable and PHPStan does not report on.
-Sites: <code>src/Analyser/NodeScopeResolver.php:1689, 1702, 4838, 4844, 5000, 5103</code>,
+to <code>$stmt-&gt;valueVar-&gt;name</code> / <code>$stmt-&gt;keyVar-&gt;name</code>. Two sites are a
+<em>negated</em> <code>instanceof</code> on a property path
+(<code>$expr instanceof FuncCall &amp;&amp; !$expr-&gt;name instanceof Name</code>) that does
+not reproduce from the construct alone, so start those by bisecting the
+enclosing method. One is not narrowing at all: <code>getAttribute()</code> returns
+<code>mixed</code>, and a <code>!== null</code> guard leaves it <code>mixed</code>, which we report as
+unverifiable and PHPStan does not report on.
+Sites: <code>src/Analyser/NodeScopeResolver.php:1702, 5000, 5103</code>,
 <code>src/Analyser/NodeScopeResolver.php:2874</code>, <code>src/Analyser/TypeSpecifier.php:600</code>
 (both negated <code>instanceof</code>),
 <code>src/Analyser/NodeScopeResolver.php:3866 (×2)</code> (the <code>mixed</code> case),
 <code>src/Rules/FunctionDefinitionCheck.php:195</code> (narrowed <code>$param</code>
 <code>use</code>-captured by a closure).</p>
-<p><strong>b. Re-testing a condition, or a boolean flag holding it, doesn't
-re-apply its narrowing</strong> (15 sites). Three shapes PHPStan's
-specified-types machinery handles:</p>
+<p><strong>b. Re-testing a condition doesn't re-apply what it proved the first
+time</strong> (4 sites). Two shapes PHPStan's specified-types machinery
+handles:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">// 1. The identical condition re-tested later:</span>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">if (count($args) &gt; 0) { $acceptor = Selector::selectFromArgs(...); }</span>
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">if (count($args) &gt; 0) { use($acceptor); }                    // non-null</span>
 <a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">// 2. A boolean flag recording an instanceof, then read to pick a subject:</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">$constArrayIsI = $types[$i] instanceof ConstantArrayType &amp;&amp; ...;</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">$constArray = $constArrayIsI ? $types[$i] : $types[$j];      // ConstantArrayType</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="x">// 3. Two variables assigned together; checking one implies the other:</span>
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="x">if ($assertions === null) { return null; } // $acceptor was set iff $assertions was</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">// 2. Two variables assigned together; checking one implies the other:</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">if ($assertions === null) { return null; } // $acceptor was set iff $assertions was</span>
 </code></pre></div>
-<p>Shape 2 accounts for the whole <code>TypeCombinator</code> cluster: the flag is
-recorded, but the subject it narrows is an array dim rather than a
-plain variable, so the ternary that reads the flag back hands out the
-declared element type. Its else arm needs shape 3 as well — <code>!$isI</code>
-combined with the enclosing <code>$isI || $isJ</code> is what proves the other dim.
-Sites: <code>src/Analyser/ExprHandler/FuncCallHandler.php:977, 1042</code>,
+<p>Shape 1 is what the three handler sites want. A branch join already
+records what the branch proved under the variable it filled, so a <code>!==
+null</code> test on that variable recovers it; what is missing is the same
+thing keyed by the <em>condition</em> rather than by a variable, which is the
+step that needs a proof keyed by a required type rather than by
+non-nullness. The one <code>TypeCombinator</code> site is the else arm of
+<code>$constArray = $constArrayIsI ? $types[$i] : $types[$j];</code>, which needs
+shape 2: <code>!$isI</code> combined with the enclosing <code>$isI || $isJ</code> is what
+proves the other dim.
+Sites: <code>src/Analyser/ExprHandler/FuncCallHandler.php:977</code>,
 <code>src/Analyser/ExprHandler/MethodCallHandler.php:350</code>,
 <code>src/Analyser/ExprHandler/StaticCallHandler.php:455</code>,
-<code>src/Analyser/NodeScopeResolver.php:693, 707, 727, 732</code>,
-<code>src/Type/TypeCombinator.php:1991, 1994, 2012, 2013, 2020, 2021, 2029</code>.</p>
+<code>src/Type/TypeCombinator.php:1994</code>.</p>
 <h3 id="b274-a-null-seeded-accumulator-filled-in-a-loop-keeps-null-or-loses-its-type-entirely">B274. A null-seeded accumulator filled in a loop keeps <code>null</code> (or loses its type entirely)<a class="headerlink" href="#b274-a-null-seeded-accumulator-filled-in-a-loop-keeps-null-or-loses-its-type-entirely" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: High · Complexity: High</strong></p>
 <p>19 sites, two symptoms of one shape — PHPStan's own scope-merging
