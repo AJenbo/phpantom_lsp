@@ -880,23 +880,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Narrowing">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b270-a-proof-keyed-by-a-value-the-guard-leaves-unnarrowed-isnt-reconstructed" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B270. A proof keyed by a value the guard leaves unnarrowed isn't reconstructed
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1485,23 +1468,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Narrowing">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b270-a-proof-keyed-by-a-value-the-guard-leaves-unnarrowed-isnt-reconstructed" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B270. A proof keyed by a value the guard leaves unnarrowed isn't reconstructed
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1632,40 +1598,7 @@ an entry below. The unattributed remainder is described in
 <h2 id="reachability">Reachability<a class="headerlink" href="#reachability" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
-<h3 id="b270-a-proof-keyed-by-a-value-the-guard-leaves-unnarrowed-isnt-reconstructed">B270. A proof keyed by a value the guard leaves unnarrowed isn't reconstructed<a class="headerlink" href="#b270-a-proof-keyed-by-a-value-the-guard-leaves-unnarrowed-isnt-reconstructed" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Very High</strong></p>
-<p>What the narrowing store keys a proof against, and what it takes to read
-that proof back. PHPStan keys specified types by expression string and
-keeps them until something writes to that expression, so a proof recorded
-about one spelling is available to every other occurrence of it. A branch
-join now records what each path proved under the keys the two paths
-disagree about, and a later test that re-establishes one of those keys
-re-applies the rest — but only when the two paths left that key holding
-values that cannot both be the one in hand. Where they overlap, the test
-proves nothing and the proof is dropped. Two shapes fall in that gap.</p>
-<p><strong>a. A guard on <code>instanceof</code>.</strong> The else path of <code>if ($id instanceof B)</code>
-on an <code>A</code> keeps <code>A</code>, which spans <code>B</code>, so re-testing <code>$id instanceof B</code>
-does not recover what the first test's branch filled:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">$a = null;</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">if ($id instanceof B) { $a = makeA(); }</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">return $id instanceof B ? takesA($a) : &#39;&#39;;     // $a is still A|null</span>
-</code></pre></div>
-<p>This wants the negative branch to carry the exclusion the condition
-really proves ("an <code>A</code> that is not a <code>B</code>"), which is the representation
-gap <a href="../type-inference/#t20-type-narrowing-reconciliation-engine">T20</a>'s
-sure/sure-not split closes.</p>
-<p><strong>b. Two variables assigned together, where checking one implies the
-other through an enclosing disjunction.</strong> <code>!$isI</code> combined with an
-enclosing <code>$isI || $isJ</code> is what proves the other dim:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">if (!$isI &amp;&amp; !$isJ) { return null; }</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">$constArray = $isI ? $types[$i] : $types[$j];  // the else arm needs $isJ</span>
-</code></pre></div>
-<p>Reading the else arm's proof back means carrying the enclosing
-disjunction as a live clause and resolving it against <code>!$isI</code>, which is
-the clause algebra T20 plans rather than anything the join can record.</p>
-<p>Neither shape reproduces in the PHPStan Source sample project any more —
-both constructs were rewritten upstream between sweeps — so the repros
-above are the record of them.</p>
+<p>No outstanding items.</p>
 <h2 id="arithmetic">Arithmetic<a class="headerlink" href="#arithmetic" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
