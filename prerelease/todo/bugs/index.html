@@ -905,17 +905,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b303-a-branch-join-drops-the-other-paths-type-when-one-path-narrowed-to-an-intersection" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B303. A branch join drops the other path's type when one path narrowed to an intersection
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1532,17 +1521,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b303-a-branch-join-drops-the-other-paths-type-when-one-path-narrowed-to-an-intersection" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B303. A branch join drops the other path's type when one path narrowed to an intersection
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1743,29 +1721,6 @@ known and one path lost it", not a relaxation of the existing rule.</p>
 <p>Sites: <code>src/Analyser/NodeScopeResolver.php:1103, 1112, 1116, 1121, 5406, 5414</code>,
 <code>src/Rules/Properties/SetNonVirtualPropertyHookAssignRule.php:64, 72, 80, 81, 90</code>,
 <code>src/Rules/TooWideTypehints/TooWideParameterOutTypeCheck.php:47, 56</code>.</p>
-<h3 id="b303-a-branch-join-drops-the-other-paths-type-when-one-path-narrowed-to-an-intersection">B303. A branch join drops the other path's type when one path narrowed to an intersection<a class="headerlink" href="#b303-a-branch-join-drops-the-other-paths-type-when-one-path-narrowed-to-an-intersection" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<p><code>ScopeState::merge_branch</code> folds an incoming type into an existing entry
-whenever the two name the same class, and widens the existing spelling
-only when the incoming one is a superset of it. Neither spelling being a
-superset of the other is the case it has no answer for: it keeps the
-existing entry and drops the incoming one, so the whole of the other
-path's type is lost.</p>
-<p>An intersection is the shape that reaches it. <code>Variable&amp;Node</code> and
-<code>?Variable</code> both name <code>Variable</code>, and neither is a member-wise superset
-of the other, so the branch that carries the nullable half contributes
-nothing:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">function r(?Variable $v): void {</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">    if ($v instanceof Node) { echo 1; } else { echo 2; }</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    acceptString($v);        // reported as Variable&amp;Node; the else path&#39;s ?Variable is gone</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">}</span>
-</code></pre></div>
-<p>It is order-dependent, which is the tell: with the operands the other way
-round the join answers <code>?Variable|Variable&amp;Node</code>, so the same two paths
-give two different results depending on which one the merge starts from.
-The fix is for the same-class fold to union the two spellings rather than
-pick one, or to leave the incoming entry alone when neither subsumes the
-other.</p>
 <h2 id="arithmetic">Arithmetic<a class="headerlink" href="#arithmetic" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
