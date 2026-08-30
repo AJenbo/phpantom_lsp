@@ -249,6 +249,7 @@ impl LanguageServer for Backend {
                 type_definition_provider: Some(TypeDefinitionProviderCapability::Simple(true)),
                 implementation_provider: Some(ImplementationProviderCapability::Simple(true)),
                 references_provider: Some(OneOf::Left(true)),
+                call_hierarchy_provider: Some(CallHierarchyServerCapability::Simple(true)),
                 document_highlight_provider: Some(OneOf::Left(true)),
                 code_action_provider: Some(CodeActionProviderCapability::Options(
                     CodeActionOptions {
@@ -1568,6 +1569,56 @@ impl LanguageServer for Backend {
 
     async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
         self.inlay_hint_request(params).await
+    }
+
+    async fn prepare_call_hierarchy(
+        &self,
+        params: CallHierarchyPrepareParams,
+    ) -> Result<Option<Vec<CallHierarchyItem>>> {
+        let uri = params
+            .text_document_position_params
+            .text_document
+            .uri
+            .to_string();
+        let position = params.text_document_position_params.position;
+        let backend = self.clone_for_blocking();
+        let request_uri = uri.clone();
+        run_blocking_cancel_safe("prepare_call_hierarchy", move || {
+            backend.handle_with_position(
+                "prepare_call_hierarchy",
+                &request_uri,
+                position,
+                |content, translated_position| {
+                    backend.prepare_call_hierarchy_impl(&request_uri, content, translated_position)
+                },
+            )
+        })
+        .await
+        .unwrap_or(Ok(None))
+    }
+
+    async fn incoming_calls(
+        &self,
+        params: CallHierarchyIncomingCallsParams,
+    ) -> Result<Option<Vec<CallHierarchyIncomingCall>>> {
+        let backend = self.clone_for_blocking();
+        Ok(run_blocking_cancel_safe("incoming_calls", move || {
+            backend.incoming_calls_impl(&params.item)
+        })
+        .await
+        .flatten())
+    }
+
+    async fn outgoing_calls(
+        &self,
+        params: CallHierarchyOutgoingCallsParams,
+    ) -> Result<Option<Vec<CallHierarchyOutgoingCall>>> {
+        let backend = self.clone_for_blocking();
+        Ok(run_blocking_cancel_safe("outgoing_calls", move || {
+            backend.outgoing_calls_impl(&params.item)
+        })
+        .await
+        .flatten())
     }
 
     async fn prepare_type_hierarchy(
