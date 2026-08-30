@@ -39,7 +39,6 @@ use super::member::MemberKind;
 use super::point_location;
 use crate::Backend;
 use crate::class_lookup::find_class_at_offset;
-use crate::config::IndexingStrategy;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind};
 use crate::text_position::position_to_offset;
 use crate::type_engine::resolver::ResolutionCtx;
@@ -683,7 +682,7 @@ impl Backend {
         let mut result: Vec<ClassInfo> = Vec::new();
         // Track by FQN to avoid short-name collisions across namespaces.
         let mut seen_fqns: HashSet<String> = HashSet::new();
-        if self.config().indexing.strategy() == IndexingStrategy::Full
+        if self.config().indexing.strategy().builds_workspace_index()
             && !self.workspace_indexed.load(Ordering::Acquire)
         {
             self.ensure_workspace_indexed_for_request();

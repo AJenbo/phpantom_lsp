@@ -41,7 +41,6 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::composer;
-use crate::config::IndexingStrategy;
 use crate::formatting;
 
 /// Run `f` on a blocking thread in a way that survives `$/cancelRequest`.
@@ -112,6 +111,19 @@ impl LanguageServer for Backend {
             *self.workspace.workspace_root.write() = Some(root);
         }
 
+        if let Some(options) = params.initialization_options.clone() {
+            match serde_json::from_value::<crate::config::InitializationOptions>(options) {
+                Ok(options) => *self.workspace.initialization_options.lock() = options,
+                Err(error) => {
+                    self.log(
+                        MessageType::WARNING,
+                        format!("Invalid PHPantom initializationOptions: {error}"),
+                    )
+                    .await;
+                }
+            }
+        }
+
         // Store the client name for quirks-mode adjustments.
         if let Some(info) = &params.client_info {
             *self.client_name.lock() = info.name.clone();
@@ -176,6 +188,16 @@ impl LanguageServer for Backend {
             .unwrap_or(false);
         self.supports_semantic_tokens_refresh
             .store(client_supports_semantic_tokens_refresh, Ordering::Release);
+
+        let client_supports_code_lens_refresh = params
+            .capabilities
+            .workspace
+            .as_ref()
+            .and_then(|ws| ws.code_lens.as_ref())
+            .and_then(|code_lens| code_lens.refresh_support)
+            .unwrap_or(false);
+        self.supports_code_lens_refresh
+            .store(client_supports_code_lens_refresh, Ordering::Release);
 
         // Reference counts on declarations are computed off the request
         // path, so the hints an editor holds are the ones from before the
@@ -274,7 +296,7 @@ impl LanguageServer for Backend {
                 workspace_symbol_provider: Some(OneOf::Left(true)),
                 folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
                 code_lens_provider: Some(CodeLensOptions {
-                    resolve_provider: Some(false),
+                    resolve_provider: Some(true),
                 }),
                 selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
@@ -341,7 +363,11 @@ impl LanguageServer for Backend {
                 &root,
                 self.workspace.global_config_path.as_deref(),
             ) {
-                Ok(cfg) => {
+                Ok(mut cfg) => {
+                    self.workspace
+                        .initialization_options
+                        .lock()
+                        .apply_to(&mut cfg);
                     *self.workspace.config.lock() = cfg;
                 }
                 Err(e) => {
@@ -471,6 +497,15 @@ impl LanguageServer for Backend {
                 }
             }
 
+            let framework_count = self.index_framework_workspace(Some(&progress));
+            if framework_count > 0 {
+                tracing::info!(
+                    "PHPantom: indexed {} Symfony/Doctrine resource file(s)",
+                    framework_count
+                );
+            }
+            progress.set_percentage(99, "Finalizing startup indexes");
+
             if let Some(poller) = poller {
                 poller.finish().await;
             }
@@ -565,6 +600,14 @@ impl LanguageServer for Backend {
                 kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
             },
             FileSystemWatcher {
+                glob_pattern: GlobPattern::String("**/*.{yaml,yml,xml}".to_string()),
+                kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
+            },
+            FileSystemWatcher {
+                glob_pattern: GlobPattern::String("**/*.{yaml,yml,xml}.dist".to_string()),
+                kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
+            },
+            FileSystemWatcher {
                 glob_pattern: GlobPattern::String("**/composer.json".to_string()),
                 kind: Some(WatchKind::Change),
             },
@@ -589,6 +632,20 @@ impl LanguageServer for Backend {
                 },
             ]);
         }
+        watchers.extend([
+            FileSystemWatcher {
+                glob_pattern: GlobPattern::String("**/*.yaml".to_string()),
+                kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
+            },
+            FileSystemWatcher {
+                glob_pattern: GlobPattern::String("**/*.yml".to_string()),
+                kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
+            },
+            FileSystemWatcher {
+                glob_pattern: GlobPattern::String("**/*.xml".to_string()),
+                kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
+            },
+        ]);
 
         registrations.push(Registration {
             id: "workspace/didChangeWatchedFiles".to_string(),
@@ -730,6 +787,23 @@ impl LanguageServer for Backend {
             .write()
             .insert(uri.clone(), Arc::clone(&text));
 
+        // Resource documents are not PHP source. Build a lightweight symbol
+        // map so navigation, references, rename, and PHP declaration lenses
+        // all consume the same indexed occurrences.
+        let is_resource = crate::resource_navigation::is_resource_document(&uri);
+        let is_framework_resource = crate::framework::is_framework_resource_uri(&uri);
+        if is_resource || is_framework_resource {
+            if is_resource {
+                self.update_resource_symbol_index(&uri, &text);
+            }
+            if is_framework_resource {
+                self.index_framework_uri_content(&uri, &text);
+            }
+            self.log(MessageType::INFO, format!("Opened resource file: {}", uri))
+                .await;
+            return;
+        }
+
         // Parse and update AST map, use map, and namespace map
         self.update_ast(&uri, &text);
 
@@ -809,6 +883,23 @@ impl LanguageServer for Backend {
             .write()
             .insert(uri.clone(), Arc::clone(&text));
 
+        let is_resource = crate::resource_navigation::is_resource_document(&uri);
+        let is_framework_resource = crate::framework::is_framework_resource_uri(&uri);
+        if is_resource || is_framework_resource {
+            if is_resource {
+                self.update_resource_symbol_index(&uri, &text);
+            }
+            if is_framework_resource {
+                self.index_framework_uri_content(&uri, &text);
+            }
+            if self.supports_code_lens_refresh.load(Ordering::Acquire)
+                && let Some(ref client) = self.client
+            {
+                let _ = client.code_lens_refresh().await;
+            }
+            return;
+        }
+
         // Re-parse in a blocking background task so typing does not
         // monopolize the LSP service loop and delay completion requests.
         //
@@ -878,6 +969,12 @@ impl LanguageServer for Backend {
                     {
                         let _ = client.inlay_hint_refresh().await;
                     }
+                    if refresh_backend
+                        .supports_code_lens_refresh
+                        .load(Ordering::Acquire)
+                    {
+                        let _ = client.code_lens_refresh().await;
+                    }
                 }
             });
         }
@@ -908,6 +1005,24 @@ impl LanguageServer for Backend {
             self.blade_injected_vars.write().remove(&uri);
         }
 
+        let is_resource = crate::resource_navigation::is_resource_document(&uri);
+        let is_framework_resource = crate::framework::is_framework_resource_uri(&uri);
+        if is_resource || is_framework_resource {
+            if is_resource {
+                if let Some(content) = self.get_file_content(&uri) {
+                    self.update_resource_symbol_index(&uri, &content);
+                } else {
+                    self.clear_file_maps(&uri);
+                }
+            }
+            if is_framework_resource {
+                self.reindex_framework_uri_from_disk(&uri);
+            }
+            self.log(MessageType::INFO, format!("Closed resource file: {}", uri))
+                .await;
+            return;
+        }
+
         self.clear_file_maps(&uri);
 
         // Clear diagnostics so stale warnings don't linger after the file is closed
@@ -919,13 +1034,22 @@ impl LanguageServer for Backend {
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
         let uri = params.text_document.uri.to_string();
+        let is_resource = crate::resource_navigation::is_resource_document(&uri);
 
         if let Some(text) = params.text {
             let text = Arc::new(text);
             self.open_files
                 .write()
                 .insert(uri.clone(), Arc::clone(&text));
-            self.update_ast(&uri, &text);
+            if is_resource {
+                self.update_resource_symbol_index(&uri, &text);
+            } else {
+                self.update_ast(&uri, &text);
+            }
+        }
+
+        if is_resource {
+            return;
         }
 
         // A save is a reliable sync point: re-diagnose the saved file
@@ -979,6 +1103,11 @@ impl LanguageServer for Backend {
         // (or missing ones) are corrected.
         if did_work {
             self.request_diagnostic_refresh().await;
+            if self.supports_code_lens_refresh.load(Ordering::Acquire)
+                && let Some(ref client) = self.client
+            {
+                let _ = client.code_lens_refresh().await;
+            }
         }
     }
 
@@ -996,6 +1125,24 @@ impl LanguageServer for Backend {
         let backend = self.clone_for_blocking();
         let uri_clone = uri.clone();
         run_blocking_cancel_safe("goto_definition", move || {
+            // YAML and XML may name PHP classes under any schema. Resolve
+            // fully-qualified class and Class::member tokens before entering
+            // the PHP-only symbol-map path below.
+            if crate::resource_navigation::is_resource_document(&uri_clone) {
+                let location = backend.get_file_content(&uri_clone).and_then(|content| {
+                    crate::util::catch_panic_unwind_safe(
+                        "goto_definition",
+                        &uri_clone,
+                        Some(position),
+                        || backend.resolve_resource_definition(&content, position),
+                    )
+                    .flatten()
+                });
+                if let Some(location) = location {
+                    return Ok(Some(GotoDefinitionResponse::Scalar(location)));
+                }
+            }
+
             // A component tag is HTML, so it has no position in the virtual
             // PHP `handle_with_position` would swap in below; it is resolved
             // from the template's own source instead.
@@ -1471,12 +1618,25 @@ impl LanguageServer for Backend {
         let uri = params.text_document.uri.to_string();
         let backend = self.clone_for_blocking();
         let u = uri.clone();
-        self.coalesced_whole_file("code_lens", &uri, move || {
-            backend.handle_with_uri("code_lens", &u, |content| {
-                backend.handle_code_lens(&u, content)
+        let lenses = self
+            .coalesced_whole_file("code_lens", &uri, move || {
+                backend.handle_with_uri("code_lens", &u, |content| {
+                    backend.handle_code_lens(&u, content)
+                })
             })
+            .await;
+        self.schedule_member_ref_counts();
+        lenses
+    }
+
+    async fn code_lens_resolve(&self, params: CodeLens) -> Result<CodeLens> {
+        let fallback = params.clone();
+        let backend = self.clone_for_blocking();
+        Ok(run_blocking_cancel_safe("code_lens_resolve", move || {
+            backend.resolve_code_lens_item(params)
         })
         .await
+        .unwrap_or(fallback))
     }
 
     async fn execute_command(
@@ -1844,7 +2004,8 @@ impl Backend {
         if self.client.is_none() {
             return;
         }
-        if self.config().indexing.strategy() != IndexingStrategy::Full {
+        let strategy = self.config().indexing.strategy();
+        if !strategy.builds_workspace_index() {
             return;
         }
         if self.workspace.workspace_root.read().is_none() {
@@ -1858,7 +2019,11 @@ impl Backend {
         if let Some(ref tok) = progress_token {
             self.progress_begin(
                 tok,
-                "PHPantom: Full index",
+                if strategy.prewarms_semantic_relations() {
+                    "PHPantom: Semantic index"
+                } else {
+                    "PHPantom: Full index"
+                },
                 Some("Parsing workspace files".to_string()),
             )
             .await;
@@ -1873,14 +2038,27 @@ impl Backend {
         let progress_backend = self.clone_for_blocking();
         tokio::spawn(async move {
             let worker_state = Arc::clone(&progress_state);
-            let indexed_files = run_blocking_cancel_safe("full_background_index", move || {
-                let report_progress =
-                    |percentage, message: String| worker_state.set_percentage(percentage, message);
-                parse_backend.ensure_workspace_indexed_with_progress(Some(&report_progress));
-                parse_backend.symbol_maps.read().len()
-            })
-            .await
-            .unwrap_or(0);
+            let (indexed_files, warmed_files) =
+                run_blocking_cancel_safe("full_background_index", move || {
+                    let report_progress = |percentage: u32, message: String| {
+                        let percentage = if strategy.prewarms_semantic_relations() {
+                            percentage.saturating_mul(80) / 100
+                        } else {
+                            percentage
+                        };
+                        worker_state.set_percentage(percentage, message);
+                    };
+                    parse_backend.ensure_workspace_indexed_with_progress(Some(&report_progress));
+                    let indexed_files = parse_backend.symbol_maps.read().len();
+                    let warmed_files = if strategy.prewarms_semantic_relations() {
+                        parse_backend.prewarm_member_reference_targets(Some(&worker_state))
+                    } else {
+                        0
+                    };
+                    (indexed_files, warmed_files)
+                })
+                .await
+                .unwrap_or((0, 0));
 
             if let Some(poller) = poller {
                 poller.finish().await;
@@ -1891,9 +2069,14 @@ impl Backend {
                 .store(false, Ordering::Release);
 
             if let Some(tok) = progress_token {
-                progress_backend
-                    .progress_end(&tok, Some(format!("Parsed {} files", indexed_files)))
-                    .await;
+                let message = if strategy.prewarms_semantic_relations() {
+                    format!(
+                        "Parsed {indexed_files} files and prepared {warmed_files} reference files"
+                    )
+                } else {
+                    format!("Parsed {indexed_files} files")
+                };
+                progress_backend.progress_end(&tok, Some(message)).await;
             }
 
             progress_backend.request_diagnostic_refresh().await;
@@ -1908,6 +2091,13 @@ impl Backend {
                 && let Some(ref client) = progress_backend.client
             {
                 let _ = client.inlay_hint_refresh().await;
+            }
+            if progress_backend
+                .supports_code_lens_refresh
+                .load(Ordering::Acquire)
+                && let Some(ref client) = progress_backend.client
+            {
+                let _ = client.code_lens_refresh().await;
             }
 
             // With the whole workspace parsed, eagerly resolve every
@@ -1975,7 +2165,9 @@ impl Backend {
         // map, so a file passes through here once; a file the parser panics
         // on publishes nothing and is retried, which is the same work its
         // next keystroke would do anyway.
-        if !self.symbol_maps.read().contains_key(uri) {
+        if !crate::resource_navigation::is_resource_document(uri)
+            && !self.symbol_maps.read().contains_key(uri)
+        {
             self.update_ast(uri, &content);
         }
 

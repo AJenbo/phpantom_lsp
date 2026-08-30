@@ -37,7 +37,7 @@
         },
         "workspace": {
           "type": "boolean",
-          "description": "Compute diagnostics for the whole workspace in the background after startup and the full index finish, so project-wide problems appear for files that are not open in the editor. Off by default: it costs a project-wide sweep every session. Requires the default \"full\" indexing strategy.",
+          "description": "Compute diagnostics for the whole workspace in the background after startup and the complete index finish, so project-wide problems appear for files that are not open in the editor. Off by default: it costs a project-wide sweep every session. Requires the \"full\" or \"semantic\" indexing strategy.",
           "default": false
         },
         "workspace-external": {
@@ -75,11 +75,12 @@
       "properties": {
         "strategy": {
           "type": "string",
-          "description": "The indexing strategy for class discovery. \"full\" (default): scan PHP files, then background-parse user files to populate symbol and reference indexes. \"composer\": use Composer's classmap, fall back to self-scan. \"self\": scan all PHP files, ignore classmap. \"none\": no proactive scanning, classmap only.",
+          "description": "The indexing strategy for class discovery. \"full\" (default): scan PHP files, then background-parse user files to populate symbol and reference indexes. \"semantic\": build the full index and resolve semantic relationships for lower first-use latency. \"composer\": use Composer's classmap, fall back to self-scan. \"self\": scan all PHP files, ignore classmap. \"none\": no proactive scanning, classmap only.",
           "enum": [
             "composer",
             "self",
             "full",
+            "semantic",
             "none"
           ],
           "default": "full"
