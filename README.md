@@ -40,6 +40,7 @@ PHPantom focuses on deep type intelligence. Here's how it compares:
 | Closure parameter inference     | ✅       | 🚧           | 🚧         | 🚧          | 🚧          |
 | Laravel                         | ✅       | ❌           | 🚧         | ❌          | 🚧          |
 | Blade templates                 | 🚧       | ❌           | ✅         | ❌          | 🚧          |
+| Symfony / Twig / Doctrine       | ✅       | 🚧           | 🚧         | 🚧          | 🧩          |
 | Other frameworks<sup>4</sup>    | 🚧       | 🚧           | 🚧         | 🚧          | 🧩          |
 | **Refactoring**                 |          |              |            |             |             |
 | Rename                          | ✅       | 🔒           | 🔒         | ✅          | ✅          |
@@ -60,14 +61,14 @@ PHPantom focuses on deep type intelligence. Here's how it compares:
 <sup>1</sup> Completion, hover, signature help, go-to-definition, find references, diagnostics, document symbols.<br>
 <sup>2</sup> Auto-import, go-to implementation / type-definition, smart select, folding ranges, formatting, code lens, inlay hints, type hierarchy, document links.<br>
 <sup>3</sup> Implement interface methods, extract method/function, extract/inline variable, generate constructor, generate getter/setter.<br>
-<sup>4</sup> CakePHP, non-Composer WordPress, Symfony, Behat, PHPUnit, and Prophecy, and Twig.<br>
+<sup>4</sup> CakePHP, non-Composer WordPress, Behat, PHPUnit, and Prophecy.<br>
 <sup>5</sup> Convert between arrow functions and closures, and switch statements to match expressions.<br>
 Performance measured on a production codebase: 21K PHP files, 1.5M lines of code (vendor + application). Time to ready is CPU time consumed until full type intelligence is available on a cold start (first index); tools with a disk cache launch faster on subsequent starts.
 </sub>
 </p>
 
 > [!TIP]
-> **Want to verify?** Open [`examples/php/`](examples/php/) in your editor and trigger completion at the marked locations in `completion.php`. It exercises every type intelligence feature in the table, including edge cases where tools diverge. For Laravel specifically, open [`examples/laravel/`](examples/laravel/) — a standalone project with real Eloquent models, config, routes, views, and translations that exercises Eloquent property resolution, query builder chaining, scopes, custom collections, and go-to-definition for config keys, route names, and translation strings.
+> **Want to verify?** Open [`examples/php/`](examples/php/) in your editor and trigger completion at the marked locations in `completion.php`. It exercises every type intelligence feature in the table, including edge cases where tools diverge. Framework playgrounds live in [`examples/laravel/`](examples/laravel/) and [`examples/symfony/`](examples/symfony/).
 
 ## Context-Aware Intelligence
 
@@ -77,6 +78,7 @@ Performance measured on a production codebase: 21K PHP files, 1.5M lines of code
 - **Conditional return types.** PHPStan-style conditional `@return` types resolve to the concrete branch at each call site.
 - **Type aliases and shapes.** `@phpstan-type`, `@phpstan-import-type`, and `object{...}` shapes all resolve through to completions.
 - **Laravel.** Eloquent relationships, scopes, accessors, casts, and Builder chains resolve end-to-end. Macros behave like real methods. Container strings like `app('cache')` resolve to the bound class, `auth()->user()` resolves to your configured model, authorization strings resolve to the gate definition or policy method that declares them, and query string compleation on both relation and column names. Blade templates get completion, hover, go-to-definition, and diagnostics through virtual PHP preprocessing. No ide-helper or database access required.
+- **Symfony.** Container configuration, routes, Twig templates, translations, events, Messenger, forms, validation mappings, Doctrine metadata, and local configuration schemas participate in completion, navigation, references, rename, diagnostics, and code lenses across PHP, YAML, XML, XLIFF, and Twig.
 - **Everything else you'd expect.** Generics, type narrowing, named arguments, destructuring, first-class callables, anonymous classes, `@deprecated` detection, and namespace segment drilling.
 
 ## Project Awareness
