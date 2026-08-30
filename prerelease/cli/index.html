@@ -1996,11 +1996,12 @@ fewer with each release. If you hit one, please
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w">                             </span><span class="c1"># scan entire project</span>
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>src/<span class="w">                        </span><span class="c1"># scan a subdirectory</span>
 <a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>src/Foo.php<span class="w">                 </span><span class="c1"># scan a single file</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--severity<span class="w"> </span>warning<span class="w">          </span><span class="c1"># errors and warnings only</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--severity<span class="w"> </span>error<span class="w">            </span><span class="c1"># errors only</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--project-root<span class="w"> </span>/path/to/app<span class="w"> </span><span class="c1"># explicit project root</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--no-colour<span class="w">                 </span><span class="c1"># plain text output</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--debug<span class="w"> </span>-vv<span class="w">                 </span><span class="c1"># trace file-by-file progress</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>app/<span class="w"> </span>lib/Helper.php<span class="w">         </span><span class="c1"># scan several paths at once</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--severity<span class="w"> </span>warning<span class="w">          </span><span class="c1"># errors and warnings only</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--severity<span class="w"> </span>error<span class="w">            </span><span class="c1"># errors only</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--project-root<span class="w"> </span>/path/to/app<span class="w"> </span><span class="c1"># explicit project root</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--no-colour<span class="w">                 </span><span class="c1"># plain text output</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--debug<span class="w"> </span>-vv<span class="w">                 </span><span class="c1"># trace file-by-file progress</span>
 </code></pre></div>
 <h3 id="options_1">Options<a class="headerlink" href="#options_1" title="Permanent link">&para;</a></h3>
 <table>
@@ -2012,8 +2013,8 @@ fewer with each release. If you hit one, please
 </thead>
 <tbody>
 <tr>
-<td><code>[PATH]</code></td>
-<td>File or directory to analyze. Defaults to the entire project.</td>
+<td><code>[PATH]...</code></td>
+<td>Files or directories to analyze. Repeatable; the results are the union of every path given. Defaults to the entire project.</td>
 </tr>
 <tr>
 <td><code>--severity &lt;LEVEL&gt;</code></td>
@@ -2060,7 +2061,7 @@ fewer with each release. If you hit one, please
 </tr>
 <tr>
 <td>2</td>
-<td><code>PATH</code> argument does not exist</td>
+<td>A <code>PATH</code> argument does not exist</td>
 </tr>
 </tbody>
 </table>
