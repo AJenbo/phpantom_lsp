@@ -215,6 +215,16 @@ impl Backend {
         // served after a file changes.
         crate::virtual_members::phpdoc::bump_mixin_generation();
 
+        // Symfony's PHP configurators contain semantic class and callable
+        // strings that the normal PHP symbol map deliberately treats as
+        // plain strings. Keep their lightweight framework index in step with
+        // every parse, including incomplete edits where the main parse fails.
+        if crate::framework::should_index_framework_php_content(uri, content)
+            || self.framework_references.read().contains_key(uri)
+        {
+            self.index_framework_uri_content(uri, content);
+        }
+
         let content_to_parse = if self.is_blade_file(uri) {
             // Seed the template scope with the set cached by the refresh
             // passes (post-index refresh, Blade did_open, caller save):
@@ -1322,6 +1332,10 @@ impl Backend {
 
         if changed {
             self.member_completion_cache.lock().clear();
+            // Exact member targets in other files may depend on the return or
+            // property type that changed here. Rebuild those files lazily;
+            // the edited file itself is evicted by reference reindexing below.
+            self.clear_resolved_member_files();
             // A receiver's type is settled against the classes of the whole
             // workspace, so a signature change anywhere can turn a call that
             // was not a render into one, or the other way round.
