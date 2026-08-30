@@ -84,7 +84,7 @@ pub async fn run(options: AnalyseOptions) -> i32 {
         .init_single_project(root, php_version, composer_package, None)
         .await;
     // ── 3. Locate user files (via PSR-4) and crop to path ───────────
-    let files = discover_user_files(&backend, root, options.path_filter.as_deref());
+    let files = discover_user_files(&backend, root, &options.path_filters);
 
     if files.is_empty() {
         eprintln!("No PHP files found.");
@@ -645,33 +645,36 @@ pub async fn run(options: AnalyseOptions) -> i32 {
 /// Discover user PHP files to analyse.
 ///
 /// Walks each PSR-4 source directory from `composer.json` (these only
-/// cover the project's own code, not vendor).  When `path_filter` is
-/// provided the results are cropped to that file or directory.
+/// cover the project's own code, not vendor).  When `path_filters` is
+/// non-empty the results are cropped to those files and directories.
 pub(crate) fn discover_user_files(
     backend: &Backend,
     workspace_root: &Path,
-    path_filter: Option<&Path>,
+    path_filters: &[PathBuf],
 ) -> Vec<PathBuf> {
-    use ignore::WalkBuilder;
+    // Resolve the path filters to absolute paths, and split them into the
+    // directories that need walking and the files that are taken as given.
+    let (filter_dirs, filter_files): (Vec<PathBuf>, Vec<PathBuf>) = path_filters
+        .iter()
+        .map(|f| {
+            if f.is_relative() {
+                workspace_root.join(f)
+            } else {
+                f.to_path_buf()
+            }
+        })
+        .partition(|p| p.is_dir());
 
-    // Resolve the path filter to an absolute path.
-    let abs_filter = path_filter.map(|f| {
-        if f.is_relative() {
-            workspace_root.join(f)
-        } else {
-            f.to_path_buf()
-        }
-    });
+    let mut files: Vec<PathBuf> = filter_files
+        .into_iter()
+        .filter(|p| p.extension().is_some_and(|ext| ext == "php"))
+        .collect();
 
-    // Single-file short circuit.
-    if let Some(ref resolved) = abs_filter
-        && resolved.is_file()
-    {
-        return if resolved.extension().is_some_and(|ext| ext == "php") {
-            vec![resolved.clone()]
-        } else {
-            Vec::new()
-        };
+    // Every filter named a file, so there is nothing left to walk.
+    if !path_filters.is_empty() && filter_dirs.is_empty() {
+        files.sort();
+        files.dedup();
+        return files;
     }
 
     // Collect the PSR-4 source directories as absolute paths.
@@ -718,86 +721,83 @@ pub(crate) fn discover_user_files(
     vendor_dirs.sort_unstable();
     vendor_dirs.dedup();
 
-    // When an explicit path filter points outside all PSR-4 source
-    // directories (e.g. into vendor/), walk the filter path directly
-    // instead of skipping it.  This matches PHPStan behaviour: the
-    // default scan covers only user code, but an explicit override
-    // scans whatever you point it at.
-    let filter_overlaps_psr4 = abs_filter.as_ref().is_none_or(|fp| {
-        source_dirs
-            .iter()
-            .any(|d| d.starts_with(fp) || fp.starts_with(d))
-    });
+    // A directory filter that points outside every PSR-4 source directory
+    // (e.g. into vendor/) is walked directly instead of being skipped.
+    // This matches PHPStan behaviour: the default scan covers only user
+    // code, but an explicit override scans whatever you point it at.
+    let (psr4_filters, external_filters): (Vec<&Path>, Vec<&Path>) =
+        filter_dirs.iter().map(PathBuf::as_path).partition(|fp| {
+            source_dirs
+                .iter()
+                .any(|d| d.starts_with(fp) || fp.starts_with(d))
+        });
 
-    let dirs_to_walk: Vec<&Path> = if filter_overlaps_psr4 {
-        source_dirs.iter().map(|p| p.as_path()).collect()
-    } else {
-        // The filter path doesn't overlap any PSR-4 dir — walk it
-        // directly (no vendor exclusion since the user explicitly
-        // asked for this path).
-        vec![abs_filter.as_deref().unwrap()]
-    };
-
-    let mut files: Vec<PathBuf> = Vec::new();
-
-    for dir in &dirs_to_walk {
-        // If a directory filter is active and doesn't overlap with
-        // this source dir, skip entirely.
-        if let Some(ref fp) = abs_filter
-            && fp.is_dir()
-            && !dir.starts_with(fp)
-            && !fp.starts_with(dir)
-        {
-            continue;
-        }
-
-        let skip_vendor = if filter_overlaps_psr4 {
-            vendor_dirs.clone()
-        } else {
-            // User explicitly targeted this path — don't skip vendor
-            // subdirectories within it.
-            Vec::new()
-        };
-        let walker = WalkBuilder::new(dir)
-            .git_ignore(true)
-            .git_global(true)
-            .git_exclude(true)
-            .hidden(true)
-            .parents(true)
-            .ignore(true)
-            .filter_entry(move |entry| {
-                if entry.file_type().is_some_and(|ft| ft.is_dir())
-                    && !skip_vendor.is_empty()
-                    && let Ok(canonical) = entry.path().canonicalize()
-                    && skip_vendor.iter().any(|v| canonical.starts_with(v))
-                {
-                    return false;
-                }
-                true
-            })
-            .build();
-
-        for entry in walker.flatten() {
-            let path = entry.into_path();
-            if !path.is_file() || path.extension().is_none_or(|ext| ext != "php") {
-                continue;
-            }
-
-            // Crop to the filter directory.
-            if let Some(ref fp) = abs_filter
-                && fp.is_dir()
-                && !path.starts_with(fp)
+    // Walk the project's own source tree when no filter was given, or when
+    // at least one filter lands inside it.
+    if filter_dirs.is_empty() || !psr4_filters.is_empty() {
+        for dir in &source_dirs {
+            // Skip source directories that no active filter overlaps.
+            if !psr4_filters.is_empty()
+                && !psr4_filters
+                    .iter()
+                    .any(|fp| dir.starts_with(fp) || fp.starts_with(dir))
             {
                 continue;
             }
 
-            files.push(path);
+            collect_php_files(dir, &vendor_dirs, &psr4_filters, &mut files);
         }
+    }
+
+    // The user explicitly targeted these paths, so no vendor exclusion and
+    // no cropping beyond the walked directory itself.
+    for dir in &external_filters {
+        collect_php_files(dir, &[], &[], &mut files);
     }
 
     files.sort();
     files.dedup();
     files
+}
+
+/// Walk `dir` for PHP files, skipping anything under `skip_vendor` and
+/// keeping only files under one of the `crop` paths (all of them when
+/// `crop` is empty).
+fn collect_php_files(dir: &Path, skip_vendor: &[PathBuf], crop: &[&Path], out: &mut Vec<PathBuf>) {
+    use ignore::WalkBuilder;
+
+    let skip_vendor = skip_vendor.to_vec();
+    let walker = WalkBuilder::new(dir)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .hidden(true)
+        .parents(true)
+        .ignore(true)
+        .filter_entry(move |entry| {
+            if entry.file_type().is_some_and(|ft| ft.is_dir())
+                && !skip_vendor.is_empty()
+                && let Ok(canonical) = entry.path().canonicalize()
+                && skip_vendor.iter().any(|v| canonical.starts_with(v))
+            {
+                return false;
+            }
+            true
+        })
+        .build();
+
+    for entry in walker.flatten() {
+        let path = entry.into_path();
+        if !path.is_file() || path.extension().is_none_or(|ext| ext != "php") {
+            continue;
+        }
+
+        if !crop.is_empty() && !crop.iter().any(|fp| path.starts_with(fp)) {
+            continue;
+        }
+
+        out.push(path);
+    }
 }
 
 /// Current process resident-set size in bytes, for the -vvv per-file
@@ -911,7 +911,7 @@ mod tests {
         let backend = Backend::new_headless();
         backend.add_vendor_dir(&root.join("vendor"));
 
-        let files = discover_user_files(&backend, root, None);
+        let files = discover_user_files(&backend, root, &[]);
         let names: Vec<String> = files
             .iter()
             .map(|p| p.strip_prefix(root).unwrap().to_string_lossy().into_owned())
@@ -952,7 +952,7 @@ mod tests {
             .lock()
             .push(linked_root.join("vendor"));
 
-        let files = discover_user_files(&backend, &real_root, None);
+        let files = discover_user_files(&backend, &real_root, &[]);
         assert!(files.contains(&real_root.join("app/Main.php")), "{files:?}");
         assert!(
             !files
@@ -973,7 +973,66 @@ mod tests {
         std::fs::write(root.join("other.php"), "<?php\n").unwrap();
 
         let backend = Backend::new_headless();
-        let files = discover_user_files(&backend, root, Some(Path::new("includes/target.php")));
+        let files = discover_user_files(&backend, root, &[PathBuf::from("includes/target.php")]);
         assert_eq!(files, vec![root.join("includes/target.php")]);
+    }
+
+    /// Several filters are unioned, mixing files and directories, and
+    /// everything they do not cover stays out.
+    #[test]
+    fn discover_user_files_unions_multiple_filters() {
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("app/Models")).unwrap();
+        std::fs::create_dir_all(root.join("lib")).unwrap();
+        std::fs::create_dir_all(root.join("tests")).unwrap();
+        std::fs::write(root.join("app/Models/User.php"), "<?php\n").unwrap();
+        std::fs::write(root.join("lib/Helper.php"), "<?php\n").unwrap();
+        std::fs::write(root.join("lib/Other.php"), "<?php\n").unwrap();
+        std::fs::write(root.join("tests/UserTest.php"), "<?php\n").unwrap();
+
+        let backend = Backend::new_headless();
+        let files = discover_user_files(
+            &backend,
+            root,
+            &[
+                PathBuf::from("app"),
+                PathBuf::from("lib/Helper.php"),
+                PathBuf::from("tests"),
+            ],
+        );
+
+        assert_eq!(
+            files,
+            vec![
+                root.join("app/Models/User.php"),
+                root.join("lib/Helper.php"),
+                root.join("tests/UserTest.php"),
+            ]
+        );
+    }
+
+    /// The same file named twice, and a file that also sits inside a
+    /// named directory, are each reported once.
+    #[test]
+    fn discover_user_files_dedupes_overlapping_filters() {
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/A.php"), "<?php\n").unwrap();
+        std::fs::write(root.join("src/B.php"), "<?php\n").unwrap();
+
+        let backend = Backend::new_headless();
+        let files = discover_user_files(
+            &backend,
+            root,
+            &[
+                PathBuf::from("src"),
+                PathBuf::from("src/A.php"),
+                PathBuf::from("src/A.php"),
+            ],
+        );
+
+        assert_eq!(files, vec![root.join("src/A.php"), root.join("src/B.php")]);
     }
 }

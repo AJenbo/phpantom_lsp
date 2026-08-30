@@ -265,7 +265,7 @@ pub async fn run(options: FixOptions) -> i32 {
         .await;
 
     // ── 3. Discover files ───────────────────────────────────────────
-    let files = crate::analyse::discover_user_files(&backend, root, options.path_filter.as_deref());
+    let files = crate::analyse::discover_user_files(&backend, root, options.path_filter.as_slice());
 
     if files.is_empty() {
         eprintln!("No PHP files found.");

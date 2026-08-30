@@ -60,9 +60,9 @@ enum Command {
     /// Use this to find and fix the spots where the LSP can't resolve a symbol,
     /// so you can achieve and maintain full completion coverage across the project.
     Analyze {
-        /// Path to analyze (file or directory). Defaults to the entire project.
+        /// Paths to analyze (files or directories). Defaults to the entire project.
         #[arg(value_name = "PATH")]
-        path: Option<std::path::PathBuf>,
+        paths: Vec<std::path::PathBuf>,
 
         /// Minimum severity level to report.
         #[arg(long, default_value = "all")]
@@ -297,7 +297,7 @@ async fn async_main() {
             }
         }
         Some(Command::Analyze {
-            path,
+            paths,
             severity,
             no_colour,
             project_root,
@@ -320,7 +320,10 @@ async fn async_main() {
 
             let options = phpantom_lsp::analyse::AnalyseOptions {
                 workspace_root,
-                path_filter: resolve_path_filter(path, 2),
+                path_filters: paths
+                    .into_iter()
+                    .map(|p| resolve_path_filter(p, 2))
+                    .collect(),
                 severity_filter: severity.into(),
                 use_colour,
                 output_format,
@@ -356,7 +359,7 @@ async fn async_main() {
 
             let options = phpantom_lsp::fix::FixOptions {
                 workspace_root,
-                path_filter: resolve_path_filter(path, 1),
+                path_filter: path.map(|p| resolve_path_filter(p, 1)),
                 rules,
                 dry_run,
                 use_colour,
@@ -464,11 +467,7 @@ fn atty_stdout() -> bool {
 /// directory (not `--project-root`) and exit with `error_exit_code` if it
 /// does not exist, matching what shell tab-completion and every other
 /// analyzer CLI produce for a typed-out relative path.
-fn resolve_path_filter(
-    path: Option<std::path::PathBuf>,
-    error_exit_code: i32,
-) -> Option<std::path::PathBuf> {
-    let path = path?;
+fn resolve_path_filter(path: std::path::PathBuf, error_exit_code: i32) -> std::path::PathBuf {
     let abs = if path.is_absolute() {
         path
     } else {
@@ -484,5 +483,5 @@ fn resolve_path_filter(
         eprintln!("Error: path not found: {}", abs.display());
         std::process::exit(error_exit_code);
     }
-    Some(abs)
+    abs
 }

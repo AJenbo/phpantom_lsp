@@ -83,9 +83,10 @@ pub struct AnalyseOptions {
     /// PHP tree without a composer.json is analysed by walking the
     /// root.
     pub workspace_root: PathBuf,
-    /// Optional path filter: only analyse files under this path.
-    /// Can be a directory or a single file.
-    pub path_filter: Option<PathBuf>,
+    /// Optional path filters: only analyse files under these paths.
+    /// Each can be a directory or a single file; empty means the whole
+    /// project.
+    pub path_filters: Vec<PathBuf>,
     /// Minimum severity to report.
     pub severity_filter: SeverityFilter,
     /// Whether to output with ANSI colours.

@@ -119,6 +119,7 @@ That makes it useful in a few situations:
 phpantom_lsp analyze                             # scan entire project
 phpantom_lsp analyze src/                        # scan a subdirectory
 phpantom_lsp analyze src/Foo.php                 # scan a single file
+phpantom_lsp analyze app/ lib/Helper.php         # scan several paths at once
 phpantom_lsp analyze --severity warning          # errors and warnings only
 phpantom_lsp analyze --severity error            # errors only
 phpantom_lsp analyze --project-root /path/to/app # explicit project root
@@ -130,7 +131,7 @@ phpantom_lsp analyze --debug -vv                 # trace file-by-file progress
 
 | Flag                       | Description                                                      |
 | -------------------------- | ---------------------------------------------------------------- |
-| `[PATH]`                   | File or directory to analyze. Defaults to the entire project.    |
+| `[PATH]...`                | Files or directories to analyze. Repeatable; the results are the union of every path given. Defaults to the entire project. |
 | `--severity <LEVEL>`       | Minimum severity: `all` (default), `warning`, or `error`.        |
 | `--project-root <DIR>`     | Project root directory. Defaults to the current working directory.|
 | `--no-colour`              | Disable ANSI colour output.                                      |
@@ -144,7 +145,7 @@ phpantom_lsp analyze --debug -vv                 # trace file-by-file progress
 | ---- | ------------------------------ |
 | 0    | No diagnostics found            |
 | 1    | Diagnostics were found          |
-| 2    | `PATH` argument does not exist  |
+| 2    | A `PATH` argument does not exist |
 
 ### Example output
 
