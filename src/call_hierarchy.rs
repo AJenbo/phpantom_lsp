@@ -46,7 +46,10 @@ impl Backend {
         &self,
         item: &CallHierarchyItem,
     ) -> Option<Vec<CallHierarchyIncomingCall>> {
-        let target = self.php_callable_from_item(item)?;
+        let event_calls = self.symfony_event_incoming_calls(item);
+        let Some(target) = self.php_callable_from_item(item) else {
+            return event_calls;
+        };
         let content = self.get_file_content(target.item.uri.as_str())?;
         let references = self
             .find_references(
@@ -73,6 +76,7 @@ impl Backend {
             .into_values()
             .map(|(from, from_ranges)| CallHierarchyIncomingCall { from, from_ranges })
             .collect();
+        calls.extend(event_calls.unwrap_or_default());
         calls.sort_by_key(|left| php_item_key(&left.from));
         calls.dedup_by(|left, right| {
             left.from == right.from && left.from_ranges == right.from_ranges
@@ -84,9 +88,12 @@ impl Backend {
         &self,
         item: &CallHierarchyItem,
     ) -> Option<Vec<CallHierarchyOutgoingCall>> {
-        let callable = self.php_callable_from_item(item)?;
+        let event_calls = self.symfony_event_outgoing_calls(item);
+        let Some(callable) = self.php_callable_from_item(item) else {
+            return event_calls;
+        };
         let Some((body_start, body_end)) = callable.body else {
-            return Some(Vec::new());
+            return event_calls.or_else(|| Some(Vec::new()));
         };
         let uri = callable.item.uri.as_str();
         let content = self.get_file_content(uri)?;
@@ -125,6 +132,7 @@ impl Backend {
             .into_values()
             .map(|(to, from_ranges)| CallHierarchyOutgoingCall { to, from_ranges })
             .collect();
+        calls.extend(event_calls.unwrap_or_default());
         calls.sort_by_key(|left| php_item_key(&left.to));
         calls.dedup_by(|left, right| left.to == right.to && left.from_ranges == right.from_ranges);
         Some(calls)
@@ -145,6 +153,14 @@ impl Backend {
         let content = self.get_file_content(uri)?;
         let offset = position_to_offset(&content, location.range.start);
         self.php_callable_at(uri, &content, offset)
+    }
+
+    pub(crate) fn call_hierarchy_item_at_location(
+        &self,
+        location: &Location,
+    ) -> Option<CallHierarchyItem> {
+        self.php_callable_at_location(location)
+            .map(|callable| callable.item)
     }
 
     fn php_callable_at(&self, uri: &str, content: &str, offset: u32) -> Option<PhpCallable> {

@@ -3,7 +3,10 @@
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
-use tower_lsp::lsp_types::{CodeLens, Command, Location, Position, Range, Url};
+use tower_lsp::lsp_types::{
+    CallHierarchyIncomingCall, CallHierarchyItem, CallHierarchyOutgoingCall, CodeLens, Command,
+    Location, Position, Range, SymbolKind, Url,
+};
 
 use super::container::{EventSubscription, load_compiled_container};
 use crate::Backend;
@@ -89,6 +92,251 @@ struct PhpArgument<'a> {
 }
 
 impl Backend {
+    pub(crate) fn symfony_event_outgoing_calls(
+        &self,
+        item: &CallHierarchyItem,
+    ) -> Option<Vec<CallHierarchyOutgoingCall>> {
+        let data = item.data.as_ref()?;
+        match data.get("kind")?.as_str()? {
+            "php" => self.publisher_event_outgoing_calls(item),
+            "symfonyEvent" => self.event_subscriber_outgoing_calls(item),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn symfony_event_incoming_calls(
+        &self,
+        item: &CallHierarchyItem,
+    ) -> Option<Vec<CallHierarchyIncomingCall>> {
+        let data = item.data.as_ref()?;
+        match data.get("kind")?.as_str()? {
+            "php" => self.subscriber_event_incoming_calls(item),
+            "symfonyEvent" => self.event_publisher_incoming_calls(item),
+            _ => None,
+        }
+    }
+
+    fn publisher_event_outgoing_calls(
+        &self,
+        item: &CallHierarchyItem,
+    ) -> Option<Vec<CallHierarchyOutgoingCall>> {
+        let (owner, method) = php_item_owner_method(item)?;
+        let owner = self.canonical_metadata_class(owner);
+        let (sites, subscriptions) = self.symfony_event_snapshot();
+        let config = self.config().symfony.events;
+        let publishers: Vec<_> = sites
+            .iter()
+            .filter(|site| {
+                site.role == EventRole::Publisher
+                    && same_class(&site.owner_fqn, &owner)
+                    && site.method.eq_ignore_ascii_case(method)
+            })
+            .collect();
+        if publishers.is_empty() {
+            return None;
+        }
+
+        let mut calls = Vec::new();
+        for publisher in publishers {
+            let mut modes: Vec<&str> = subscriptions
+                .iter()
+                .filter(|subscription| {
+                    event_names_match(&publisher.event, &subscription.event, &config)
+                })
+                .map(|subscription| event_mode(&subscription.event, &config))
+                .chain(
+                    sites
+                        .iter()
+                        .filter(|&site| {
+                            site.role == EventRole::Subscriber
+                                && event_names_match(&publisher.event, &site.event, &config)
+                        })
+                        .map(|site| event_mode(&site.event, &config)),
+                )
+                .collect();
+            if modes.is_empty() {
+                modes.push("sync");
+            }
+            modes.sort_unstable();
+            modes.dedup();
+            for mode in modes {
+                let event_item =
+                    self.synthetic_event_item(&publisher.event, mode, Some(publisher), item)?;
+                calls.push(CallHierarchyOutgoingCall {
+                    to: event_item,
+                    from_ranges: vec![item.selection_range],
+                });
+            }
+        }
+        Some(dedupe_outgoing_calls(calls))
+    }
+
+    fn subscriber_event_incoming_calls(
+        &self,
+        item: &CallHierarchyItem,
+    ) -> Option<Vec<CallHierarchyIncomingCall>> {
+        let (owner, method) = php_item_owner_method(item)?;
+        let owner = self.canonical_metadata_class(owner);
+        let (sites, subscriptions) = self.symfony_event_snapshot();
+        let mut events: Vec<(String, String, Option<&EventSite>)> = subscriptions
+            .iter()
+            .filter(|subscription| {
+                same_class(
+                    &self.canonical_metadata_class(&subscription.listener_fqn),
+                    &owner,
+                ) && subscription.method.eq_ignore_ascii_case(method)
+            })
+            .map(|subscription| {
+                (
+                    subscription.event.clone(),
+                    event_mode(&subscription.event, &self.config().symfony.events).to_string(),
+                    None,
+                )
+            })
+            .collect();
+        events.extend(
+            sites
+                .iter()
+                .filter(|&site| {
+                    site.role == EventRole::Subscriber
+                        && same_class(&site.owner_fqn, &owner)
+                        && site.method.eq_ignore_ascii_case(method)
+                })
+                .map(|site| {
+                    (
+                        site.event.clone(),
+                        event_mode(&site.event, &self.config().symfony.events).to_string(),
+                        Some(site),
+                    )
+                }),
+        );
+        if events.is_empty() {
+            return None;
+        }
+
+        let mut calls = Vec::new();
+        for (event, mode, site) in events {
+            let event_item = self.synthetic_event_item(&event, &mode, site, item)?;
+            calls.push(CallHierarchyIncomingCall {
+                from_ranges: vec![event_item.selection_range],
+                from: event_item,
+            });
+        }
+        Some(dedupe_incoming_calls(calls))
+    }
+
+    fn event_subscriber_outgoing_calls(
+        &self,
+        item: &CallHierarchyItem,
+    ) -> Option<Vec<CallHierarchyOutgoingCall>> {
+        let (event, mode) = synthetic_event_data(item)?;
+        let (sites, subscriptions) = self.symfony_event_snapshot();
+        let config = self.config().symfony.events;
+        let mut targets = Vec::new();
+        for subscription in subscriptions.iter().filter(|subscription| {
+            event_names_match(event, &subscription.event, &config)
+                && event_mode(&subscription.event, &config) == mode
+        }) {
+            if let Some(location) = self.symfony_class_member_declaration_location(
+                &self.canonical_metadata_class(&subscription.listener_fqn),
+                &subscription.method,
+            ) && let Some(target) = self.call_hierarchy_item_at_location(&location)
+            {
+                targets.push(target);
+            }
+        }
+        for site in sites.iter().filter(|site| {
+            site.role == EventRole::Subscriber
+                && event_names_match(event, &site.event, &config)
+                && event_mode(&site.event, &config) == mode
+        }) {
+            if let Some(location) = self.source_site_location(site)
+                && let Some(target) = self.call_hierarchy_item_at_location(&location)
+            {
+                targets.push(target);
+            }
+        }
+        if targets.is_empty() {
+            return Some(Vec::new());
+        }
+        targets.sort_by(item_order);
+        targets.dedup();
+        Some(
+            targets
+                .into_iter()
+                .map(|to| CallHierarchyOutgoingCall {
+                    to,
+                    from_ranges: vec![item.selection_range],
+                })
+                .collect(),
+        )
+    }
+
+    fn event_publisher_incoming_calls(
+        &self,
+        item: &CallHierarchyItem,
+    ) -> Option<Vec<CallHierarchyIncomingCall>> {
+        let (event, _) = synthetic_event_data(item)?;
+        let (sites, _) = self.symfony_event_snapshot();
+        let config = self.config().symfony.events;
+        let mut calls = Vec::new();
+        for site in sites.iter().filter(|site| {
+            site.role == EventRole::Publisher && event_names_match(event, &site.event, &config)
+        }) {
+            let Some(location) = self.source_site_location(site) else {
+                continue;
+            };
+            let Some(from) = self.call_hierarchy_item_at_location(&location) else {
+                continue;
+            };
+            calls.push(CallHierarchyIncomingCall {
+                from_ranges: vec![from.selection_range],
+                from,
+            });
+        }
+        Some(dedupe_incoming_calls(calls))
+    }
+
+    fn synthetic_event_item(
+        &self,
+        event: &str,
+        mode: &str,
+        site: Option<&EventSite>,
+        fallback: &CallHierarchyItem,
+    ) -> Option<CallHierarchyItem> {
+        let config = self.config().symfony.events;
+        let canonical = canonical_event_name(event, &config).to_string();
+        let (uri, range) = if let Some(site) = site {
+            let content = self.get_file_content(&site.uri)?;
+            let range = site.event_start.zip(site.event_end).map_or_else(
+                || fallback.selection_range,
+                |(start, end)| {
+                    Range::new(
+                        offset_to_position(&content, start as usize),
+                        offset_to_position(&content, end as usize),
+                    )
+                },
+            );
+            (Url::parse(&site.uri).ok()?, range)
+        } else {
+            (fallback.uri.clone(), fallback.selection_range)
+        };
+        Some(CallHierarchyItem {
+            name: canonical.clone(),
+            kind: SymbolKind::EVENT,
+            tags: None,
+            detail: Some(format!("Symfony event · {mode}")),
+            uri,
+            range,
+            selection_range: range,
+            data: Some(serde_json::json!({
+                "kind": "symfonyEvent",
+                "event": canonical,
+                "mode": mode,
+            })),
+        })
+    }
+
     /// Rebuild Symfony metadata from the newest compiled container.
     pub(crate) fn rebuild_symfony_metadata(&self, workspace_root: &Path) -> usize {
         let config = self.config().symfony;
@@ -315,7 +563,7 @@ impl Backend {
                             })
                         })
                         .filter_map(|subscription| {
-                            self.class_member_declaration_location(
+                            self.symfony_class_member_declaration_location(
                                 &self.canonical_metadata_class(&subscription.listener_fqn),
                                 &subscription.method,
                             )
@@ -391,7 +639,7 @@ impl Backend {
                                 event_names_match(&event, &subscription.event, &config)
                             })
                             .filter_map(|subscription| {
-                                self.class_member_declaration_location(
+                                self.symfony_class_member_declaration_location(
                                     &self.canonical_metadata_class(&subscription.listener_fqn),
                                     &subscription.method,
                                 )
@@ -455,7 +703,7 @@ impl Backend {
                     .iter()
                     .filter(|subscription| event_names_match(&event, &subscription.event, &config))
                     .filter_map(|subscription| {
-                        self.class_member_declaration_location(
+                        self.symfony_class_member_declaration_location(
                             &self.canonical_metadata_class(&subscription.listener_fqn),
                             &subscription.method,
                         )
@@ -538,6 +786,26 @@ impl Backend {
         Some(Location::new(uri, Range::new(position, position)))
     }
 
+    fn symfony_class_member_declaration_location(
+        &self,
+        class_fqn: &str,
+        method_name: &str,
+    ) -> Option<Location> {
+        let class = self.find_or_load_class(class_fqn)?;
+        let method = class
+            .methods
+            .iter()
+            .find(|method| method.name.eq_ignore_ascii_case(method_name))?;
+        let uri = self.resolve_class_uri(class_fqn)?;
+        let content = self.get_file_content(&uri)?;
+        let start = offset_to_position(&content, method.name_offset as usize);
+        let end = offset_to_position(&content, method.name_offset as usize + method.name.len());
+        Some(Location::new(
+            Url::parse(&uri).ok()?,
+            Range::new(start, end),
+        ))
+    }
+
     fn event_lens(
         &self,
         uri: &str,
@@ -595,6 +863,72 @@ impl Backend {
             data: None,
         })
     }
+}
+
+fn php_item_owner_method(item: &CallHierarchyItem) -> Option<(&str, &str)> {
+    let data = item.data.as_ref()?;
+    Some((data.get("owner")?.as_str()?, data.get("method")?.as_str()?))
+}
+
+fn synthetic_event_data(item: &CallHierarchyItem) -> Option<(&str, &str)> {
+    let data = item.data.as_ref()?;
+    Some((data.get("event")?.as_str()?, data.get("mode")?.as_str()?))
+}
+
+fn event_mode<'a>(event: &str, config: &'a SymfonyEventsConfig) -> &'a str {
+    for rule in &config.subscribers {
+        for (case, suffix) in &rule.transport_cases {
+            if !suffix.is_empty()
+                && event.ends_with(suffix)
+                && case.to_ascii_lowercase().contains("async")
+            {
+                return "async";
+            }
+        }
+    }
+    if config.ignored_suffixes.iter().any(|suffix| {
+        !suffix.is_empty()
+            && event.ends_with(suffix)
+            && suffix.to_ascii_lowercase().contains("async")
+    }) {
+        return "async";
+    }
+    "sync"
+}
+
+fn item_order(left: &CallHierarchyItem, right: &CallHierarchyItem) -> std::cmp::Ordering {
+    left.uri
+        .as_str()
+        .cmp(right.uri.as_str())
+        .then(
+            left.selection_range
+                .start
+                .line
+                .cmp(&right.selection_range.start.line),
+        )
+        .then(
+            left.selection_range
+                .start
+                .character
+                .cmp(&right.selection_range.start.character),
+        )
+        .then(left.name.cmp(&right.name))
+}
+
+fn dedupe_outgoing_calls(
+    mut calls: Vec<CallHierarchyOutgoingCall>,
+) -> Vec<CallHierarchyOutgoingCall> {
+    calls.sort_by(|left, right| item_order(&left.to, &right.to));
+    calls.dedup_by(|left, right| left.to == right.to);
+    calls
+}
+
+fn dedupe_incoming_calls(
+    mut calls: Vec<CallHierarchyIncomingCall>,
+) -> Vec<CallHierarchyIncomingCall> {
+    calls.sort_by(|left, right| item_order(&left.from, &right.from));
+    calls.dedup_by(|left, right| left.from == right.from);
+    calls
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1257,5 +1591,118 @@ mod tests {
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].event, "course.failed");
         assert_eq!(sites[0].event_start, Some(7));
+    }
+
+    #[test]
+    fn proxy_publishers_flow_through_synthetic_event_nodes() {
+        let backend = Backend::new_test();
+        *backend.workspace.config.lock() = toml::from_str(
+            r#"
+[symfony.events]
+ignored-suffixes = [".async"]
+
+[[symfony.events.publishers]]
+attribute = 'Acme\Event\Publish'
+name-argument = "name"
+name-position = 0
+default-dispatch = ["post"]
+name-template = "{dispatch}.{class_snake}"
+explicit-name-template = "{name}"
+
+[[symfony.events.subscribers]]
+attribute = 'Acme\Event\Listen'
+name-argument = "name"
+name-position = 0
+transport-argument = "transport"
+transport-position = 1
+transport-cases = { ASYNC = ".async" }
+"#,
+        )
+        .unwrap();
+        backend.replace_proxy_relations(
+            "test",
+            vec![crate::proxy_metadata::ProxyRelation {
+                proxy_fqn: "Generated\\JobProxy".to_string(),
+                target_fqn: "App\\Job".to_string(),
+            }],
+        );
+
+        let publisher_uri = "file:///generated_proxy.php";
+        let publisher = r#"<?php
+namespace Generated;
+use Acme\Event\Publish;
+class JobProxy extends \App\Job implements \Acme\TransparentProxy {
+    #[Publish(name: 'job.done')]
+    public function execute(): void {}
+}
+"#;
+        let subscriber_uri = "file:///listener.php";
+        let subscriber = r#"<?php
+namespace App;
+use Acme\Event\Listen;
+class JobListener {
+    #[Listen(name: 'job.done', transport: Transport::ASYNC)]
+    public function onDone(): void {}
+}
+"#;
+        for (uri, content) in [(publisher_uri, publisher), (subscriber_uri, subscriber)] {
+            backend
+                .open_files
+                .write()
+                .insert(uri.to_string(), std::sync::Arc::new(content.to_string()));
+            backend.update_ast(uri, content);
+        }
+
+        let publisher_offset =
+            backend.symbols.uri_classes_index.read()[publisher_uri][0].methods[0].name_offset;
+        let publisher_item = backend
+            .prepare_call_hierarchy_impl(
+                publisher_uri,
+                publisher,
+                offset_to_position(publisher, publisher_offset as usize),
+            )
+            .unwrap()
+            .remove(0);
+        let event_call = backend
+            .outgoing_calls_impl(&publisher_item)
+            .unwrap()
+            .into_iter()
+            .find(|call| call.to.kind == SymbolKind::EVENT)
+            .expect("publisher should dispatch a synthetic event");
+        assert_eq!(event_call.to.name, "job.done");
+        assert_eq!(
+            event_call.to.detail.as_deref(),
+            Some("Symfony event · async")
+        );
+        assert_eq!(event_call.to.data.as_ref().unwrap()["mode"], "async");
+
+        let subscribers = backend.outgoing_calls_impl(&event_call.to).unwrap();
+        assert_eq!(subscribers.len(), 1);
+        assert_eq!(subscribers[0].to.name, "onDone");
+
+        let publishers = backend.incoming_calls_impl(&event_call.to).unwrap();
+        assert_eq!(publishers.len(), 1);
+        assert_eq!(publishers[0].from.name, "execute");
+        assert_eq!(
+            publishers[0].from.detail.as_deref(),
+            Some("Generated\\JobProxy")
+        );
+
+        let subscriber_offset =
+            backend.symbols.uri_classes_index.read()[subscriber_uri][0].methods[0].name_offset;
+        let subscriber_item = backend
+            .prepare_call_hierarchy_impl(
+                subscriber_uri,
+                subscriber,
+                offset_to_position(subscriber, subscriber_offset as usize),
+            )
+            .unwrap()
+            .remove(0);
+        let incoming = backend.incoming_calls_impl(&subscriber_item).unwrap();
+        assert!(
+            incoming
+                .iter()
+                .any(|call| call.from.kind == SymbolKind::EVENT)
+        );
     }
 }
