@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Implementation CodeLens.** Interfaces, classes, and methods show clickable implementation counts once the workspace index is ready. Each lens opens every exact implementation location, including members inherited from a parent or supplied by a trait. Contributed by @sidux.
 - **`analyze` takes more than one path.** `phpantom_lsp analyze app/ lib/Helper.php tests/` scans the union of everything named, mixing directories and single files freely, so a pre-commit hook or a CI step can hand it exactly the paths that changed instead of running the whole project or invoking the binary once per path. Overlapping arguments are reported once, and a path that does not exist still stops the run with exit code 2. Naming no path scans the entire project, as before.
 
 ### Changed

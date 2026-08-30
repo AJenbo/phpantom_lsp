@@ -6,6 +6,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::atom::Atom;
+use crate::definition::MemberImplementationTarget;
 use crate::definition::member::MemberKind;
 use crate::text_position::offset_to_position;
 use crate::types::{ClassInfo, ClassLikeKind, MAX_INHERITANCE_DEPTH};
@@ -19,6 +20,17 @@ fn line_indent(content: &str, byte_offset: usize) -> u32 {
         .chars()
         .take_while(|c| *c == ' ' || *c == '\t')
         .count() as u32
+}
+
+fn implementation_lens_title(count: usize) -> String {
+    format!(
+        "{count} {}",
+        if count == 1 {
+            "implementation"
+        } else {
+            "implementations"
+        }
+    )
 }
 
 /// Information about a prototype (ancestor) method that a local method
@@ -45,9 +57,36 @@ impl Backend {
         };
 
         let mut lenses = Vec::new();
+        let context = self.file_context(uri);
+        let class_loader = self.class_loader(&context);
 
         for class in &classes {
             let class_fqn = class.fqn();
+            let implementation_descendants = if self
+                .workspace_indexed
+                .load(std::sync::atomic::Ordering::Acquire)
+            {
+                self.implementation_descendants(class, &class_loader, true)
+            } else {
+                Vec::new()
+            };
+
+            if !implementation_descendants.is_empty() {
+                let locations = self.class_implementation_locations_from_descendants(
+                    uri,
+                    content,
+                    class,
+                    &implementation_descendants,
+                );
+                if let Some(lens) = self.build_locations_lens(
+                    uri,
+                    offset_to_position(content, class.keyword_offset as usize),
+                    implementation_lens_title(locations.len()),
+                    locations,
+                ) {
+                    lenses.push(lens);
+                }
+            }
 
             if let Some(lens) = self.build_covers_lens(class, uri, content) {
                 lenses.push(lens);
@@ -75,6 +114,27 @@ impl Backend {
                 };
 
                 let proto = self.find_prototype(class, &class_fqn, &method.name, uri, content);
+                if !implementation_descendants.is_empty() {
+                    let locations = self.member_implementation_locations_from_descendants(
+                        uri,
+                        content,
+                        MemberImplementationTarget {
+                            class,
+                            name: &method.name,
+                            kind: MemberKind::Method,
+                        },
+                        &implementation_descendants,
+                        &class_loader,
+                    );
+                    if let Some(lens) = self.build_locations_lens(
+                        uri,
+                        pos,
+                        implementation_lens_title(locations.len()),
+                        locations,
+                    ) {
+                        lenses.push(lens);
+                    }
+                }
                 if let Some(proto) = proto {
                     let icon = if proto.is_interface { "◆" } else { "↑" };
                     let title = format!("{} {}::{}", icon, proto.ancestor_name, method.name);
@@ -100,6 +160,35 @@ impl Backend {
         } else {
             Some(lenses)
         }
+    }
+
+    fn build_locations_lens(
+        &self,
+        origin_uri: &str,
+        source_position: Position,
+        title: String,
+        locations: Vec<Location>,
+    ) -> Option<CodeLens> {
+        if locations.is_empty() {
+            return None;
+        }
+        let origin_uri = Url::parse(origin_uri).ok()?;
+        Some(CodeLens {
+            range: Range::new(
+                Position::new(source_position.line, 0),
+                Position::new(source_position.line, 0),
+            ),
+            command: Some(Command {
+                title,
+                command: "editor.action.showReferences".to_string(),
+                arguments: Some(vec![
+                    serde_json::json!(origin_uri),
+                    serde_json::json!(source_position),
+                    serde_json::json!(locations),
+                ]),
+            }),
+            data: None,
+        })
     }
 
     /// Build the "which tests cover this class" lens for a class

@@ -59,6 +59,12 @@ pub(crate) mod member;
 mod resolve;
 mod type_definition;
 
+pub(crate) struct MemberImplementationTarget<'a> {
+    pub(crate) class: &'a crate::types::ClassInfo,
+    pub(crate) name: &'a str,
+    pub(crate) kind: member::MemberKind,
+}
+
 /// Build an LSP `Location` with a zero-width range (start == end).
 ///
 /// Almost every "go to definition" result points to a single position

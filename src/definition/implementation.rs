@@ -36,7 +36,7 @@ use std::sync::atomic::Ordering;
 use tower_lsp::lsp_types::*;
 
 use super::member::MemberKind;
-use super::point_location;
+use super::{MemberImplementationTarget, point_location};
 use crate::Backend;
 use crate::class_lookup::find_class_at_offset;
 use crate::config::IndexingStrategy;
@@ -147,61 +147,65 @@ impl Backend {
             .or_else(|| class_loader(name))
             .map(Arc::unwrap_or_clone)?;
 
-        // Final classes cannot be extended, so there are no implementations.
-        if target.is_final {
-            return None;
+        let locations =
+            self.class_implementation_locations(uri, content, &target, &class_loader, false);
+        (!locations.is_empty()).then_some(locations)
+    }
+
+    /// Return navigable declarations for the descendants of `target`.
+    ///
+    /// This is shared by go-to-implementation and code lenses
+    /// so their counts and targets stay identical.
+    pub(crate) fn class_implementation_locations(
+        &self,
+        uri: &str,
+        content: &str,
+        target: &ClassInfo,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        project_only: bool,
+    ) -> Vec<Location> {
+        let descendants = self.implementation_descendants(target, class_loader, project_only);
+        self.class_implementation_locations_from_descendants(uri, content, target, &descendants)
+    }
+
+    /// Resolve the descendant classes once for callers that need class and
+    /// member implementation data for the same declaration.
+    pub(crate) fn implementation_descendants(
+        &self,
+        target: &ClassInfo,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        project_only: bool,
+    ) -> Vec<ClassInfo> {
+        if target.is_final || matches!(target.kind, ClassLikeKind::Trait | ClassLikeKind::Enum) {
+            return Vec::new();
         }
 
-        // Whether the target is a concrete (non-abstract, non-interface)
-        // class.  When it is, we include abstract subclasses in the
-        // results because the user is exploring the class hierarchy
-        // rather than looking for instantiable implementations.
-        let target_is_concrete = target.kind != ClassLikeKind::Interface && !target.is_abstract;
-
-        let target_short = target.name;
-        // Compute target FQN from the class's own namespace (most
-        // reliable), then fall back to fqn_uri_index, then to the FQN we
-        // resolved from the use-map, and finally to the short name.
-        let target_fqn = {
-            let from_class = crate::util::build_fqn(&target.name, target.file_namespace.as_deref());
-            if from_class.contains('\\') {
-                from_class
-            } else {
-                self.class_fqn_for_short(&target_short).unwrap_or_else(|| {
-                    if fqn.contains('\\') {
-                        fqn.clone()
-                    } else {
-                        target_short.to_string()
-                    }
-                })
-            }
-        };
-
-        let implementors = self.find_implementors(
-            &target_short,
+        let target_fqn = target.fqn();
+        self.find_implementors(
+            &target.name,
             &target_fqn,
-            &class_loader,
-            target_is_concrete,
+            class_loader,
+            true,
             false,
-            false,
-        );
+            project_only,
+        )
+    }
 
-        if implementors.is_empty() {
-            return None;
-        }
-
-        let mut locations = Vec::new();
-        for imp in &implementors {
-            if let Some(loc) = self.locate_class_declaration(imp, uri, content) {
-                locations.push(loc);
-            }
-        }
-
-        if locations.is_empty() {
-            None
-        } else {
-            Some(locations)
-        }
+    pub(crate) fn class_implementation_locations_from_descendants(
+        &self,
+        uri: &str,
+        content: &str,
+        target: &ClassInfo,
+        descendants: &[ClassInfo],
+    ) -> Vec<Location> {
+        let include_abstract = target.kind == ClassLikeKind::Class && !target.is_abstract;
+        let mut locations = descendants
+            .iter()
+            .filter(|descendant| include_abstract || !descendant.is_abstract)
+            .filter_map(|implementor| self.locate_class_declaration(implementor, uri, content))
+            .collect::<Vec<_>>();
+        sort_and_dedup_locations(&mut locations);
+        locations
     }
 
     /// Reverse jump: from a method definition in a concrete class to the
@@ -395,14 +399,6 @@ impl Backend {
         member_name: &str,
         class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     ) -> Option<Vec<Location>> {
-        let target_short = &interface_class.name;
-        let target_fqn = self.implementor_target_fqn(interface_class);
-
-        // Abstract classes are included: a class being abstract says
-        // nothing about whether the queried method has a body in it.
-        let implementors =
-            self.find_implementors(target_short, &target_fqn, class_loader, true, false, false);
-
         let member_kind = if interface_class
             .methods
             .iter()
@@ -419,96 +415,91 @@ impl Backend {
             MemberKind::Constant
         };
 
-        let mut locations = Vec::new();
-        for imp in &implementors {
-            if let Some(loc) = self.locate_member_implementation(
-                imp,
-                member_name,
-                member_kind,
-                class_loader,
-                uri,
-                content,
-            ) && !locations.contains(&loc)
-            {
-                locations.push(loc);
-            }
-        }
-
-        if locations.is_empty() {
-            None
-        } else {
-            Some(locations)
-        }
+        let locations = self.member_implementation_locations(
+            uri,
+            content,
+            MemberImplementationTarget {
+                class: interface_class,
+                name: member_name,
+                kind: member_kind,
+            },
+            class_loader,
+            false,
+        );
+        (!locations.is_empty()).then_some(locations)
     }
 
-    /// The location of the implementation of `member_name` that `imp`
-    /// provides, or `None` when it provides none.
+    /// Return the descendant declarations that implement or override a
+    /// member declared on `target`.
     ///
-    /// The definition to jump to is the one `imp` declares itself or, when
-    /// `imp` only inherits the member, the one declared by the nearest
-    /// ancestor that has a body — a concrete class that inherits a method
-    /// unchanged still implements it, it just implements it elsewhere.  A
-    /// method that is only ever re-declared `abstract` is another
-    /// declaration rather than an implementation, so it is skipped.
-    fn locate_member_implementation(
+    /// Each target is the concrete declaration that supplies the member,
+    /// including a trait or parent declaration inherited by a descendant.
+    /// Shared inherited declarations are deduplicated, and abstract
+    /// re-declarations are not implementations.
+    pub(crate) fn member_implementation_locations(
         &self,
-        imp: &ClassInfo,
-        member_name: &str,
-        member_kind: MemberKind,
+        uri: &str,
+        content: &str,
+        target: MemberImplementationTarget<'_>,
         class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-        current_uri: &str,
-        current_content: &str,
-    ) -> Option<Location> {
-        let declares = |cls: &ClassInfo| match member_kind {
-            MemberKind::Method => cls
-                .get_method_ci(member_name)
-                .is_some_and(|m| !m.is_abstract && !m.is_virtual),
-            MemberKind::Property => cls.properties.iter().any(|p| p.name == member_name),
-            MemberKind::Constant => cls.constants.iter().any(|c| c.name == member_name),
-        };
-
-        let locate = |cls: &ClassInfo| -> Option<Location> {
-            let cls_fqn = crate::util::build_fqn(&cls.name, cls.file_namespace.as_deref());
-            let (class_uri, class_content) =
-                self.find_class_file_content(&cls_fqn, current_uri, current_content)?;
-            let member_pos =
-                Self::find_member_position_in_class(&class_content, member_name, member_kind, cls)?;
-            Some(point_location(Url::parse(&class_uri).ok()?, member_pos))
-        };
-
-        if declares(imp) {
-            return locate(imp);
-        }
-
-        let mut current = imp.parent_class;
-        let mut depth = 0u32;
-        while let Some(parent_name) = current {
-            if depth >= MAX_INHERITANCE_DEPTH {
-                break;
-            }
-            depth += 1;
-            let Some(parent_cls) = class_loader(&parent_name) else {
-                break;
-            };
-            if declares(&parent_cls) {
-                return locate(&parent_cls);
-            }
-            current = parent_cls.parent_class;
-        }
-
-        None
+        project_only: bool,
+    ) -> Vec<Location> {
+        let descendants = self.implementation_descendants(target.class, class_loader, project_only);
+        self.member_implementation_locations_from_descendants(
+            uri,
+            content,
+            target,
+            &descendants,
+            class_loader,
+        )
     }
 
-    /// The FQN to search implementors of `cls` by: the namespace the class
-    /// declares itself when it has one, falling back to whatever the class
-    /// index knows about its short name.
-    fn implementor_target_fqn(&self, cls: &ClassInfo) -> String {
-        let from_class = crate::util::build_fqn(&cls.name, cls.file_namespace.as_deref());
-        if from_class.contains('\\') {
-            return from_class;
+    pub(crate) fn member_implementation_locations_from_descendants(
+        &self,
+        uri: &str,
+        content: &str,
+        target: MemberImplementationTarget<'_>,
+        descendants: &[ClassInfo],
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    ) -> Vec<Location> {
+        let mut locations = Vec::new();
+        let target_fqn = target.class.fqn();
+        for implementor in descendants {
+            let direct = owns_concrete_member(implementor, target.name, target.kind);
+            let inherited;
+            let (declaring_class, declaring_fqn) = if direct {
+                (implementor, implementor.fqn().to_string())
+            } else {
+                let Some((declaring, declaring_fqn)) =
+                    Self::find_declaring_class(implementor, target.name, class_loader)
+                else {
+                    continue;
+                };
+                if declaring.fqn() == target_fqn
+                    || !owns_concrete_member(&declaring, target.name, target.kind)
+                {
+                    continue;
+                }
+                inherited = declaring;
+                (&inherited, declaring_fqn)
+            };
+
+            if let Some((class_uri, class_content)) =
+                self.find_class_file_content(&declaring_fqn, uri, content)
+                && let Some(member_pos) = Self::find_member_position_in_class(
+                    &class_content,
+                    target.name,
+                    target.kind,
+                    declaring_class,
+                )
+                && let Ok(parsed_uri) = Url::parse(&class_uri)
+            {
+                locations.push(point_location(parsed_uri, member_pos));
+            }
         }
-        self.class_fqn_for_short(&cls.name)
-            .unwrap_or_else(|| cls.name.to_string())
+
+        sort_and_dedup_locations(&mut locations);
+        locations
     }
 
     /// Resolve implementations of a method call on an interface/abstract class.
@@ -583,33 +574,20 @@ impl Backend {
                 MemberKind::Property
             };
 
-            let target_short = &candidate.name;
-            let target_fqn = self.implementor_target_fqn(candidate);
-
-            let implementors = self.find_implementors(
-                target_short,
-                &target_fqn,
+            all_locations.extend(self.member_implementation_locations(
+                uri,
+                content,
+                MemberImplementationTarget {
+                    class: candidate,
+                    name: member_name,
+                    kind: member_kind,
+                },
                 &class_loader,
-                true,
                 false,
-                false,
-            );
-
-            for imp in &implementors {
-                if let Some(loc) = self.locate_member_implementation(
-                    imp,
-                    member_name,
-                    member_kind,
-                    &class_loader,
-                    uri,
-                    content,
-                ) && !all_locations.contains(&loc)
-                {
-                    all_locations.push(loc);
-                }
-            }
+            ));
         }
 
+        sort_and_dedup_locations(&mut all_locations);
         if all_locations.is_empty() {
             return None;
         }
@@ -1249,20 +1227,6 @@ impl Backend {
         })
     }
 
-    /// Get the FQN for a class given its short name, by looking it up in
-    /// the `fqn_uri_index`.
-    fn class_fqn_for_short(&self, target_short: &str) -> Option<String> {
-        let idx = self.symbols.fqn_uri_index.read();
-        // Look for an entry whose short name matches.
-        for fqn in idx.keys() {
-            let short = short_name(fqn);
-            if short.eq_ignore_ascii_case(target_short) {
-                return Some(fqn.to_owned());
-            }
-        }
-        None
-    }
-
     /// Find the location of a class declaration for an implementor.
     fn locate_class_declaration(
         &self,
@@ -1283,6 +1247,34 @@ impl Backend {
 
         Some(point_location(parsed_uri, position))
     }
+}
+
+fn owns_concrete_member(class: &ClassInfo, member_name: &str, member_kind: MemberKind) -> bool {
+    match member_kind {
+        MemberKind::Method => class
+            .methods
+            .iter()
+            .any(|method| method.name == member_name && !method.is_virtual && !method.is_abstract),
+        MemberKind::Property => class
+            .properties
+            .iter()
+            .any(|property| property.name == member_name && !property.is_virtual),
+        MemberKind::Constant => class
+            .constants
+            .iter()
+            .any(|constant| constant.name == member_name && !constant.is_virtual),
+    }
+}
+
+fn sort_and_dedup_locations(locations: &mut Vec<Location>) {
+    locations.sort_by(|left, right| {
+        left.uri
+            .as_str()
+            .cmp(right.uri.as_str())
+            .then(left.range.start.line.cmp(&right.range.start.line))
+            .then(left.range.start.character.cmp(&right.range.start.character))
+    });
+    locations.dedup();
 }
 
 #[cfg(test)]
