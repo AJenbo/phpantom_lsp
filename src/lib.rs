@@ -222,6 +222,7 @@ mod backend;
 pub mod benevolent_builtins;
 pub mod blade;
 pub(crate) mod call_args;
+mod call_hierarchy;
 pub mod ci_map;
 pub(crate) mod class_loader_memo;
 pub(crate) mod class_lookup;

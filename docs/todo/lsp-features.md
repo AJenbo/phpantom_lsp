@@ -91,53 +91,6 @@ developer arrive before vendor matches, even within a single phase.
 
 ---
 
-## F5. Call hierarchy
-
-**Impact: Medium · Complexity: Medium**
-
-Implement `callHierarchy/incomingCalls` and
-`callHierarchy/outgoingCalls` to answer "who calls this function?" and
-"what does this function call?"
-
-### Incoming calls (who calls this)
-
-Given a function or method, find all call sites across the project.
-This is conceptually similar to Find References but filtered to call
-expressions and structured as a tree (each caller is itself a callable
-with a location).
-
-The existing Find References infrastructure
-(`find_references_in_file`, cross-file scanning) provides the core
-search. The call hierarchy handler wraps the results into
-`CallHierarchyIncomingCall` items, grouping by containing function.
-
-### Outgoing calls (what does this call)
-
-Given a function or method, walk its AST body and collect all call
-expressions (function calls, method calls, static calls, `new`
-expressions). Resolve each callee to its declaration location.
-
-This is a single-file AST walk with cross-file resolution for each
-callee, similar to what go-to-definition already does.
-
-### Prepare
-
-`callHierarchy/prepare` returns a `CallHierarchyItem` for the symbol
-at the cursor. This is straightforward: resolve the symbol, return its
-name, kind, URI, range, and selection range.
-
-### Dependencies
-
-Call hierarchy benefits significantly from a full project index.
-Without an index, incoming calls can only be found via the existing
-classmap + PSR-4 scan approach (same as Find References). Now that
-full background indexing is available, the lookup can become a
-simple index query instead of relying on the scan-based approach that
-Find References uses on its own.
-
-**References:**
-- Phpactor: call hierarchy via its references index.
-
 ## F7. Evaluatable expression support (DAP integration)
 
 **Impact: Low-Medium · Complexity: Low**
