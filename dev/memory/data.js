@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788042786329,
+  "lastUpdate": 1788083575119,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -25941,6 +25941,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 71.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "82feb3dcf7473ec62c295dd20838acded769dd2b",
+          "message": "A value the type engine holds leniently stays lenient past an `if` and\ninside an array key",
+          "timestamp": "2026-08-30T11:39:52+02:00",
+          "tree_id": "c5d04555357603623bcca3df936b2abbfe99aa12",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/82feb3dcf7473ec62c295dd20838acded769dd2b"
+        },
+        "date": 1788083567853,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 73.3,
             "unit": "MiB"
           }
         ]
