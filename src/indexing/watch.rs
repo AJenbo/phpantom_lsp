@@ -23,10 +23,10 @@ const GLOBAL_CONFIG_POLL_INTERVAL: Duration = Duration::from_secs(2);
 impl Backend {
     /// Apply a `workspace/didChangeWatchedFiles` batch to the indexes.
     ///
-    /// Returns `true` if any PHP file, composer file, or the project's own
-    /// `.phpantom.toml` was acted on (so the caller can ask the editor to
-    /// re-pull diagnostics).  Runs entirely on a blocking thread; it parses
-    /// no files on the async runtime.
+    /// Returns `true` if any PHP/resource file, composer file, or the
+    /// project's own `.phpantom.toml` was acted on (so the caller can ask the
+    /// editor to refresh affected features). Runs entirely on a blocking
+    /// thread; it parses no files on the async runtime.
     ///
     /// Editors cannot watch the filesystem while the window is unfocused, so
     /// on refocus they resynchronise by reporting the *entire* workspace as
@@ -49,16 +49,20 @@ impl Backend {
     ) -> bool {
         let mut composer_changed = false;
         let mut config_changed = false;
+        let mut proxy_index_rebuild = false;
         let mut schema_full_rebuild = false;
         let mut migration_changes: Vec<(PathBuf, FileChangeType)> = Vec::new();
         let mut php_changes: Vec<(String, PathBuf, FileChangeType)> = Vec::new();
+        let mut resource_changes: Vec<(String, PathBuf, FileChangeType)> = Vec::new();
         let mut migration_discovery =
             crate::virtual_members::laravel::database_schema::MigrationDiscovery::default();
         let is_laravel = self.resolved_class_cache.read().is_laravel();
+        let proxy_rules = self.config().php.proxies;
         let config_path = root.join(crate::config::CONFIG_FILE_NAME);
         {
             let open = self.open_files.read();
             let parsed = self.parsed_uris.read();
+            let indexed = self.symbol_maps.read();
             let laravel_config = self.config().laravel;
             for change in &params.changes {
                 let path_str = change.uri.path();
@@ -103,18 +107,44 @@ impl Backend {
                     }
                     continue;
                 }
+                let uri_str = change.uri.to_string();
+                if crate::resource_navigation::is_resource_document(path_str) {
+                    if open.contains_key(&uri_str) {
+                        continue;
+                    }
+                    let Ok(file_path) = change.uri.to_file_path() else {
+                        continue;
+                    };
+                    if change.typ == FileChangeType::CHANGED {
+                        let canonical_uri = crate::util::path_to_uri(&file_path);
+                        if !indexed.contains_key(&uri_str)
+                            && !indexed.contains_key(canonical_uri.as_str())
+                        {
+                            continue;
+                        }
+                    }
+                    resource_changes.push((uri_str, file_path, change.typ));
+                    continue;
+                }
                 if !path_str.ends_with(".php") {
                     continue;
                 }
 
                 // Open files are already tracked via did_open/did_change.
-                let uri_str = change.uri.to_string();
                 if open.contains_key(&uri_str) {
                     continue;
                 }
                 let Ok(file_path) = change.uri.to_file_path() else {
                     continue;
                 };
+
+                // Generated proxies are opt-in metadata inputs, not ordinary
+                // project classes. Rebuild their small relation index rather
+                // than parsing them into the workspace symbol maps.
+                if crate::proxy_metadata::is_configured_proxy_path(root, &file_path, &proxy_rules) {
+                    proxy_index_rebuild = true;
+                    continue;
+                }
 
                 if change.typ == FileChangeType::CHANGED {
                     // `parsed_uris` records the editor URI for open files and
@@ -133,8 +163,10 @@ impl Backend {
         }
 
         if php_changes.is_empty()
+            && resource_changes.is_empty()
             && !composer_changed
             && !config_changed
+            && !proxy_index_rebuild
             && !schema_full_rebuild
             && migration_changes.is_empty()
         {
@@ -144,6 +176,7 @@ impl Backend {
         if config_changed {
             tracing::info!("PHPantom: .phpantom.toml changed, reloading configuration");
             self.reload_config(root);
+            proxy_index_rebuild = true;
             // Schema/migration settings live in the same file, and the
             // cheapest correct response to "something in here changed" is
             // the same full rebuild a config/database.php or schema file
@@ -175,6 +208,25 @@ impl Backend {
             self.rescan_composer_indexes(root);
         }
 
+        if proxy_index_rebuild {
+            let count = self.rebuild_configured_proxy_index(root);
+            tracing::info!("PHPantom: indexed {} transparent proxies", count);
+            self.refresh_indexed_resource_symbols();
+        }
+
+        if !resource_changes.is_empty() {
+            tracing::info!(
+                "PHPantom: {} watched YAML/XML file(s) changed on disk, refreshing references",
+                resource_changes.len()
+            );
+            for (uri, path, change_type) in &resource_changes {
+                if *change_type == FileChangeType::DELETED {
+                    self.clear_file_maps(uri);
+                } else if let Ok(content) = std::fs::read_to_string(path) {
+                    self.update_resource_symbol_index(uri, &content);
+                }
+            }
+        }
         if schema_full_rebuild {
             tracing::info!("PHPantom: Laravel schema files changed, reloading schema index");
             self.reload_laravel_schema_index(root);
@@ -260,6 +312,14 @@ impl Backend {
             last_modified = modified;
             tracing::info!("PHPantom: global config changed, reloading configuration");
             self.reload_config(&root);
+            let proxy_backend = self.clone_for_blocking();
+            let proxy_root = root.clone();
+            crate::server::run_blocking_cancel_safe("reload_php_proxies", move || {
+                let count = proxy_backend.rebuild_configured_proxy_index(&proxy_root);
+                proxy_backend.refresh_indexed_resource_symbols();
+                count
+            })
+            .await;
         }
     }
 }

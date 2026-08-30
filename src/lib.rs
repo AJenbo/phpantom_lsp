@@ -261,11 +261,13 @@ mod phpstan;
 pub(crate) mod phpstan_ignore;
 pub(crate) mod process;
 pub mod progress;
+mod proxy_metadata;
 mod reference_counts;
 mod reference_index;
 mod references;
 mod rename;
 mod resolution;
+mod resource_navigation;
 pub(crate) mod return_collection;
 pub(crate) mod scope_collector;
 mod selection_range;
@@ -567,6 +569,12 @@ pub struct Backend {
     /// candidate files, then run their existing semantic checks for aliases,
     /// inheritance, Laravel declarations, and `self/static/parent`.
     pub(crate) reference_index: reference_index::ReferenceIndex,
+    /// Transparent proxy-to-real-class relations for metadata consumers.
+    ///
+    /// Generated proxies remain valid PHP subclasses in the type engine,
+    /// while events, external references, and lenses can be attributed to the
+    /// class the proxy represents at runtime.
+    pub(crate) proxy_index: Arc<RwLock<proxy_metadata::ProxyIndex>>,
     /// Skip building [`reference_index`] from `update_ast`.
     ///
     /// Set by [`Backend::new_headless`] for the `analyze`/`fix` CLI
@@ -879,6 +887,12 @@ pub struct Backend {
     /// this, editors keep showing tokens computed from the pre-edit
     /// symbol map until the next unrelated request.
     pub(crate) supports_semantic_tokens_refresh: Arc<std::sync::atomic::AtomicBool>,
+    /// Whether the client supports `workspace/codeLens/refresh`.
+    ///
+    /// Exact member-reference locations are computed outside the CodeLens
+    /// request.  Supporting clients re-pull once that bounded cache is warm,
+    /// avoiding a burst of lazy resolve requests for every declaration.
+    pub(crate) supports_code_lens_refresh: Arc<std::sync::atomic::AtomicBool>,
     /// Whether the client supports `workspace/inlayHint/refresh`.
     ///
     /// Set during `initialize` from the client's
@@ -887,7 +901,7 @@ pub struct Backend {
     /// without a refresh the editor keeps the hints it pulled before they
     /// were ready.
     pub(crate) supports_inlay_hint_refresh: Arc<std::sync::atomic::AtomicBool>,
-    /// Reference counts for member declarations, feeding the inlay hints.
+    /// Exact member references shared by declaration inlay hints and lenses.
     pub(crate) member_ref_counts: Arc<reference_counts::MemberRefCounts>,
     /// Set to `true` once `initialized` finishes indexing (PSR-4,
     /// classmap, stubs, vendor).  Background workers and the pull
@@ -922,12 +936,13 @@ pub struct Backend {
     /// symbol map recorded a candidate site ever get an entry.
     pub(crate) typed_receiver_view_spans_cache:
         Arc<RwLock<HashMap<String, crate::blade::typed_receiver::TypedReceiverSpans>>>,
-    /// Whether the workspace directory has been fully scanned for PHP files.
+    /// Whether the workspace directory has been fully scanned for PHP and
+    /// resource files.
     ///
-    /// Set to `true` after the first Phase 2 walk in `ensure_workspace_indexed`.
-    /// Subsequent calls still re-walk the directory to discover newly created
-    /// files, but the flag lets us log the difference between initial and
-    /// refresh scans.
+    /// Set to `true` after the initial `ensure_workspace_indexed` pass.
+    /// Per-symbol consumers reuse that index, watched-file notifications
+    /// update it incrementally, and an explicit reference search may refresh
+    /// it once to discover filesystem changes the editor did not report.
     pub(crate) workspace_indexed: Arc<std::sync::atomic::AtomicBool>,
     /// Serializes whole-workspace indexing so a foreground request does not
     /// duplicate the background full-index parse.
@@ -1075,6 +1090,7 @@ impl Backend {
             open_files: Arc::new(RwLock::new(HashMap::new())),
             symbol_maps: Arc::new(RwLock::new(HashMap::new())),
             reference_index: reference_index::new_reference_index(),
+            proxy_index: Arc::new(RwLock::new(proxy_metadata::ProxyIndex::default())),
             skip_reference_index: false,
             symbols: SymbolIndex::new(),
             workspace: WorkspaceEnv::new(),
@@ -1147,6 +1163,7 @@ impl Backend {
             ),
             supports_show_document: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_semantic_tokens_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            supports_code_lens_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_inlay_hint_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             member_ref_counts: reference_counts::new_member_ref_counts(),
             init_complete: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -1185,6 +1202,7 @@ impl Backend {
             open_files: Arc::new(RwLock::new(HashMap::new())),
             symbol_maps: Arc::new(RwLock::new(HashMap::new())),
             reference_index: reference_index::new_reference_index(),
+            proxy_index: Arc::new(RwLock::new(proxy_metadata::ProxyIndex::default())),
             skip_reference_index: false,
             symbols: SymbolIndex::new(),
             workspace: WorkspaceEnv::new_isolated(),
@@ -1254,6 +1272,7 @@ impl Backend {
             ),
             supports_show_document: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_semantic_tokens_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            supports_code_lens_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_inlay_hint_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             member_ref_counts: reference_counts::new_member_ref_counts(),
             init_complete: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -1838,6 +1857,7 @@ impl Backend {
             open_files: Arc::clone(&self.open_files),
             symbol_maps: Arc::clone(&self.symbol_maps),
             reference_index: Arc::clone(&self.reference_index),
+            proxy_index: Arc::clone(&self.proxy_index),
             skip_reference_index: self.skip_reference_index,
             symbols: self.symbols.clone(),
             parse_errors: Arc::clone(&self.parse_errors),
@@ -1893,6 +1913,7 @@ impl Backend {
             ),
             supports_show_document: Arc::clone(&self.supports_show_document),
             supports_semantic_tokens_refresh: Arc::clone(&self.supports_semantic_tokens_refresh),
+            supports_code_lens_refresh: Arc::clone(&self.supports_code_lens_refresh),
             supports_inlay_hint_refresh: Arc::clone(&self.supports_inlay_hint_refresh),
             member_ref_counts: Arc::clone(&self.member_ref_counts),
             init_complete: Arc::clone(&self.init_complete),
