@@ -11,8 +11,12 @@ use std::collections::HashMap;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::framework::{
+    FrameworkReferenceKind, SymfonySymbolKind, namespace_segment_range_at_offset,
+    short_segment_range,
+};
 use crate::symbol_map::SymbolKind;
-use crate::text_position::offset_to_position;
+use crate::text_position::{offset_to_position, position_to_byte_offset};
 use crate::util::build_fqn;
 
 use super::namespace::find_namespace_segment_at_offset;
@@ -82,7 +86,9 @@ impl Backend {
         content: &str,
         position: Position,
     ) -> Option<PrepareRenameResponse> {
-        let span = self.lookup_symbol_at_position(uri, content, position)?;
+        let Some(span) = self.lookup_symbol_at_position(uri, content, position) else {
+            return self.handle_framework_prepare_rename(uri, content, position);
+        };
 
         // The range below is built from this span's byte offsets, and the
         // editor shows it as the text about to be replaced.  A map that
@@ -142,7 +148,9 @@ impl Backend {
         position: Position,
         new_name: &str,
     ) -> Option<WorkspaceEdit> {
-        let span = self.lookup_symbol_at_position(uri, content, position)?;
+        let Some(span) = self.lookup_symbol_at_position(uri, content, position) else {
+            return self.handle_framework_rename(uri, content, position, new_name);
+        };
 
         // Every edit below is derived, directly or through find-references,
         // from this span.  If the map it came from predates the buffer the
@@ -319,6 +327,120 @@ impl Backend {
         })
     }
 
+    fn handle_framework_prepare_rename(
+        &self,
+        uri: &str,
+        content: &str,
+        position: Position,
+    ) -> Option<PrepareRenameResponse> {
+        let reference = self.framework_reference_at_position(uri, content, position)?;
+        let (start, end, placeholder) = match reference.kind {
+            FrameworkReferenceKind::Class { fqn } => {
+                let source = content.get(reference.start as usize..reference.end as usize)?;
+                let (start, end) = short_segment_range(source, reference.start);
+                (start, end, crate::util::short_name(&fqn).to_string())
+            }
+            FrameworkReferenceKind::Method { member_name, .. } => {
+                (reference.start, reference.end, member_name)
+            }
+            FrameworkReferenceKind::Namespace { prefix } => {
+                let source = content.get(reference.start as usize..reference.end as usize)?;
+                let cursor = position_to_byte_offset(content, position) as u32;
+                let (segment_idx, start, end) =
+                    namespace_segment_range_at_offset(source, reference.start, cursor)?;
+                let placeholder = prefix
+                    .split('\\')
+                    .nth(segment_idx)
+                    .unwrap_or(prefix.as_str())
+                    .to_string();
+                (start, end, placeholder)
+            }
+            FrameworkReferenceKind::SymfonySymbol {
+                kind: SymfonySymbolKind::Template,
+                ..
+            } => return None,
+            FrameworkReferenceKind::SymfonySymbol { name, .. } => {
+                (reference.start, reference.end, name)
+            }
+            FrameworkReferenceKind::RouteParameter { name, .. } => {
+                (reference.start, reference.end, name)
+            }
+            FrameworkReferenceKind::Path { .. } => return None,
+        };
+
+        Some(PrepareRenameResponse::RangeWithPlaceholder {
+            range: Range {
+                start: offset_to_position(content, start as usize),
+                end: offset_to_position(content, end as usize),
+            },
+            placeholder,
+        })
+    }
+
+    fn handle_framework_rename(
+        &self,
+        uri: &str,
+        content: &str,
+        position: Position,
+        new_name: &str,
+    ) -> Option<WorkspaceEdit> {
+        let reference = self.framework_reference_at_position(uri, content, position)?;
+        if self.is_vendor_framework_reference(uri, content, position) {
+            return None;
+        }
+
+        match reference.kind {
+            FrameworkReferenceKind::Class { fqn } => {
+                let locations =
+                    self.find_framework_references_for_rename(uri, content, position, true)?;
+                self.build_class_rename_edit(&fqn, new_name, &locations)
+            }
+            FrameworkReferenceKind::Method { .. } => {
+                let locations =
+                    self.find_framework_references_for_rename(uri, content, position, true)?;
+                build_simple_rename_edit(self, uri, content, &locations, new_name, false)
+            }
+            FrameworkReferenceKind::Namespace { prefix } => {
+                let source = content.get(reference.start as usize..reference.end as usize)?;
+                let cursor = position_to_byte_offset(content, position) as u32;
+                let (segment_idx, _start, _end) =
+                    namespace_segment_range_at_offset(source, reference.start, cursor)?;
+                self.build_namespace_rename_edit(&prefix, segment_idx, new_name)
+            }
+            FrameworkReferenceKind::SymfonySymbol {
+                kind: SymfonySymbolKind::Template,
+                ..
+            } => None,
+            FrameworkReferenceKind::SymfonySymbol { .. } => {
+                let locations =
+                    self.find_framework_references_for_rename(uri, content, position, true)?;
+                build_simple_rename_edit(self, uri, content, &locations, new_name, true)
+            }
+            FrameworkReferenceKind::RouteParameter { .. } => {
+                let locations =
+                    self.find_framework_references_for_rename(uri, content, position, true)?;
+                build_simple_rename_edit(self, uri, content, &locations, new_name, false)
+            }
+            FrameworkReferenceKind::Path { .. } => None,
+        }
+    }
+
+    fn is_vendor_framework_reference(&self, uri: &str, content: &str, position: Position) -> bool {
+        let vendor_prefixes = self.workspace.vendor_uri_prefixes.lock().clone();
+        if vendor_prefixes.is_empty() {
+            return false;
+        }
+
+        self.resolve_definition(uri, content, position)
+            .into_iter()
+            .any(|loc| {
+                let def_uri = loc.uri.to_string();
+                vendor_prefixes
+                    .iter()
+                    .any(|prefix| def_uri.starts_with(prefix.as_str()))
+            })
+    }
+
     /// Extract the renameable symbol name and its source range.
     ///
     /// Returns `None` for symbols that cannot be renamed.
@@ -424,5 +546,64 @@ impl Backend {
             SymbolKind::CompactVariable { .. } => false,
             _ => false,
         }
+    }
+}
+
+fn build_simple_rename_edit(
+    backend: &Backend,
+    current_uri: &str,
+    current_content: &str,
+    locations: &[Location],
+    new_name: &str,
+    preserve_php_escaping: bool,
+) -> Option<WorkspaceEdit> {
+    if locations.is_empty() {
+        return None;
+    }
+
+    let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
+    for location in locations {
+        let loc_uri_str = location.uri.to_string();
+        let loc_content = if loc_uri_str == current_uri {
+            Some(current_content.to_string())
+        } else {
+            backend.get_file_content(&loc_uri_str)
+        };
+        let Some(loc_content) = loc_content else {
+            continue;
+        };
+        let replacement = if preserve_php_escaping && loc_uri_str.ends_with(".php") {
+            let start =
+                crate::text_position::position_to_offset(&loc_content, location.range.start);
+            let end = crate::text_position::position_to_offset(&loc_content, location.range.end);
+            let source = loc_content
+                .get(start as usize..end as usize)
+                .unwrap_or_default();
+            if source.contains("\\\\") {
+                new_name.replace('\\', "\\\\")
+            } else {
+                new_name.to_string()
+            }
+        } else {
+            new_name.to_string()
+        };
+
+        changes
+            .entry(location.uri.clone())
+            .or_default()
+            .push(TextEdit {
+                range: location.range,
+                new_text: replacement,
+            });
+    }
+
+    if changes.is_empty() {
+        None
+    } else {
+        Some(WorkspaceEdit {
+            changes: Some(changes),
+            document_changes: None,
+            change_annotations: None,
+        })
     }
 }
