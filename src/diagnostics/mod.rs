@@ -238,6 +238,7 @@ mod stale;
 pub(crate) mod state;
 mod subject_cache;
 pub(crate) mod suppression;
+mod symfony;
 mod syntax_errors;
 mod type_errors;
 pub(crate) mod undefined_variables;
@@ -583,6 +584,7 @@ impl Backend {
                 self.collect_blade_section_diagnostics(uri_str, out)
             );
         }
+        self.collect_unknown_symfony_container_diagnostics(uri_str, content, out);
     }
 
     /// Emit a warning for each `$this->argument('x')` / `$this->option('x')`

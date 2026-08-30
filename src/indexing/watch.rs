@@ -23,10 +23,10 @@ const GLOBAL_CONFIG_POLL_INTERVAL: Duration = Duration::from_secs(2);
 impl Backend {
     /// Apply a `workspace/didChangeWatchedFiles` batch to the indexes.
     ///
-    /// Returns `true` if any PHP file, composer file, or the project's own
-    /// `.phpantom.toml` was acted on (so the caller can ask the editor to
-    /// re-pull diagnostics).  Runs entirely on a blocking thread; it parses
-    /// no files on the async runtime.
+    /// Returns `true` if any PHP/resource file, composer file, or the
+    /// project's own `.phpantom.toml` was acted on (so the caller can ask the
+    /// editor to refresh affected features). Runs entirely on a blocking
+    /// thread; it parses no files on the async runtime.
     ///
     /// Editors cannot watch the filesystem while the window is unfocused, so
     /// on refocus they resynchronise by reporting the *entire* workspace as
@@ -52,13 +52,16 @@ impl Backend {
         let mut schema_full_rebuild = false;
         let mut migration_changes: Vec<(PathBuf, FileChangeType)> = Vec::new();
         let mut php_changes: Vec<(String, PathBuf, FileChangeType)> = Vec::new();
+        let mut resource_changes: Vec<(String, PathBuf, FileChangeType)> = Vec::new();
         let mut migration_discovery =
             crate::virtual_members::laravel::database_schema::MigrationDiscovery::default();
         let is_laravel = self.resolved_class_cache.read().is_laravel();
         let config_path = root.join(crate::config::CONFIG_FILE_NAME);
+        let mut framework_changes: Vec<(String, PathBuf, FileChangeType)> = Vec::new();
         {
             let open = self.open_files.read();
             let parsed = self.parsed_uris.read();
+            let indexed = self.symbol_maps.read();
             let laravel_config = self.config().laravel;
             for change in &params.changes {
                 let path_str = change.uri.path();
@@ -103,12 +106,43 @@ impl Backend {
                     }
                     continue;
                 }
+                let uri_str = change.uri.to_string();
+                if crate::resource_navigation::is_resource_document(path_str) {
+                    if open.contains_key(&uri_str) {
+                        continue;
+                    }
+                    let Ok(file_path) = change.uri.to_file_path() else {
+                        continue;
+                    };
+                    if change.typ == FileChangeType::CHANGED {
+                        let canonical_uri = crate::util::path_to_uri(&file_path);
+                        if !indexed.contains_key(&uri_str)
+                            && !indexed.contains_key(canonical_uri.as_str())
+                        {
+                            continue;
+                        }
+                    }
+                    if crate::framework::is_framework_resource_uri(&uri_str) {
+                        framework_changes.push((uri_str.clone(), file_path.clone(), change.typ));
+                    }
+                    resource_changes.push((uri_str, file_path, change.typ));
+                    continue;
+                }
                 if !path_str.ends_with(".php") {
+                    if crate::framework::is_framework_resource_uri(change.uri.as_ref()) {
+                        let uri_str = change.uri.to_string();
+                        if open.contains_key(&uri_str) {
+                            continue;
+                        }
+                        let Ok(file_path) = change.uri.to_file_path() else {
+                            continue;
+                        };
+                        framework_changes.push((uri_str, file_path, change.typ));
+                    }
                     continue;
                 }
 
                 // Open files are already tracked via did_open/did_change.
-                let uri_str = change.uri.to_string();
                 if open.contains_key(&uri_str) {
                     continue;
                 }
@@ -116,6 +150,9 @@ impl Backend {
                     continue;
                 };
 
+                if crate::framework::is_framework_php_config_path(&file_path) {
+                    framework_changes.push((uri_str.clone(), file_path.clone(), change.typ));
+                }
                 if change.typ == FileChangeType::CHANGED {
                     // `parsed_uris` records the editor URI for open files and
                     // the canonical `file://` URI for lazily loaded ones;
@@ -126,6 +163,14 @@ impl Backend {
                     if !loaded {
                         continue;
                     }
+                    if !crate::framework::is_framework_php_config_path(&file_path) {
+                        framework_changes.push((uri_str.clone(), file_path.clone(), change.typ));
+                    }
+                } else if change.typ == FileChangeType::DELETED
+                    && self.framework_references.read().contains_key(&uri_str)
+                    && !crate::framework::is_framework_php_config_path(&file_path)
+                {
+                    framework_changes.push((uri_str.clone(), file_path.clone(), change.typ));
                 }
 
                 php_changes.push((uri_str, file_path, change.typ));
@@ -133,10 +178,12 @@ impl Backend {
         }
 
         if php_changes.is_empty()
+            && resource_changes.is_empty()
             && !composer_changed
             && !config_changed
             && !schema_full_rebuild
             && migration_changes.is_empty()
+            && framework_changes.is_empty()
         {
             return false;
         }
@@ -175,6 +222,19 @@ impl Backend {
             self.rescan_composer_indexes(root);
         }
 
+        if !resource_changes.is_empty() {
+            tracing::info!(
+                "PHPantom: {} watched YAML/XML file(s) changed on disk, refreshing references",
+                resource_changes.len()
+            );
+            for (uri, path, change_type) in &resource_changes {
+                if *change_type == FileChangeType::DELETED {
+                    self.clear_file_maps(uri);
+                } else if let Ok(content) = std::fs::read_to_string(path) {
+                    self.update_resource_symbol_index(uri, &content);
+                }
+            }
+        }
         if schema_full_rebuild {
             tracing::info!("PHPantom: Laravel schema files changed, reloading schema index");
             self.reload_laravel_schema_index(root);
@@ -184,6 +244,16 @@ impl Backend {
                 migration_changes.len()
             );
             self.update_laravel_migrations(&migration_changes);
+        }
+
+        if !framework_changes.is_empty() {
+            tracing::info!(
+                "PHPantom: {} Symfony/Doctrine resource file(s) changed on disk",
+                framework_changes.len()
+            );
+            for (uri, path, typ) in &framework_changes {
+                self.apply_framework_file_change(uri, path, *typ);
+            }
         }
 
         true

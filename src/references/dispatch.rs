@@ -27,6 +27,29 @@ impl Backend {
         position: Position,
         include_declaration: bool,
     ) -> Option<Vec<Location>> {
+        // Refresh once for the user command so files created without a
+        // watcher event remain discoverable. The per-symbol scanners below
+        // only wait for/reuse that completed index.
+        self.ensure_workspace_indexed_for_request();
+        self.find_references_inner(
+            uri,
+            content,
+            position,
+            include_declaration,
+            ReferenceSearchMode::References,
+        )
+    }
+
+    /// Resolve declaration annotations against the completed index without
+    /// turning every CodeLens item into another workspace refresh.
+    pub(crate) fn find_references_from_workspace_index(
+        &self,
+        uri: &str,
+        content: &str,
+        position: Position,
+        include_declaration: bool,
+    ) -> Option<Vec<Location>> {
+        self.ensure_workspace_index_ready_for_request();
         self.find_references_inner(
             uri,
             content,
@@ -45,6 +68,7 @@ impl Backend {
         position: Position,
         include_declaration: bool,
     ) -> Option<Vec<Location>> {
+        self.ensure_workspace_indexed_for_request();
         self.find_references_inner(
             uri,
             content,
@@ -116,11 +140,82 @@ impl Backend {
             return Some(locations);
         }
 
+        if let Some(locations) =
+            self.find_framework_references_at(uri, content, position, include_declaration, mode)
+            && !locations.is_empty()
+        {
+            tracing::info!("Find References: found Symfony/Doctrine resource references");
+            tracing::info!(
+                "Find References: total time (framework path): {:?}",
+                start_total.elapsed()
+            );
+            return Some(locations);
+        }
+
         tracing::info!(
             "Find References: no references found in {:?}",
             start_total.elapsed()
         );
         None
+    }
+
+    pub(crate) fn find_framework_references_for_rename(
+        &self,
+        uri: &str,
+        content: &str,
+        position: Position,
+        include_declaration: bool,
+    ) -> Option<Vec<Location>> {
+        self.find_framework_references_at(
+            uri,
+            content,
+            position,
+            include_declaration,
+            ReferenceSearchMode::Rename,
+        )
+    }
+
+    fn find_framework_references_at(
+        &self,
+        uri: &str,
+        content: &str,
+        position: Position,
+        include_declaration: bool,
+        mode: ReferenceSearchMode,
+    ) -> Option<Vec<Location>> {
+        let reference = self.framework_reference_at_position(uri, content, position)?;
+        let locations = match reference.kind {
+            FrameworkReferenceKind::Class { fqn } => {
+                self.find_class_references(&fqn, include_declaration)
+            }
+            FrameworkReferenceKind::Method {
+                class_fqn,
+                member_name,
+            } => {
+                let hierarchy = self
+                    .collect_member_receiver_scope(
+                        std::slice::from_ref(&class_fqn),
+                        &member_name,
+                        false,
+                        mode.include_declaring_interfaces(),
+                    )
+                    .unwrap_or_else(|| self.collect_hierarchy_for_fqns(&[class_fqn]));
+                self.find_member_references(
+                    &member_name,
+                    false,
+                    include_declaration,
+                    Some(&hierarchy),
+                    Some(&hierarchy),
+                )
+            }
+            FrameworkReferenceKind::SymfonySymbol { kind, name, .. } => {
+                self.framework_symfony_symbol_locations(kind, &name, include_declaration, true)
+            }
+            FrameworkReferenceKind::Namespace { .. } | FrameworkReferenceKind::Path { .. } => {
+                Vec::new()
+            }
+        };
+        Some(locations)
     }
 
     /// Dispatch a symbol-map hit to the appropriate reference finder.
