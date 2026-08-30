@@ -511,11 +511,24 @@ impl ResolvedType {
             return results;
         }
 
+        // Splitting a union apart to normalize it loses the benevolence
+        // marker sitting above it, and a `false` branch is exactly what
+        // brings a lenient union through here in the first place. A scope
+        // that merely rejoined must not make it enforceable again, so the
+        // marker is carried across — but only while every contributing
+        // type had it, since one the code did spell out makes the whole
+        // union worth enforcing.
+        let all_lenient = non_class_types.iter().all(PhpType::is_benevolent);
         let original = match non_class_types.len() {
             1 => non_class_types[0].clone(),
             _ => PhpType::union(non_class_types.clone()),
         };
-        let normalized = PhpType::join_runtime_value_types(non_class_types);
+        let mut normalized = PhpType::join_runtime_value_types(non_class_types);
+        if all_lenient {
+            normalized = PhpType::benevolent(normalized);
+        }
+        // Without the marker carried across, this comparison would see two
+        // types differing by nothing else and rebuild the entry anyway.
         if normalized == original {
             return results;
         }

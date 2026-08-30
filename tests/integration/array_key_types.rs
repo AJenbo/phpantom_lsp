@@ -491,6 +491,63 @@ function declaredElement(array $config): array
     );
 }
 
+/// The *key* position of a collected array keeps its leniency too, not just
+/// the value beside it. Writing an unknown key into an accumulator and
+/// reading it back out again is the same key it always was, so holding the
+/// read to both branches reports a call the write itself does not.
+#[test]
+fn a_benevolent_key_keeps_its_leniency_inside_a_container() {
+    let content = r#"<?php
+declare(strict_types=1);
+
+function takesInt(int $i): void {}
+
+function collected(array $bare): void
+{
+    $out = [];
+    foreach ($bare as $key => $value) {
+        takesInt($key);
+        $out[$key] = $value;
+    }
+    foreach ($out as $collectedKey => $collectedValue) {
+        takesInt($collectedKey);
+        echo $collectedValue;
+    }
+}
+
+/** @param array<string, int> $declared */
+function declaredKey(array $declared): void
+{
+    $out = [];
+    foreach ($declared as $key => $value) {
+        $out[$key] = $value;
+    }
+    foreach ($out as $collectedKey => $collectedValue) {
+        takesInt($collectedKey);
+        echo $collectedValue;
+    }
+}
+"#;
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///benevolent_container_key.php";
+    backend.update_ast(uri, content);
+    let mut diagnostics = Vec::new();
+    backend.collect_argument_type_diagnostics(uri, content, &mut diagnostics);
+    let messages: Vec<String> = diagnostics
+        .into_iter()
+        .map(|d| format!("{}: {}", d.range.start.line, d.message))
+        .collect();
+    assert!(
+        messages.iter().any(|m| m.starts_with("26:")),
+        "a key the docblock declared `string` is still enforced: {messages:?}"
+    );
+    assert_eq!(
+        messages.len(),
+        1,
+        "an unknown key must stay lenient through being collected: {messages:?}"
+    );
+}
+
 /// An array the walk watched being built inside a loop keeps its element
 /// type when a later iteration reads it back through a destructuring
 /// `foreach`. The first walk of the outer loop reaches the inner `foreach`

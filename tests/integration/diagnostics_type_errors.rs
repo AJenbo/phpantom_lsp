@@ -10367,6 +10367,70 @@ function test(): void {
     let messages = type_error_messages(&collect_with_full_stubs(php));
     assert!(messages.is_empty(), "got {messages:?}");
 }
+/// Rejoining after a branch says nothing about a value neither side
+/// touched, so the leniency has to survive the merge. It used to be
+/// dropped by the literal collapse the join runs every local through,
+/// which meant one unrelated `if` was enough to bring the `|false` back.
+#[test]
+fn a_benevolent_result_survives_a_branch_merge() {
+    let php = r#"<?php
+function takesString(string $path): void {}
+
+function afterIf(bool $flag): void {
+    $tmp = tempnam(sys_get_temp_dir(), 'x');
+    if ($flag) {
+        echo 'y';
+    }
+    takesString($tmp);
+}
+
+function afterIfElse(bool $flag): void {
+    $tmp = tempnam(sys_get_temp_dir(), 'x');
+    if ($flag) {
+        echo 'y';
+    } else {
+        echo 'z';
+    }
+    takesString($tmp);
+}
+
+function afterWhile(bool $flag): void {
+    $tmp = tempnam(sys_get_temp_dir(), 'x');
+    while ($flag) {
+        echo 'y';
+    }
+    takesString($tmp);
+}
+"#;
+    let messages = type_error_messages(&collect_with_full_stubs(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// The merge carries the marker only while every side had it: a union the
+/// code spelled out itself is still enforced on the other side of an `if`.
+#[test]
+fn a_spelled_out_failure_branch_survives_a_branch_merge_too() {
+    let php = r#"<?php
+function takesString(string $path): void {}
+
+/** @return string|false */
+function mightFail() { return false; }
+
+function test(bool $flag): void {
+    $value = mightFail();
+    if ($flag) {
+        echo 'y';
+    }
+    takesString($value);
+}
+"#;
+    let messages = type_error_messages(&collect_with_full_stubs(php));
+    assert!(
+        messages.iter().any(|m| m.contains("false")),
+        "expected the `false` branch to still be reported, got {messages:?}"
+    );
+}
+
 /// `DOMNode::appendChild()` is benevolent *and* templated
 /// (`@return TNode|false`), so the marker has to survive both the template
 /// substitution and the union simplification that follow it.

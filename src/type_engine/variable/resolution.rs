@@ -2162,26 +2162,26 @@ pub(super) fn merge_push_type(base: &PhpType, value_type: &PhpType) -> PhpType {
     PhpType::list(elem_type)
 }
 
-/// Join the member types collected for a container's element position,
-/// keeping the benevolence marker the collection dropped.
+/// Join the member types collected for one of a container's positions
+/// (element or key), keeping the benevolence marker the collection dropped.
 ///
 /// Splitting a union into its members loses the marker sitting above them,
-/// and an element type that was lenient on its own has to stay lenient once
-/// it is inside `list<…>` / `array<…, …>`: the element comparison is the
-/// same comparison a direct return makes, so a union nobody wrote down
-/// would otherwise be enforced against every declared element type the
-/// moment it is collected into a container. The marker only survives while
-/// every contributing source carried it — a member the code did spell out
-/// makes the whole element type worth enforcing again.
+/// and a type that was lenient on its own has to stay lenient once it is
+/// inside `list<…>` / `array<…, …>`: the position's comparison is the same
+/// comparison a direct return makes, so a union nobody wrote down would
+/// otherwise be enforced against every declared type the moment it is
+/// collected into a container. That applies just as much to the key an
+/// `Arg[]` hands out as to the value beside it. The marker only survives
+/// while every contributing source carried it — a member the code did
+/// spell out makes the whole position worth enforcing again.
 fn join_element_types(
     members: Vec<PhpType>,
-    value_type: &PhpType,
-    existing_elem: Option<&PhpType>,
+    incoming: &PhpType,
+    existing: Option<&PhpType>,
 ) -> PhpType {
     let joined = PhpType::join_runtime_value_types(members);
-    let existing_is_lenient =
-        existing_elem.is_none_or(|elem| elem.is_empty() || elem.is_benevolent());
-    if value_type.is_benevolent() && existing_is_lenient {
+    let existing_is_lenient = existing.is_none_or(|ty| ty.is_empty() || ty.is_benevolent());
+    if incoming.is_benevolent() && existing_is_lenient {
         return PhpType::benevolent(joined);
     }
     joined
@@ -2206,25 +2206,29 @@ pub(super) fn merge_keyed_type(
     key_type: &PhpType,
     value_type: &PhpType,
 ) -> PhpType {
-    let key_type = normalize_array_key_type(key_type)
+    // Normalizing rebuilds a key through `kind()`, which sees straight
+    // through the benevolence marker, so the leniency decision below reads
+    // the types as they arrived rather than as they normalize.
+    let existing_key = base.iterable_key_type();
+    let normalized_key = normalize_array_key_type(key_type)
         .unwrap_or_else(|| PhpType::union(vec![PhpType::int(), PhpType::string()]));
     let value_type = value_type.widen_scalar_literals();
 
     // Collect existing key types from the base.
     let mut key_types: Vec<PhpType> = Vec::new();
-    if let Some(existing_key) = base
-        .iterable_key_type()
-        .and_then(|key| normalize_array_key_type(&key))
-        && !existing_key.is_empty()
+    if let Some(normalized_existing) = existing_key
+        .as_ref()
+        .and_then(normalize_array_key_type)
+        .filter(|key| !key.is_empty())
     {
-        for member in existing_key.union_members() {
+        for member in normalized_existing.union_members() {
             if !key_types.iter().any(|e| e.equivalent(member)) {
                 key_types.push(member.clone());
             }
         }
     }
     // Add new key type members.
-    for member in key_type.union_members() {
+    for member in normalized_key.union_members() {
         if !member.is_empty() && !key_types.iter().any(|e| e.equivalent(member)) {
             key_types.push(member.clone());
         }
@@ -2257,7 +2261,7 @@ pub(super) fn merge_keyed_type(
         // No key type information — use a single-param generic.
         PhpType::generic_array_val(val_type)
     } else {
-        let k_type = PhpType::join_runtime_value_types(key_types);
+        let k_type = join_element_types(key_types, key_type, existing_key.as_ref());
         PhpType::generic_array(k_type, val_type)
     }
 }
