@@ -177,6 +177,16 @@ impl LanguageServer for Backend {
         self.supports_semantic_tokens_refresh
             .store(client_supports_semantic_tokens_refresh, Ordering::Release);
 
+        let client_supports_code_lens_refresh = params
+            .capabilities
+            .workspace
+            .as_ref()
+            .and_then(|ws| ws.code_lens.as_ref())
+            .and_then(|code_lens| code_lens.refresh_support)
+            .unwrap_or(false);
+        self.supports_code_lens_refresh
+            .store(client_supports_code_lens_refresh, Ordering::Release);
+
         // Reference counts on declarations are computed off the request
         // path, so the hints an editor holds are the ones from before the
         // counts landed unless it can be asked to re-pull them.
@@ -249,6 +259,7 @@ impl LanguageServer for Backend {
                 type_definition_provider: Some(TypeDefinitionProviderCapability::Simple(true)),
                 implementation_provider: Some(ImplementationProviderCapability::Simple(true)),
                 references_provider: Some(OneOf::Left(true)),
+                call_hierarchy_provider: Some(CallHierarchyServerCapability::Simple(true)),
                 document_highlight_provider: Some(OneOf::Left(true)),
                 code_action_provider: Some(CodeActionProviderCapability::Options(
                     CodeActionOptions {
@@ -274,7 +285,7 @@ impl LanguageServer for Backend {
                 workspace_symbol_provider: Some(OneOf::Left(true)),
                 folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
                 code_lens_provider: Some(CodeLensOptions {
-                    resolve_provider: Some(false),
+                    resolve_provider: Some(true),
                 }),
                 selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
@@ -407,6 +418,35 @@ impl LanguageServer for Backend {
                 }
             }
 
+            // Generated transparent proxies live in opt-in cache/build paths
+            // that normal project indexing may ignore. Read their declarations
+            // into the metadata relation index; they do not enter the type
+            // engine or the workspace class map.
+            let proxy_backend = self.clone_for_blocking();
+            let proxy_root = root.clone();
+            let proxy_count = run_blocking_cancel_safe("index_php_proxies", move || {
+                proxy_backend.rebuild_configured_proxy_index(&proxy_root)
+            })
+            .await
+            .unwrap_or(0);
+            if proxy_count > 0 {
+                tracing::info!("PHPantom: indexed {} transparent proxies", proxy_count);
+            }
+
+            // Symfony's generated container records the final event-listener
+            // wiring after compiler passes have run. Read it statically; the
+            // container PHP is never loaded or executed.
+            let symfony_backend = self.clone_for_blocking();
+            let symfony_root = root.clone();
+            let event_count = run_blocking_cancel_safe("index_symfony_metadata", move || {
+                symfony_backend.rebuild_symfony_metadata(&symfony_root)
+            })
+            .await
+            .unwrap_or(0);
+            if event_count > 0 {
+                tracing::info!("PHPantom: indexed {} Symfony event links", event_count);
+            }
+
             // Laravel-only startup work.  The project classification is
             // set by the init pass above from composer.json, so it has to
             // run after it: a Symfony workspace must never pay for the
@@ -469,6 +509,14 @@ impl LanguageServer for Backend {
                 if warmed > 0 {
                     tracing::info!("PHPantom: warmed {} Laravel completion classes", warmed);
                 }
+            }
+
+            let framework_count = self.index_framework_workspace();
+            if framework_count > 0 {
+                tracing::info!(
+                    "PHPantom: indexed {} Symfony/Doctrine resource file(s)",
+                    framework_count
+                );
             }
 
             if let Some(poller) = poller {
@@ -565,6 +613,14 @@ impl LanguageServer for Backend {
                 kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
             },
             FileSystemWatcher {
+                glob_pattern: GlobPattern::String("**/*.{yaml,yml,xml}".to_string()),
+                kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
+            },
+            FileSystemWatcher {
+                glob_pattern: GlobPattern::String("**/*.{yaml,yml,xml}.dist".to_string()),
+                kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
+            },
+            FileSystemWatcher {
                 glob_pattern: GlobPattern::String("**/composer.json".to_string()),
                 kind: Some(WatchKind::Change),
             },
@@ -589,6 +645,20 @@ impl LanguageServer for Backend {
                 },
             ]);
         }
+        watchers.extend([
+            FileSystemWatcher {
+                glob_pattern: GlobPattern::String("**/*.yaml".to_string()),
+                kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
+            },
+            FileSystemWatcher {
+                glob_pattern: GlobPattern::String("**/*.yml".to_string()),
+                kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
+            },
+            FileSystemWatcher {
+                glob_pattern: GlobPattern::String("**/*.xml".to_string()),
+                kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
+            },
+        ]);
 
         registrations.push(Registration {
             id: "workspace/didChangeWatchedFiles".to_string(),
@@ -730,6 +800,24 @@ impl LanguageServer for Backend {
             .write()
             .insert(uri.clone(), Arc::clone(&text));
 
+        // Resource documents are not PHP source. Build a lightweight symbol
+        // map so navigation, references, rename, and PHP declaration lenses
+        // all consume the same indexed occurrences.
+        let is_resource = crate::resource_navigation::is_resource_document(&uri);
+        let is_framework_resource = crate::framework::is_framework_resource_uri(&uri);
+        if is_resource || is_framework_resource {
+            if is_resource {
+                self.update_resource_symbol_index(&uri, &text);
+            }
+            if is_framework_resource {
+                self.index_framework_uri_content(&uri, &text);
+                self.schedule_diagnostics(uri.clone());
+            }
+            self.log(MessageType::INFO, format!("Opened resource file: {}", uri))
+                .await;
+            return;
+        }
+
         // Parse and update AST map, use map, and namespace map
         self.update_ast(&uri, &text);
 
@@ -809,6 +897,24 @@ impl LanguageServer for Backend {
             .write()
             .insert(uri.clone(), Arc::clone(&text));
 
+        let is_resource = crate::resource_navigation::is_resource_document(&uri);
+        let is_framework_resource = crate::framework::is_framework_resource_uri(&uri);
+        if is_resource || is_framework_resource {
+            if is_resource {
+                self.update_resource_symbol_index(&uri, &text);
+            }
+            if is_framework_resource {
+                self.index_framework_uri_content(&uri, &text);
+                self.schedule_diagnostics(uri.clone());
+            }
+            if self.supports_code_lens_refresh.load(Ordering::Acquire)
+                && let Some(ref client) = self.client
+            {
+                let _ = client.code_lens_refresh().await;
+            }
+            return;
+        }
+
         // Re-parse in a blocking background task so typing does not
         // monopolize the LSP service loop and delay completion requests.
         //
@@ -878,6 +984,12 @@ impl LanguageServer for Backend {
                     {
                         let _ = client.inlay_hint_refresh().await;
                     }
+                    if refresh_backend
+                        .supports_code_lens_refresh
+                        .load(Ordering::Acquire)
+                    {
+                        let _ = client.code_lens_refresh().await;
+                    }
                 }
             });
         }
@@ -908,6 +1020,30 @@ impl LanguageServer for Backend {
             self.blade_injected_vars.write().remove(&uri);
         }
 
+        let is_resource = crate::resource_navigation::is_resource_document(&uri);
+        let is_framework_resource = crate::framework::is_framework_resource_uri(&uri);
+        if is_resource || is_framework_resource {
+            if is_resource {
+                if let Some(content) = self.get_file_content(&uri) {
+                    self.update_resource_symbol_index(&uri, &content);
+                } else {
+                    self.clear_file_maps(&uri);
+                }
+            }
+            if is_framework_resource {
+                self.reindex_framework_uri_from_disk(&uri);
+            }
+            self.log(MessageType::INFO, format!("Closed resource file: {}", uri))
+                .await;
+            return;
+        }
+
+        if crate::framework::is_framework_php_config_uri(&uri)
+            || self.framework_references.read().contains_key(&uri)
+        {
+            self.reindex_framework_uri_from_disk(&uri);
+        }
+
         self.clear_file_maps(&uri);
 
         // Clear diagnostics so stale warnings don't linger after the file is closed
@@ -919,13 +1055,22 @@ impl LanguageServer for Backend {
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
         let uri = params.text_document.uri.to_string();
+        let is_resource = crate::resource_navigation::is_resource_document(&uri);
 
         if let Some(text) = params.text {
             let text = Arc::new(text);
             self.open_files
                 .write()
                 .insert(uri.clone(), Arc::clone(&text));
-            self.update_ast(&uri, &text);
+            if is_resource {
+                self.update_resource_symbol_index(&uri, &text);
+            } else {
+                self.update_ast(&uri, &text);
+            }
+        }
+
+        if is_resource {
+            return;
         }
 
         // A save is a reliable sync point: re-diagnose the saved file
@@ -979,6 +1124,11 @@ impl LanguageServer for Backend {
         // (or missing ones) are corrected.
         if did_work {
             self.request_diagnostic_refresh().await;
+            if self.supports_code_lens_refresh.load(Ordering::Acquire)
+                && let Some(ref client) = self.client
+            {
+                let _ = client.code_lens_refresh().await;
+            }
         }
     }
 
@@ -996,6 +1146,34 @@ impl LanguageServer for Backend {
         let backend = self.clone_for_blocking();
         let uri_clone = uri.clone();
         run_blocking_cancel_safe("goto_definition", move || {
+            // YAML and XML may name PHP classes under any schema. Resolve
+            // fully-qualified class and Class::member tokens before entering
+            // the PHP-only symbol-map path below.
+            if crate::resource_navigation::is_resource_document(&uri_clone) {
+                let location = backend.get_file_content(&uri_clone).and_then(|content| {
+                    crate::util::catch_panic_unwind_safe(
+                        "goto_definition",
+                        &uri_clone,
+                        Some(position),
+                        || backend.resolve_resource_definition(&content, position),
+                    )
+                    .flatten()
+                });
+                if let Some(location) = location {
+                    return Ok(Some(GotoDefinitionResponse::Scalar(location)));
+                }
+            }
+
+            if let Some(locations) = backend.get_file_content(&uri_clone).and_then(|content| {
+                backend.symfony_event_definitions_at(&uri_clone, &content, position)
+            }) {
+                return Ok(match locations.as_slice() {
+                    [] => None,
+                    [location] => Some(GotoDefinitionResponse::Scalar(location.clone())),
+                    _ => Some(GotoDefinitionResponse::Array(locations)),
+                });
+            }
+
             // A component tag is HTML, so it has no position in the virtual
             // PHP `handle_with_position` would swap in below; it is resolved
             // from the template's own source instead.
@@ -1240,6 +1418,16 @@ impl LanguageServer for Backend {
         });
         let uri_clone = uri.clone();
         let result = run_blocking_cancel_safe("references", move || {
+            if let Some(locations) = backend.get_file_content(&uri_clone).and_then(|content| {
+                backend.symfony_event_references_at(
+                    &uri_clone,
+                    &content,
+                    position,
+                    include_declaration,
+                )
+            }) {
+                return Ok(Some(locations));
+            }
             backend.handle_with_position("references", &uri_clone, position, |content, pos| {
                 backend
                     .find_references(&uri_clone, content, pos, include_declaration)
@@ -1471,12 +1659,25 @@ impl LanguageServer for Backend {
         let uri = params.text_document.uri.to_string();
         let backend = self.clone_for_blocking();
         let u = uri.clone();
-        self.coalesced_whole_file("code_lens", &uri, move || {
-            backend.handle_with_uri("code_lens", &u, |content| {
-                backend.handle_code_lens(&u, content)
+        let lenses = self
+            .coalesced_whole_file("code_lens", &uri, move || {
+                backend.handle_with_uri("code_lens", &u, |content| {
+                    backend.handle_code_lens(&u, content)
+                })
             })
+            .await;
+        self.schedule_member_ref_counts();
+        lenses
+    }
+
+    async fn code_lens_resolve(&self, params: CodeLens) -> Result<CodeLens> {
+        let fallback = params.clone();
+        let backend = self.clone_for_blocking();
+        Ok(run_blocking_cancel_safe("code_lens_resolve", move || {
+            backend.resolve_code_lens_item(params)
         })
         .await
+        .unwrap_or(fallback))
     }
 
     async fn execute_command(
@@ -1557,6 +1758,56 @@ impl LanguageServer for Backend {
 
     async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
         self.inlay_hint_request(params).await
+    }
+
+    async fn prepare_call_hierarchy(
+        &self,
+        params: CallHierarchyPrepareParams,
+    ) -> Result<Option<Vec<CallHierarchyItem>>> {
+        let uri = params
+            .text_document_position_params
+            .text_document
+            .uri
+            .to_string();
+        let position = params.text_document_position_params.position;
+        let backend = self.clone_for_blocking();
+        let request_uri = uri.clone();
+        run_blocking_cancel_safe("prepare_call_hierarchy", move || {
+            backend.handle_with_position(
+                "prepare_call_hierarchy",
+                &request_uri,
+                position,
+                |content, translated_position| {
+                    backend.prepare_call_hierarchy_impl(&request_uri, content, translated_position)
+                },
+            )
+        })
+        .await
+        .unwrap_or(Ok(None))
+    }
+
+    async fn incoming_calls(
+        &self,
+        params: CallHierarchyIncomingCallsParams,
+    ) -> Result<Option<Vec<CallHierarchyIncomingCall>>> {
+        let backend = self.clone_for_blocking();
+        Ok(run_blocking_cancel_safe("incoming_calls", move || {
+            backend.incoming_calls_impl(&params.item)
+        })
+        .await
+        .flatten())
+    }
+
+    async fn outgoing_calls(
+        &self,
+        params: CallHierarchyOutgoingCallsParams,
+    ) -> Result<Option<Vec<CallHierarchyOutgoingCall>>> {
+        let backend = self.clone_for_blocking();
+        Ok(run_blocking_cancel_safe("outgoing_calls", move || {
+            backend.outgoing_calls_impl(&params.item)
+        })
+        .await
+        .flatten())
     }
 
     async fn prepare_type_hierarchy(
@@ -1909,6 +2160,13 @@ impl Backend {
             {
                 let _ = client.inlay_hint_refresh().await;
             }
+            if progress_backend
+                .supports_code_lens_refresh
+                .load(Ordering::Acquire)
+                && let Some(ref client) = progress_backend.client
+            {
+                let _ = client.code_lens_refresh().await;
+            }
 
             // With the whole workspace parsed, eagerly resolve every
             // class so interactive requests hit a warm cache.  This
@@ -1975,7 +2233,9 @@ impl Backend {
         // map, so a file passes through here once; a file the parser panics
         // on publishes nothing and is retried, which is the same work its
         // next keystroke would do anyway.
-        if !self.symbol_maps.read().contains_key(uri) {
+        if !crate::resource_navigation::is_resource_document(uri)
+            && !self.symbol_maps.read().contains_key(uri)
+        {
             self.update_ast(uri, &content);
         }
 

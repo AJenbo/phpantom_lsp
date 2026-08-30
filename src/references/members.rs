@@ -13,11 +13,20 @@ use std::collections::HashMap;
 
 use tower_lsp::lsp_types::{Location, Range};
 
+use crate::atom::{Atom, AtomMap};
 use crate::class_lookup::find_class_at_offset;
 use crate::references::push_unique_location;
 use crate::symbol_map::SymbolKind;
 use crate::text_position::offset_to_position;
 use crate::types::ClassInfo;
+
+#[derive(Clone)]
+pub(crate) struct MemberDeclarationReferenceQuery {
+    pub(crate) uri: Arc<str>,
+    pub(crate) offset: u32,
+    pub(crate) member: Atom,
+    pub(crate) is_static: bool,
+}
 
 impl Backend {
     pub(super) fn find_laravel_macro_references(
@@ -168,31 +177,295 @@ impl Backend {
         push_unique_location(locations, &parsed_uri, start, end);
     }
 
-    /// Count the references to a member declaration, scoped to the class
+    /// Find the references to a member declaration, scoped to the class
     /// hierarchy that declares it.
     ///
     /// This is the same search Find References runs on the declaration, so
     /// the number matches what the user sees when they follow the hint.
-    pub(crate) fn member_declaration_reference_count(
+    pub(crate) fn member_declaration_references(
         &self,
         uri: &str,
         offset: u32,
         member_name: &str,
         is_static: bool,
-    ) -> usize {
-        let mode = ReferenceSearchMode::References;
-        let hierarchy =
-            self.resolve_member_declaration_hierarchy(uri, offset, member_name, is_static, mode);
-        let declaration_scope =
-            self.resolve_member_declaration_scope(uri, offset, member_name, is_static, mode);
-        self.find_member_references(
-            member_name,
+    ) -> Vec<Location> {
+        self.member_declaration_references_batch(&[MemberDeclarationReferenceQuery {
+            uri: Arc::from(uri),
+            offset,
+            member: crate::atom::atom(member_name),
             is_static,
-            false,
-            hierarchy.as_ref(),
-            declaration_scope.as_ref(),
-        )
-        .len()
+        }])
+        .pop()
+        .unwrap_or_default()
+    }
+
+    /// Find exact references for several member declarations in one semantic
+    /// pass over the union of their candidate files.
+    ///
+    /// A viewport commonly queues many declarations at once. Resolving each
+    /// declaration separately reopens the same files and repeats receiver
+    /// inference for every same-named method in unrelated class hierarchies.
+    /// This batch resolves each matching access once, then attributes it only
+    /// to queries whose hierarchy contains the receiver class.
+    pub(crate) fn member_declaration_references_batch(
+        &self,
+        queries: &[MemberDeclarationReferenceQuery],
+    ) -> Vec<Vec<Location>> {
+        struct PreparedQuery {
+            member: Atom,
+            is_static: bool,
+            hierarchy: Option<HashSet<String>>,
+        }
+
+        if queries.is_empty() {
+            return Vec::new();
+        }
+
+        let mode = ReferenceSearchMode::References;
+        let prepared: Vec<_> = queries
+            .iter()
+            .map(|query| PreparedQuery {
+                member: query.member,
+                is_static: query.is_static,
+                hierarchy: self.resolve_member_declaration_hierarchy(
+                    &query.uri,
+                    query.offset,
+                    &query.member,
+                    query.is_static,
+                    mode,
+                ),
+            })
+            .collect();
+
+        let mut by_member: AtomMap<Vec<usize>> = AtomMap::default();
+        let mut candidate_keys = HashSet::new();
+        for (query_index, query) in prepared.iter().enumerate() {
+            by_member.entry(query.member).or_default().push(query_index);
+            candidate_keys.extend(member_candidate_keys(
+                &query.member,
+                query.is_static,
+                query.hierarchy.as_ref(),
+            ));
+        }
+
+        let candidate_keys: Vec<_> = candidate_keys.into_iter().collect();
+        let snapshot = self.user_file_symbol_maps_for_reference_keys(&candidate_keys);
+        self.begin_request_scan_window(snapshot.len(), "Scanning for member references");
+
+        let scan_file = |file_uri: &str,
+                         symbol_map: &Arc<crate::symbol_map::SymbolMap>|
+         -> Vec<(usize, Location)> {
+            let mut span_indices = Vec::new();
+            for member in by_member.keys() {
+                span_indices.extend_from_slice(symbol_map.member_access_indices(member));
+            }
+            if span_indices.is_empty() {
+                return Vec::new();
+            }
+            span_indices.sort_unstable();
+            span_indices.dedup();
+
+            let Ok(parsed_uri) = Url::parse(file_uri) else {
+                return Vec::new();
+            };
+            let Some(content) = self.reference_file_content_arc(file_uri) else {
+                return Vec::new();
+            };
+            let needs_receiver = prepared.iter().any(|query| query.hierarchy.is_some());
+            let resolved_file = needs_receiver.then(|| {
+                self.resolved_member_file(file_uri, symbol_map)
+                    .unwrap_or_else(|| {
+                        let _parse_cache_guard = crate::parser::with_parse_cache(&content);
+                        let file_ctx = self.file_context(file_uri);
+                        let all_access_indices: Vec<_> = symbol_map
+                            .spans
+                            .iter()
+                            .enumerate()
+                            .filter_map(|(index, span)| {
+                                matches!(span.kind, SymbolKind::MemberAccess { .. })
+                                    .then_some(index)
+                            })
+                            .collect();
+
+                        // Build variable scopes once, then resolve every
+                        // member access while those snapshots are hot.
+                        // Later declaration names reuse this packed
+                        // per-file result without reopening the PHP file.
+                        let _scope_guard =
+                            crate::type_engine::variable::forward_walk::with_diagnostic_scope_cache(
+                            );
+                        let needs_variable_scopes = all_access_indices.iter().any(|&span_index| {
+                            let SymbolKind::MemberAccess { subject_text, .. } =
+                                &symbol_map.spans[span_index].kind
+                            else {
+                                return false;
+                            };
+                            let subject = subject_text.as_str(&content).trim_start();
+                            subject.starts_with('$') && !subject.starts_with("$this")
+                        });
+                        if needs_variable_scopes {
+                            let class_loader = self.class_loader(&file_ctx);
+                            let function_loader = self.function_loader(&file_ctx);
+                            let constant_loader = self.constant_loader(&file_ctx);
+                            let config_resolver = |key: &str| self.resolve_config_type(key);
+                            let trans_resolver = |key: &str| self.resolve_trans_type(key);
+                            let loaders = crate::type_engine::resolver::Loaders {
+                                function_loader: Some(&function_loader),
+                                constant_loader: Some(&constant_loader),
+                                config_resolver: Some(&config_resolver),
+                                trans_resolver: Some(&trans_resolver),
+                            };
+                            crate::type_engine::variable::forward_walk::build_diagnostic_scopes(
+                                &content,
+                                &file_ctx.classes,
+                                &class_loader,
+                                Some(self),
+                                loaders,
+                                Some(&self.resolved_class_cache),
+                            );
+                        }
+
+                        let _chain_guard =
+                            crate::type_engine::resolver::with_chain_resolution_cache();
+                        let _resolver_guard =
+                            crate::type_engine::call_resolution::activate_type_engine_caches();
+                        let resolved = all_access_indices
+                            .into_iter()
+                            .filter_map(|span_index| {
+                                let span = &symbol_map.spans[span_index];
+                                let SymbolKind::MemberAccess {
+                                    subject_text,
+                                    is_static,
+                                    ..
+                                } = &span.kind
+                                else {
+                                    return None;
+                                };
+                                let targets = self
+                                    .resolve_subject_to_fqns(
+                                        subject_text.as_str(&content),
+                                        *is_static,
+                                        &file_ctx,
+                                        span.start,
+                                        &content,
+                                    )
+                                    .into_iter()
+                                    .map(|target| crate::atom::atom(&target))
+                                    .collect();
+                                Some((span_index, targets))
+                            })
+                            .collect();
+                        self.cache_resolved_member_file(file_uri, Arc::clone(symbol_map), resolved)
+                    })
+            });
+
+            let mut matches = Vec::new();
+            for span_index in span_indices {
+                let span = &symbol_map.spans[span_index];
+                let SymbolKind::MemberAccess {
+                    member_name,
+                    is_static,
+                    ..
+                } = &span.kind
+                else {
+                    continue;
+                };
+                let Some(query_indices) = by_member.get(member_name) else {
+                    continue;
+                };
+
+                let subject_fqns = resolved_file
+                    .as_ref()
+                    .map_or(&[][..], |file| file.targets_for_span(span_index));
+                let range = Range::new(
+                    offset_to_position(&content, span.start as usize),
+                    offset_to_position(&content, span.end as usize),
+                );
+
+                for &query_index in query_indices {
+                    let query = &prepared[query_index];
+                    if let Some(hierarchy) = &query.hierarchy {
+                        if !subject_fqns
+                            .iter()
+                            .any(|fqn| hierarchy.contains(fqn.as_str()))
+                        {
+                            continue;
+                        }
+                    } else if query.is_static != *is_static {
+                        continue;
+                    }
+
+                    matches.push((
+                        query_index,
+                        Location {
+                            uri: parsed_uri.clone(),
+                            range,
+                        },
+                    ));
+                }
+            }
+            matches
+        };
+
+        let mut locations = vec![Vec::new(); queries.len()];
+        if snapshot.len() <= 2 {
+            for (file_uri, symbol_map) in &snapshot {
+                self.request_scan_file_done();
+                for (query_index, location) in scan_file(file_uri, symbol_map) {
+                    locations[query_index].push(location);
+                }
+            }
+        } else {
+            let next = std::sync::atomic::AtomicUsize::new(0);
+            let thread_count = std::thread::available_parallelism()
+                .map(std::num::NonZeroUsize::get)
+                .unwrap_or(4)
+                .min(snapshot.len());
+            let worker_results = std::thread::scope(|scope| {
+                let mut handles = Vec::with_capacity(thread_count);
+                for _ in 0..thread_count {
+                    let next = &next;
+                    let snapshot = &snapshot;
+                    let scan_file = &scan_file;
+                    handles.push(
+                        std::thread::Builder::new()
+                            .stack_size(crate::PARSE_WORKER_STACK_SIZE)
+                            .spawn_scoped(scope, move || {
+                                let mut matches = Vec::new();
+                                loop {
+                                    let index =
+                                        next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                    let Some((file_uri, symbol_map)) = snapshot.get(index) else {
+                                        break;
+                                    };
+                                    self.request_scan_file_done();
+                                    matches.extend(scan_file(file_uri, symbol_map));
+                                }
+                                matches
+                            })
+                            .expect("spawn member reference worker"),
+                    );
+                }
+                handles
+                    .into_iter()
+                    .flat_map(|handle| {
+                        handle.join().unwrap_or_else(|_| {
+                            tracing::error!("member reference worker panicked");
+                            Vec::new()
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            });
+            for (query_index, location) in worker_results {
+                locations[query_index].push(location);
+            }
+        }
+
+        for query_locations in &mut locations {
+            sort_locations_for_references(query_locations);
+        }
+
+        locations
     }
 
     /// Find all references to a member (method, property, or constant)
@@ -276,6 +549,11 @@ impl Backend {
 
             let mut file_content: Option<Arc<String>> = None;
 
+            // Receiver resolution may visit the parsed AST once per matching
+            // access. Keep one AST alive for this candidate file so common
+            // member names do not reparse the whole source for every access.
+            let parse_cache_guard = std::cell::OnceCell::new();
+
             // Lazily resolved file context — only computed when we need
             // to check a candidate's subject against the hierarchy.
             let file_ctx_cell: std::cell::OnceCell<crate::types::FileContext> =
@@ -308,6 +586,8 @@ impl Backend {
                             let Some(ref content) = file_content else {
                                 break;
                             };
+                            parse_cache_guard
+                                .get_or_init(|| crate::parser::with_parse_cache(content));
 
                             let ctx = file_ctx_cell.get_or_init(|| self.file_context(file_uri));
                             let subject_fqns = self.resolve_subject_to_fqns(
@@ -441,13 +721,10 @@ impl Backend {
             }
         }
 
-        locations.sort_by(|a, b| {
-            a.uri
-                .as_str()
-                .cmp(b.uri.as_str())
-                .then(a.range.start.line.cmp(&b.range.start.line))
-                .then(a.range.start.character.cmp(&b.range.start.character))
-        });
+        for loc in self.framework_member_reference_locations(target_member, hierarchy) {
+            push_unique_location(&mut locations, &loc.uri, loc.range.start, loc.range.end);
+        }
+        sort_locations_for_references(&mut locations);
 
         locations
     }
@@ -594,6 +871,17 @@ impl Backend {
             function_loader: &function_loader,
         };
 
+        let doctrine_repository_fqns = self.resolve_doctrine_repository_subject_to_fqns(
+            subject_text,
+            ctx,
+            access_offset,
+            content,
+            &class_loader,
+        );
+        if !doctrine_repository_fqns.is_empty() {
+            return doctrine_repository_fqns;
+        }
+
         match crate::type_engine::subject_resolution::resolve_subject_type(
             subject_text,
             is_static,
@@ -625,6 +913,130 @@ impl Backend {
                 &class_loader,
             ),
         }
+    }
+
+    fn resolve_doctrine_repository_subject_to_fqns(
+        &self,
+        subject_text: &str,
+        ctx: &crate::types::FileContext,
+        access_offset: u32,
+        content: &str,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    ) -> Vec<String> {
+        let expr = crate::type_engine::subject_expr::SubjectExpr::parse(subject_text);
+        let mut candidates = self.doctrine_repository_fqns_from_expr(
+            &expr,
+            &ctx.use_map,
+            &ctx.namespace,
+            &ctx.classes,
+            access_offset,
+            class_loader,
+        );
+
+        if candidates.is_empty()
+            && let crate::type_engine::subject_expr::SubjectExpr::Variable(var_name) = &expr
+            && let Some(assigned_expr) =
+                last_assignment_expression_before(content, access_offset, var_name)
+        {
+            let assigned = crate::type_engine::subject_expr::SubjectExpr::parse(assigned_expr);
+            candidates = self.doctrine_repository_fqns_from_expr(
+                &assigned,
+                &ctx.use_map,
+                &ctx.namespace,
+                &ctx.classes,
+                access_offset,
+                class_loader,
+            );
+        }
+
+        candidates
+    }
+
+    fn doctrine_repository_fqns_from_expr(
+        &self,
+        expr: &crate::type_engine::subject_expr::SubjectExpr,
+        use_map: &HashMap<String, String>,
+        namespace: &Option<String>,
+        local_classes: &[Arc<ClassInfo>],
+        access_offset: u32,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    ) -> Vec<String> {
+        let crate::type_engine::subject_expr::SubjectExpr::CallExpr { callee, args_text } = expr
+        else {
+            return Vec::new();
+        };
+        let crate::type_engine::subject_expr::SubjectExpr::MethodCall { method, .. } =
+            callee.as_ref()
+        else {
+            return Vec::new();
+        };
+        if !method.eq_ignore_ascii_case("getRepository") {
+            return Vec::new();
+        }
+
+        let Some(entity_fqn) = doctrine_repository_entity_arg(
+            args_text,
+            use_map,
+            namespace,
+            local_classes,
+            access_offset,
+        ) else {
+            return Vec::new();
+        };
+
+        self.doctrine_repository_fqns_for_entity(&entity_fqn, class_loader)
+    }
+
+    pub(crate) fn doctrine_repository_fqns_for_entity(
+        &self,
+        entity_fqn: &str,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    ) -> Vec<String> {
+        let entity = normalize_fqn(entity_fqn);
+        let entity_short = crate::util::short_name(&entity);
+        let repository_short = doctrine_repository_short_name(entity_short);
+        let mut candidate_fqns = self.framework_doctrine_repository_fqns_for_entity(&entity);
+        candidate_fqns.extend(doctrine_repository_convention_candidates(
+            &entity,
+            &repository_short,
+        ));
+
+        {
+            let class_index = self.symbols.fqn_class_index.read();
+            for (class_fqn, class_info) in class_index.iter() {
+                if crate::util::short_name(class_fqn).eq_ignore_ascii_case(&repository_short)
+                    && looks_like_doctrine_repository(class_info)
+                {
+                    candidate_fqns.push(normalize_fqn(class_fqn));
+                }
+            }
+        }
+
+        for fallback in [
+            "Doctrine\\Bundle\\DoctrineBundle\\Repository\\ServiceEntityRepository",
+            "Doctrine\\ORM\\EntityRepository",
+            "Doctrine\\Persistence\\ObjectRepository",
+            "ServiceEntityRepository",
+            "EntityRepository",
+            "ObjectRepository",
+        ] {
+            candidate_fqns.push(fallback.to_string());
+        }
+
+        let mut resolved = Vec::new();
+        for candidate in candidate_fqns {
+            let normalized = normalize_fqn(&candidate);
+            if resolved
+                .iter()
+                .any(|known: &String| known.eq_ignore_ascii_case(&normalized))
+            {
+                continue;
+            }
+            if let Some(class_info) = class_loader(&normalized) {
+                resolved.push(normalize_fqn(&class_info.fqn()));
+            }
+        }
+        resolved
     }
 
     fn resolve_static_laravel_builder_subject_to_fqns(
@@ -672,7 +1084,7 @@ impl Backend {
     /// - All ancestor FQNs (parent chain, interfaces, traits)
     /// - All descendant FQNs (classes that extend/implement any class in
     ///   the hierarchy)
-    fn collect_hierarchy_for_fqns(&self, seed_fqns: &[String]) -> HashSet<String> {
+    pub(super) fn collect_hierarchy_for_fqns(&self, seed_fqns: &[String]) -> HashSet<String> {
         let mut hierarchy = HashSet::new();
         let class_loader = |name: &str| -> Option<Arc<ClassInfo>> { self.find_or_load_class(name) };
 
@@ -773,7 +1185,7 @@ impl Backend {
         hierarchy
     }
 
-    fn collect_member_receiver_scope(
+    pub(super) fn collect_member_receiver_scope(
         &self,
         seed_fqns: &[String],
         member_name: &str,
@@ -1105,4 +1517,113 @@ impl Backend {
             }
         }
     }
+}
+
+fn doctrine_repository_entity_arg(
+    args_text: &str,
+    use_map: &HashMap<String, String>,
+    namespace: &Option<String>,
+    local_classes: &[Arc<ClassInfo>],
+    access_offset: u32,
+) -> Option<String> {
+    let first_arg = crate::type_engine::conditional_resolution::split_text_args(args_text)
+        .into_iter()
+        .next()?
+        .trim();
+    let class_expr = first_arg.strip_suffix("::class")?.trim();
+    let class_expr = class_expr.trim_start_matches('\\');
+    if class_expr.is_empty() {
+        return None;
+    }
+
+    match class_expr {
+        "self" | "static" => {
+            let current = find_class_at_offset(local_classes, access_offset)?;
+            Some(current.fqn().to_string())
+        }
+        "parent" => {
+            let current = find_class_at_offset(local_classes, access_offset)?;
+            current.parent_class.map(|parent| parent.to_string())
+        }
+        _ => Some(Backend::resolve_to_fqn(class_expr, use_map, namespace)),
+    }
+}
+
+fn doctrine_repository_short_name(entity_short: &str) -> String {
+    let stem = entity_short
+        .strip_suffix("Entity")
+        .or_else(|| entity_short.strip_suffix("Impl"))
+        .unwrap_or(entity_short);
+    format!("{stem}Repository")
+}
+
+pub(crate) fn doctrine_repository_matches_entity_convention(
+    entity_fqn: &str,
+    repository_fqn: &str,
+) -> bool {
+    let entity = normalize_fqn(entity_fqn);
+    let repository = normalize_fqn(repository_fqn);
+    let repository_short = doctrine_repository_short_name(crate::util::short_name(&entity));
+    crate::util::short_name(&repository).eq_ignore_ascii_case(&repository_short)
+        || doctrine_repository_convention_candidates(&entity, &repository_short)
+            .iter()
+            .any(|candidate| candidate.eq_ignore_ascii_case(&repository))
+}
+
+fn doctrine_repository_convention_candidates(
+    entity_fqn: &str,
+    repository_short: &str,
+) -> Vec<String> {
+    let mut candidates = Vec::new();
+    if let Some((entity_ns, _)) = entity_fqn.rsplit_once('\\') {
+        candidates.push(format!("{entity_ns}\\{repository_short}"));
+
+        for marker in ["\\Entity\\", "\\Entities\\", "\\Model\\", "\\Models\\"] {
+            if let Some((root, _tail)) = entity_fqn.rsplit_once(marker) {
+                candidates.push(format!("{root}\\Repository\\{repository_short}"));
+                candidates.push(format!("{root}\\Repositories\\{repository_short}"));
+            }
+        }
+
+        for suffix in ["\\Entity", "\\Entities", "\\Model", "\\Models"] {
+            if let Some(root) = entity_ns.strip_suffix(suffix) {
+                candidates.push(format!("{root}\\Repository\\{repository_short}"));
+                candidates.push(format!("{root}\\Repositories\\{repository_short}"));
+            }
+        }
+    } else {
+        candidates.push(repository_short.to_string());
+    }
+
+    candidates
+}
+
+pub(crate) fn looks_like_doctrine_repository(class_info: &ClassInfo) -> bool {
+    if class_info.name.to_string().ends_with("Repository") {
+        return true;
+    }
+    class_info.parent_class.as_ref().is_some_and(|parent| {
+        let short = crate::util::short_name(parent);
+        matches!(
+            short,
+            "ServiceEntityRepository" | "EntityRepository" | "ObjectRepository"
+        )
+    })
+}
+
+fn last_assignment_expression_before<'a>(
+    content: &'a str,
+    access_offset: u32,
+    var_name: &str,
+) -> Option<&'a str> {
+    let prefix = content.get(..access_offset as usize)?;
+    let pattern = format!("{var_name} =");
+    let assign_start = prefix.rfind(&pattern)?;
+    let after_equals = prefix[assign_start + pattern.len()..].trim_start();
+    let end = after_equals
+        .find(';')
+        .or_else(|| after_equals.find('\n'))
+        .unwrap_or(after_equals.len());
+    let expr = after_equals[..end].trim();
+    if expr.is_empty() { None } else { Some(expr) }
 }

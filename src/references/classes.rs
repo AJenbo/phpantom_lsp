@@ -45,6 +45,15 @@ impl Backend {
             let resolved_names = self.resolved_names.read().get(file_uri).cloned();
             let file_namespace = self.first_file_namespace(file_uri);
             let file_use_map = std::cell::OnceCell::new();
+            let class_matches = |resolved: &str| {
+                if crate::resource_navigation::is_resource_document(file_uri) {
+                    self.metadata_class_family(resolved)
+                        .iter()
+                        .any(|name| name.eq_ignore_ascii_case(target))
+                } else {
+                    class_names_match(strip_fqn_prefix(resolved), target, target_short)
+                }
+            };
 
             // First pass: resolved-name check to avoid unnecessary content work.
             // Aliased imports (`use Foo as Bar; new Bar`) must still reach the
@@ -68,7 +77,7 @@ impl Backend {
                             });
                             Self::resolve_to_fqn(name, use_map, &file_namespace)
                         };
-                        class_names_match(strip_fqn_prefix(&resolved), target, target_short)
+                        class_matches(&resolved)
                     }
                 }
                 SymbolKind::ClassDeclaration { name } => {
@@ -109,7 +118,7 @@ impl Backend {
                             });
                             Self::resolve_to_fqn(name, use_map, &file_namespace)
                         };
-                        class_names_match(strip_fqn_prefix(&resolved), target, target_short)
+                        class_matches(&resolved)
                     }
                     SymbolKind::ClassDeclaration { name } if include_declaration => {
                         if !name.eq_ignore_ascii_case(target_short) {
@@ -152,15 +161,10 @@ impl Backend {
             }
         }
 
-        locations.sort_by(|a, b| {
-            a.uri
-                .as_str()
-                .cmp(b.uri.as_str())
-                .then(a.range.start.line.cmp(&b.range.start.line))
-                .then(a.range.start.character.cmp(&b.range.start.character))
-        });
-
-        locations.dedup();
+        for loc in self.framework_class_reference_locations(target) {
+            push_unique_location(&mut locations, &loc.uri, loc.range.start, loc.range.end);
+        }
+        sort_locations_for_references(&mut locations);
         locations
     }
 

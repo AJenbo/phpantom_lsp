@@ -215,13 +215,15 @@ fn range_matches(content: &str, range: Range, expected: &Expected) -> bool {
 /// `\Ns\Foo`.
 fn is_name_token(text: &str) -> bool {
     let body = text.strip_prefix('$').unwrap_or(text);
-    let body = body.strip_prefix('\\').unwrap_or(body);
+    let body = body.trim_start_matches('\\');
     !body.is_empty()
-        && body.split('\\').all(|segment| {
-            !segment.is_empty()
-                && !segment.starts_with(|c: char| c.is_ascii_digit())
-                && segment.chars().all(is_name_char)
-        })
+        && body
+            .split('\\')
+            .filter(|segment| !segment.is_empty())
+            .all(|segment| {
+                !segment.starts_with(|c: char| c.is_ascii_digit())
+                    && segment.chars().all(is_name_char)
+            })
 }
 
 /// Whether `c` can appear inside a PHP identifier.  PHP allows every byte
