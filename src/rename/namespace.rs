@@ -168,20 +168,23 @@ impl Backend {
             }
         }
 
+        self.collect_framework_namespace_edits(old_prefix, new_prefix, &mut changes);
+        let psr4_rename_ops = self
+            .build_namespace_psr4_rename_ops(old_prefix, new_prefix)
+            .unwrap_or_default();
+        self.collect_framework_path_edits_for_directory_renames(&psr4_rename_ops, &mut changes);
+
         if changes.is_empty() {
             return None;
         }
 
         // PSR-4 directory rename: if a mapping exists, emit RenameFile
         // operations to move the directory.
-        if let Some(ops) = self.build_namespace_psr4_rename_ops(old_prefix, new_prefix)
-            && !ops.is_empty()
-            && self.supports_file_rename.load(Ordering::Acquire)
-        {
+        if !psr4_rename_ops.is_empty() && self.supports_file_rename.load(Ordering::Acquire) {
             let mut doc_ops: Vec<DocumentChangeOperation> = Vec::new();
 
             // Add directory/file rename operations first.
-            for (old_uri, new_uri) in &ops {
+            for (old_uri, new_uri) in &psr4_rename_ops {
                 doc_ops.push(DocumentChangeOperation::Op(ResourceOp::Rename(
                     RenameFile {
                         old_uri: old_uri.clone(),
@@ -195,7 +198,7 @@ impl Backend {
             // Convert text edits to document changes. Rewrite URIs
             // that fall inside a renamed directory.
             for (uri, edits) in changes {
-                let target_uri = ops
+                let target_uri = psr4_rename_ops
                     .iter()
                     .find_map(|(old_u, new_u)| {
                         let old_str = old_u.as_str();
