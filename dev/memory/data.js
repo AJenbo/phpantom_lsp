@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788203638825,
+  "lastUpdate": 1788214533064,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -26145,6 +26145,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 72.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "9ce5182c48620abc43e34db9da2cb4601a73585c",
+          "message": "fix: oving a class into another namespace adds the import its former namespace-siblings were relying on\n\nA file in the same namespace as a class reaches it by short name with\nno `use` statement at all, so the class-move rename had nothing to\nrewrite there: it updated the `use` line wherever one existed and\nwalked straight past the files where the shared namespace had been\ndoing that job. Those files were left spelling a name that no longer\nresolves, which nothing reports until the code runs.\n\nSuch a file now gains the import as part of the same edit, inserted\nthrough the existing use-block analysis so it lands in alphabetical\norder among the imports already there. Where the short name is\nalready taken by an unrelated import, the new one is aliased and the\nreferences are rewritten to the alias, which needed a use-statement\nbuilder that can emit an `as` clause; `build_use_edit` delegates to it\nso its existing callers are unchanged.\n\nThe import is only added when the file actually spells the class by\nits short name, so a file that writes the fully-qualified name keeps\ngetting its references rewritten in full and no import, and a file\nalready sitting in the namespace the class moved into is left alone.",
+          "timestamp": "2026-08-31T17:02:20-05:00",
+          "tree_id": "a1500ede36ee1ac6c71f5d802735f5ea5dc14500",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/9ce5182c48620abc43e34db9da2cb4601a73585c"
+        },
+        "date": 1788214525130,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 36.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 70.6,
             "unit": "MiB"
           }
         ]
