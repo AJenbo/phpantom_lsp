@@ -424,15 +424,45 @@ impl Backend {
                 && import_info.is_some()
                 && has_import_collision(&file_use_map, old_fqn_normalized, new_short_name);
 
+            let is_definition_file = def_uri_str.as_ref() == Some(file_uri_str);
+
+            let file_namespace = self.first_file_namespace(file_uri_str);
+
+            // A file with no import for the class reached it through its
+            // own namespace, so moving the class out of that namespace
+            // leaves every short-name reference dangling.  Such a file
+            // needs a `use` statement added.
+            let needs_new_import = namespace_changed
+                && import_info.is_none()
+                && !is_definition_file
+                && namespace_owns(file_namespace.as_deref(), old_fqn_normalized)
+                && !namespace_owns(file_namespace.as_deref(), &new_fqn_normalized);
+
+            // The short name may already be taken in this file by an
+            // unrelated import, in which case the added import has to be
+            // aliased and the references rewritten to that alias.
+            let new_import_alias = if needs_new_import
+                && has_import_collision(&file_use_map, old_fqn_normalized, new_short_name)
+            {
+                Some(pick_collision_alias(new_short_name, &file_use_map))
+            } else {
+                None
+            };
+
             let (skip_alias_refs, in_code_replacement) = match &import_info {
                 Some(info) if info.has_explicit_alias => (true, info.alias.clone()),
                 Some(_) if has_collision => {
                     let alias = pick_collision_alias(new_short_name, &file_use_map);
                     (false, alias)
                 }
-                _ if class_name_changed => (false, new_short_name.to_string()),
-                _ => (true, old_short_name.to_string()),
+                _ => match &new_import_alias {
+                    Some(alias) => (false, alias.clone()),
+                    None if class_name_changed => (false, new_short_name.to_string()),
+                    None => (true, old_short_name.to_string()),
+                },
             };
+
+            let rewrite_short_refs = class_name_changed || new_import_alias.is_some();
 
             let use_line_range = if import_info.is_some() {
                 find_use_line_range(&file_content, old_fqn_normalized)
@@ -441,8 +471,7 @@ impl Backend {
             };
 
             let mut file_edits: Vec<TextEdit> = Vec::new();
-
-            let is_definition_file = def_uri_str.as_ref() == Some(file_uri_str);
+            let mut has_short_name_ref = false;
 
             if is_definition_file
                 && namespace_changed
@@ -526,11 +555,14 @@ impl Backend {
                         .is_some_and(|info| source_text.eq_ignore_ascii_case(&info.alias))
                 {
                     continue;
-                } else if class_name_changed {
-                    file_edits.push(TextEdit {
-                        range: loc.range,
-                        new_text: in_code_replacement.clone(),
-                    });
+                } else {
+                    has_short_name_ref = true;
+                    if rewrite_short_refs {
+                        file_edits.push(TextEdit {
+                            range: loc.range,
+                            new_text: in_code_replacement.clone(),
+                        });
+                    }
                 }
             }
 
@@ -548,6 +580,21 @@ impl Backend {
                     range: ul.range,
                     new_text: new_line,
                 });
+            }
+
+            // Only worth importing when the file actually spells the
+            // class by its short name; a file that only ever writes the
+            // FQN had its references rewritten in full above.
+            if needs_new_import && has_short_name_ref {
+                let use_block = crate::completion::use_edit::analyze_use_block(&file_content);
+                if let Some(import_edits) = crate::completion::use_edit::build_aliased_use_edit(
+                    &new_fqn_normalized,
+                    new_import_alias.as_deref(),
+                    &use_block,
+                    &file_namespace,
+                ) {
+                    file_edits.extend(import_edits);
+                }
             }
 
             if !file_edits.is_empty() {
@@ -642,6 +689,21 @@ fn find_import_for_fqn(use_map: &HashMap<String, String>, target_fqn: &str) -> O
         }
     }
     None
+}
+
+/// Whether a file declaring `file_namespace` resolves the short name of
+/// `fqn` to `fqn` without needing a `use` import.
+///
+/// PHP falls back to the current namespace for unqualified class names,
+/// so `namespace App\Support;` reaches `App\Support\Helper` as plain
+/// `Helper`.  Namespace names are case-insensitive.
+fn namespace_owns(file_namespace: Option<&str>, fqn: &str) -> bool {
+    let class_namespace = fqn.rfind('\\').map(|i| &fqn[..i]);
+    match (file_namespace, class_namespace) {
+        (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
+        (None, None) => true,
+        _ => false,
+    }
 }
 
 /// Check whether importing `new_short_name` would collide with an

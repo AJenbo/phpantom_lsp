@@ -4226,6 +4226,309 @@ async fn rename_class_move_updates_cross_file_usage() {
 }
 
 #[tokio::test]
+async fn rename_class_move_adds_import_to_former_namespace_sibling() {
+    // A sibling in the same namespace reached the class without any
+    // `use` import.  Moving the class out of that namespace has to add
+    // the import, or the sibling stops compiling.
+    let backend = Backend::new_test();
+
+    let uri_decl = Url::parse("file:///src/BuilderHelper.php").unwrap();
+    let uri_usage = Url::parse("file:///src/Builder.php").unwrap();
+
+    let text_decl = concat!(
+        "<?php\n",
+        "namespace App\\Support;\n",
+        "\n",
+        "class BuilderHelper {}\n",
+    );
+
+    let text_usage = concat!(
+        "<?php\n",
+        "namespace App\\Support;\n",
+        "\n",
+        "class Builder {\n",
+        "    public function helper(): BuilderHelper {\n",
+        "        return new BuilderHelper();\n",
+        "    }\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri_decl, text_decl).await;
+    open_file(&backend, &uri_usage, text_usage).await;
+
+    let edit = rename(
+        &backend,
+        &uri_decl,
+        3,
+        6,
+        "App\\Support\\Helpers\\BuilderHelper",
+    )
+    .await;
+    let ws = edit.expect("Expected a workspace edit for the class move");
+
+    let usage_edits = edits_for_uri(&ws, &uri_usage);
+    let result_usage = apply_edits(text_usage, &usage_edits);
+    assert!(
+        result_usage.contains("use App\\Support\\Helpers\\BuilderHelper;"),
+        "The sibling should gain an import for the moved class; got:\n{}",
+        result_usage
+    );
+    assert!(
+        result_usage.contains("new BuilderHelper()"),
+        "The short-name references should stay as-is; got:\n{}",
+        result_usage
+    );
+}
+
+#[tokio::test]
+async fn rename_class_move_adds_import_when_short_name_also_changes() {
+    let backend = Backend::new_test();
+
+    let uri_decl = Url::parse("file:///src/BuilderHelper.php").unwrap();
+    let uri_usage = Url::parse("file:///src/Builder.php").unwrap();
+
+    let text_decl = concat!(
+        "<?php\n",
+        "namespace App\\Support;\n",
+        "\n",
+        "class BuilderHelper {}\n",
+    );
+
+    let text_usage = concat!(
+        "<?php\n",
+        "namespace App\\Support;\n",
+        "\n",
+        "class Builder {\n",
+        "    public function helper(): BuilderHelper {\n",
+        "        return new BuilderHelper();\n",
+        "    }\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri_decl, text_decl).await;
+    open_file(&backend, &uri_usage, text_usage).await;
+
+    let edit = rename(&backend, &uri_decl, 3, 6, "App\\Helpers\\BuildAssistant").await;
+    let ws = edit.expect("Expected a workspace edit for the class move");
+
+    let result_usage = apply_edits(text_usage, &edits_for_uri(&ws, &uri_usage));
+    assert!(
+        result_usage.contains("use App\\Helpers\\BuildAssistant;"),
+        "got:\n{}",
+        result_usage
+    );
+    assert!(
+        result_usage.contains("new BuildAssistant()")
+            && result_usage.contains("helper(): BuildAssistant"),
+        "got:\n{}",
+        result_usage
+    );
+    assert!(
+        !result_usage.contains("BuilderHelper"),
+        "No stale references should remain; got:\n{}",
+        result_usage
+    );
+}
+
+#[tokio::test]
+async fn rename_class_move_aliases_added_import_on_short_name_collision() {
+    // The sibling already imports an unrelated class under the short
+    // name the moved class needs, so the added import must be aliased
+    // and the references rewritten to that alias.
+    let backend = Backend::new_test();
+
+    let uri_decl = Url::parse("file:///src/Helper.php").unwrap();
+    let uri_other = Url::parse("file:///src/Other/Widget.php").unwrap();
+    let uri_usage = Url::parse("file:///src/Builder.php").unwrap();
+
+    let text_decl = concat!(
+        "<?php\n",
+        "namespace App\\Support;\n",
+        "\n",
+        "class Helper {}\n",
+    );
+    let text_other = concat!("<?php\n", "namespace Other;\n", "\n", "class Widget {}\n",);
+
+    let text_usage = concat!(
+        "<?php\n",
+        "namespace App\\Support;\n",
+        "\n",
+        "use Other\\Widget;\n",
+        "\n",
+        "class Builder {\n",
+        "    public function run(): Widget {\n",
+        "        new Helper();\n",
+        "        return new Widget();\n",
+        "    }\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri_decl, text_decl).await;
+    open_file(&backend, &uri_other, text_other).await;
+    open_file(&backend, &uri_usage, text_usage).await;
+
+    let edit = rename(&backend, &uri_decl, 3, 6, "App\\Helpers\\Widget").await;
+    let ws = edit.expect("Expected a workspace edit for the class move");
+
+    let result_usage = apply_edits(text_usage, &edits_for_uri(&ws, &uri_usage));
+    assert!(
+        result_usage.contains("use Other\\Widget;"),
+        "The unrelated import must survive; got:\n{}",
+        result_usage
+    );
+    assert!(
+        result_usage.contains("use App\\Helpers\\Widget as WidgetAlias;"),
+        "The moved class must be imported under an alias; got:\n{}",
+        result_usage
+    );
+    assert!(
+        result_usage.contains("new WidgetAlias()"),
+        "The moved class's references must use the alias; got:\n{}",
+        result_usage
+    );
+    assert!(
+        result_usage.contains("return new Widget();"),
+        "The unrelated class's references must be left alone; got:\n{}",
+        result_usage
+    );
+}
+
+#[tokio::test]
+async fn rename_class_move_skips_import_for_fqn_only_reference() {
+    // A file that only ever writes the FQN has that FQN rewritten, so
+    // there is nothing for an import to fix.
+    let backend = Backend::new_test();
+
+    let uri_decl = Url::parse("file:///src/BuilderHelper.php").unwrap();
+    let uri_usage = Url::parse("file:///src/Builder.php").unwrap();
+
+    let text_decl = concat!(
+        "<?php\n",
+        "namespace App\\Support;\n",
+        "\n",
+        "class BuilderHelper {}\n",
+    );
+
+    let text_usage = concat!(
+        "<?php\n",
+        "namespace App\\Support;\n",
+        "\n",
+        "class Builder {\n",
+        "    public function helper() {\n",
+        "        return new \\App\\Support\\BuilderHelper();\n",
+        "    }\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri_decl, text_decl).await;
+    open_file(&backend, &uri_usage, text_usage).await;
+
+    let edit = rename(
+        &backend,
+        &uri_decl,
+        3,
+        6,
+        "App\\Support\\Helpers\\BuilderHelper",
+    )
+    .await;
+    let ws = edit.expect("Expected a workspace edit for the class move");
+
+    let result_usage = apply_edits(text_usage, &edits_for_uri(&ws, &uri_usage));
+    assert!(
+        result_usage.contains("new \\App\\Support\\Helpers\\BuilderHelper()"),
+        "got:\n{}",
+        result_usage
+    );
+    assert!(
+        !result_usage.contains("use "),
+        "No import is needed for an FQN-only reference; got:\n{}",
+        result_usage
+    );
+}
+
+#[tokio::test]
+async fn rename_class_move_into_referencing_files_namespace_adds_no_import() {
+    // The class lands in the referencing file's own namespace, so the
+    // short-name reference keeps resolving without an import.
+    let backend = Backend::new_test();
+
+    let uri_decl = Url::parse("file:///src/Support/BuilderHelper.php").unwrap();
+    let uri_usage = Url::parse("file:///src/Builder.php").unwrap();
+
+    let text_decl = concat!(
+        "<?php\n",
+        "namespace App\\Support;\n",
+        "\n",
+        "class BuilderHelper {}\n",
+    );
+
+    let text_usage = concat!(
+        "<?php\n",
+        "namespace App\\Support;\n",
+        "\n",
+        "class Builder {\n",
+        "    public function helper(): BuilderHelper {\n",
+        "        return new BuilderHelper();\n",
+        "    }\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri_decl, text_decl).await;
+    open_file(&backend, &uri_usage, text_usage).await;
+
+    // Same namespace, different short name: no move out of the namespace.
+    let edit = rename(&backend, &uri_decl, 3, 6, "App\\Support\\BuildAssistant").await;
+    let ws = edit.expect("Expected a workspace edit for the class rename");
+
+    let result_usage = apply_edits(text_usage, &edits_for_uri(&ws, &uri_usage));
+    assert!(
+        !result_usage.contains("use "),
+        "A same-namespace rename needs no import; got:\n{}",
+        result_usage
+    );
+    assert!(
+        result_usage.contains("new BuildAssistant()"),
+        "got:\n{}",
+        result_usage
+    );
+}
+
+#[tokio::test]
+async fn rename_class_move_from_global_namespace_adds_import() {
+    let backend = Backend::new_test();
+
+    let uri_decl = Url::parse("file:///src/Legacy.php").unwrap();
+    let uri_usage = Url::parse("file:///src/Caller.php").unwrap();
+
+    let text_decl = concat!("<?php\n", "\n", "class Legacy {}\n");
+    let text_usage = concat!(
+        "<?php\n",
+        "\n",
+        "function callIt() {\n",
+        "    return new Legacy();\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri_decl, text_decl).await;
+    open_file(&backend, &uri_usage, text_usage).await;
+
+    let edit = rename(&backend, &uri_decl, 2, 6, "App\\Legacy").await;
+    let ws = edit.expect("Expected a workspace edit for the class move");
+
+    let result_usage = apply_edits(text_usage, &edits_for_uri(&ws, &uri_usage));
+    assert!(
+        result_usage.contains("use App\\Legacy;"),
+        "got:\n{}",
+        result_usage
+    );
+    assert!(
+        result_usage.contains("new Legacy()"),
+        "got:\n{}",
+        result_usage
+    );
+}
+
+#[tokio::test]
 async fn rename_macro_registration_string_updates_call_sites() {
     let backend = Backend::new_test();
     let class_uri = Url::parse("file:///Widget.php").unwrap();
