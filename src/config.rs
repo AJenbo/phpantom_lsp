@@ -539,6 +539,67 @@ impl IndexingConfig {
     }
 }
 
+/// File filters supplied by the editor rather than by `.phpantom.toml`.
+///
+/// An editor already knows which paths the user hides and which
+/// extensions they treat as PHP; mirroring that into `.phpantom.toml`
+/// by hand is duplicated work. A client passes the same two lists
+/// [`IndexingConfig`] accepts through `initializationOptions` (and
+/// again through `workspace/didChangeConfiguration` when the user
+/// edits their settings mid-session):
+///
+/// ```json
+/// { "indexing": { "exclude": ["generated"], "extensions": ["module"] } }
+/// ```
+///
+/// The shape is deliberately generic. It is a list of gitignore-style
+/// globs and a list of extensions, never an editor's own setting
+/// names, so every client can translate its native settings into it.
+/// This layer sits beside the config-file layer rather than replacing
+/// it: [`Backend::index_filters`](crate::Backend::index_filters)
+/// compiles the union, so a `.phpantom.toml` reload keeps the client's
+/// contribution and a client update keeps the file's.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ClientIndexingOptions {
+    /// Paths to skip, in the same gitignore syntax as
+    /// [`IndexingConfig::exclude`].
+    pub exclude: Vec<String>,
+    /// Extra file extensions treated as PHP source, as in
+    /// [`IndexingConfig::extensions`].
+    pub extensions: Vec<String>,
+}
+
+impl ClientIndexingOptions {
+    /// Read the `indexing` filters out of a client-supplied settings
+    /// blob, from either `initializationOptions` or the `settings` of a
+    /// `workspace/didChangeConfiguration` notification.
+    ///
+    /// Accepts the filters at the top level (`{"indexing": …}`, what an
+    /// extension passes as its own initialization options) or nested
+    /// under a `phpantom` key (`{"phpantom": {"indexing": …}}`, the
+    /// shape a client sends when it pushes its whole settings tree).
+    ///
+    /// Returns `None` when the blob carries no readable `indexing`
+    /// block, meaning "this notification is not about file filters"
+    /// rather than "the user cleared them". Clients re-push settings
+    /// for reasons of their own (VS Code's client sends the whole
+    /// `phpantom` section whenever any key in it changes), and reading
+    /// those as an empty filter set would silently discard what the
+    /// editor forwarded at startup. Clearing is still expressible: an
+    /// `indexing` block that is present but empty parses as no filters.
+    /// A malformed block is ignored for the same reason.
+    pub fn from_client_settings(settings: &serde_json::Value) -> Option<Self> {
+        let scoped = settings.get("phpantom").unwrap_or(settings);
+        serde_json::from_value(scoped.get("indexing")?.clone()).ok()
+    }
+
+    /// Whether the client supplied no filters at all.
+    pub fn is_empty(&self) -> bool {
+        self.exclude.is_empty() && self.extensions.is_empty()
+    }
+}
+
 /// The indexing strategy that controls class discovery behaviour.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum IndexingStrategy {
@@ -1638,5 +1699,77 @@ paths = ["database/schema", "extra/schema.sql"]
         merge_toml(&mut base, overlay);
         let config: Config = base.try_into().unwrap();
         assert_eq!(config.indexing.strategy, Some(IndexingStrategy::SelfScan));
+    }
+
+    #[test]
+    fn client_options_read_top_level_indexing() {
+        let settings = serde_json::json!({
+            "indexing": { "exclude": ["generated"], "extensions": ["module"] }
+        });
+        let options = ClientIndexingOptions::from_client_settings(&settings).unwrap();
+        assert_eq!(options.exclude, ["generated"]);
+        assert_eq!(options.extensions, ["module"]);
+    }
+
+    /// A client that pushes its whole settings tree namespaces the block
+    /// under the server's section name.
+    #[test]
+    fn client_options_read_a_phpantom_scoped_block() {
+        let settings = serde_json::json!({
+            "phpantom": { "indexing": { "exclude": ["build"] } },
+            "editor": { "tabSize": 4 }
+        });
+        let options = ClientIndexingOptions::from_client_settings(&settings).unwrap();
+        assert_eq!(options.exclude, ["build"]);
+        assert!(options.extensions.is_empty());
+    }
+
+    /// A settings blob with no readable `indexing` block means "not
+    /// about file filters", not "the user cleared them". VS Code's
+    /// client re-pushes the whole `phpantom` section whenever any key in
+    /// it changes, so reading those as an empty filter set would discard
+    /// what the extension forwarded at startup the first time someone
+    /// toggled an unrelated setting.
+    #[test]
+    fn client_options_ignore_settings_without_an_indexing_block() {
+        for settings in [
+            serde_json::json!({}),
+            serde_json::json!({ "unrelated": true }),
+            serde_json::json!({ "phpantom": { "trace": { "server": "verbose" } } }),
+            serde_json::json!({ "indexing": "not-an-object" }),
+            serde_json::json!({ "indexing": { "exclude": "not-a-list" } }),
+            serde_json::json!(null),
+        ] {
+            assert!(
+                ClientIndexingOptions::from_client_settings(&settings).is_none(),
+                "settings without a readable indexing block must be ignored: {settings}"
+            );
+        }
+    }
+
+    /// Clearing the filters again still has to be expressible, or a user
+    /// who removes their last exclude keeps it until they restart.
+    #[test]
+    fn an_empty_indexing_block_clears_the_filters() {
+        for settings in [
+            serde_json::json!({ "indexing": {} }),
+            serde_json::json!({ "indexing": { "exclude": [], "extensions": [] } }),
+        ] {
+            let options = ClientIndexingOptions::from_client_settings(&settings)
+                .expect("a present indexing block is a filter update");
+            assert!(options.is_empty());
+        }
+    }
+
+    /// The strategy key belongs to `.phpantom.toml` alone: an editor
+    /// forwards file filters, it does not get to switch the project's
+    /// indexing mode.
+    #[test]
+    fn client_options_carry_only_the_two_filter_lists() {
+        let settings = serde_json::json!({
+            "indexing": { "strategy": "none", "exclude": ["generated"] }
+        });
+        let options = ClientIndexingOptions::from_client_settings(&settings).unwrap();
+        assert_eq!(options.exclude, ["generated"]);
     }
 }

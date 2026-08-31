@@ -222,6 +222,10 @@ impl Backend {
     /// is visible to every other clone, including the long-lived one that
     /// answers LSP requests.
     pub(crate) fn reload_config(&self, root: &std::path::Path) {
+        // Captured before the reload replaces them, so the reconciliation
+        // below can tell which way the file filters moved.
+        let previous_filters = self.index_filters();
+
         match crate::config::load_config_from(root, self.workspace.global_config_path.as_deref()) {
             Ok(cfg) => self.set_config(cfg),
             Err(e) => {
@@ -248,6 +252,10 @@ impl Backend {
         // registered, or the client never reports its file events and
         // the index keeps serving the last full scan.
         self.reregister_watched_files_if_changed();
+
+        // An edit to `[indexing] exclude` or `extensions` changes what
+        // belongs in the index, not merely what the next scan will see.
+        self.reconcile_index_for_filter_change(&previous_filters);
     }
 
     /// Build the `workspace/didChangeWatchedFiles` registration for the
@@ -650,6 +658,37 @@ mod tests {
         assert_eq!(filters.extra_extensions(), &["module".to_string()]);
     }
 
+    /// Recompiling the filters only governs the next scan. A live
+    /// `.phpantom.toml` edit also has to reconcile the index built under
+    /// the old ones, or the tree the user just excluded keeps answering
+    /// completion and workspace symbol search until restart.
+    #[test]
+    fn reload_config_evicts_newly_excluded_classes() {
+        let dir = tempfile::tempdir().unwrap();
+        let backend = Backend::new_test();
+        *backend.workspace.workspace_root.write() = Some(dir.path().to_path_buf());
+
+        let generated = dir.path().join("generated/Hidden.php");
+        std::fs::create_dir_all(generated.parent().unwrap()).unwrap();
+        std::fs::write(&generated, "<?php\nclass Hidden {}\n").unwrap();
+        let uri = crate::util::path_to_uri(&generated);
+        backend
+            .symbols
+            .with_class_declarations(|decls| decls.note_discovered("Hidden", uri));
+
+        std::fs::write(
+            dir.path().join(crate::config::CONFIG_FILE_NAME),
+            "[indexing]\nexclude = [\"generated\"]\n",
+        )
+        .unwrap();
+        backend.reload_config(dir.path());
+
+        assert!(
+            backend.symbols.fqn_uri_index.read().get("Hidden").is_none(),
+            "a class under a newly excluded path must leave the index"
+        );
+    }
+
     /// Adding an `[indexing] extensions` entry used to need a restart
     /// before its files were watched: `initialized` only ever registered
     /// the watcher list once, and a live `.phpantom.toml` reload never
@@ -703,6 +742,30 @@ mod tests {
         assert_eq!(
             *backend.registered_watcher_state.read(),
             Some((Vec::new(), true))
+        );
+    }
+
+    /// An extension the *editor* forwards needs its watcher registered
+    /// just as much as one written into `.phpantom.toml`. Without it the
+    /// client reports no events for those files and the index keeps
+    /// serving the last full scan.
+    #[test]
+    fn a_client_extension_update_updates_the_registered_watcher_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let backend = Backend::new_test();
+        *backend.workspace.workspace_root.write() = Some(dir.path().to_path_buf());
+        backend.reregister_watched_files_if_changed();
+
+        backend.set_client_indexing_options(crate::config::ClientIndexingOptions {
+            exclude: Vec::new(),
+            extensions: vec!["module".to_string()],
+        });
+        backend.reregister_watched_files_if_changed();
+
+        assert_eq!(
+            *backend.registered_watcher_state.read(),
+            Some((vec!["module".to_string()], true)),
+            "a client-forwarded extension must be watched"
         );
     }
 }

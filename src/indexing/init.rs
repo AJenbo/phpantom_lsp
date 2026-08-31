@@ -16,6 +16,39 @@ use crate::composer;
 use crate::config::IndexingStrategy;
 
 impl Backend {
+    /// Build the symbol indexes for whichever shape the workspace at
+    /// `root` turns out to have.
+    ///
+    /// `composer_package` is the already-parsed root `composer.json`, so
+    /// the file is read once per pass rather than once per caller.
+    ///
+    /// Shared by the `initialized` handshake and by the rediscovery a
+    /// mid-session filter change schedules, so the two produce the same
+    /// index rather than the latter re-implementing a walk of its own.
+    /// Every index write below is an insert-if-absent, which is what
+    /// makes a second pass safe to run over a populated index.
+    pub(crate) async fn discover_workspace_symbols(
+        &self,
+        root: &std::path::Path,
+        php_version: crate::types::PhpVersion,
+        composer_package: Option<composer::ComposerPackage>,
+        progress: Option<&crate::progress::ScanProgress>,
+    ) {
+        if composer_package.is_some() {
+            self.init_single_project(root, php_version, composer_package, progress)
+                .await;
+            return;
+        }
+
+        let subprojects = composer::discover_subproject_roots(root);
+        if subprojects.is_empty() {
+            self.init_no_composer(root, php_version, progress).await;
+        } else {
+            self.init_monorepo(root, &subprojects, php_version, progress)
+                .await;
+        }
+    }
+
     /// Initialize a single-project workspace (root `composer.json` exists).
     ///
     /// This is the standard fast path: read PSR-4 mappings, build the
@@ -476,9 +509,14 @@ impl Backend {
             .set_runtime_permission_package(any_runtime_permissions);
 
         // Re-sort PSR-4 mappings by prefix length descending so
-        // longest-prefix-first matching works.
+        // longest-prefix-first matching works.  Each subproject appends
+        // to the shared list, and so does a rediscovery pass over a list
+        // an earlier one already filled, so drop the repeats instead of
+        // letting every pass grow what class-path resolution walks.
         {
             let mut psr4 = self.workspace.psr4_mappings.write();
+            let mut seen: HashSet<(String, String)> = HashSet::new();
+            psr4.retain(|m| seen.insert((m.prefix.clone(), m.base_path.clone())));
             psr4.sort_by_key(|b| std::cmp::Reverse(b.prefix.len()));
         }
 

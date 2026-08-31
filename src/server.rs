@@ -117,6 +117,18 @@ impl LanguageServer for Backend {
             *self.client_name.lock() = info.name.clone();
         }
 
+        // File filters the editor forwarded from its own settings. Read
+        // before anything scans, so the very first discovery pass already
+        // honours them rather than indexing excluded trees and dropping
+        // them later.
+        if let Some(options) = params
+            .initialization_options
+            .as_ref()
+            .and_then(crate::config::ClientIndexingOptions::from_client_settings)
+        {
+            self.set_client_indexing_options(options);
+        }
+
         let client_supports_pull = params
             .capabilities
             .text_document
@@ -375,8 +387,6 @@ impl LanguageServer for Backend {
                 });
             self.set_php_version(php_version);
 
-            let has_composer_json = composer_package.is_some();
-
             // ── Create a progress token for indexing feedback ────────
             // The heavy scans below run synchronously, so per-file
             // progress is written to a shared `ScanProgress` state and
@@ -391,22 +401,8 @@ impl LanguageServer for Backend {
                 .as_ref()
                 .map(|tok| self.spawn_progress_poller(tok.clone(), Arc::clone(&progress)));
 
-            if has_composer_json {
-                // ── Single-project path (root composer.json exists) ──────
-                self.init_single_project(&root, php_version, composer_package, Some(&progress))
-                    .await;
-            } else {
-                // ── Monorepo / non-Composer path ────────────────────────
-                let subprojects = composer::discover_subproject_roots(&root);
-
-                if !subprojects.is_empty() {
-                    self.init_monorepo(&root, &subprojects, php_version, Some(&progress))
-                        .await;
-                } else {
-                    self.init_no_composer(&root, php_version, Some(&progress))
-                        .await;
-                }
-            }
+            self.discover_workspace_symbols(&root, php_version, composer_package, Some(&progress))
+                .await;
 
             // Laravel-only startup work.  The project classification is
             // set by the init pass above from composer.json, so it has to
@@ -925,6 +921,42 @@ impl LanguageServer for Backend {
         // serialized, so they are only triggered on save — not on
         // every keystroke.  This is the only place they are scheduled.
         self.schedule_external_diagnostics(uri);
+    }
+
+    async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
+        // Clients re-push settings for reasons of their own, so a
+        // notification that carries no file filters is not a request to
+        // drop the ones already in force, and one that repeats the
+        // current filters is not a change.
+        let Some(options) =
+            crate::config::ClientIndexingOptions::from_client_settings(&params.settings)
+        else {
+            return;
+        };
+        // Captured before the change, so the reconciliation below can
+        // tell which way the filters moved.
+        let previous_filters = self.index_filters();
+        if !self.set_client_indexing_options(options) {
+            return;
+        }
+
+        // A newly added extension needs its own watcher, or the client
+        // never reports events for those files and the index keeps
+        // serving the last full scan. Same follow-up a live
+        // `.phpantom.toml` edit performs.
+        self.reregister_watched_files_if_changed();
+
+        // The index was built under the filters the user just changed
+        // away from: drop what they now exclude, and walk for what they
+        // now admit.
+        self.reconcile_index_for_filter_change(&previous_filters);
+
+        // A narrowed exclude list makes classes resolvable that were
+        // missing a moment ago, so the negative cache has to go or the
+        // editor keeps showing "class not found" for them.
+        self.clear_class_not_found_cache();
+
+        self.request_diagnostic_refresh().await;
     }
 
     async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
@@ -1873,6 +1905,169 @@ mod tests {
         assert_eq!(options["documentSelector"][0]["language"], "php");
         assert!(options["documentSelector"][0].get("scheme").is_none());
         assert!(options["documentSelector"][0].get("pattern").is_none());
+    }
+
+    /// `initialize` params carrying a workspace root and whatever the
+    /// client chose to send as its initialization options.
+    fn init_params(
+        root: &std::path::Path,
+        initialization_options: Option<serde_json::Value>,
+    ) -> InitializeParams {
+        #[allow(deprecated)]
+        InitializeParams {
+            root_uri: Some(Url::from_file_path(root).unwrap()),
+            initialization_options,
+            ..Default::default()
+        }
+    }
+
+    /// The filters have to be live before anything scans, so the first
+    /// discovery pass already honours them instead of indexing excluded
+    /// trees and dropping them afterwards.
+    #[tokio::test]
+    async fn initialize_applies_client_supplied_file_filters() {
+        let dir = tempfile::tempdir().unwrap();
+        let backend = Backend::new_test();
+
+        backend
+            .initialize(init_params(
+                dir.path(),
+                Some(serde_json::json!({
+                    "indexing": { "exclude": ["generated"], "extensions": ["module"] }
+                })),
+            ))
+            .await
+            .unwrap();
+
+        let filters = backend.index_filters();
+        assert!(filters.is_excluded_entry(&dir.path().join("generated"), true));
+        assert!(filters.is_php_file(&dir.path().join("a.module")));
+    }
+
+    /// Most clients send nothing, and one that does may send a shape
+    /// meant for something else entirely. Neither may switch filtering on.
+    #[tokio::test]
+    async fn initialize_without_client_filters_leaves_discovery_unfiltered() {
+        let dir = tempfile::tempdir().unwrap();
+
+        for options in [None, Some(serde_json::json!({ "unrelated": true }))] {
+            let backend = Backend::new_test();
+            backend
+                .initialize(init_params(dir.path(), options))
+                .await
+                .unwrap();
+
+            let filters = backend.index_filters();
+            assert!(!filters.is_excluded_entry(&dir.path().join("generated"), true));
+            assert!(!filters.is_php_file(&dir.path().join("a.module")));
+        }
+    }
+
+    /// Editing the editor's own settings mid-session has to take effect
+    /// without a restart, the same way a live `.phpantom.toml` edit does.
+    #[tokio::test]
+    async fn did_change_configuration_recompiles_the_filters() {
+        let dir = tempfile::tempdir().unwrap();
+        let backend = Backend::new_test();
+        backend
+            .initialize(init_params(dir.path(), None))
+            .await
+            .unwrap();
+
+        backend
+            .did_change_configuration(DidChangeConfigurationParams {
+                settings: serde_json::json!({
+                    "phpantom": { "indexing": { "exclude": ["generated"] } }
+                }),
+            })
+            .await;
+
+        assert!(
+            backend
+                .index_filters()
+                .is_excluded_entry(&dir.path().join("generated"), true)
+        );
+
+        // Removing the entry again has to restore the unfiltered walk,
+        // not merely stop adding to the exclude list.
+        backend
+            .did_change_configuration(DidChangeConfigurationParams {
+                settings: serde_json::json!({ "phpantom": { "indexing": {} } }),
+            })
+            .await;
+
+        assert!(
+            !backend
+                .index_filters()
+                .is_excluded_entry(&dir.path().join("generated"), true)
+        );
+    }
+
+    /// Recompiling the filters only governs the next scan. The
+    /// notification also has to reconcile the index that was built under
+    /// the old ones, or a class in a folder the user just hid keeps
+    /// answering completion and workspace symbol search until restart.
+    #[tokio::test]
+    async fn did_change_configuration_evicts_newly_excluded_classes() {
+        let dir = tempfile::tempdir().unwrap();
+        let backend = Backend::new_test();
+        backend
+            .initialize(init_params(dir.path(), None))
+            .await
+            .unwrap();
+
+        let hidden = dir.path().join("generated/Hidden.php");
+        std::fs::create_dir_all(hidden.parent().unwrap()).unwrap();
+        std::fs::write(&hidden, "<?php\nclass Hidden {}\n").unwrap();
+        let uri = crate::util::path_to_uri(&hidden);
+        backend
+            .symbols
+            .with_class_declarations(|decls| decls.note_discovered("Hidden", uri));
+
+        backend
+            .did_change_configuration(DidChangeConfigurationParams {
+                settings: serde_json::json!({
+                    "phpantom": { "indexing": { "exclude": ["generated"] } }
+                }),
+            })
+            .await;
+
+        assert!(
+            backend.symbols.fqn_uri_index.read().get("Hidden").is_none(),
+            "a class under a newly excluded folder must leave the index"
+        );
+    }
+
+    /// VS Code's client syncs the whole `phpantom` settings section on
+    /// every change to any key in it. That notification says nothing
+    /// about file filters, so it must leave the ones the extension
+    /// forwarded at startup alone rather than reading as "cleared".
+    #[tokio::test]
+    async fn a_settings_push_without_filters_leaves_them_in_force() {
+        let dir = tempfile::tempdir().unwrap();
+        let backend = Backend::new_test();
+        backend
+            .initialize(init_params(
+                dir.path(),
+                Some(serde_json::json!({ "indexing": { "exclude": ["generated"] } })),
+            ))
+            .await
+            .unwrap();
+
+        backend
+            .did_change_configuration(DidChangeConfigurationParams {
+                settings: serde_json::json!({
+                    "phpantom": { "trace": { "server": "verbose" } }
+                }),
+            })
+            .await;
+
+        assert!(
+            backend
+                .index_filters()
+                .is_excluded_entry(&dir.path().join("generated"), true),
+            "an unrelated settings push must not discard the client's filters"
+        );
     }
 }
 

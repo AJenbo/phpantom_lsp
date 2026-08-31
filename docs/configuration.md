@@ -169,6 +169,30 @@ Set `lint` or `analyze` explicitly to override all of this in either direction.
 
 The file is optional. Unknown keys are silently ignored, so the file is forward-compatible.
 
+## Editor-supplied file filters
+
+Your editor already knows which folders it hides and which extensions it opens as PHP. PHPantom accepts the same two `[indexing]` lists from the editor over LSP, so that knowledge does not have to be mirrored into `.phpantom.toml` by hand:
+
+```json
+{ "indexing": { "exclude": ["generated"], "extensions": ["module"] } }
+```
+
+The server reads that shape from `initializationOptions` at startup and from `workspace/didChangeConfiguration` when you change your settings mid-session. It is also accepted namespaced under a `phpantom` key, which is how a client that pushes its whole settings tree sends it.
+
+A notification that carries no `indexing` block leaves the filters as they are, since clients re-push their settings for reasons of their own. To clear the filters, send an `indexing` block with empty lists rather than omitting it.
+
+A change made mid-session is reconciled against the index built under the previous filters, so neither direction needs a restart: classes under a path you just excluded leave the index, and files a removed exclude or an added extension brings back into scope are picked up by a fresh workspace scan a moment later. That scan is debounced, so a burst of settings changes costs one walk rather than one each. Editing `.phpantom.toml` is reconciled the same way. A file you have open in the editor is always served, whatever the filters say about it.
+
+The values mean exactly what the [`[indexing]`](#indexing) keys of the same name mean: `exclude` is gitignore syntax relative to the workspace root, and `extensions` are extra file extensions (without the dot) treated as PHP source. Only those two keys are read; the indexing strategy stays a project decision.
+
+Editor settings and `.phpantom.toml` are two layers of one filter set rather than one overriding the other, so:
+
+- Both lists apply. A path either side excludes is excluded, and an extension either side names is indexed.
+- Changing one never drops the other. Reloading `.phpantom.toml` keeps what the editor sent, and a settings change keeps what the file says.
+- A `!` re-include in `.phpantom.toml` still wins over an exclude the editor sent, following the usual gitignore rule that the last matching pattern decides. This is how a project keeps one generated file indexed that its contributors happen to hide in their editors.
+
+The interface is deliberately generic (a list of globs and a list of extensions, never an editor's own setting names), so any client can translate its native settings into it. See [Editor Setup](editor-setup.md) for what each editor does with it.
+
 ## Code Formatting
 
 PHPantom ships a built-in PHP formatter (mago-formatter) that works out of the box, so `textDocument/formatting` requests are answered without any setup. The formatter is chosen per project in this order:

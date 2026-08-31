@@ -1975,24 +1975,62 @@ impl Backend {
     }
 
     /// Return the compiled `[indexing]` exclude globs and extra PHP
-    /// extensions, building them from the current config on first use.
+    /// extensions, building them on first use from the union of the
+    /// `.phpantom.toml` layer and the client-supplied layer.
     ///
-    /// The compiled filters are cached until [`set_config`](Self::set_config)
-    /// replaces the configuration, so glob compilation never runs on a
-    /// per-file path.
+    /// The two layers are unioned rather than one overriding the other:
+    /// both name files that are not worth indexing, and a client cannot
+    /// know what a project's config file already excludes. The compiled
+    /// result is cached until [`set_config`](Self::set_config) or
+    /// [`set_client_indexing_options`](Self::set_client_indexing_options)
+    /// invalidates it, so glob compilation never runs on a per-file path.
     pub(crate) fn index_filters(&self) -> Arc<classmap_scanner::IndexFilters> {
         if let Some(filters) = self.workspace.index_filters.read().as_ref() {
             return Arc::clone(filters);
         }
         let root = self.workspace.workspace_root.read().clone();
         let indexing = self.config().indexing;
-        let compiled = Arc::new(classmap_scanner::IndexFilters::compile(
-            root.as_deref(),
-            indexing.exclude(),
-            indexing.extensions(),
-        ));
+        let client = self.workspace.client_indexing.read();
+
+        // The overwhelmingly common case is one layer or the other being
+        // empty, so only pay for a merged allocation when both contribute.
+        let compiled = if client.is_empty() {
+            classmap_scanner::IndexFilters::compile(
+                root.as_deref(),
+                indexing.exclude(),
+                indexing.extensions(),
+            )
+        } else {
+            // The config file's patterns go last so a `!` re-include in
+            // `.phpantom.toml` can still override an exclude the editor
+            // forwarded: gitignore semantics give the last match priority.
+            let exclude = [client.exclude.as_slice(), indexing.exclude()].concat();
+            let extensions = [client.extensions.as_slice(), indexing.extensions()].concat();
+            classmap_scanner::IndexFilters::compile(root.as_deref(), &exclude, &extensions)
+        };
+        drop(client);
+
+        let compiled = Arc::new(compiled);
         *self.workspace.index_filters.write() = Some(Arc::clone(&compiled));
         compiled
+    }
+
+    /// Replace the client-supplied file filters.
+    ///
+    /// Called from the `initialize` handshake and again whenever a
+    /// `workspace/didChangeConfiguration` arrives. Returns whether the
+    /// filters actually changed, so the caller can skip the rescan and
+    /// watcher churn a no-op settings push would otherwise cause (clients
+    /// re-send their whole settings tree for edits to unrelated keys).
+    pub fn set_client_indexing_options(&self, options: config::ClientIndexingOptions) -> bool {
+        let mut current = self.workspace.client_indexing.write();
+        if *current == options {
+            return false;
+        }
+        *current = options;
+        drop(current);
+        *self.workspace.index_filters.write() = None;
+        true
     }
 
     /// Record whether the client handles `window/showDocument`.
