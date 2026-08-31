@@ -2168,9 +2168,9 @@ to mirror <code>files.exclude</code> / <code>files.associations</code> into
 reload keeps the client's contribution and a client update keeps the
 config file's. Accept the same shape via
 <code>workspace/didChangeConfiguration</code> so a settings change mid-session
-recompiles the filters; a changed <code>extensions</code> list also needs the
-watcher re-registration tracked as B1 in
-<a href="../bugs/#b1-adding-an-indexing-extensions-entry-needs-a-restart-to-be-watched"><code>bugs.md</code></a>.</p>
+recompiles the filters; call <code>Backend::reregister_watched_files_if_changed</code>
+afterwards so a changed <code>extensions</code> list gets its watcher re-registered
+too, the same as a live <code>.phpantom.toml</code> edit already does.</p>
 <p>Keep the interface generic (a list of gitignore-style globs and a
 list of extensions), never editor-specific setting names: any client
 can supply them, and Zed already forwards the user's

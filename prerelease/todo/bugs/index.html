@@ -937,28 +937,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b2-a-blade_directive-directive-shifts-every-component-tags-bound-attributes" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B2. A <code>blade_directive</code> directive shifts every component tag's bound attributes
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#b1-adding-an-indexing-extensions-entry-needs-a-restart-to-be-watched" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B1. Adding an <code>[indexing] extensions</code> entry needs a restart to be watched
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1536,28 +1514,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b2-a-blade_directive-directive-shifts-every-component-tags-bound-attributes" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B2. A <code>blade_directive</code> directive shifts every component tag's bound attributes
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#b1-adding-an-indexing-extensions-entry-needs-a-restart-to-be-watched" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B1. Adding an <code>[indexing] extensions</code> entry needs a restart to be watched
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1614,58 +1570,7 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h2 id="b2-a-blade_directive-directive-shifts-every-component-tags-bound-attributes">B2. A <code>blade_directive</code> directive shifts every component tag's bound attributes<a class="headerlink" href="#b2-a-blade_directive-directive-shifts-every-component-tags-bound-attributes" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<p><code>extract_component_call_site_vars</code> in
-<code>src/blade/call_site_inference.rs</code> pairs a component tag's bound
-attributes with the expressions they pass by <em>counting</em>:
-<code>scan_component_tag_calls</code> in <code>src/blade/component_tags.rs</code> numbers the
-bound attributes of a template in document order, and
-<code>BladeDirectiveWalker</code> collects every <code>blade_directive(EXPR)</code> call of the
-same template's virtual PHP in document order, then index N of the first
-list reads <code>calls[N]</code>.</p>
-<p>The count only lines up if a bound attribute is the <em>only</em> thing that
-emits that marker, and it is not. <code>translate_directive</code> lowers
-<code>@class</code>, <code>@style</code>, <code>@json</code>, <code>@dump</code>, <code>@js</code>, <code>@dd</code>, <code>@slot</code>, <code>@props</code>,
-<code>@aware</code>, <code>@lang</code>, <code>@choice</code>, <code>@vite</code> and <code>@fonts</code> to the same
-<code>blade_directive</code>, so a template writing any of them ahead of a tag
-shifts the pairing by one per occurrence:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>@class([&#39;featured&#39; =&gt; $flag])
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>&lt;x-alert :title=&quot;$heading&quot; /&gt;
-</code></pre></div>
-<p>lowers to <code>blade_directive(['featured' =&gt; $flag]); … blade_directive($heading);</code>,
-so <code>alert.blade.php</code> is told its <code>$title</code> is <code>array{featured: bool}</code>.
-Every attribute after the first such directive is typed from the wrong
-expression, or from none at all once the count runs past the end.</p>
-<p><strong>Fix:</strong> Give the bound-attribute marker a name of its own, the way
-<code>@can</code>, <code>@each</code>, <code>@section</code> and the view directives already have theirs
-(<code>blade_can_directive</code>, <code>blade_each_directive</code>, <code>blade_section_directive</code>,
-<code>blade_view_directive</code>), and count only that one. Then the two scans
-cannot be desynchronised by a directive that happens to share a marker.
-A test in <code>tests/integration/blade_call_site_inference.rs</code> asserting a
-tag's bound attribute still types correctly with a <code>@class</code> above it is
-what would have caught this.</p>
-<h2 id="b1-adding-an-indexing-extensions-entry-needs-a-restart-to-be-watched">B1. Adding an <code>[indexing] extensions</code> entry needs a restart to be watched<a class="headerlink" href="#b1-adding-an-indexing-extensions-entry-needs-a-restart-to-be-watched" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<p><code>initialized</code> in <code>src/server.rs</code> registers one
-<code>workspace/didChangeWatchedFiles</code> watcher per configured
-<code>[indexing] extensions</code> entry, and that registration happens once. A
-<code>.phpantom.toml</code> reload recompiles the filters (so the next workspace
-scan sees the new extension) but does not touch the watcher list, so
-editing a <code>.module</code> file added to the setting mid-session produces no
-event and the index keeps serving the version from the last full scan.
-The rest of the configuration is reloaded live, and the changelog says
-so, which is what makes the exception surprising.</p>
-<p>The Laravel-gated <code>*.sql</code> and <code>config/database.php</code> watchers have the
-same shape: they are chosen from <code>is_laravel()</code> at startup and never
-revisited.</p>
-<p><strong>Fix:</strong> Re-register the watcher capability from <code>reload_config</code> when
-the extension list (or the Laravel classification) changed since the
-last registration, unregistering the previous one by its
-<code>workspace/didChangeWatchedFiles</code> id first. Guard it on an actual
-change so an unrelated config edit does not churn the client's
-watchers. A test can assert the registered glob set after a reload
-that adds an extension.</p>
+<p>No outstanding items.</p>
 
 
 
