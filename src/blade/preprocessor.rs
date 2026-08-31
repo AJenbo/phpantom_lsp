@@ -1,5 +1,7 @@
 use super::TemplateKind;
-use super::directives::{match_directive, translate_directive};
+use super::directives::{
+    CUSTOM_MARKER, CustomDirectives, CustomForm, match_directive, translate_directive,
+};
 use super::source_map::BladeSourceMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -122,7 +124,14 @@ pub struct ComponentParameter {
 }
 
 pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
-    preprocess_with_vars(content, &[], TemplateKind::View, None, None)
+    preprocess_with_vars(
+        content,
+        &[],
+        TemplateKind::View,
+        None,
+        None,
+        &CustomDirectives::default(),
+    )
 }
 
 /// The variables Blade puts in a component view's scope on top of the data
@@ -214,12 +223,18 @@ fn is_php_variable_name(name: &str) -> bool {
 /// carries that class's members and the tag's attributes are checked as
 /// the arguments the framework passes them as.  Without one (or for a tag
 /// it cannot answer for) the tag degrades to a comment.
+///
+/// `custom_directives` are the ones the project's service providers
+/// registered with `Blade::directive()` / `Blade::if()`.  A directive in
+/// that set lowers to a marker call keeping its argument as real PHP,
+/// instead of degrading to the comment an unrecognised `@name` becomes.
 pub fn preprocess_with_vars(
     content: &str,
     injected_vars: &[(String, String)],
     kind: TemplateKind,
     this_class: Option<&str>,
     components: Option<&dyn ComponentResolver>,
+    custom_directives: &CustomDirectives,
 ) -> (String, BladeSourceMap) {
     let mut virtual_php = String::with_capacity(content.len() + 512);
     let mut source_map = BladeSourceMap::default();
@@ -275,7 +290,7 @@ pub fn preprocess_with_vars(
     }
 
     // ── Prologue ──
-    virtual_php.push_str("<?php if (!function_exists('blade_directive')) { function blade_directive(...$args) {} function blade_view_directive(...$args) {} function blade_each_directive(...$args) {} function blade_can_directive(...$args): bool { return true; } function blade_section_directive(...$args): bool { return true; } function blade_stack_directive(...$args): bool { return true; } function blade_push_if_directive(...$args) {} }\n");
+    virtual_php.push_str("<?php if (!function_exists('blade_directive')) { function blade_directive(...$args) {} function blade_view_directive(...$args) {} function blade_each_directive(...$args) {} function blade_can_directive(...$args): bool { return true; } function blade_section_directive(...$args): bool { return true; } function blade_stack_directive(...$args): bool { return true; } function blade_push_if_directive(...$args) {} function blade_custom_directive(...$args): bool { return true; } }\n");
     // Where hoisted `@use` imports are spliced in once the whole
     // template has been scanned: still in the prologue, so they precede
     // every name they import (name resolution runs in source order and
@@ -806,6 +821,62 @@ pub fn preprocess_with_vars(
                         } else {
                             replacement = format!(" {}; ", translate_directive(directive));
                             next_mode = Mode::Php(false);
+                        }
+                    } else if let Some((name, form)) = custom_directives.match_directive(&rest_str)
+                    {
+                        // A directive one of the project's service providers
+                        // registered. Blade's own compiler checks its custom
+                        // table *before* its built-in directives, but a
+                        // registration shadowing a core name would break the
+                        // block structure of every template that writes it
+                        // (and of Blade's own compiled output), so the core
+                        // table wins here.
+                        //
+                        // The handler is a callback returning arbitrary PHP,
+                        // so only the argument list is reproduced: it stays
+                        // real PHP that gets type-checked, passed to a marker
+                        // that stands in for whatever the handler emits. An
+                        // argument list is optional — Blade hands the handler
+                        // an empty expression when there is none — so a bare
+                        // name must not enter `DirectiveArgs`, which would
+                        // hunt the rest of the template for a closing paren
+                        // that was never opened.
+                        match_len = 1 + name.len();
+                        let has_args = rest_str[name.len()..].trim_start().starts_with('(');
+                        match form {
+                            CustomForm::End => {
+                                replacement = " endif; ".to_string();
+                                next_mode = Mode::Html;
+                            }
+                            CustomForm::Open | CustomForm::Else => {
+                                let keyword = if form == CustomForm::Open {
+                                    "if"
+                                } else {
+                                    "elseif"
+                                };
+                                if has_args {
+                                    // The marker's own `(` is left open for
+                                    // the directive's argument list to close,
+                                    // so the suffix closes both it and the
+                                    // condition.
+                                    replacement = format!(" {keyword} ({CUSTOM_MARKER} ");
+                                    next_mode = Mode::DirectiveArgs("):");
+                                    paren_depth = 0;
+                                } else {
+                                    replacement = format!(" {keyword} ({CUSTOM_MARKER}()): ");
+                                    next_mode = Mode::Html;
+                                }
+                            }
+                            CustomForm::Statement => {
+                                if has_args {
+                                    replacement = format!(" {CUSTOM_MARKER} ");
+                                    next_mode = Mode::DirectiveArgs(";");
+                                    paren_depth = 0;
+                                } else {
+                                    replacement = format!(" {CUSTOM_MARKER}(); ");
+                                    next_mode = Mode::Html;
+                                }
+                            }
                         }
                     }
                 } else if remaining.starts_with(&[':'])
@@ -1874,6 +1945,7 @@ mod tests {
             TemplateKind::View,
             Some("App\\Livewire\\Counter"),
             None,
+            &Default::default(),
         );
         assert!(
             php.contains(
@@ -1902,6 +1974,7 @@ mod tests {
             TemplateKind::Component,
             None,
             None,
+            &Default::default(),
         );
         assert!(
             php.contains("/** @var \\Illuminate\\View\\ComponentAttributeBag $attributes */")
@@ -1945,6 +2018,7 @@ mod tests {
             TemplateKind::Component,
             None,
             None,
+            &Default::default(),
         );
         assert!(
             !php.contains("$attributes = null;"),
@@ -1966,6 +2040,7 @@ mod tests {
             TemplateKind::View,
             None,
             None,
+            &Default::default(),
         );
         assert!(
             php.contains("/** @var array<int, string> $results */"),
@@ -2014,6 +2089,7 @@ mod tests {
             TemplateKind::View,
             None,
             None,
+            &Default::default(),
         );
         assert_eq!(map.prologue_lines, super::super::PROLOGUE_LINES + 2);
         assert!(
@@ -2040,6 +2116,7 @@ mod tests {
             TemplateKind::View,
             None,
             None,
+            &Default::default(),
         );
         assert!(
             php.contains("/** @var mixed $x */") && !php.contains("evil()"),
@@ -2065,6 +2142,7 @@ mod tests {
             TemplateKind::Component,
             None,
             None,
+            &Default::default(),
         );
         assert!(
             !php.contains("wire:model.live") && !php.contains("@click"),
@@ -2160,6 +2238,130 @@ mod tests {
             php.contains("blade_directive ($value);"),
             "unexpected @dump(...) translation: {}",
             php
+        );
+    }
+
+    /// The directives a project registered, as the provider scan would have
+    /// recorded them.
+    fn registered(names: &[(&str, bool)]) -> CustomDirectives {
+        let registrations: Vec<super::super::directives::CustomDirective> = names
+            .iter()
+            .map(
+                |(name, conditional)| super::super::directives::CustomDirective {
+                    name: name.to_string(),
+                    conditional: *conditional,
+                },
+            )
+            .collect();
+        CustomDirectives::from_registrations(&registrations)
+    }
+
+    /// The wrapped template body of a preprocessed template, without the
+    /// prologue — whose marker declarations would otherwise answer a search
+    /// for a marker the body never calls.
+    fn preprocess_with_directives(content: &str, directives: &CustomDirectives) -> String {
+        let (php, _) =
+            preprocess_with_vars(content, &[], TemplateKind::View, None, None, directives);
+        let body_start = php
+            .find("global $errors")
+            .expect("wrapper function prologue");
+        php[body_start..].to_string()
+    }
+
+    /// A `Blade::directive()` registration is a statement whose argument the
+    /// template still gets type-checked on, rather than the comment an
+    /// unregistered `@name` degrades to.
+    #[test]
+    fn a_registered_directive_keeps_its_argument_as_real_php() {
+        let php = preprocess_with_directives(
+            "<p>@datetime($post->createdAt)</p>",
+            &registered(&[("datetime", false)]),
+        );
+        assert!(
+            php.contains("blade_custom_directive ($post->createdAt);"),
+            "unexpected @datetime translation: {php}"
+        );
+    }
+
+    /// Blade hands a handler an empty expression when the template writes no
+    /// argument list, so a bare name must complete on the spot instead of
+    /// scanning ahead for a closing paren that was never opened.
+    #[test]
+    fn a_registered_directive_without_arguments_stands_alone() {
+        let php = preprocess_with_directives(
+            "<p>@datetime</p>{{ $after }}",
+            &registered(&[("datetime", false)]),
+        );
+        assert!(
+            php.contains("blade_custom_directive();"),
+            "unexpected bare @datetime translation: {php}"
+        );
+        assert!(
+            php.contains("echo e( $after"),
+            "the rest of the template must still be scanned as Blade: {php}"
+        );
+    }
+
+    /// `Blade::if('admin')` gives the template four directives, and the
+    /// three that are not the `@end` open a real condition so the `@endadmin`
+    /// closing them balances.
+    #[test]
+    fn a_registered_condition_opens_a_real_if() {
+        let php = preprocess_with_directives(
+            "@admin('editor')\n<p>yes</p>\n@elseadmin('viewer')\n<p>maybe</p>\n@endadmin\n<p>after</p>",
+            &registered(&[("admin", true)]),
+        );
+        assert!(
+            php.contains("if (blade_custom_directive ('editor')):"),
+            "@admin should open a balanced if: {php}"
+        );
+        assert!(
+            php.contains("elseif (blade_custom_directive ('viewer')):"),
+            "@elseadmin should open a balanced elseif: {php}"
+        );
+        assert!(
+            php.contains("endif;"),
+            "@endadmin should close what @admin opened: {php}"
+        );
+    }
+
+    /// The argument list is optional for every member of the family, and
+    /// `@unlessadmin` is closed by the same `@endadmin` as `@admin`.
+    #[test]
+    fn a_registered_condition_without_arguments_is_still_balanced() {
+        let php = preprocess_with_directives(
+            "@unlessadmin\n<p>no</p>\n@endadmin\n",
+            &registered(&[("admin", true)]),
+        );
+        assert!(
+            php.contains("if (blade_custom_directive()):") && php.contains("endif;"),
+            "a bare @unlessadmin must open and close a real if: {php}"
+        );
+    }
+
+    /// Nothing was registered, so the directive is still what it always was:
+    /// inert markup, with its argument not read as PHP at all.
+    #[test]
+    fn an_unregistered_directive_stays_masked() {
+        let php = preprocess_with_directives("<p>@datetime($x)</p>", &CustomDirectives::default());
+        assert!(
+            !php.contains("blade_custom_directive") && !php.contains("$x"),
+            "an unregistered directive must stay masked: {php}"
+        );
+    }
+
+    /// Blade's compiler consults its custom table before its own directives,
+    /// but a registration shadowing a core name would break the block
+    /// structure of every template that writes it, so the core table wins.
+    #[test]
+    fn a_registration_does_not_shadow_a_core_directive() {
+        let php = preprocess_with_directives(
+            "@if ($ok)\n<p>hi</p>\n@endif\n",
+            &registered(&[("if", false), ("endif", false)]),
+        );
+        assert!(
+            php.contains("($ok):") && !php.contains("blade_custom_directive"),
+            "@if must still compile as Blade's own directive: {php}"
         );
     }
 
@@ -2446,6 +2648,7 @@ mod tests {
             TemplateKind::View,
             None,
             Some(&resolver as &dyn ComponentResolver),
+            &Default::default(),
         )
         .0
     }

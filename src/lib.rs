@@ -794,6 +794,12 @@ pub struct Backend {
     /// The per-provider scans the merged table above was built from, so an
     /// edit to one provider rebuilds the merge without re-reading the rest.
     pub(crate) laravel_provider_scans: Arc<RwLock<virtual_members::laravel::ProviderScans>>,
+    /// The Blade directives the project's providers register, expanded from
+    /// the merged table's `custom_directives` into every name a template can
+    /// write.  Kept separate from the table because the Blade preprocessor
+    /// reads it on every keystroke in a template and must not pay for the
+    /// expansion each time.
+    pub(crate) blade_custom_directives: Arc<RwLock<blade::directives::CustomDirectives>>,
     /// Cached Laravel string key enumerations (route names, config keys,
     /// view names, translation keys).  `None` = not yet computed.
     /// Invalidated when a file in `routes/`, `config/`, `resources/views/`,
@@ -1128,6 +1134,9 @@ impl Backend {
             laravel_provider_scans: Arc::new(RwLock::new(
                 virtual_members::laravel::ProviderScans::default(),
             )),
+            blade_custom_directives: Arc::new(RwLock::new(
+                blade::directives::CustomDirectives::default(),
+            )),
             laravel_string_key_cache: Arc::new(RwLock::new(LaravelStringKeyCache::default())),
             laravel_string_key_build_locks: Arc::new(LaravelStringKeyBuildLocks::default()),
             schema_index: Arc::new(RwLock::new(
@@ -1235,6 +1244,9 @@ impl Backend {
             )),
             laravel_provider_scans: Arc::new(RwLock::new(
                 virtual_members::laravel::ProviderScans::default(),
+            )),
+            blade_custom_directives: Arc::new(RwLock::new(
+                blade::directives::CustomDirectives::default(),
             )),
             laravel_string_key_cache: Arc::new(RwLock::new(LaravelStringKeyCache::default())),
             laravel_string_key_build_locks: Arc::new(LaravelStringKeyBuildLocks::default()),
@@ -1874,6 +1886,7 @@ impl Backend {
             laravel_date_seed_uris: Arc::clone(&self.laravel_date_seed_uris),
             laravel_provider_resources: Arc::clone(&self.laravel_provider_resources),
             laravel_provider_scans: Arc::clone(&self.laravel_provider_scans),
+            blade_custom_directives: Arc::clone(&self.blade_custom_directives),
             laravel_string_key_cache: Arc::clone(&self.laravel_string_key_cache),
             laravel_string_key_build_locks: Arc::clone(&self.laravel_string_key_build_locks),
             schema_index: Arc::clone(&self.schema_index),

@@ -2989,6 +2989,11 @@ impl Backend {
             + resources.folio_mounts.len()
             > 0;
         let has_bindings = !resources.bindings.is_empty();
+        let directives = crate::blade::directives::CustomDirectives::from_registrations(
+            &resources.custom_directives,
+        );
+        let directives_changed = *self.blade_custom_directives.read() != directives;
+        *self.blade_custom_directives.write() = directives;
         *self.laravel_provider_resources.write() = resources;
 
         // The shared and composed template variables are resolved from these
@@ -3011,6 +3016,29 @@ impl Backend {
         if has_bindings {
             *self.laravel_aliases.write() = None;
             self.clear_class_not_found_cache();
+        }
+
+        // Which directives exist decides what the preprocessor lowers rather
+        // than masks, and the providers registering them are scanned after
+        // the workspace index has already preprocessed every template — so
+        // the templates have to be preprocessed again against the set that
+        // just arrived.
+        if directives_changed {
+            self.reparse_blade_templates();
+        }
+    }
+
+    /// Re-preprocess every Blade template already in the virtual-PHP cache.
+    ///
+    /// A no-op before any template has been preprocessed, and only reached
+    /// when the registered directive set actually moved, so the pass cannot
+    /// repeat itself: the second scan publishes the same set.
+    fn reparse_blade_templates(&self) {
+        let uris: Vec<String> = self.blade_virtual_content.read().keys().cloned().collect();
+        for uri in uris {
+            if let Some(content) = self.get_file_content(&uri) {
+                self.update_ast(&uri, &content);
+            }
         }
     }
 

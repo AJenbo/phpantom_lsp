@@ -178,6 +178,22 @@
     @php($bakery = \App\Models\Bakery::firstOrFail())
     <x-card :bakery="$bakery" footer="Baked today" />
 
+    {{-- @priceTag and the @bakeryOpen family are this project's own
+         directives, registered in DemoServiceProvider::boot() with
+         Blade::directive() and Blade::if(). Neither exists in Blade, so that
+         registration is the only record of them: without it a template
+         writing them gets nothing at all.
+         Try: type `@price` and `@bakery` on a line of their own — both
+         complete like Blade's own directives. What a directive is handed
+         stays real PHP, so hover $bakery below and change `dough_temp` to a
+         column the model does not have to see it reported. --}}
+    @priceTag($bakery->dough_temp)
+    @bakeryOpen($bakery)
+        <p>{{ __('messages.welcome') }}</p>
+    @elsebakeryOpen($bakery)
+        <p>{{ trans('auth.failed') }}</p>
+    @endbakeryOpen
+
     {{-- @verbatim: content inside is skipped by the preprocessor --}}
     @verbatim
         <p>This {{ $blade }} syntax is not processed</p>

@@ -70,30 +70,6 @@ dependency.
 
 ---
 
-## BL11. Custom directive discovery
-
-**Impact: Medium · Complexity: Medium**
-
-`Blade::directive('datetime', …)` and `Blade::if('env', …)`
-registrations in app and package service providers declare
-project-specific directives. (Component namespace/path registrations —
-`Blade::componentNamespace()`, `Blade::anonymousComponentPath()`,
-`Blade::anonymousComponentNamespace()` — are already scanned into
-`ProviderResources` and extend the discovery index; see
-`src/virtual_members/laravel/provider_resources.rs`. What remains is the
-directive-registration half.) Scan literal directive registrations too
-— the same provider-scanning shape as the macro scanner — so that:
-
-- known custom directives stop degrading to comments in the
-  preprocessor and instead map to expression-preserving PHP (their
-  argument is still type-checked);
-- `Blade::if('admin')` synthesizes the full family (`@admin`,
-  `@elseadmin`, `@endadmin`, `@unlessadmin`);
-- directive name completion (`DIRECTIVE_COMPLETIONS` in
-  `src/blade/directives.rs`) includes them.
-
----
-
 ## BL25. Anonymous component attribute completion from undeclared template reads
 
 **Impact: Medium · Complexity: Medium**
