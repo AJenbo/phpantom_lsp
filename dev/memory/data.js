@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788184535963,
+  "lastUpdate": 1788186767397,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -26043,6 +26043,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 69.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "sidux@users.noreply.github.com",
+            "name": "sidux",
+            "username": "sidux"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "5aa55e0beaf4ff802df9622e6dbcaf6777d7f36b",
+          "message": "feat(php): add call hierarchy\n\nReuse the existing definition and reference pipelines for standard\nincoming and outgoing call navigation.",
+          "timestamp": "2026-08-31T16:20:23+02:00",
+          "tree_id": "794c3b9c88a92c60eee4e038589c3d83b05945df",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/5aa55e0beaf4ff802df9622e6dbcaf6777d7f36b"
+        },
+        "date": 1788186759985,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 36.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 72.3,
             "unit": "MiB"
           }
         ]
