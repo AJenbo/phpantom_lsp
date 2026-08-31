@@ -1168,41 +1168,57 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#x9-honor-editor-file-excludes-and-php-associations-during-indexing" class="md-nav__link">
+  <a href="#x9-accept-client-supplied-file-filters-initializationoptions" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        X9. Honor editor file excludes and PHP associations during indexing
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="X9. Honor editor file excludes and PHP associations during indexing">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#approach" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Approach
+        X9. Accept client-supplied file filters (<code>initializationOptions</code>)
       </span>
     </span>
   </a>
   
 </li>
-        
-          <li class="md-nav__item">
-  <a href="#editor-agnostic-note" class="md-nav__link">
+      
+        <li class="md-nav__item">
+  <a href="#x10-vs-code-forward-filesexclude-and-filesassociations-depends-on-x9" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Editor-agnostic note
+        X10. VS Code: forward <code>files.exclude</code> and <code>files.associations</code> (depends on X9)
       </span>
     </span>
   </a>
   
 </li>
-        
-      </ul>
-    </nav>
+      
+        <li class="md-nav__item">
+  <a href="#x11-zed-file-filters-via-initialization_options-depends-on-x9" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        X11. Zed: file filters via <code>initialization_options</code> (depends on X9)
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#x12-say-when-an-exclude-hid-the-class-a-diagnostic-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        X12. Say when an exclude hid the class a diagnostic names
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#x13-decide-how-workspace-wide-edits-treat-excluded-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        X13. Decide how workspace-wide edits treat excluded files
+      </span>
+    </span>
+  </a>
   
 </li>
       
@@ -1744,41 +1760,57 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#x9-honor-editor-file-excludes-and-php-associations-during-indexing" class="md-nav__link">
+  <a href="#x9-accept-client-supplied-file-filters-initializationoptions" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        X9. Honor editor file excludes and PHP associations during indexing
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="X9. Honor editor file excludes and PHP associations during indexing">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#approach" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Approach
+        X9. Accept client-supplied file filters (<code>initializationOptions</code>)
       </span>
     </span>
   </a>
   
 </li>
-        
-          <li class="md-nav__item">
-  <a href="#editor-agnostic-note" class="md-nav__link">
+      
+        <li class="md-nav__item">
+  <a href="#x10-vs-code-forward-filesexclude-and-filesassociations-depends-on-x9" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Editor-agnostic note
+        X10. VS Code: forward <code>files.exclude</code> and <code>files.associations</code> (depends on X9)
       </span>
     </span>
   </a>
   
 </li>
-        
-      </ul>
-    </nav>
+      
+        <li class="md-nav__item">
+  <a href="#x11-zed-file-filters-via-initialization_options-depends-on-x9" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        X11. Zed: file filters via <code>initialization_options</code> (depends on X9)
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#x12-say-when-an-exclude-hid-the-class-a-diagnostic-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        X12. Say when an exclude hid the class a diagnostic names
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#x13-decide-how-workspace-wide-edits-treat-excluded-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        X13. Decide how workspace-wide edits treat excluded files
+      </span>
+    </span>
+  </a>
   
 </li>
       
@@ -2116,44 +2148,89 @@ ready to implement.</p>
 </li>
 </ol>
 <hr />
-<h2 id="x9-honor-editor-file-excludes-and-php-associations-during-indexing">X9. Honor editor file excludes and PHP associations during indexing<a class="headerlink" href="#x9-honor-editor-file-excludes-and-php-associations-during-indexing" title="Permanent link">&para;</a></h2>
+<h2 id="x9-accept-client-supplied-file-filters-initializationoptions">X9. Accept client-supplied file filters (<code>initializationOptions</code>)<a class="headerlink" href="#x9-accept-client-supplied-file-filters-initializationoptions" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p>The <code>.phpantom.toml</code> side of editor-filter support has shipped:
+<code>[indexing] exclude</code> and <code>[indexing] extensions</code> compile into
+<code>classmap_scanner::IndexFilters</code>, which every workspace walker, the
+file watcher, and <code>analyze</code> consult. The server, however, reads no
+<code>initializationOptions</code> at all today (and has no
+<code>workspace/didChangeConfiguration</code> handler), so an editor extension
+has nothing to forward the editor's own settings to, and a user has
+to mirror <code>files.exclude</code> / <code>files.associations</code> into
+<code>.phpantom.toml</code> by hand.</p>
+<p>Teach <code>initialize</code> to read a generic shape from
+<code>initializationOptions</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">{</span><span class="w"> </span><span class="nt">&quot;indexing&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;exclude&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;generated&quot;</span><span class="p">],</span><span class="w"> </span><span class="nt">&quot;extensions&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;module&quot;</span><span class="p">]</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">}</span>
+</code></pre></div>
+<p>held as a client layer beside the <code>.phpantom.toml</code> layer:
+<code>Backend::index_filters()</code> compiles the union of the two, so a config
+reload keeps the client's contribution and a client update keeps the
+config file's. Accept the same shape via
+<code>workspace/didChangeConfiguration</code> so a settings change mid-session
+recompiles the filters; a changed <code>extensions</code> list also needs the
+watcher re-registration tracked as B1 in
+<a href="../bugs/#b1-adding-an-indexing-extensions-entry-needs-a-restart-to-be-watched"><code>bugs.md</code></a>.</p>
+<p>Keep the interface generic (a list of gitignore-style globs and a
+list of extensions), never editor-specific setting names: any client
+can supply them, and Zed already forwards the user's
+<code>lsp.phpantom.initialization_options</code> from <code>settings.json</code> to the
+server verbatim, so this task alone gives Zed users a working path
+with no extension changes at all (see X11).</p>
+<h2 id="x10-vs-code-forward-filesexclude-and-filesassociations-depends-on-x9">X10. VS Code: forward <code>files.exclude</code> and <code>files.associations</code> (depends on X9)<a class="headerlink" href="#x10-vs-code-forward-filesexclude-and-filesassociations-depends-on-x9" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p>The client half of X9 for VS Code; the work lives in the extension
+repo (filed there as V9). The client passes no
+<code>initializationOptions</code> today. Gather the effective <code>files.exclude</code>
+entries that are enabled, translating VS Code's glob dialect to the
+gitignore lines X9 accepts, and the <code>files.associations</code> patterns
+mapped to <code>php</code>, reduced to extensions (<code>*.module</code> → <code>module</code>). Pass
+both at startup and re-send them from
+<code>workspace.onDidChangeConfiguration</code>. Clients are spawned one per
+workspace folder, so read folder-scoped configuration for each. This
+is the same merge Intelephense's middleware performs with VS Code's
+native settings.</p>
+<h2 id="x11-zed-file-filters-via-initialization_options-depends-on-x9">X11. Zed: file filters via <code>initialization_options</code> (depends on X9)<a class="headerlink" href="#x11-zed-file-filters-via-initialization_options-depends-on-x9" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
+<p>Zed's extension API serves extensions only the <code>language</code>, <code>lsp</code>, and
+<code>context_servers</code> settings categories (<code>get_settings</code> in the
+<code>extension_host</code> crate), so the PHP extension cannot read the
+editor's <code>file_scan_exclusions</code> or <code>file_types</code> to forward them;
+automatic parity with the editor's own excludes is blocked on an
+upstream Zed change. What is achievable now: Zed merges the user's
+<code>lsp.phpantom.initialization_options</code> from <code>settings.json</code> over
+whatever the extension supplies, so once X9 lands the whole feature
+is a documentation section. Document the shape in
+<a href="../../editor-setup/"><code>editor-setup.md</code></a>, and file the upstream
+request to expose those two settings to extensions so the manual
+step can eventually disappear.</p>
+<h2 id="x12-say-when-an-exclude-hid-the-class-a-diagnostic-names">X12. Say when an exclude hid the class a diagnostic names<a class="headerlink" href="#x12-say-when-an-exclude-hid-the-class-a-diagnostic-names" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
-<p>This task spans both the server and the IDE plugins. The server side
-teaches the directory walkers to honor a generic list of exclude globs
-and extra PHP extensions. The client side (each editor extension) must
-gather the editor's effective <code>files.exclude</code> / <code>files.associations</code>
-and forward them to the server, since only the extension has access to
-those editor settings.</p>
-<p>The workspace scanners discover files by the <code>.php</code> extension and do
-not consult any exclude list. Two pieces of information the editor
-already has are ignored:</p>
-<ul>
-<li><strong><code>files.exclude</code> (and a PHPantom-specific exclude glob).</strong> Large
-  generated/vendored directories that the user has hidden from the
-  editor are still walked and parsed by the indexer. Skipping them
-  would cut startup work and avoid indexing irrelevant symbols.</li>
-<li><strong><code>files.associations</code>.</strong> Files mapped to PHP under a non-<code>.php</code>
-  extension (e.g. <code>.module</code>, <code>.inc</code>, <code>.theme</code> in Drupal) are not
-  discovered by the byte-level scanners, so their classes/functions
-  are missing from the index. Note that <em>open</em> associated files
-  already work, because VS Code reports them with the <code>php</code> language
-  id and the client's document selector matches on language id, not
-  extension. Only background discovery is affected.</li>
-</ul>
-<h3 id="approach">Approach<a class="headerlink" href="#approach" title="Permanent link">&para;</a></h3>
-<p>The client passes the effective exclude globs and the set of
-PHP-associated extensions to the server (via <code>initializationOptions</code>,
-or by responding to <code>workspace/configuration</code> the way Intelephense's
-middleware merges VS Code's native <code>files.exclude</code> /
-<code>files.associations</code> into the server config). The directory walkers in
-<code>classmap_scanner/discovery.rs</code> and <code>util.rs</code> consult the exclude
-globs before descending, and treat the extra associated extensions as
-PHP when collecting candidate files.</p>
-<h3 id="editor-agnostic-note">Editor-agnostic note<a class="headerlink" href="#editor-agnostic-note" title="Permanent link">&para;</a></h3>
-<p>Excludes and associations are editor concepts. Keep the server's
-interface generic (a list of globs and a list of extensions) so any
-client (VS Code, Zed) can supply them, rather than hard-coding
-VS Code setting names in the server.</p>
+<p>An over-broad <code>[indexing] exclude</code> makes real classes unresolvable,
+and the resulting <code>Class 'App\Generated\Foo' not found</code> is
+indistinguishable from a typo: the user's own configuration caused
+it and nothing says so, which reads as a PHPantom bug. When class
+resolution fails, the FQN maps to a PSR-4 path, and that file exists
+on disk but <code>is_excluded_path</code> matches it, extend the message with
+the cause ("defined in <code>src/Generated/Foo.php</code>, which <code>[indexing]
+exclude</code> skips"). The PSR-4 mapping makes the probe a single stat
+plus an already-compiled glob match on the failure path only;
+classmap-only projects get no probe rather than a disk walk.</p>
+<h2 id="x13-decide-how-workspace-wide-edits-treat-excluded-files">X13. Decide how workspace-wide edits treat excluded files<a class="headerlink" href="#x13-decide-how-workspace-wide-edits-treat-excluded-files" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p><code>collect_php_files_gitignore</code> feeds find-references and namespace
+rename, so an excluded tree is invisible to both: a rename can leave
+excluded code calling a name that no longer exists, with no warning.
+That is consistent with what an exclude means, but sharper than
+"background discovery" suggests. Options: (a) keep the behaviour and
+document it under the <code>exclude</code> setting; (b) let correctness
+operations (rename, find-references) ignore <code>[indexing] exclude</code> on
+the grounds that the setting is an index-size and startup-time tool,
+not a statement that the code does not exist; (c) keep the exclusion
+but include a warning in the rename response when excludes are
+configured. Maintainer's call on the semantics; whichever way it
+goes, the chosen behaviour needs a test and a sentence in
+<a href="../../configuration/"><code>configuration.md</code></a>.</p>
 
 
 

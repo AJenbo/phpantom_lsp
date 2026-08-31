@@ -937,6 +937,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#b1-adding-an-indexing-extensions-entry-needs-a-restart-to-be-watched" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B1. Adding an <code>[indexing] extensions</code> entry needs a restart to be watched
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1514,6 +1525,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#b1-adding-an-indexing-extensions-entry-needs-a-restart-to-be-watched" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B1. Adding an <code>[indexing] extensions</code> entry needs a restart to be watched
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1570,7 +1592,27 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h2 id="b1-adding-an-indexing-extensions-entry-needs-a-restart-to-be-watched">B1. Adding an <code>[indexing] extensions</code> entry needs a restart to be watched<a class="headerlink" href="#b1-adding-an-indexing-extensions-entry-needs-a-restart-to-be-watched" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
+<p><code>initialized</code> in <code>src/server.rs</code> registers one
+<code>workspace/didChangeWatchedFiles</code> watcher per configured
+<code>[indexing] extensions</code> entry, and that registration happens once. A
+<code>.phpantom.toml</code> reload recompiles the filters (so the next workspace
+scan sees the new extension) but does not touch the watcher list, so
+editing a <code>.module</code> file added to the setting mid-session produces no
+event and the index keeps serving the version from the last full scan.
+The rest of the configuration is reloaded live, and the changelog says
+so, which is what makes the exception surprising.</p>
+<p>The Laravel-gated <code>*.sql</code> and <code>config/database.php</code> watchers have the
+same shape: they are chosen from <code>is_laravel()</code> at startup and never
+revisited.</p>
+<p><strong>Fix:</strong> Re-register the watcher capability from <code>reload_config</code> when
+the extension list (or the Laravel classification) changed since the
+last registration, unregistering the previous one by its
+<code>workspace/didChangeWatchedFiles</code> id first. Guard it on an actual
+change so an unrelated config edit does not churn the client's
+watchers. A test can assert the registered glob set after a reload
+that adds an extension.</p>
 
 
 

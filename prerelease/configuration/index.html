@@ -1885,8 +1885,24 @@ present on a rule; omitted constraints match anything.</p>
 <td><code>"full"</code></td>
 <td>Class discovery strategy: <code>"full"</code>, <code>"composer"</code>, <code>"self"</code>, or <code>"none"</code>. See <a href="#indexing-strategy">Indexing Strategy</a> below.</td>
 </tr>
+<tr>
+<td><code>exclude</code></td>
+<td>string[]</td>
+<td><code>[]</code></td>
+<td>Paths the workspace scanners skip, in gitignore syntax relative to the workspace root: a bare name matches at any depth, a pattern containing <code>/</code> anchors to the root, a trailing <code>/</code> restricts to directories, and a leading <code>!</code> re-includes. Applies to background discovery and to the directories <code>analyze</code> walks. A file you open in the editor, or name outright on the <code>analyze</code> command line, is always served.</td>
+</tr>
+<tr>
+<td><code>extensions</code></td>
+<td>string[]</td>
+<td><code>[]</code></td>
+<td>Extra file extensions (without the dot) treated as PHP source during workspace discovery, e.g. <code>["module", "inc", "theme"]</code> for Drupal. <code>.php</code> is always included.</td>
+</tr>
 </tbody>
 </table>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="k">[indexing]</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">exclude</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;generated&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;web/sites/default/files&quot;</span><span class="p">]</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="n">extensions</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;module&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;install&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;theme&quot;</span><span class="p">]</span>
+</code></pre></div>
 <h3 id="semantic_tokens"><code>[semantic_tokens]</code><a class="headerlink" href="#semantic_tokens" title="Permanent link">&para;</a></h3>
 <p>PHPantom defaults to <code>contextual</code> semantic tokens so editor syntax
 highlighting remains in charge of ordinary PHP syntax.</p>
@@ -2136,11 +2152,11 @@ highlighting remains in charge of ordinary PHP syntax.</p>
 <li><strong>Otherwise, the built-in formatter is used.</strong></li>
 </ol>
 <p>The built-in formatter defaults to the PER-CS 2.0 style. If a <code>mago.toml</code> is present at the workspace root, its <code>[formatter]</code> table is honoured instead, so PHPantom formats with the same preset and settings your project already uses with the Mago CLI:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># mago.toml</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="k">[formatter]</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="n">preset</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;psr-12&quot;</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="n">print-width</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">100</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="n">use-tabs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">false</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># mago.toml</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="k">[formatter]</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="n">preset</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;psr-12&quot;</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="n">print-width</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">100</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="n">use-tabs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">false</span>
 </code></pre></div>
 <p>For the full list of <code>[formatter]</code> options (presets, brace placement, blank-line handling, casing, and the rest), refer to the upstream Mago documentation: <a href="https://mago.carthage.software/latest/en/tools/formatter/configuration-reference">Formatter configuration reference</a>.</p>
 <h2 id="indexing-strategy">Indexing Strategy<a class="headerlink" href="#indexing-strategy" title="Permanent link">&para;</a></h2>
