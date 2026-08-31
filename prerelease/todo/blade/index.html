@@ -823,17 +823,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#bl11-custom-directive-discovery" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        BL11. Custom directive discovery
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#bl25-anonymous-component-attribute-completion-from-undeclared-template-reads" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1568,17 +1557,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#bl11-custom-directive-discovery" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        BL11. Custom directive discovery
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#bl25-anonymous-component-attribute-completion-from-undeclared-template-reads" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1907,27 +1885,6 @@ dependency.</p>
   component resolution produces comments. The user always gets partial
   completions rather than a broken file. The preprocessor must never
   produce invalid PHP.</li>
-</ul>
-<hr />
-<h2 id="bl11-custom-directive-discovery">BL11. Custom directive discovery<a class="headerlink" href="#bl11-custom-directive-discovery" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<p><code>Blade::directive('datetime', …)</code> and <code>Blade::if('env', …)</code>
-registrations in app and package service providers declare
-project-specific directives. (Component namespace/path registrations —
-<code>Blade::componentNamespace()</code>, <code>Blade::anonymousComponentPath()</code>,
-<code>Blade::anonymousComponentNamespace()</code> — are already scanned into
-<code>ProviderResources</code> and extend the discovery index; see
-<code>src/virtual_members/laravel/provider_resources.rs</code>. What remains is the
-directive-registration half.) Scan literal directive registrations too
-— the same provider-scanning shape as the macro scanner — so that:</p>
-<ul>
-<li>known custom directives stop degrading to comments in the
-  preprocessor and instead map to expression-preserving PHP (their
-  argument is still type-checked);</li>
-<li><code>Blade::if('admin')</code> synthesizes the full family (<code>@admin</code>,
-  <code>@elseadmin</code>, <code>@endadmin</code>, <code>@unlessadmin</code>);</li>
-<li>directive name completion (<code>DIRECTIVE_COMPLETIONS</code> in
-  <code>src/blade/directives.rs</code>) includes them.</li>
 </ul>
 <hr />
 <h2 id="bl25-anonymous-component-attribute-completion-from-undeclared-template-reads">BL25. Anonymous component attribute completion from undeclared template reads<a class="headerlink" href="#bl25-anonymous-component-attribute-completion-from-undeclared-template-reads" title="Permanent link">&para;</a></h2>
