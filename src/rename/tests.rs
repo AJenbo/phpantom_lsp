@@ -42,6 +42,20 @@ async fn rename(
     character: u32,
     new_name: &str,
 ) -> Option<WorkspaceEdit> {
+    rename_result(backend, uri, line, character, new_name)
+        .await
+        .expect("rename was refused")
+}
+
+/// Like [`rename`] but keeps the refusal, so a test can assert on the
+/// message the user is shown.
+async fn rename_result(
+    backend: &Backend,
+    uri: &Url,
+    line: u32,
+    character: u32,
+    new_name: &str,
+) -> std::result::Result<Option<WorkspaceEdit>, String> {
     let params = RenameParams {
         text_document_position: TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri: uri.clone() },
@@ -51,7 +65,10 @@ async fn rename(
         work_done_progress_params: WorkDoneProgressParams::default(),
     };
 
-    backend.rename(params).await.unwrap()
+    backend
+        .rename(params)
+        .await
+        .map_err(|e| e.message.to_string())
 }
 
 fn seed_macro_index(backend: &Backend, uri: &Url, text: &str) {
@@ -5468,5 +5485,315 @@ async fn rename_function_can_start_from_a_fully_qualified_call() {
     assert!(
         updated.contains("function yell(): void {}") && updated.contains("\\Support\\yell();"),
         "the declaration and the qualified call should both move:\n{updated}"
+    );
+}
+
+// ─── Moves onto an already-occupied target ──────────────────────────────────
+
+/// A backend over a real on-disk PSR-4 workspace (`App\` → `src/`), with
+/// every file indexed and client file-rename support enabled.  The
+/// PSR-4 file-move logic stats the filesystem, so these cases cannot be
+/// exercised against synthetic `file:///` URIs.
+async fn psr4_move_workspace(files: &[(&str, &str)]) -> (Backend, tempfile::TempDir) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let backend = Backend::new_test();
+    backend.supports_file_rename.store(true, Ordering::Release);
+    *backend.workspace_root().write() = Some(dir.path().to_path_buf());
+    *backend.psr4_mappings().write() = vec![crate::composer::Psr4Mapping {
+        prefix: "App\\".to_string(),
+        base_path: "src".to_string(),
+    }];
+
+    for (rel, content) in files {
+        let full = dir.path().join(rel);
+        std::fs::create_dir_all(full.parent().expect("parent")).expect("mkdir");
+        std::fs::write(&full, content).expect("write");
+        let uri = Url::from_file_path(&full).expect("uri");
+        open_file(&backend, &uri, content).await;
+    }
+
+    (backend, dir)
+}
+
+fn ws_uri(dir: &tempfile::TempDir, rel: &str) -> Url {
+    Url::from_file_path(dir.path().join(rel)).expect("uri")
+}
+
+/// Every `(old, new)` file operation a workspace edit carries.
+fn file_moves(edit: &WorkspaceEdit) -> Vec<(String, String)> {
+    let Some(DocumentChanges::Operations(ops)) = &edit.document_changes else {
+        return Vec::new();
+    };
+    ops.iter()
+        .filter_map(|op| match op {
+            DocumentChangeOperation::Op(ResourceOp::Rename(r)) => {
+                Some((r.old_uri.to_string(), r.new_uri.to_string()))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// Every URI a workspace edit targets with text edits.
+fn edited_uris(edit: &WorkspaceEdit) -> Vec<String> {
+    match &edit.document_changes {
+        Some(DocumentChanges::Operations(ops)) => ops
+            .iter()
+            .filter_map(|op| match op {
+                DocumentChangeOperation::Edit(e) => Some(e.text_document.uri.to_string()),
+                _ => None,
+            })
+            .collect(),
+        _ => edit
+            .changes
+            .iter()
+            .flat_map(|c| c.keys())
+            .map(|u| u.to_string())
+            .collect(),
+    }
+}
+
+#[tokio::test]
+async fn class_move_onto_an_existing_class_is_refused_with_no_edits() {
+    // The destination namespace already declares the name, so the move
+    // would leave two classes claiming it.  Nothing is emitted.
+    let (backend, dir) = psr4_move_workspace(&[
+        (
+            "src/Internal/Helper.php",
+            "<?php\nnamespace App\\Internal;\n\nclass Helper {}\n",
+        ),
+        (
+            "src/Support/Helper.php",
+            "<?php\nnamespace App\\Support;\n\nclass Helper {}\n",
+        ),
+    ])
+    .await;
+
+    let uri = ws_uri(&dir, "src/Internal/Helper.php");
+    let result = rename_result(&backend, &uri, 3, 8, "App\\Support\\Helper").await;
+
+    let message = result.expect_err("the move should be refused");
+    assert!(
+        message.contains("App\\Support\\Helper") && message.contains("already"),
+        "the refusal should name the class in the way: {message}"
+    );
+    assert!(
+        std::fs::read_to_string(dir.path().join("src/Support/Helper.php"))
+            .expect("the existing file should be untouched")
+            .contains("namespace App\\Support;")
+    );
+}
+
+#[tokio::test]
+async fn class_move_onto_an_existing_file_is_refused() {
+    // Nothing declares `App\Support\Helper`, but PSR-4 puts it in a file
+    // that is already there, so the move would clobber it.
+    let (backend, dir) = psr4_move_workspace(&[(
+        "src/Internal/Helper.php",
+        "<?php\nnamespace App\\Internal;\n\nclass Helper {}\n",
+    )])
+    .await;
+
+    std::fs::create_dir_all(dir.path().join("src/Support")).expect("mkdir");
+    std::fs::write(
+        dir.path().join("src/Support/Helper.php"),
+        "<?php\n// notes\n",
+    )
+    .expect("write");
+
+    let uri = ws_uri(&dir, "src/Internal/Helper.php");
+    let result = rename_result(&backend, &uri, 3, 8, "App\\Support\\Helper").await;
+
+    let message = result.expect_err("the move should be refused");
+    assert!(
+        message.contains("already exists"),
+        "the refusal should say the file is in the way: {message}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("src/Support/Helper.php")).expect("read"),
+        "<?php\n// notes\n",
+    );
+}
+
+#[tokio::test]
+async fn class_move_to_a_free_name_still_works() {
+    let (backend, dir) = psr4_move_workspace(&[
+        (
+            "src/Internal/Helper.php",
+            "<?php\nnamespace App\\Internal;\n\nclass Helper {}\n",
+        ),
+        (
+            "src/Support/Existing.php",
+            "<?php\nnamespace App\\Support;\n\nclass Existing {}\n",
+        ),
+    ])
+    .await;
+
+    let uri = ws_uri(&dir, "src/Internal/Helper.php");
+    let ws = rename(&backend, &uri, 3, 8, "App\\Support\\Helper")
+        .await
+        .expect("expected an edit");
+
+    let moves = file_moves(&ws);
+    assert_eq!(moves.len(), 1, "expected one file move, got {moves:?}");
+    assert!(
+        moves[0].1.ends_with("/src/Support/Helper.php"),
+        "got {moves:?}"
+    );
+}
+
+#[tokio::test]
+async fn namespace_rename_into_an_existing_namespace_merges_file_by_file() {
+    // `App\Internal` merges into an `App\Support` that already exists.
+    // A directory rename would clobber or fail, so each file moves on
+    // its own and the files already there are left alone.
+    let (backend, dir) = psr4_move_workspace(&[
+        (
+            "src/Internal/Helper.php",
+            "<?php\nnamespace App\\Internal;\n\nclass Helper {}\n",
+        ),
+        (
+            "src/Internal/Nested/Deep.php",
+            "<?php\nnamespace App\\Internal\\Nested;\n\nclass Deep {}\n",
+        ),
+        (
+            "src/Support/Existing.php",
+            "<?php\nnamespace App\\Support;\n\nclass Existing {}\n",
+        ),
+    ])
+    .await;
+
+    let uri = ws_uri(&dir, "src/Internal/Helper.php");
+    let ws = rename(&backend, &uri, 1, 12, "App\\Support")
+        .await
+        .expect("expected an edit");
+
+    let moves = file_moves(&ws);
+    assert!(
+        !moves
+            .iter()
+            .any(|(old, _)| old.ends_with("/src/Internal") || old.ends_with("/src/Support")),
+        "the directory itself must not be renamed onto an existing one: {moves:?}"
+    );
+
+    let destinations: Vec<&str> = moves.iter().map(|(_, new)| new.as_str()).collect();
+    assert!(
+        destinations
+            .iter()
+            .any(|d| d.ends_with("/src/Support/Helper.php")),
+        "got {destinations:?}"
+    );
+    assert!(
+        destinations
+            .iter()
+            .any(|d| d.ends_with("/src/Support/Nested/Deep.php")),
+        "a nested file keeps its relative path: {destinations:?}"
+    );
+    assert!(
+        !destinations
+            .iter()
+            .any(|d| d.ends_with("/src/Support/Existing.php")),
+        "the file already there is not touched: {destinations:?}"
+    );
+
+    // Every edited file is one the move actually produces.
+    for edited in edited_uris(&ws) {
+        assert!(
+            !edited.contains("/src/Internal/"),
+            "an edit still targets the old location: {edited}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn namespace_rename_onto_a_clashing_name_is_refused_with_no_edits() {
+    let (backend, dir) = psr4_move_workspace(&[
+        (
+            "src/Internal/Helper.php",
+            "<?php\nnamespace App\\Internal;\n\nclass Helper {}\n",
+        ),
+        (
+            "src/Internal/Parser.php",
+            "<?php\nnamespace App\\Internal;\n\nclass Parser {}\n",
+        ),
+        (
+            "src/Support/Helper.php",
+            "<?php\nnamespace App\\Support;\n\nclass Helper {}\n",
+        ),
+    ])
+    .await;
+
+    let uri = ws_uri(&dir, "src/Internal/Helper.php");
+    let result = rename_result(&backend, &uri, 1, 12, "App\\Support").await;
+
+    let message = result.expect_err("the merge should be refused");
+    assert!(
+        message.contains("App\\Support\\Helper"),
+        "the refusal should name the clash: {message}"
+    );
+    assert!(
+        message.contains("App\\Internal") && message.contains("App\\Support"),
+        "the refusal should name both namespaces: {message}"
+    );
+}
+
+#[tokio::test]
+async fn namespace_rename_to_a_fresh_namespace_still_moves_the_directory() {
+    // Nothing exists at the destination, so the whole directory moves in
+    // one operation, as it did before merging was possible.
+    let (backend, dir) = psr4_move_workspace(&[(
+        "src/Internal/Helper.php",
+        "<?php\nnamespace App\\Internal;\n\nclass Helper {}\n",
+    )])
+    .await;
+
+    let uri = ws_uri(&dir, "src/Internal/Helper.php");
+    let ws = rename(&backend, &uri, 1, 12, "App\\Core")
+        .await
+        .expect("expected an edit");
+
+    let moves = file_moves(&ws);
+    assert_eq!(moves.len(), 1, "expected one directory move: {moves:?}");
+    assert!(moves[0].0.ends_with("/src/Internal"), "got {moves:?}");
+    assert!(moves[0].1.ends_with("/src/Core"), "got {moves:?}");
+}
+
+#[tokio::test]
+async fn namespace_rename_does_not_capture_a_sibling_directory_with_the_same_prefix() {
+    // `src/Internal` must not claim the edits of `src/InternalTools`.
+    let (backend, dir) = psr4_move_workspace(&[
+        (
+            "src/Internal/Helper.php",
+            "<?php\nnamespace App\\Internal;\n\nclass Helper {}\n",
+        ),
+        (
+            "src/InternalTools/Runner.php",
+            concat!(
+                "<?php\n",
+                "namespace App\\InternalTools;\n",
+                "\n",
+                "use App\\Internal\\Helper;\n",
+                "\n",
+                "class Runner {\n",
+                "    public function h(): Helper {\n",
+                "        return new Helper();\n",
+                "    }\n",
+                "}\n",
+            ),
+        ),
+    ])
+    .await;
+
+    let uri = ws_uri(&dir, "src/Internal/Helper.php");
+    let ws = rename(&backend, &uri, 1, 12, "App\\Core")
+        .await
+        .expect("expected an edit");
+
+    assert!(
+        edited_uris(&ws)
+            .iter()
+            .any(|u| u.ends_with("/src/InternalTools/Runner.php")),
+        "the sibling's edits must stay at its own path: {:?}",
+        edited_uris(&ws)
     );
 }

@@ -1382,18 +1382,38 @@ impl LanguageServer for Backend {
 
         let backend = self.clone_for_blocking();
         let uri_clone = uri.clone();
-        run_blocking_cancel_safe("rename", move || {
+        let outcome = run_blocking_cancel_safe("rename", move || {
             backend.handle_with_position("rename", &uri_clone, position, |content, pos| {
-                backend
-                    .handle_rename(&uri_clone, content, pos, &new_name)
-                    .map(|mut edit| {
-                        backend.translate_workspace_edit(&mut edit);
-                        edit
-                    })
+                Some(
+                    backend
+                        .handle_rename(&uri_clone, content, pos, &new_name)
+                        .map(|edit| {
+                            edit.map(|mut edit| {
+                                backend.translate_workspace_edit(&mut edit);
+                                edit
+                            })
+                        }),
+                )
             })
         })
         .await
-        .unwrap_or(Ok(None))
+        .unwrap_or(Ok(None))?;
+
+        // A refusal carries a reason the user has to see (the move's
+        // destination is taken), and an error response is the only part
+        // of the rename protocol an editor shows them.
+        match outcome {
+            Some(Err(message)) => {
+                self.log(MessageType::WARNING, message.clone()).await;
+                Err(tower_lsp::jsonrpc::Error {
+                    code: tower_lsp::jsonrpc::ErrorCode::InvalidRequest,
+                    message: message.into(),
+                    data: None,
+                })
+            }
+            Some(Ok(edit)) => Ok(edit),
+            None => Ok(None),
+        }
     }
 
     async fn document_symbol(

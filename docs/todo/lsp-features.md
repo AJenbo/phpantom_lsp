@@ -524,3 +524,49 @@ but is worth a quick re-check after the migration in case the newer
 
 **Where to look:** `src/server.rs` (`initialize`, `type_hierarchy_registration`),
 `src/type_hierarchy.rs`.
+
+---
+
+## F22. Merge a namespace onto one that shares a class name
+
+**Impact: Low-Medium · Complexity: Medium-High**
+
+Renaming `App\Internal` to an `App\Support` that already exists now
+merges: the files move into the existing directory one at a time
+instead of the source directory being renamed on top of the
+destination. Where the two namespaces declare the same class name
+(`App\Internal\Helper` and `App\Support\Helper` both exist), the whole
+rename is refused with a message naming the clash, because the merge
+has no well-defined answer for that name — see
+`namespace_merge_conflict` in `src/rename/namespace.rs`.
+
+Refusing is the safe answer, not the desirable one: a user merging
+twenty files should not be blocked by one clash. What is missing is a
+partial merge that moves everything except the clashing names and
+leaves those behind *intact*. "Intact" is the hard part and the reason
+this is deferred rather than done:
+
+- The clashing class's file must keep its own `namespace` declaration,
+  so that file's namespace-declaration edit has to be suppressed while
+  its siblings' are kept. Today the namespace rename rewrites by
+  string prefix over raw text with no per-class granularity.
+- Every reference to the clashing FQN (`use App\Internal\Helper;`,
+  `\App\Internal\Helper`, and unqualified `Helper` inside the old
+  namespace) must be left pointing at the old name. Rewriting them is
+  what makes a naive partial merge worse than a refusal: the reference
+  silently resolves to the *other* class.
+- A file holding both a clashing class and a non-clashing one cannot
+  half-move, so it has to be reported as a clash too.
+- The classes that do move out of the old namespace stop being
+  namespace-siblings of the ones left behind, so the files left behind
+  need `use` imports added for them — the same rule
+  `build_class_move_edit` already applies for a single class move.
+
+The refusal message should then list only the names that could not
+move, and the response should still carry the edits for everything
+that could.
+
+**Where to look:** `src/rename/namespace.rs`
+(`namespace_merge_conflict`, `build_namespace_prefix_rename_edit`,
+`collect_merge_move_ops`), `src/rename/class.rs` (the import-adding
+rule to mirror).
