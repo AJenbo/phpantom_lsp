@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788191398703,
+  "lastUpdate": 1788203638825,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -26111,6 +26111,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 76.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "6d32fa002113d2c297200fc98cc9a1883f3c5db2",
+          "message": "A `@class`/`@style`/`@json` (and other attribute-style) directive\nwritten before a component tag no longer mistypes its bound attributes",
+          "timestamp": "2026-08-31T21:00:37+02:00",
+          "tree_id": "d4c488ebd9a7d5feaa812ee4dd738b6e345030c9",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/6d32fa002113d2c297200fc98cc9a1883f3c5db2"
+        },
+        "date": 1788203633118,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 36.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 72.5,
             "unit": "MiB"
           }
         ]
