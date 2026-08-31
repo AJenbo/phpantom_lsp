@@ -70,43 +70,6 @@ dependency.
 
 ---
 
-## BL25. Anonymous component attribute completion from undeclared template reads
-
-**Impact: Medium · Complexity: Medium**
-
-`anonymous_component_attributes()` in
-`src/completion/handler/blade_component.rs` only reads a component's
-`@props()` declaration. A `.blade.php` anonymous component with no
-`@props` block — the common case for a small partial that just reads
-`$title`/`$icon` straight from the tag's attributes — gets no attribute
-completion at all when its tag is typed elsewhere in the project.
-Laravel Idea covers exactly this case: it treats every variable an
-anonymous component's view reads that nothing else declares as an
-implicit prop, and offers it as a completion candidate the same as a
-declared one.
-
-- When `@props()` is absent (or to fill in names it leaves out), fall
-  back to a free-variable scan of the component's own template: names
-  read but never assigned within it (no `@php` assignment, loop
-  variable, `@aware`, or outer-scope source) are the template's
-  implicit attribute list.
-- This reads the *callee*'s own body, not caller call sites, so it
-  stays consistent with this document's "signatures over call-site
-  scanning" philosophy above — the template still declares its own
-  contract, just implicitly through usage instead of a `@props()` line.
-
-### Tests
-
-- An anonymous component with no `@props` and a bare `{{ $title }}`
-  read offers `title` as an attribute when its tag is completed
-  elsewhere.
-- A variable the template assigns itself (`@php($label = strtoupper($title))`)
-  or receives from `@aware` is not offered; only genuinely free reads
-  are.
-- A component that does declare `@props()` is unaffected — declared
-  names still win and still show their default/required detail.
-
----
 
 ## BL1. Blade-aware code actions
 

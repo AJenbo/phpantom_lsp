@@ -40,7 +40,6 @@ contributor even though it's short.
 | X9   | [Accept client-supplied file filters (`initializationOptions`)](todo/indexing.md#x9-accept-client-supplied-file-filters-initializationoptions) (live half depends on B1) | Medium | Medium |
 | X10  | [VS Code: forward `files.exclude` and `files.associations`](todo/indexing.md#x10-vs-code-forward-filesexclude-and-filesassociations-depends-on-x9) (depends on X9; work lives in the VS Code extension repo as V9) | Medium | Medium |
 | X11  | [Zed: file filters via `initialization_options`](todo/indexing.md#x11-zed-file-filters-via-initialization_options-depends-on-x9) (depends on X9)             | Low-Medium  | Low-Medium  |
-| BL25 | [Anonymous component attribute completion from undeclared template reads](todo/blade.md#bl25-anonymous-component-attribute-completion-from-undeclared-template-reads) | Medium     | Medium      |
 | L52  | ["Create missing view" quick-fix for an unresolved view name](todo/laravel.md#l52-create-missing-view-quick-fix-for-an-unresolved-view-name)              | Low-Medium  | Medium      |
 | BL23 | [Unbalanced component tag diagnostics](todo/blade.md#bl23-unbalanced-component-tag-diagnostics)                            | Low-Medium | Medium     |
 | BL14 | [Folding ranges for Blade files](todo/blade.md#bl14-folding-ranges-for-blade-files)                                        | Low-Medium | Medium     |

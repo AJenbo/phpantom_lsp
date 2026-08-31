@@ -8,6 +8,7 @@ pub(crate) mod contract;
 pub mod directive_completion;
 pub mod directives;
 pub(crate) mod discovery;
+pub(crate) mod implicit_props;
 pub(crate) mod layout;
 pub mod preprocessor;
 pub(crate) mod shared_vars;
