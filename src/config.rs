@@ -513,8 +513,9 @@ pub struct IndexingConfig {
     /// depth, a pattern containing `/` anchors to the root, a trailing
     /// `/` restricts to directories, and a leading `!` re-includes.
     ///
-    /// Excludes apply to background discovery only; files the editor
-    /// opens are always served.
+    /// Excludes apply to background discovery and to the directories
+    /// `analyze` walks. A file the editor opens, or one named outright
+    /// on the `analyze` command line, is always served.
     pub exclude: Option<Vec<String>>,
     /// Extra file extensions (without the dot) treated as PHP source
     /// during workspace discovery, e.g. `["module", "inc", "theme"]`

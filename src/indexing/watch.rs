@@ -216,7 +216,7 @@ impl Backend {
     /// answers LSP requests.
     pub(crate) fn reload_config(&self, root: &std::path::Path) {
         match crate::config::load_config_from(root, self.workspace.global_config_path.as_deref()) {
-            Ok(cfg) => *self.workspace.config.lock() = cfg,
+            Ok(cfg) => self.set_config(cfg),
             Err(e) => {
                 tracing::warn!("Failed to reload .phpantom.toml: {}", e);
                 return;
@@ -491,5 +491,38 @@ mod tests {
         backend.workspace.global_config_path = Some(global);
         backend.reload_config(&project);
         assert!(backend.config().diagnostics.extra_arguments_enabled());
+    }
+
+    /// The compiled `[indexing]` filters are cached until the config is
+    /// replaced, so a reload has to drop them. Writing the new config
+    /// straight into the mutex leaves the old globs compiled and every
+    /// scan after the reload keeps using the settings the user just
+    /// changed away from.
+    #[test]
+    fn reload_config_recompiles_the_indexing_filters() {
+        let dir = tempfile::tempdir().unwrap();
+        let backend = Backend::new_test();
+        *backend.workspace.workspace_root.write() = Some(dir.path().to_path_buf());
+
+        // Compile and cache the filters under the empty default config.
+        assert!(
+            !backend
+                .index_filters()
+                .is_excluded_entry(&dir.path().join("generated"), true)
+        );
+
+        std::fs::write(
+            dir.path().join(crate::config::CONFIG_FILE_NAME),
+            "[indexing]\nexclude = [\"generated\"]\nextensions = [\"module\"]\n",
+        )
+        .unwrap();
+        backend.reload_config(dir.path());
+
+        let filters = backend.index_filters();
+        assert!(
+            filters.is_excluded_entry(&dir.path().join("generated"), true),
+            "a reload must recompile the exclude globs"
+        );
+        assert_eq!(filters.extra_extensions(), &["module".to_string()]);
     }
 }

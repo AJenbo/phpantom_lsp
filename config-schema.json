@@ -89,7 +89,7 @@
           "items": {
             "type": "string"
           },
-          "description": "Paths the workspace scanners skip, in gitignore syntax relative to the workspace root: a bare name matches at any depth, a pattern containing / anchors to the root, a trailing / restricts to directories, and a leading ! re-includes. Applies to background discovery only; files opened in the editor are always served.",
+          "description": "Paths the workspace scanners skip, in gitignore syntax relative to the workspace root: a bare name matches at any depth, a pattern containing / anchors to the root, a trailing / restricts to directories, and a leading ! re-includes. Applies to background discovery and to the directories analyze walks. A file you open in the editor, or name outright on the analyze command line, is always served.",
           "default": []
         },
         "extensions": {

@@ -35,6 +35,10 @@ contributor even though it's short.
 | #    | Item                                                                                                                                                      | Impact      | Complexity  |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 |     | Clear [refactoring gate](todo/refactor.md)                                                                                                                      | —           | —           |
+| B1   | [Adding an `[indexing] extensions` entry needs a restart to be watched](todo/bugs.md#b1-adding-an-indexing-extensions-entry-needs-a-restart-to-be-watched)  | Low         | Low-Medium  |
+| X9   | [Accept client-supplied file filters (`initializationOptions`)](todo/indexing.md#x9-accept-client-supplied-file-filters-initializationoptions) (live half depends on B1) | Medium | Medium |
+| X10  | [VS Code: forward `files.exclude` and `files.associations`](todo/indexing.md#x10-vs-code-forward-filesexclude-and-filesassociations-depends-on-x9) (depends on X9; work lives in the VS Code extension repo as V9) | Medium | Medium |
+| X11  | [Zed: file filters via `initialization_options`](todo/indexing.md#x11-zed-file-filters-via-initialization_options-depends-on-x9) (depends on X9)             | Low-Medium  | Low-Medium  |
 | BL11 | [Custom directive discovery](todo/blade.md#bl11-custom-directive-discovery) (`Blade::directive()` / `Blade::if()` registrations)                          | Medium      | Medium      |
 | BL25 | [Anonymous component attribute completion from undeclared template reads](todo/blade.md#bl25-anonymous-component-attribute-completion-from-undeclared-template-reads) | Medium     | Medium      |
 | L52  | ["Create missing view" quick-fix for an unresolved view name](todo/laravel.md#l52-create-missing-view-quick-fix-for-an-unresolved-view-name)              | Low-Medium  | Medium      |
@@ -204,8 +208,9 @@ unlikely to move the needle for most users.
 |     | **[Indexing](todo/indexing.md)**                                                                                                                                            |             |             |
 | X7  | [Recency tracking](todo/indexing.md#x7-recency-tracking)                                                                                                                    | Medium      | Medium-High |
 | X6  | Disk cache (evaluate later)                                                                                                                                                 | Medium      | Very High   |
+| X13 | [Decide how workspace-wide edits treat excluded files](todo/indexing.md#x13-decide-how-workspace-wide-edits-treat-excluded-files)                                           | Low-Medium  | Medium      |
 | X2  | Parallel file processing — remaining work                                                                                                                                   | Low-Medium  | Medium-High |
-| X9  | [Forward editor file excludes and PHP associations to the server](todo/indexing.md#x9-forward-editor-file-excludes-and-php-associations-to-the-server)                      | Low-Medium  | Medium-High |
+| X12 | [Say when an exclude hid the class a diagnostic names](todo/indexing.md#x12-say-when-an-exclude-hid-the-class-a-diagnostic-names)                                           | Low-Medium  | Medium-High |
 |     | **[Inline Completion](todo/inline-completion.md)**                                                                                                                          |             |             |
 | N1  | Template engine (type-aware snippets)                                                                                                                                       | Medium      | Medium      |
 | N2  | N-gram prediction from PHP corpus                                                                                                                                           | Medium      | Very High   |

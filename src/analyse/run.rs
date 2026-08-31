@@ -665,9 +665,14 @@ pub(crate) fn discover_user_files(
         })
         .partition(|p| p.is_dir());
 
+    // `[indexing] extensions` files are PHP source, so they are analysed
+    // like `.php`; `[indexing] exclude` prunes the default project walk
+    // below but never a path the user named outright.
+    let filters = backend.index_filters();
+
     let mut files: Vec<PathBuf> = filter_files
         .into_iter()
-        .filter(|p| p.extension().is_some_and(|ext| ext == "php"))
+        .filter(|p| filters.is_php_file(p))
         .collect();
 
     // Every filter named a file, so there is nothing left to walk.
@@ -745,14 +750,18 @@ pub(crate) fn discover_user_files(
                 continue;
             }
 
-            collect_php_files(dir, &vendor_dirs, &psr4_filters, &mut files);
+            collect_php_files(dir, &vendor_dirs, &psr4_filters, &filters, &mut files);
         }
     }
 
     // The user explicitly targeted these paths, so no vendor exclusion and
-    // no cropping beyond the walked directory itself.
+    // no cropping beyond the walked directory itself.  `[indexing] exclude`
+    // still applies: it declares what is not the project's code at all, the
+    // way PHPStan's `excludePaths` holds for a path named on its command
+    // line too.  Naming a file outright bypasses it (those never reach this
+    // walk), which is the escape hatch for analysing an excluded path.
     for dir in &external_filters {
-        collect_php_files(dir, &[], &[], &mut files);
+        collect_php_files(dir, &[], &[], &filters, &mut files);
     }
 
     files.sort();
@@ -763,10 +772,20 @@ pub(crate) fn discover_user_files(
 /// Walk `dir` for PHP files, skipping anything under `skip_vendor` and
 /// keeping only files under one of the `crop` paths (all of them when
 /// `crop` is empty).
-fn collect_php_files(dir: &Path, skip_vendor: &[PathBuf], crop: &[&Path], out: &mut Vec<PathBuf>) {
+///
+/// `filters` decides which extensions count as PHP source and which
+/// paths `[indexing] exclude` prunes.
+fn collect_php_files(
+    dir: &Path,
+    skip_vendor: &[PathBuf],
+    crop: &[&Path],
+    filters: &std::sync::Arc<crate::classmap_scanner::IndexFilters>,
+    out: &mut Vec<PathBuf>,
+) {
     use ignore::WalkBuilder;
 
     let skip_vendor = skip_vendor.to_vec();
+    let filter_excludes = std::sync::Arc::clone(filters);
     let walker = WalkBuilder::new(dir)
         .git_ignore(true)
         .git_global(true)
@@ -775,20 +794,21 @@ fn collect_php_files(dir: &Path, skip_vendor: &[PathBuf], crop: &[&Path], out: &
         .parents(true)
         .ignore(true)
         .filter_entry(move |entry| {
-            if entry.file_type().is_some_and(|ft| ft.is_dir())
+            let is_dir = entry.file_type().is_some_and(|ft| ft.is_dir());
+            if is_dir
                 && !skip_vendor.is_empty()
                 && let Ok(canonical) = entry.path().canonicalize()
                 && skip_vendor.iter().any(|v| canonical.starts_with(v))
             {
                 return false;
             }
-            true
+            !filter_excludes.is_excluded_entry(entry.path(), is_dir)
         })
         .build();
 
     for entry in walker.flatten() {
         let path = entry.into_path();
-        if !path.is_file() || path.extension().is_none_or(|ext| ext != "php") {
+        if !path.is_file() || !filters.is_php_file(&path) {
             continue;
         }
 
@@ -929,6 +949,65 @@ mod tests {
             !names.contains(&"readme.txt".to_string()),
             "non-PHP files must be skipped: {names:?}"
         );
+    }
+
+    /// `[indexing] exclude` prunes the project scan, and `[indexing]
+    /// extensions` brings non-`.php` sources into it, so `analyze`
+    /// reports on the same set of files the indexer holds. Excludes
+    /// hold for a directory named on the command line as well; naming
+    /// a file outright is the escape hatch.
+    #[test]
+    fn discover_user_files_honors_the_indexing_filters() {
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+        let root = dir.path();
+        std::fs::write(root.join("index.php"), "<?php\n").unwrap();
+        std::fs::write(root.join("hooks.module"), "<?php\n").unwrap();
+        std::fs::create_dir_all(root.join("generated")).unwrap();
+        std::fs::write(root.join("generated/Stub.php"), "<?php\n").unwrap();
+
+        let backend = Backend::new_headless();
+        *backend.workspace_root().write() = Some(root.to_path_buf());
+        let mut cfg = crate::config::Config::default();
+        cfg.indexing.exclude = Some(vec!["generated".to_string()]);
+        cfg.indexing.extensions = Some(vec!["module".to_string()]);
+        backend.set_config(cfg);
+
+        let names = |files: &[PathBuf]| -> Vec<String> {
+            files
+                .iter()
+                .map(|p| p.strip_prefix(root).unwrap().to_string_lossy().into_owned())
+                .collect()
+        };
+
+        let scanned = names(&discover_user_files(&backend, root, &[]));
+        assert!(scanned.contains(&"index.php".to_string()), "{scanned:?}");
+        assert!(
+            scanned.contains(&"hooks.module".to_string()),
+            "a configured extension is analysed like .php: {scanned:?}"
+        );
+        assert!(
+            !scanned.iter().any(|n| n.starts_with("generated")),
+            "an excluded directory must be pruned: {scanned:?}"
+        );
+
+        // Naming the excluded directory does not re-enable it...
+        let targeted = names(&discover_user_files(
+            &backend,
+            root,
+            &[root.join("generated")],
+        ));
+        assert!(
+            targeted.is_empty(),
+            "an exclude holds for a directory named on the command line: {targeted:?}"
+        );
+
+        // ...but naming the file itself does.
+        let by_file = names(&discover_user_files(
+            &backend,
+            root,
+            &[root.join("generated/Stub.php")],
+        ));
+        assert_eq!(by_file, vec!["generated/Stub.php".to_string()]);
     }
 
     #[cfg(unix)]

@@ -321,32 +321,105 @@ ready to implement.
 
 ---
 
-## X9. Forward editor file excludes and PHP associations to the server
+## X9. Accept client-supplied file filters (`initializationOptions`)
+
+**Impact: Medium · Complexity: Medium**
+
+The `.phpantom.toml` side of editor-filter support has shipped:
+`[indexing] exclude` and `[indexing] extensions` compile into
+`classmap_scanner::IndexFilters`, which every workspace walker, the
+file watcher, and `analyze` consult. The server, however, reads no
+`initializationOptions` at all today (and has no
+`workspace/didChangeConfiguration` handler), so an editor extension
+has nothing to forward the editor's own settings to, and a user has
+to mirror `files.exclude` / `files.associations` into
+`.phpantom.toml` by hand.
+
+Teach `initialize` to read a generic shape from
+`initializationOptions`:
+
+```json
+{ "indexing": { "exclude": ["generated"], "extensions": ["module"] } }
+```
+
+held as a client layer beside the `.phpantom.toml` layer:
+`Backend::index_filters()` compiles the union of the two, so a config
+reload keeps the client's contribution and a client update keeps the
+config file's. Accept the same shape via
+`workspace/didChangeConfiguration` so a settings change mid-session
+recompiles the filters; a changed `extensions` list also needs the
+watcher re-registration tracked as B1 in
+[`bugs.md`](bugs.md#b1-adding-an-indexing-extensions-entry-needs-a-restart-to-be-watched).
+
+Keep the interface generic (a list of gitignore-style globs and a
+list of extensions), never editor-specific setting names: any client
+can supply them, and Zed already forwards the user's
+`lsp.phpantom.initialization_options` from `settings.json` to the
+server verbatim, so this task alone gives Zed users a working path
+with no extension changes at all (see X11).
+
+## X10. VS Code: forward `files.exclude` and `files.associations` (depends on X9)
+
+**Impact: Medium · Complexity: Medium**
+
+The client half of X9 for VS Code; the work lives in the extension
+repo (filed there as V9). The client passes no
+`initializationOptions` today. Gather the effective `files.exclude`
+entries that are enabled, translating VS Code's glob dialect to the
+gitignore lines X9 accepts, and the `files.associations` patterns
+mapped to `php`, reduced to extensions (`*.module` → `module`). Pass
+both at startup and re-send them from
+`workspace.onDidChangeConfiguration`. Clients are spawned one per
+workspace folder, so read folder-scoped configuration for each. This
+is the same merge Intelephense's middleware performs with VS Code's
+native settings.
+
+## X11. Zed: file filters via `initialization_options` (depends on X9)
+
+**Impact: Low-Medium · Complexity: Low-Medium**
+
+Zed's extension API serves extensions only the `language`, `lsp`, and
+`context_servers` settings categories (`get_settings` in the
+`extension_host` crate), so the PHP extension cannot read the
+editor's `file_scan_exclusions` or `file_types` to forward them;
+automatic parity with the editor's own excludes is blocked on an
+upstream Zed change. What is achievable now: Zed merges the user's
+`lsp.phpantom.initialization_options` from `settings.json` over
+whatever the extension supplies, so once X9 lands the whole feature
+is a documentation section. Document the shape in
+[`editor-setup.md`](../editor-setup.md), and file the upstream
+request to expose those two settings to extensions so the manual
+step can eventually disappear.
+
+## X12. Say when an exclude hid the class a diagnostic names
 
 **Impact: Low-Medium · Complexity: Medium-High**
 
-The server side of this task has shipped: the directory walkers honor
-`[indexing] exclude` (gitignore-style patterns) and `[indexing]
-extensions` (extra PHP extensions) from `.phpantom.toml`. What remains
-is the client side: each editor extension must gather the editor's
-effective `files.exclude` / `files.associations` and forward them to
-the server, since only the extension has access to those editor
-settings. Today a user has to mirror those editor settings into
-`.phpantom.toml` by hand.
+An over-broad `[indexing] exclude` makes real classes unresolvable,
+and the resulting `Class 'App\Generated\Foo' not found` is
+indistinguishable from a typo: the user's own configuration caused
+it and nothing says so, which reads as a PHPantom bug. When class
+resolution fails, the FQN maps to a PSR-4 path, and that file exists
+on disk but `is_excluded_path` matches it, extend the message with
+the cause ("defined in `src/Generated/Foo.php`, which `[indexing]
+exclude` skips"). The PSR-4 mapping makes the probe a single stat
+plus an already-compiled glob match on the failure path only;
+classmap-only projects get no probe rather than a disk walk.
 
-### Approach
+## X13. Decide how workspace-wide edits treat excluded files
 
-The client passes the effective exclude globs and the set of
-PHP-associated extensions to the server (via `initializationOptions`,
-or by responding to `workspace/configuration` the way Intelephense's
-middleware merges VS Code's native `files.exclude` /
-`files.associations` into the server config). The server merges them
-into the same compiled filters the `.phpantom.toml` keys feed
-(`classmap_scanner::IndexFilters`).
+**Impact: Low-Medium · Complexity: Medium**
 
-### Editor-agnostic note
-
-Excludes and associations are editor concepts. Keep the server's
-interface generic (a list of globs and a list of extensions) so any
-client (VS Code, Zed) can supply them, rather than hard-coding
-VS Code setting names in the server.
+`collect_php_files_gitignore` feeds find-references and namespace
+rename, so an excluded tree is invisible to both: a rename can leave
+excluded code calling a name that no longer exists, with no warning.
+That is consistent with what an exclude means, but sharper than
+"background discovery" suggests. Options: (a) keep the behaviour and
+document it under the `exclude` setting; (b) let correctness
+operations (rename, find-references) ignore `[indexing] exclude` on
+the grounds that the setting is an index-size and startup-time tool,
+not a statement that the code does not exist; (c) keep the exclusion
+but include a warning in the rename response when excludes are
+configured. Maintainer's call on the semantics; whichever way it
+goes, the chosen behaviour needs a test and a sentence in
+[`configuration.md`](../configuration.md).
