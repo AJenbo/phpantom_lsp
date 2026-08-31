@@ -1116,67 +1116,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#f5-call-hierarchy" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        F5. Call hierarchy
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="F5. Call hierarchy">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#incoming-calls-who-calls-this" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Incoming calls (who calls this)
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#outgoing-calls-what-does-this-call" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Outgoing calls (what does this call)
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#prepare" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Prepare
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#dependencies" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Dependencies
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#f7-evaluatable-expression-support-dap-integration" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1878,67 +1817,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#f5-call-hierarchy" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        F5. Call hierarchy
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="F5. Call hierarchy">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#incoming-calls-who-calls-this" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Incoming calls (who calls this)
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#outgoing-calls-what-does-this-call" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Outgoing calls (what does this call)
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#prepare" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Prepare
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#dependencies" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Dependencies
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#f7-evaluatable-expression-support-dap-integration" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2451,39 +2329,6 @@ developer arrive before vendor matches, even within a single phase.</p>
    everything, return once.</li>
 </ol>
 <hr />
-<h2 id="f5-call-hierarchy">F5. Call hierarchy<a class="headerlink" href="#f5-call-hierarchy" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<p>Implement <code>callHierarchy/incomingCalls</code> and
-<code>callHierarchy/outgoingCalls</code> to answer "who calls this function?" and
-"what does this function call?"</p>
-<h3 id="incoming-calls-who-calls-this">Incoming calls (who calls this)<a class="headerlink" href="#incoming-calls-who-calls-this" title="Permanent link">&para;</a></h3>
-<p>Given a function or method, find all call sites across the project.
-This is conceptually similar to Find References but filtered to call
-expressions and structured as a tree (each caller is itself a callable
-with a location).</p>
-<p>The existing Find References infrastructure
-(<code>find_references_in_file</code>, cross-file scanning) provides the core
-search. The call hierarchy handler wraps the results into
-<code>CallHierarchyIncomingCall</code> items, grouping by containing function.</p>
-<h3 id="outgoing-calls-what-does-this-call">Outgoing calls (what does this call)<a class="headerlink" href="#outgoing-calls-what-does-this-call" title="Permanent link">&para;</a></h3>
-<p>Given a function or method, walk its AST body and collect all call
-expressions (function calls, method calls, static calls, <code>new</code>
-expressions). Resolve each callee to its declaration location.</p>
-<p>This is a single-file AST walk with cross-file resolution for each
-callee, similar to what go-to-definition already does.</p>
-<h3 id="prepare">Prepare<a class="headerlink" href="#prepare" title="Permanent link">&para;</a></h3>
-<p><code>callHierarchy/prepare</code> returns a <code>CallHierarchyItem</code> for the symbol
-at the cursor. This is straightforward: resolve the symbol, return its
-name, kind, URI, range, and selection range.</p>
-<h3 id="dependencies">Dependencies<a class="headerlink" href="#dependencies" title="Permanent link">&para;</a></h3>
-<p>Call hierarchy benefits significantly from a full project index.
-Without an index, incoming calls can only be found via the existing
-classmap + PSR-4 scan approach (same as Find References). Now that
-full background indexing is available, the lookup can become a
-simple index query instead of relying on the scan-based approach that
-Find References uses on its own.</p>
-<p><strong>References:</strong>
-- Phpactor: call hierarchy via its references index.</p>
 <h2 id="f7-evaluatable-expression-support-dap-integration">F7. Evaluatable expression support (DAP integration)<a class="headerlink" href="#f7-evaluatable-expression-support-dap-integration" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
 <p>Implement <code>textDocument/evaluatableExpression</code> so debuggers (Xdebug
