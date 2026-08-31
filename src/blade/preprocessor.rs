@@ -31,11 +31,12 @@ enum Mode {
     Comment,
     /// The expression of a Blade component bound attribute
     /// (`:name="$expr"` or the `:$var` shorthand). The expression is
-    /// emitted verbatim as a real PHP argument to `blade_directive(...)`
-    /// so the forward walker sees the variables it uses; the surrounding
-    /// tag markup stays masked. `Some(quote)` is the delimiting quote of
-    /// a `:name="..."` value; `None` is the shorthand `:$var`, which ends
-    /// at the first character that cannot be part of the variable name.
+    /// emitted verbatim as a real PHP argument to
+    /// `blade_bound_attr_directive(...)` so the forward walker sees the
+    /// variables it uses; the surrounding tag markup stays masked.
+    /// `Some(quote)` is the delimiting quote of a `:name="..."` value;
+    /// `None` is the shorthand `:$var`, which ends at the first character
+    /// that cannot be part of the variable name.
     BoundAttr(Option<char>),
     /// The parenthesised argument list of an `@use(...)` or `@inject(...)`
     /// directive. Unlike `DirectiveArgs`, the argument text is captured and
@@ -290,7 +291,7 @@ pub fn preprocess_with_vars(
     }
 
     // ── Prologue ──
-    virtual_php.push_str("<?php if (!function_exists('blade_directive')) { function blade_directive(...$args) {} function blade_view_directive(...$args) {} function blade_each_directive(...$args) {} function blade_can_directive(...$args): bool { return true; } function blade_section_directive(...$args): bool { return true; } function blade_stack_directive(...$args): bool { return true; } function blade_push_if_directive(...$args) {} function blade_custom_directive(...$args): bool { return true; } }\n");
+    virtual_php.push_str("<?php if (!function_exists('blade_directive')) { function blade_directive(...$args) {} function blade_bound_attr_directive(...$args) {} function blade_view_directive(...$args) {} function blade_each_directive(...$args) {} function blade_can_directive(...$args): bool { return true; } function blade_section_directive(...$args): bool { return true; } function blade_stack_directive(...$args): bool { return true; } function blade_push_if_directive(...$args) {} function blade_custom_directive(...$args): bool { return true; } }\n");
     // Where hoisted `@use` imports are spliced in once the whole
     // template has been scanned: still in the prologue, so they precede
     // every name they import (name resolution runs in source order and
@@ -371,9 +372,9 @@ pub fn preprocess_with_vars(
     // opens; see `bound_attr_spans_lines`.
     let mut bound_attr_multiline = false;
     // What closes the expression currently open in `Mode::BoundAttr`:
-    // `);` for the `blade_directive(` call an ordinary bound attribute
-    // becomes, and `;` for one that is an argument of the surrounding
-    // tag's component call and is bound to a variable for it.
+    // `);` for the `blade_bound_attr_directive(` call an ordinary bound
+    // attribute becomes, and `;` for one that is an argument of the
+    // surrounding tag's component call and is bound to a variable for it.
     let mut bound_attr_suffix = ");";
     // The component call the surrounding tag opened, if any; see
     // `OpenComponentCall`.
@@ -890,10 +891,15 @@ pub fn preprocess_with_vars(
                     // `:$var` shorthand. The expression stays where the
                     // template wrote it, either as an argument of the
                     // component call the tag opened or, when it names no
-                    // parameter of it, as a `blade_directive(...)` call of
-                    // its own so its variables are still seen. The rest of
-                    // the tag stays masked. A leading `::` is an escaped
-                    // literal colon and is left alone.
+                    // parameter of it, as a `blade_bound_attr_directive(...)`
+                    // call of its own so its variables are still seen. That
+                    // marker is exclusive to bound attributes (unlike the
+                    // generic `blade_directive` shared by `@class`, `@json`,
+                    // and friends), so a scan counting bound attributes can
+                    // count its calls without another directive's call
+                    // shifting the sequence. The rest of the tag stays
+                    // masked. A leading `::` is an escaped literal colon and
+                    // is left alone.
                     let shorthand = remaining.get(1) == Some(&'$')
                         && remaining
                             .get(2)
@@ -921,7 +927,7 @@ pub fn preprocess_with_vars(
                             .map(|variable| format!(" {variable} = "));
                         let (prefix, suffix) = match &argument {
                             Some(prefix) => (prefix.as_str(), ";"),
-                            None => (" blade_directive(", ");"),
+                            None => (" blade_bound_attr_directive(", ");"),
                         };
                         replacement = prefix.to_string();
                         bound_attr_suffix = suffix;
@@ -1185,8 +1191,8 @@ pub fn preprocess_with_vars(
         // A bound-attribute expression whose closing quote is on a later
         // line (what a formatter produces for a long array or argument
         // list) stays open: this line's PHP is flushed as-is and the next
-        // line continues the same `blade_directive(` call. Cutting it off
-        // here would truncate the expression mid-syntax.
+        // line continues the same `blade_bound_attr_directive(` call.
+        // Cutting it off here would truncate the expression mid-syntax.
         //
         // When the closing quote never appears at all the attribute is
         // malformed, and the call is closed off so only the attribute
@@ -1239,8 +1245,8 @@ pub fn preprocess_with_vars(
     }
 
     // Likewise for a multi-line bound attribute whose closing quote turned
-    // out to be unreachable: leaving `blade_directive(` open would swallow
-    // the wrapper's closing brace.
+    // out to be unreachable: leaving `blade_bound_attr_directive(` open
+    // would swallow the wrapper's closing brace.
     if let Mode::BoundAttr(_) = mode {
         virtual_php.push_str(bound_attr_suffix);
         virtual_php.push('\n');
@@ -2551,7 +2557,7 @@ mod tests {
         let content = r#"<x-img.size :src="$image" alt="x" />"#;
         let (php, _) = preprocess(content);
         assert!(
-            php.contains("blade_directive($image);"),
+            php.contains("blade_bound_attr_directive($image);"),
             "bound attribute expression should be emitted as PHP: {}",
             php
         );
@@ -2576,14 +2582,14 @@ mod tests {
         let content = r#"<livewire:edit-channel :key="$item->id" />"#;
         let (php, _) = preprocess(content);
         assert!(
-            php.contains("blade_directive($item->id);"),
+            php.contains("blade_bound_attr_directive($item->id);"),
             "method-call expression in a bound attribute should be emitted: {}",
             php
         );
         // The `:` inside the `livewire:edit-channel` tag name is part of
         // the name, not an attribute, so it must not open a directive call.
         assert!(
-            !php.contains("blade_directive(edit-channel"),
+            !php.contains("blade_bound_attr_directive(edit-channel"),
             "namespace colon in the tag name must not be treated as a binding: {}",
             php
         );
@@ -2711,7 +2717,7 @@ mod tests {
             "an attribute the attribute bag takes is not an argument: {php}"
         );
         assert!(
-            php.contains("blade_directive($id);"),
+            php.contains("blade_bound_attr_directive($id);"),
             "a bound attribute that is not an argument still contributes \
              its expression: {php}"
         );
@@ -2816,7 +2822,7 @@ mod tests {
             "an anonymous component is declared, not built: {php}"
         );
         assert!(
-            php.contains("blade_directive($t);"),
+            php.contains("blade_bound_attr_directive($t);"),
             "its attributes still contribute their expressions: {php}"
         );
     }
@@ -2858,7 +2864,7 @@ mod tests {
             "a bound attribute on a multi-line component tag: {php}"
         );
         assert!(
-            !php.contains("blade_directive(notAnAttr"),
+            !php.contains("blade_bound_attr_directive(notAnAttr"),
             "a colon after the tag closed is not an attribute: {php}"
         );
     }
@@ -2894,7 +2900,8 @@ mod tests {
             "no unresolved tag may bind a component: {php}"
         );
         assert!(
-            php.contains("blade_directive($name);") && php.contains("blade_directive($v);"),
+            php.contains("blade_bound_attr_directive($name);")
+                && php.contains("blade_bound_attr_directive($v);"),
             "a dynamic component's expressions are still parsed: {php}"
         );
     }
@@ -2906,7 +2913,7 @@ mod tests {
         let content = r#"<x-alert :$message />"#;
         let (php, _) = preprocess(content);
         assert!(
-            php.contains("blade_directive($message);"),
+            php.contains("blade_bound_attr_directive($message);"),
             "`:$var` shorthand should emit the variable as PHP: {}",
             php
         );
@@ -2920,7 +2927,7 @@ mod tests {
         let content = r#"<x-btn :class="$active ? 'on' : 'off'" />"#;
         let (php, _) = preprocess(content);
         assert!(
-            php.contains("blade_directive($active ? 'on' : 'off');"),
+            php.contains("blade_bound_attr_directive($active ? 'on' : 'off');"),
             "inner string literals should be preserved in the expression: {}",
             php
         );
@@ -2936,14 +2943,15 @@ mod tests {
         let (php, _) = preprocess(content);
         // The only binding here is `:real="$v"`.
         assert!(
-            php.contains("blade_directive($v);"),
+            php.contains("blade_bound_attr_directive($v);"),
             "the real binding should still be emitted: {}",
             php
         );
-        // The prologue declares `function blade_directive(...)` once, so a
-        // single binding yields two occurrences of `blade_directive(`.
+        // The prologue declares `function blade_bound_attr_directive(...)`
+        // once, so a single binding yields two occurrences of
+        // `blade_bound_attr_directive(`.
         assert_eq!(
-            php.matches("blade_directive(").count(),
+            php.matches("blade_bound_attr_directive(").count(),
             2,
             "no spurious bindings from value/text/escaped colons: {}",
             php
@@ -2967,10 +2975,11 @@ mod tests {
     fn test_preprocess_bound_attribute_ignored_outside_tag() {
         let content = r#"<p>ratio :w="16" here</p>"#;
         let (php, _) = preprocess(content);
-        // Only the prologue's `function blade_directive(...)` declaration
-        // should remain; no binding call is emitted for a colon in text.
+        // Only the prologue's `function blade_bound_attr_directive(...)`
+        // declaration should remain; no binding call is emitted for a colon
+        // in text.
         assert_eq!(
-            php.matches("blade_directive(").count(),
+            php.matches("blade_bound_attr_directive(").count(),
             1,
             "a colon in text (outside a tag span) is not a binding: {}",
             php
@@ -2984,7 +2993,7 @@ mod tests {
         let content = "<x-img.size\n    :src=\"$image\"\n/>";
         let (php, _) = preprocess(content);
         assert!(
-            php.contains("blade_directive($image);"),
+            php.contains("blade_bound_attr_directive($image);"),
             "binding on a continuation line should be recognized: {}",
             php
         );
@@ -2998,7 +3007,7 @@ mod tests {
         let content = "<x-file.upload name=\"image\"\n    :rules=\"[\n        'Dimensions must match: 2420 x 1614',\n        'Max file size: 2 mb',\n    ]\" />\n";
         let (php, _) = preprocess(content);
         assert!(
-            php.contains("blade_directive([") && php.contains("]);"),
+            php.contains("blade_bound_attr_directive([") && php.contains("]);"),
             "the wrapped array must be emitted whole: {}",
             php
         );
@@ -3039,7 +3048,7 @@ mod tests {
         let content = "<x-alert :message=\"$msg\n<p>{{ $after }}</p>\n";
         let (php, _) = preprocess(content);
         assert!(
-            php.contains("blade_directive($msg);"),
+            php.contains("blade_bound_attr_directive($msg);"),
             "an unterminated attribute must be closed at end of line: {}",
             php
         );

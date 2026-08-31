@@ -404,7 +404,7 @@ impl Backend {
                 // The same partition the caller's own virtual PHP was
                 // built with, so the scan agrees with it about which
                 // attributes became arguments of the tag's call and are
-                // therefore not `blade_directive` calls to count.
+                // therefore not `blade_bound_attr_directive` calls to count.
                 let caller_components = self
                     .blade_injected_vars
                     .read()
@@ -1170,11 +1170,14 @@ impl Backend {
     /// already found in its raw source.
     ///
     /// `virtual_php` is the caller's own preprocessed content: a bound
-    /// attribute on *any* HTML tag compiles down to a `blade_directive(EXPR)`
-    /// call, in document order, so an occurrence's
-    /// [`super::component_tags::ComponentTagCall::bound`] indices index
-    /// directly into that call sequence — no Blade-to-PHP offset
-    /// translation needed.
+    /// attribute on *any* HTML tag compiles down to a
+    /// `blade_bound_attr_directive(EXPR)` call, in document order, so an
+    /// occurrence's [`super::component_tags::ComponentTagCall::bound`]
+    /// indices index directly into that call sequence — no Blade-to-PHP
+    /// offset translation needed. That marker is exclusive to bound
+    /// attributes, unlike the generic `blade_directive` shared by `@class`,
+    /// `@json`, and other directives, so none of those can shift the
+    /// sequence out of sync with `scan_component_tag_calls`'s count.
     fn extract_component_call_site_vars(
         &self,
         uri: &str,
@@ -1246,11 +1249,15 @@ impl Backend {
 
 // ─── AST walking ────────────────────────────────────────────────────────────
 
-/// Collects every `blade_directive(EXPR)` call in a Blade file's virtual
-/// PHP, in document order. The preprocessor emits exactly one such call
-/// per bound HTML attribute (see `super::preprocessor`), so this order
-/// matches the order `super::component_tags::scan_component_tag_calls`
-/// counts bound attributes in.
+/// Collects every `blade_bound_attr_directive(EXPR)` call in a Blade file's
+/// virtual PHP, in document order. The preprocessor emits exactly one such
+/// call per bound HTML attribute that is not consumed as a component call's
+/// argument (see `super::preprocessor`), so this order matches the order
+/// `super::component_tags::scan_component_tag_calls` counts bound attributes
+/// in. That marker is exclusive to bound attributes — unlike the generic
+/// `blade_directive` shared by `@class`, `@json`, and other directives —
+/// so a directive appearing between two tags cannot shift this sequence out
+/// of sync with that count.
 struct BladeDirectiveCollectCtx<'ast, 'arena> {
     calls: Vec<&'ast Expression<'arena>>,
 }
@@ -1268,7 +1275,7 @@ impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, BladeDirectiveColle
         let Expression::Identifier(ident) = node.function else {
             return;
         };
-        if bytes_to_str(ident.value()) != "blade_directive" {
+        if bytes_to_str(ident.value()) != "blade_bound_attr_directive" {
             return;
         }
         if let Some(arg) = node.argument_list.arguments.iter().next() {

@@ -6,9 +6,9 @@
 //! the mago AST the way a `view()` call site can (see
 //! [`super::call_site_inference`]). The virtual PHP the preprocessor
 //! emits only carries a bound attribute's *expression* forward, as a
-//! `blade_directive(...)` call; the tag name and any plain string
-//! attribute never appear in it at all. This module scans the original
-//! Blade source directly instead.
+//! `blade_bound_attr_directive(...)` call; the tag name and any plain
+//! string attribute never appear in it at all. This module scans the
+//! original Blade source directly instead.
 
 use std::path::PathBuf;
 
@@ -35,14 +35,18 @@ pub(crate) struct ComponentTagCall {
     /// text: `(camelCase name, type)`.
     pub(crate) literal: Vec<(String, PhpType)>,
     /// Bound attributes (`:name="expr"` / the `:$var` shorthand):
-    /// `(camelCase name, index into the file's `blade_directive(...)`
-    /// call sequence)`.
+    /// `(camelCase name, index into the file's
+    /// `blade_bound_attr_directive(...)` call sequence)`.
     ///
-    /// The preprocessor emits exactly one `blade_directive` call per
-    /// bound attribute, on every HTML tag in the file, in document
-    /// order — the same order this scan counts them in — so the index
-    /// correlates the two without needing to translate byte offsets
-    /// between the Blade source and the virtual PHP.
+    /// The preprocessor emits exactly one `blade_bound_attr_directive` call
+    /// per bound attribute that is not consumed as a component call's
+    /// argument, on every HTML tag in the file, in document order — the
+    /// same order this scan counts them in — so the index correlates the
+    /// two without needing to translate byte offsets between the Blade
+    /// source and the virtual PHP. That marker is exclusive to bound
+    /// attributes, so a `@class`/`@json`/other directive sharing the
+    /// generic `blade_directive` marker elsewhere in the file cannot shift
+    /// this sequence out of sync.
     pub(crate) bound: Vec<(String, usize)>,
 }
 
@@ -442,17 +446,18 @@ pub(crate) fn may_contain_component_tag(content: &str, needles: &[String]) -> bo
 /// prefix) is one of `tag_names`, and collect the attributes each passes.
 ///
 /// Every bound attribute on *any* tag in the file is counted — not just a
-/// matching one — because the preprocessor's `blade_directive` call
-/// sequence includes them all; skipping a non-matching tag's bound
+/// matching one — because the preprocessor's `blade_bound_attr_directive`
+/// call sequence includes them all; skipping a non-matching tag's bound
 /// attributes here would desynchronise this scan's count against that
 /// sequence.
 ///
 /// `arguments` is the same partition the preprocessor applied to this
 /// file: a bound attribute naming a parameter of the call its tag makes
-/// is that call's argument, not a `blade_directive` of its own, so it is
-/// not in the sequence to be counted. Both sides read the tag's target
-/// from one place (a template's [`crate::blade::call_site_inference::BladeScope`]),
-/// so the two cannot disagree about which attributes are arguments.
+/// is that call's argument, not a `blade_bound_attr_directive` of its own,
+/// so it is not in the sequence to be counted. Both sides read the tag's
+/// target from one place (a template's
+/// [`crate::blade::call_site_inference::BladeScope`]), so the two cannot
+/// disagree about which attributes are arguments.
 pub(crate) fn scan_component_tag_calls(
     content: &str,
     tag_names: &[String],
@@ -522,7 +527,7 @@ fn is_attr_name_char(b: u8) -> bool {
 /// offset just past the close, plus the literal and bound attributes
 /// found; `bound_index` is threaded through and bumped for every bound
 /// attribute encountered, matching or not, to stay in sync with the
-/// file-wide `blade_directive` call count.
+/// file-wide `blade_bound_attr_directive` call count.
 fn scan_tag_attributes(
     masked: &str,
     start: usize,
@@ -578,7 +583,7 @@ fn scan_tag_attributes(
                 let name = masked[name_start..j].to_string();
                 if is_argument(&name) {
                     // The tag's own call carries this one, so it is not in
-                    // the `blade_directive` sequence at all.
+                    // the `blade_bound_attr_directive` sequence at all.
                     i = j;
                     continue;
                 }
@@ -610,8 +615,9 @@ fn scan_tag_attributes(
         if bytes.get(i) != Some(&b'=') {
             // A bare attribute (`disabled`) is `true`. A bare *bound*
             // attribute (`:disabled`, no `=`) never reaches the
-            // preprocessor's `blade_directive` emission (it requires a
-            // quoted value), so there is nothing to correlate for it.
+            // preprocessor's `blade_bound_attr_directive` emission (it
+            // requires a quoted value), so there is nothing to correlate
+            // for it.
             if !is_bound {
                 literal.push((name, PhpType::bool()));
             }
@@ -639,7 +645,7 @@ fn scan_tag_attributes(
         if is_bound {
             // An unquoted bound value is never recognised by the
             // preprocessor either; only a quoted one produced a
-            // `blade_directive` call to correlate against.
+            // `blade_bound_attr_directive` call to correlate against.
             if quoted && !is_argument(&name) {
                 bound.push((name, *bound_index));
                 *bound_index += 1;
@@ -927,7 +933,7 @@ mod tests {
         );
         // The `<div>` binding is index 0; `alert`'s own binding must
         // therefore be index 1, or the caller correlates it against the
-        // wrong `blade_directive` call.
+        // wrong `blade_bound_attr_directive` call.
         assert_eq!(calls[0].bound, vec![("message".to_string(), 1)]);
     }
 
