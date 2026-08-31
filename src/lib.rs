@@ -129,6 +129,12 @@ pub(crate) type ParseErrorEntry = (String, u32, u32);
 /// [`Backend::uri_globals_index`] so a re-parse can evict what an edit removed.
 pub(crate) type UriGlobals = (Vec<String>, Vec<String>);
 
+/// The `[indexing] extensions` set and Laravel classification last pushed
+/// to the client as a `workspace/didChangeWatchedFiles` registration:
+/// `(extra_extensions, is_laravel)`. `None` until the first registration.
+/// See [`Backend::registered_watcher_state`].
+pub(crate) type WatchedFileRegistrationState = Option<(Vec<String>, bool)>;
+
 // ─── Module declarations ────────────────────────────────────────────────────
 
 /// Maximum number of LSP requests the tower-lsp transport processes
@@ -869,6 +875,16 @@ pub struct Backend {
     pub(crate) supports_work_done_progress: Arc<std::sync::atomic::AtomicBool>,
     /// Whether the client supports dynamic registration for type hierarchy.
     pub(crate) supports_type_hierarchy_dynamic_registration: Arc<std::sync::atomic::AtomicBool>,
+    /// The `[indexing] extensions` set and Laravel classification last
+    /// pushed to the client as a `workspace/didChangeWatchedFiles`
+    /// registration. `None` until `initialized` performs the first
+    /// registration.
+    ///
+    /// Compared on every config reload
+    /// ([`indexing::watch::reregister_watched_files_if_changed`]) so a
+    /// live `.phpantom.toml` edit that adds or removes an extension can
+    /// push a fresh registration instead of requiring a restart.
+    pub(crate) registered_watcher_state: Arc<RwLock<WatchedFileRegistrationState>>,
     /// Whether the client supports `window/showDocument`.
     ///
     /// Set during `initialize` based on the client's
@@ -1155,6 +1171,7 @@ impl Backend {
             supports_type_hierarchy_dynamic_registration: Arc::new(
                 std::sync::atomic::AtomicBool::new(false),
             ),
+            registered_watcher_state: Arc::new(RwLock::new(None)),
             supports_show_document: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_semantic_tokens_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_inlay_hint_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -1265,6 +1282,7 @@ impl Backend {
             supports_type_hierarchy_dynamic_registration: Arc::new(
                 std::sync::atomic::AtomicBool::new(false),
             ),
+            registered_watcher_state: Arc::new(RwLock::new(None)),
             supports_show_document: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_semantic_tokens_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_inlay_hint_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -1905,6 +1923,7 @@ impl Backend {
             supports_type_hierarchy_dynamic_registration: Arc::clone(
                 &self.supports_type_hierarchy_dynamic_registration,
             ),
+            registered_watcher_state: Arc::clone(&self.registered_watcher_state),
             supports_show_document: Arc::clone(&self.supports_show_document),
             supports_semantic_tokens_refresh: Arc::clone(&self.supports_semantic_tokens_refresh),
             supports_inlay_hint_refresh: Arc::clone(&self.supports_inlay_hint_refresh),

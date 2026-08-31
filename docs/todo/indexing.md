@@ -347,9 +347,9 @@ held as a client layer beside the `.phpantom.toml` layer:
 reload keeps the client's contribution and a client update keeps the
 config file's. Accept the same shape via
 `workspace/didChangeConfiguration` so a settings change mid-session
-recompiles the filters; a changed `extensions` list also needs the
-watcher re-registration tracked as B1 in
-[`bugs.md`](bugs.md#b1-adding-an-indexing-extensions-entry-needs-a-restart-to-be-watched).
+recompiles the filters; call `Backend::reregister_watched_files_if_changed`
+afterwards so a changed `extensions` list gets its watcher re-registered
+too, the same as a live `.phpantom.toml` edit already does.
 
 Keep the interface generic (a list of gitignore-style globs and a
 list of extensions), never editor-specific setting names: any client

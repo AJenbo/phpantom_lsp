@@ -562,54 +562,13 @@ impl LanguageServer for Backend {
         // (even outside the editor), so we can refresh our indices.
         // `[indexing] extensions` entries get their own watchers so files
         // like Drupal's `.module` refresh the index the way `.php` does.
-        let index_filters = self.index_filters();
-        let mut watchers: Vec<FileSystemWatcher> = index_filters
-            .extra_extensions()
-            .iter()
-            .map(|ext| FileSystemWatcher {
-                glob_pattern: GlobPattern::String(format!("**/*.{ext}")),
-                kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
-            })
-            .collect();
-        watchers.extend([
-            FileSystemWatcher {
-                glob_pattern: GlobPattern::String("**/*.php".to_string()),
-                kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
-            },
-            FileSystemWatcher {
-                glob_pattern: GlobPattern::String("**/composer.json".to_string()),
-                kind: Some(WatchKind::Change),
-            },
-            FileSystemWatcher {
-                glob_pattern: GlobPattern::String("**/composer.lock".to_string()),
-                kind: Some(WatchKind::Change),
-            },
-            FileSystemWatcher {
-                glob_pattern: GlobPattern::String("**/.phpantom.toml".to_string()),
-                kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
-            },
-        ]);
-        if self.resolved_class_cache.read().is_laravel() {
-            watchers.extend([
-                FileSystemWatcher {
-                    glob_pattern: GlobPattern::String("**/*.sql".to_string()),
-                    kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
-                },
-                FileSystemWatcher {
-                    glob_pattern: GlobPattern::String("**/config/database.php".to_string()),
-                    kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
-                },
-            ]);
-        }
-
-        registrations.push(Registration {
-            id: "workspace/didChangeWatchedFiles".to_string(),
-            method: "workspace/didChangeWatchedFiles".to_string(),
-            register_options: Some(
-                serde_json::to_value(DidChangeWatchedFilesRegistrationOptions { watchers })
-                    .unwrap(),
-            ),
-        });
+        // Built by the same helper `reload_config` uses to keep this
+        // registration current when the extension list changes mid-session
+        // (see `indexing::watch::reregister_watched_files_if_changed`).
+        let (watched_files_registration, extra_extensions, is_laravel) =
+            self.build_watched_file_registration();
+        registrations.push(watched_files_registration);
+        *self.registered_watcher_state.write() = Some((extra_extensions, is_laravel));
 
         if let Some(client) = &self.client {
             let _ = client.register_capability(registrations).await;
