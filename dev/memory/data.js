@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788255080208,
+  "lastUpdate": 1788274824068,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -26281,6 +26281,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 72.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "f2456f385cfb8e4aba97984754e66e4b5a39e987",
+          "message": "fix: offer import actions at point cursors",
+          "timestamp": "2026-09-01T09:48:16-05:00",
+          "tree_id": "5ad847dee6d69208cd4c9e49bc1726f3ffa882a4",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/f2456f385cfb8e4aba97984754e66e4b5a39e987"
+        },
+        "date": 1788274816862,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 36.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 73.8,
             "unit": "MiB"
           }
         ]
