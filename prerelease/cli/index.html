@@ -551,6 +551,45 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#move" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>move</code>
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="move">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#options" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Options
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#exit-codes" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Exit codes
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#tcp-transport" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -574,7 +613,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#options" class="md-nav__link">
+  <a href="#options_1" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Options
@@ -624,7 +663,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#options_1" class="md-nav__link">
+  <a href="#options_2" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Options
@@ -635,7 +674,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#exit-codes" class="md-nav__link">
+  <a href="#exit-codes_1" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Exit codes
@@ -685,7 +724,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#options_2" class="md-nav__link">
+  <a href="#options_3" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Options
@@ -696,7 +735,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#exit-codes_1" class="md-nav__link">
+  <a href="#exit-codes_2" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Exit codes
@@ -1581,6 +1620,45 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#move" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>move</code>
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="move">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#options" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Options
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#exit-codes" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Exit codes
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#tcp-transport" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1604,7 +1682,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#options" class="md-nav__link">
+  <a href="#options_1" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Options
@@ -1654,7 +1732,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#options_1" class="md-nav__link">
+  <a href="#options_2" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Options
@@ -1665,7 +1743,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#exit-codes" class="md-nav__link">
+  <a href="#exit-codes_1" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Exit codes
@@ -1715,7 +1793,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#options_2" class="md-nav__link">
+  <a href="#options_3" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Options
@@ -1726,7 +1804,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#exit-codes_1" class="md-nav__link">
+  <a href="#exit-codes_2" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Exit codes
@@ -1900,6 +1978,10 @@ and what CI reports.</p>
 <td>Apply automated code fixes across the project</td>
 </tr>
 <tr>
+<td><code>phpantom_lsp move</code></td>
+<td>Move classes or namespaces and update references</td>
+</tr>
+<tr>
 <td><code>phpantom_lsp init</code></td>
 <td>Generate a default <code>.phpantom.toml</code> config file</td>
 </tr>
@@ -1907,6 +1989,80 @@ and what CI reports.</p>
 </table>
 <p>Running with no subcommand starts the language server. Editors launch
 this automatically.</p>
+<hr />
+<h2 id="move"><code>move</code><a class="headerlink" href="#move" title="Permanent link">&para;</a></h2>
+<p>Moves a class or namespace and updates its declarations, imports, and references
+across the project. Inputs can be fully-qualified names or PSR-4 paths:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>phpantom_lsp<span class="w"> </span>move<span class="w"> </span><span class="s1">&#39;App\Old\Widget&#39;</span><span class="w"> </span><span class="s1">&#39;App\Domain\Gadget&#39;</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>phpantom_lsp<span class="w"> </span>move<span class="w"> </span>src/Old/Widget.php<span class="w"> </span>src/Domain/Gadget.php
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>phpantom_lsp<span class="w"> </span>move<span class="w"> </span><span class="s1">&#39;App\Old&#39;</span><span class="w"> </span><span class="s1">&#39;App\Domain&#39;</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>phpantom_lsp<span class="w"> </span>move<span class="w"> </span>src/Old<span class="w"> </span>src/Domain
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>phpantom_lsp<span class="w"> </span>move<span class="w"> </span>--dry-run<span class="w"> </span>--format<span class="w"> </span>json<span class="w"> </span>src/Old<span class="w"> </span>src/Domain
+</code></pre></div>
+<p><code>FROM</code> decides what is being moved, and <code>TO</code> is read the same way: a class
+moves to a full destination name, so <code>move 'App\Old\Widget' 'App\Domain'</code>
+renames the class to <code>Domain</code>, and moving it into <code>App\Domain</code> under its own
+name is written out as <code>'App\Domain\Widget'</code>.</p>
+<p>Path forms require a Composer PSR-4 mapping. A file identifies one class and a
+directory identifies its namespace prefix. The command refuses occupied class
+destinations and namespace merges with clashing class names before writing any
+files.</p>
+<p>A destination no PSR-4 mapping covers rewrites the declarations and their
+references, but no file can follow them, which leaves the autoloader unable to
+find what moved. That is reported as a warning on stderr and in the <code>warnings</code>
+array of the JSON output, so a script can catch it. A destination under a
+<em>different</em> mapping is an ordinary move: the files follow it to that mapping's
+directory.</p>
+<h3 id="options">Options<a class="headerlink" href="#options" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>FROM</code></td>
+<td>Source class, namespace, PHP file, or PSR-4 directory.</td>
+</tr>
+<tr>
+<td><code>TO</code></td>
+<td>Destination name or path, of the same kind as <code>FROM</code>.</td>
+</tr>
+<tr>
+<td><code>--dry-run</code></td>
+<td>Validate and report the move without changing the project.</td>
+</tr>
+<tr>
+<td><code>--project-root &lt;DIR&gt;</code></td>
+<td>Project root directory. Defaults to the current working directory.</td>
+</tr>
+<tr>
+<td><code>--format &lt;FORMAT&gt;</code></td>
+<td>Output format: <code>table</code> (default) or <code>json</code>.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="exit-codes">Exit codes<a class="headerlink" href="#exit-codes" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>Move applied, or valid dry-run completed</td>
+</tr>
+<tr>
+<td>1</td>
+<td>Invalid input, conflict, or filesystem error</td>
+</tr>
+</tbody>
+</table>
 <hr />
 <h2 id="tcp-transport">TCP Transport<a class="headerlink" href="#tcp-transport" title="Permanent link">&para;</a></h2>
 <p>By default PHPantom communicates over stdin/stdout, which is what most
@@ -1916,25 +2072,25 @@ process, connect from an IDE plugin that prefers a network socket, or
 just poke at the JSON-RPC stream with <code>nc</code> or <code>socat</code>.</p>
 <p>The server binds to the given address, accepts a single client
 connection, serves it, and exits when the client disconnects.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>phpantom_lsp<span class="w"> </span>--tcp<span class="w"> </span><span class="m">9257</span><span class="w">                  </span><span class="c1"># listen on 127.0.0.1:9257</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>phpantom_lsp<span class="w"> </span>--tcp<span class="w"> </span><span class="m">127</span>.0.0.1:9257<span class="w">       </span><span class="c1"># same, explicit host</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>phpantom_lsp<span class="w"> </span>--tcp<span class="w"> </span><span class="m">0</span>.0.0.0:9257<span class="w">         </span><span class="c1"># listen on all interfaces</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>phpantom_lsp<span class="w"> </span>--tcp<span class="w"> </span><span class="m">0</span><span class="w">                    </span><span class="c1"># OS picks a free port</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>phpantom_lsp<span class="w"> </span>--tcp<span class="w"> </span><span class="m">9257</span><span class="w">                  </span><span class="c1"># listen on 127.0.0.1:9257</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>phpantom_lsp<span class="w"> </span>--tcp<span class="w"> </span><span class="m">127</span>.0.0.1:9257<span class="w">       </span><span class="c1"># same, explicit host</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>phpantom_lsp<span class="w"> </span>--tcp<span class="w"> </span><span class="m">0</span>.0.0.0:9257<span class="w">         </span><span class="c1"># listen on all interfaces</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>phpantom_lsp<span class="w"> </span>--tcp<span class="w"> </span><span class="m">0</span><span class="w">                    </span><span class="c1"># OS picks a free port</span>
 </code></pre></div>
 <p>When the server starts it prints the bound address to stderr:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>PHPantom LSP listening on tcp://127.0.0.1:9257
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>PHPantom LSP listening on tcp://127.0.0.1:9257
 </code></pre></div>
 <p>This is especially handy with port <code>0</code>: the OS assigns an available
 port and the server tells you which one it picked.</p>
 <h3 id="connecting">Connecting<a class="headerlink" href="#connecting" title="Permanent link">&para;</a></h3>
 <p>Any LSP client that supports TCP can connect. For quick manual testing:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># In one terminal, start the server:</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>phpantom_lsp<span class="w"> </span>--tcp<span class="w"> </span><span class="m">9257</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1"># In another terminal, connect and send JSON-RPC:</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>nc<span class="w"> </span><span class="m">127</span>.0.0.1<span class="w"> </span><span class="m">9257</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># In one terminal, start the server:</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>phpantom_lsp<span class="w"> </span>--tcp<span class="w"> </span><span class="m">9257</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="c1"># In another terminal, connect and send JSON-RPC:</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>nc<span class="w"> </span><span class="m">127</span>.0.0.1<span class="w"> </span><span class="m">9257</span>
 </code></pre></div>
-<h3 id="options">Options<a class="headerlink" href="#options" title="Permanent link">&para;</a></h3>
+<h3 id="options_1">Options<a class="headerlink" href="#options_1" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
 <tr>
@@ -1993,17 +2149,17 @@ fewer with each release. If you hit one, please
 <a href="https://github.com/PHPantom-dev/phpantom_lsp/issues">report it</a>.</p>
 </blockquote>
 <h3 id="usage">Usage<a class="headerlink" href="#usage" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w">                             </span><span class="c1"># scan entire project</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>src/<span class="w">                        </span><span class="c1"># scan a subdirectory</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>src/Foo.php<span class="w">                 </span><span class="c1"># scan a single file</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>app/<span class="w"> </span>lib/Helper.php<span class="w">         </span><span class="c1"># scan several paths at once</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--severity<span class="w"> </span>warning<span class="w">          </span><span class="c1"># errors and warnings only</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--severity<span class="w"> </span>error<span class="w">            </span><span class="c1"># errors only</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--project-root<span class="w"> </span>/path/to/app<span class="w"> </span><span class="c1"># explicit project root</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--no-colour<span class="w">                 </span><span class="c1"># plain text output</span>
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--debug<span class="w"> </span>-vv<span class="w">                 </span><span class="c1"># trace file-by-file progress</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w">                             </span><span class="c1"># scan entire project</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>src/<span class="w">                        </span><span class="c1"># scan a subdirectory</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>src/Foo.php<span class="w">                 </span><span class="c1"># scan a single file</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>app/<span class="w"> </span>lib/Helper.php<span class="w">         </span><span class="c1"># scan several paths at once</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--severity<span class="w"> </span>warning<span class="w">          </span><span class="c1"># errors and warnings only</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--severity<span class="w"> </span>error<span class="w">            </span><span class="c1"># errors only</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--project-root<span class="w"> </span>/path/to/app<span class="w"> </span><span class="c1"># explicit project root</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--no-colour<span class="w">                 </span><span class="c1"># plain text output</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--debug<span class="w"> </span>-vv<span class="w">                 </span><span class="c1"># trace file-by-file progress</span>
 </code></pre></div>
-<h3 id="options_1">Options<a class="headerlink" href="#options_1" title="Permanent link">&para;</a></h3>
+<h3 id="options_2">Options<a class="headerlink" href="#options_2" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
 <tr>
@@ -2042,7 +2198,7 @@ fewer with each release. If you hit one, please
 </tr>
 </tbody>
 </table>
-<h3 id="exit-codes">Exit codes<a class="headerlink" href="#exit-codes" title="Permanent link">&para;</a></h3>
+<h3 id="exit-codes_1">Exit codes<a class="headerlink" href="#exit-codes_1" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
 <tr>
@@ -2066,14 +2222,14 @@ fewer with each release. If you hit one, please
 </tbody>
 </table>
 <h3 id="example-output">Example output<a class="headerlink" href="#example-output" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a> ------ -------------------------------------------
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>   Line   src/Service/UserService.php
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a> ------ -------------------------------------------
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>   15     Unknown class &#39;App\Models\LegacyUser&#39;.
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>          🪪  unknown_class
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>   42     Call to undefined method Post::archive().
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>          🪪  unknown_member
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a> ------ -------------------------------------------
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a> ------ -------------------------------------------
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>   Line   src/Service/UserService.php
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a> ------ -------------------------------------------
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>   15     Unknown class &#39;App\Models\LegacyUser&#39;.
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>          🪪  unknown_class
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>   42     Call to undefined method Post::archive().
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>          🪪  unknown_member
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a> ------ -------------------------------------------
 </code></pre></div>
 <h3 id="reported-diagnostics">Reported diagnostics<a class="headerlink" href="#reported-diagnostics" title="Permanent link">&para;</a></h3>
 <p>The analyze command reports the same diagnostics you see in your editor.
@@ -2141,15 +2297,15 @@ omit <code>--rule</code> to run all preferred native fixers.</p>
 <p>This is useful for cleaning up an entire codebase in one pass. For
 example, a project with hundreds of unused <code>use</code> statements can be
 cleaned up in seconds rather than file by file.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>phpantom_lsp<span class="w"> </span>fix<span class="w">                                  </span><span class="c1"># apply all preferred fixers</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>phpantom_lsp<span class="w"> </span>fix<span class="w"> </span>--rule<span class="w"> </span>unused_import<span class="w">             </span><span class="c1"># only remove unused imports</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>phpantom_lsp<span class="w"> </span>fix<span class="w"> </span>--rule<span class="w"> </span>unused_import<span class="w"> </span>--rule<span class="w"> </span>deprecated<span class="w">  </span><span class="c1"># multiple rules</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>phpantom_lsp<span class="w"> </span>fix<span class="w"> </span>--dry-run<span class="w">                        </span><span class="c1"># preview without writing</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>phpantom_lsp<span class="w"> </span>fix<span class="w"> </span>src/<span class="w">                             </span><span class="c1"># restrict to a subdirectory</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>phpantom_lsp<span class="w"> </span>fix<span class="w"> </span>src/Foo.php<span class="w">                      </span><span class="c1"># fix a single file</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>phpantom_lsp<span class="w"> </span>fix<span class="w"> </span>--project-root<span class="w"> </span>/path/to/app<span class="w">      </span><span class="c1"># explicit project root</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>phpantom_lsp<span class="w"> </span>fix<span class="w">                                  </span><span class="c1"># apply all preferred fixers</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>phpantom_lsp<span class="w"> </span>fix<span class="w"> </span>--rule<span class="w"> </span>unused_import<span class="w">             </span><span class="c1"># only remove unused imports</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>phpantom_lsp<span class="w"> </span>fix<span class="w"> </span>--rule<span class="w"> </span>unused_import<span class="w"> </span>--rule<span class="w"> </span>deprecated<span class="w">  </span><span class="c1"># multiple rules</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>phpantom_lsp<span class="w"> </span>fix<span class="w"> </span>--dry-run<span class="w">                        </span><span class="c1"># preview without writing</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>phpantom_lsp<span class="w"> </span>fix<span class="w"> </span>src/<span class="w">                             </span><span class="c1"># restrict to a subdirectory</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>phpantom_lsp<span class="w"> </span>fix<span class="w"> </span>src/Foo.php<span class="w">                      </span><span class="c1"># fix a single file</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>phpantom_lsp<span class="w"> </span>fix<span class="w"> </span>--project-root<span class="w"> </span>/path/to/app<span class="w">      </span><span class="c1"># explicit project root</span>
 </code></pre></div>
-<h3 id="options_2">Options<a class="headerlink" href="#options_2" title="Permanent link">&para;</a></h3>
+<h3 id="options_3">Options<a class="headerlink" href="#options_3" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
 <tr>
@@ -2184,7 +2340,7 @@ cleaned up in seconds rather than file by file.</p>
 </tr>
 </tbody>
 </table>
-<h3 id="exit-codes_1">Exit codes<a class="headerlink" href="#exit-codes_1" title="Permanent link">&para;</a></h3>
+<h3 id="exit-codes_2">Exit codes<a class="headerlink" href="#exit-codes_2" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
 <tr>
@@ -2224,28 +2380,28 @@ cleaned up in seconds rather than file by file.</p>
 </tbody>
 </table>
 <h3 id="example-output_1">Example output<a class="headerlink" href="#example-output_1" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a> ------ -------------------------------------------
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>   Line   src/Service/UserService.php
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a> ------ -------------------------------------------
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>    5     Unused import &#39;App\Models\LegacyUser&#39;
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>          🔧  unused_import
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>    6     Unused import &#39;App\Support\OldHelper&#39;
-<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>          🔧  unused_import
-<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a> ------ -------------------------------------------
-<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>
-<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a> [FIXED] Applied 2 fixes across 1 file
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a> ------ -------------------------------------------
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>   Line   src/Service/UserService.php
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a> ------ -------------------------------------------
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>    5     Unused import &#39;App\Models\LegacyUser&#39;
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>          🔧  unused_import
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>    6     Unused import &#39;App\Support\OldHelper&#39;
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>          🔧  unused_import
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a> ------ -------------------------------------------
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a> [FIXED] Applied 2 fixes across 1 file
 </code></pre></div>
 <h3 id="dry-run-example">Dry-run example<a class="headerlink" href="#dry-run-example" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>phpantom_lsp<span class="w"> </span>fix<span class="w"> </span>--dry-run<span class="w"> </span>--project-root<span class="w"> </span>/path/to/app
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>phpantom_lsp<span class="w"> </span>fix<span class="w"> </span>--dry-run<span class="w"> </span>--project-root<span class="w"> </span>/path/to/app
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a> ------ -------------------------------------------
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>   Line   src/Service/UserService.php
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a> ------ -------------------------------------------
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>    5     Unused import &#39;App\Models\LegacyUser&#39;
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>          🔧  unused_import
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a> ------ -------------------------------------------
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>
-<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a> [DRY RUN] 1 fix in 1 file (not applied)
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a> ------ -------------------------------------------
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>   Line   src/Service/UserService.php
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a> ------ -------------------------------------------
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>    5     Unused import &#39;App\Models\LegacyUser&#39;
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>          🔧  unused_import
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a> ------ -------------------------------------------
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a> [DRY RUN] 1 fix in 1 file (not applied)
 </code></pre></div>
 <h3 id="idempotency">Idempotency<a class="headerlink" href="#idempotency" title="Permanent link">&para;</a></h3>
 <p>Running <code>fix</code> twice produces the same result as running it once. If
@@ -2260,8 +2416,8 @@ Editors with TOML schema support (Zed, VS Code + Even Better TOML,
 Neovim) provide autocomplete and hover documentation for all available
 options via the schema. Safe to run if the file already exists (it will
 not overwrite).</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>phpantom_lsp<span class="w"> </span>init
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>phpantom_lsp<span class="w"> </span>init<span class="w"> </span>--global<span class="w">   </span><span class="c1"># user-wide defaults, inherited by every project</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>phpantom_lsp<span class="w"> </span>init
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>phpantom_lsp<span class="w"> </span>init<span class="w"> </span>--global<span class="w">   </span><span class="c1"># user-wide defaults, inherited by every project</span>
 </code></pre></div>
 <p><code>--global</code> writes to the platform config directory
 (<code>~/.config/phpantom_lsp/.phpantom.toml</code> on Linux and macOS) instead, creating it
@@ -2288,27 +2444,27 @@ better at catching structural gaps: unknown classes, unresolvable
 members, missing implementations. Running both gives you broad coverage
 without needing PHPStan at max level to get full symbol resolution.</p>
 <h3 id="github-actions-example">GitHub Actions example<a class="headerlink" href="#github-actions-example" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Type Coverage</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="nt">on</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">push</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">pull_request</span><span class="p p-Indicator">]</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="nt">jobs</span><span class="p">:</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="w">  </span><span class="nt">phpantom</span><span class="p">:</span>
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="w">    </span><span class="nt">runs-on</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ubuntu-latest</span>
-<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="w">    </span><span class="nt">steps</span><span class="p">:</span>
-<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">uses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">actions/checkout@v4</span>
-<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>
-<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a><span class="w">      </span><span class="c1"># Use --no-dev to catch production code that depends on dev-only</span>
-<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a><span class="w">      </span><span class="c1"># packages (e.g. calling PHPUnit classes from application code).</span>
-<a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Install Composer dependencies</span>
-<a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a><span class="w">        </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">composer install --no-interaction --prefer-dist --no-dev</span>
-<a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a>
-<a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Install PHPantom</span>
-<a id="__codelineno-10-16" name="__codelineno-10-16" href="#__codelineno-10-16"></a><span class="w">        </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span>
-<a id="__codelineno-10-17" name="__codelineno-10-17" href="#__codelineno-10-17"></a><span class="w">          </span><span class="no">curl -sL https://github.com/PHPantom-dev/phpantom_lsp/releases/download/0.6.0/phpantom_lsp-x86_64-unknown-linux-gnu.tar.gz | tar xz</span>
-<a id="__codelineno-10-18" name="__codelineno-10-18" href="#__codelineno-10-18"></a><span class="w">          </span><span class="no">chmod +x phpantom_lsp</span>
-<a id="__codelineno-10-19" name="__codelineno-10-19" href="#__codelineno-10-19"></a>
-<a id="__codelineno-10-20" name="__codelineno-10-20" href="#__codelineno-10-20"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Check type coverage</span>
-<a id="__codelineno-10-21" name="__codelineno-10-21" href="#__codelineno-10-21"></a><span class="w">        </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">./phpantom_lsp analyze --severity warning --no-colour src/</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Type Coverage</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="nt">on</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">push</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">pull_request</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="nt">jobs</span><span class="p">:</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="w">  </span><span class="nt">phpantom</span><span class="p">:</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="w">    </span><span class="nt">runs-on</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ubuntu-latest</span>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="w">    </span><span class="nt">steps</span><span class="p">:</span>
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">uses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">actions/checkout@v4</span>
+<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>
+<a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a><span class="w">      </span><span class="c1"># Use --no-dev to catch production code that depends on dev-only</span>
+<a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a><span class="w">      </span><span class="c1"># packages (e.g. calling PHPUnit classes from application code).</span>
+<a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Install Composer dependencies</span>
+<a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a><span class="w">        </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">composer install --no-interaction --prefer-dist --no-dev</span>
+<a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a>
+<a id="__codelineno-11-15" name="__codelineno-11-15" href="#__codelineno-11-15"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Install PHPantom</span>
+<a id="__codelineno-11-16" name="__codelineno-11-16" href="#__codelineno-11-16"></a><span class="w">        </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span>
+<a id="__codelineno-11-17" name="__codelineno-11-17" href="#__codelineno-11-17"></a><span class="w">          </span><span class="no">curl -sL https://github.com/PHPantom-dev/phpantom_lsp/releases/download/0.6.0/phpantom_lsp-x86_64-unknown-linux-gnu.tar.gz | tar xz</span>
+<a id="__codelineno-11-18" name="__codelineno-11-18" href="#__codelineno-11-18"></a><span class="w">          </span><span class="no">chmod +x phpantom_lsp</span>
+<a id="__codelineno-11-19" name="__codelineno-11-19" href="#__codelineno-11-19"></a>
+<a id="__codelineno-11-20" name="__codelineno-11-20" href="#__codelineno-11-20"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Check type coverage</span>
+<a id="__codelineno-11-21" name="__codelineno-11-21" href="#__codelineno-11-21"></a><span class="w">        </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">./phpantom_lsp analyze --severity warning --no-colour src/</span>
 </code></pre></div>
 <p>The <code>analyze</code> step fails the build if any class, member, or function
 cannot be resolved (including unused imports). The output is clean and
@@ -2316,17 +2472,17 @@ readable in the CI log.</p>
 <h3 id="common-patterns">Common patterns<a class="headerlink" href="#common-patterns" title="Permanent link">&para;</a></h3>
 <p><strong>Diagnostics gate.</strong> Fail the build when PHPantom finds unresolvable
 symbols:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--severity<span class="w"> </span>warning<span class="w"> </span>--project-root<span class="w"> </span>.<span class="w"> </span>--no-colour
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--severity<span class="w"> </span>warning<span class="w"> </span>--project-root<span class="w"> </span>.<span class="w"> </span>--no-colour
 </code></pre></div>
 <p><strong>Enforce clean imports.</strong> Fail the build when unused imports exist:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>phpantom_lsp<span class="w"> </span>fix<span class="w"> </span>--dry-run<span class="w"> </span>--rule<span class="w"> </span>unused_import<span class="w"> </span>--project-root<span class="w"> </span>.<span class="w"> </span>--no-colour
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>phpantom_lsp<span class="w"> </span>fix<span class="w"> </span>--dry-run<span class="w"> </span>--rule<span class="w"> </span>unused_import<span class="w"> </span>--project-root<span class="w"> </span>.<span class="w"> </span>--no-colour
 </code></pre></div>
 <p><strong>Pre-commit hook.</strong> Clean up imports before every commit:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>phpantom_lsp<span class="w"> </span>fix<span class="w"> </span>--rule<span class="w"> </span>unused_import<span class="w"> </span>--project-root<span class="w"> </span>.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>phpantom_lsp<span class="w"> </span>fix<span class="w"> </span>--rule<span class="w"> </span>unused_import<span class="w"> </span>--project-root<span class="w"> </span>.
 </code></pre></div>
 <p><strong>Combine analyze and fix.</strong> Run fixes first, then check what remains:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>phpantom_lsp<span class="w"> </span>fix<span class="w"> </span>--project-root<span class="w"> </span>.
-<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--project-root<span class="w"> </span>.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>phpantom_lsp<span class="w"> </span>fix<span class="w"> </span>--project-root<span class="w"> </span>.
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--project-root<span class="w"> </span>.
 </code></pre></div>
 
 
