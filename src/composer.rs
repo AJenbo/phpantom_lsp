@@ -648,6 +648,59 @@ pub fn resolve_class_path(
     None
 }
 
+/// The part of `namespace` that lies below a PSR-4 mapping's prefix, or
+/// `None` when the mapping does not cover the namespace at all.
+///
+/// `""` means the namespace *is* the mapping's root. Matching is
+/// ASCII-case-insensitive, which is how PHP compares namespace segments,
+/// and byte lengths are preserved so the remainder can be sliced off the
+/// original spelling.
+pub(crate) fn namespace_below_prefix<'a>(
+    namespace: &'a str,
+    mapping_prefix: &str,
+) -> Option<&'a str> {
+    let prefix = mapping_prefix.trim_end_matches('\\');
+    if prefix.is_empty() {
+        // A root fallback mapping (`"": "src/"`) covers every namespace.
+        return Some(namespace);
+    }
+    if !namespace.get(..prefix.len())?.eq_ignore_ascii_case(prefix) {
+        return None;
+    }
+    let rest = &namespace[prefix.len()..];
+    if rest.is_empty() {
+        return Some(rest);
+    }
+    rest.strip_prefix('\\')
+}
+
+/// The directory PSR-4 places `namespace` in, or `None` when no mapping
+/// covers it.
+///
+/// The counterpart of [`resolve_namespace_from_path`], and the namespace
+/// equivalent of [`resolve_class_path`]: it answers where a namespace's
+/// files have to live for the autoloader to find them. `mappings` is
+/// assumed to be sorted longest-prefix-first, so the most specific
+/// mapping wins and a root fallback is consulted last.
+pub(crate) fn psr4_directory_for_namespace(
+    mappings: &[Psr4Mapping],
+    workspace_root: &Path,
+    namespace: &str,
+) -> Option<PathBuf> {
+    for mapping in mappings {
+        let Some(relative) = namespace_below_prefix(namespace, &mapping.prefix) else {
+            continue;
+        };
+        let base = workspace_root.join(&mapping.base_path);
+        return Some(if relative.is_empty() {
+            base
+        } else {
+            base.join(relative.replace('\\', std::path::MAIN_SEPARATOR_STR))
+        });
+    }
+    None
+}
+
 /// Reverse of [`resolve_class_path`]: given a file path, compute the
 /// expected PSR-4 namespace and class name.
 ///

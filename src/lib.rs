@@ -259,6 +259,7 @@ mod lsp_dispatch;
 mod mago;
 #[cfg(feature = "mem-audit")]
 mod mem_audit;
+pub mod move_cli;
 pub(crate) mod names;
 mod parser;
 pub(crate) mod phar;
@@ -1322,6 +1323,12 @@ impl Backend {
             skip_reference_index: true,
             ..Self::defaults()
         }
+    }
+
+    /// Create a headless backend for refactoring commands that need the
+    /// workspace-wide reference index.
+    pub fn new_headless_refactoring() -> Self {
+        Self::defaults()
     }
 
     /// Create a `Backend` without an LSP client (for unit / integration tests).
