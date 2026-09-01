@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788274824068,
+  "lastUpdate": 1788290993839,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -26315,6 +26315,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 73.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "6a4c95b0f9497edb13ce54f014a7860d3c766b2c",
+          "message": "feat: move classes and namespaces from the command line\n\nRenaming a class's FQN or a namespace segment already moves the files\nand rewrites the references across a project, but only through\ntextDocument/rename, which needs a cursor position and hands the\nresulting WorkspaceEdit to an editor to apply. That leaves the bulk\ncase — a migration script, a pre-commit hook, an agent working through\na list of classes — with no way in short of driving an editor.\n\n`phpantom_lsp move FROM TO` exposes the same engine headlessly. Either\nside accepts a fully-qualified name or a Composer PSR-4 path, so a\nclass or a whole namespace can be named however the caller already has\nit to hand, and `--dry-run --format json` gives a validation-only form\nfor scripts.\n\nTwo cursor-free planners drive the existing rename builders rather than\nduplicating them, and the CLI applies the WorkspaceEdit itself: every\nfile is read and every edit computed in memory, and every destination\nchecked, before anything is written, so a refused move leaves the tree\nexactly as it was.\n\nMoving a class into a namespace no PSR-4 mapping covers rewrites the\ndeclaration but cannot take the file with it, leaving the class\nsomewhere the autoloader will not find it. Reporting that as a plain\nsuccess would hand a script a quietly broken project, so it is called\nout on stderr and in the JSON output instead.",
+          "timestamp": "2026-09-01T21:16:50+02:00",
+          "tree_id": "fac670182d27639b39b6eabaf4a9121d9b84ecb7",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/6a4c95b0f9497edb13ce54f014a7860d3c766b2c"
+        },
+        "date": 1788290987258,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 74.6,
             "unit": "MiB"
           }
         ]
