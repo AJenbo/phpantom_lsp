@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788214533064,
+  "lastUpdate": 1788224794583,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -26179,6 +26179,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 70.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "6010a21b6b51384701f1b69fb6977ded51d698d0",
+          "message": "A rename whose destination is already taken merges or refuses, instead of scattering files\n\nTwo shapes of move emitted file operations without checking whether\nanything was already at the far end.\n\nA namespace rename was always a single rename of the source directory\nonto the destination. Where the destination already existed that\noperation cannot be carried out, but the accompanying text edits had\nalready been re-pointed at the paths it was supposed to create, so the\nrename failed, the edits landed anyway, and the editor created a\nscatter of files holding nothing but a rewritten `namespace` line.\nMerging into an existing namespace now moves the files into it one at\na time, each keeping its path relative to the namespace root; a\ndestination that does not exist yet still moves as one directory.\n\nA class move onto an FQN another class already declares, or onto a\nfile that already exists, emitted the whole edit including the rename\nthat would clobber the far end. So did a namespace merge where both\nsides declare the same class name, which has no well-defined answer:\nmoving the rest and leaving the clash behind still rewrites every\nreference to it so it names the class that was already there, which\ncompiles and is wrong. All three now refuse and emit nothing.\n\nRefusing needs a reason the user can read, so `handle_rename` answers\n`Result<Option<WorkspaceEdit>, String>` and both front ends turn the\nerror into a failed request, which is the only part of the rename\nprotocol an editor surfaces. `Ok(None)` stays the silent \"nothing\nrenameable here\" answer.\n\nAlso fixes a latent bug in the same path: the rewrite that re-points a\nmoved file's edits matched the old directory as a bare string prefix,\nso renaming `App\\Internal` claimed the edits of `App\\InternalTools`.\nIt now requires a path separator after the match.\n\nThe partial merge that would move everything except the clashing names\nis filed as F22 rather than done; leaving the clash behind correctly\nneeds per-class granularity the namespace rename does not have yet.",
+          "timestamp": "2026-08-31T19:53:08-05:00",
+          "tree_id": "38ab3e6c80feb08d82fe603cf83a740f7b68d6ba",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/6010a21b6b51384701f1b69fb6977ded51d698d0"
+        },
+        "date": 1788224787470,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 71.5,
             "unit": "MiB"
           }
         ]
