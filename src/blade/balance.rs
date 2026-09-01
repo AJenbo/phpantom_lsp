@@ -390,6 +390,67 @@ pub(crate) fn check(content: &str) -> Vec<Imbalance> {
     out
 }
 
+/// Every well-nested block-directive pair in `content`, as
+/// `(opener_span, closer_span)` covering `@directive(...)` through its
+/// matching `@enddirective`.
+///
+/// Mirrors [`check`]'s tolerance for malformed input: a closer that does
+/// not match the innermost open block is left alone rather than guessed
+/// at, so mismatched or unclosed blocks (already reported by [`check`])
+/// simply don't fold.
+pub(crate) fn fold_pairs(content: &str) -> Vec<(Span, Span)> {
+    if !content.contains('@') {
+        return Vec::new();
+    }
+
+    let regions = inert_regions(content, true);
+    let masked = mask_regions(content, &regions);
+    let bytes = masked.as_bytes();
+
+    let mut out: Vec<(Span, Span)> = Vec::new();
+    let mut stack: Vec<(&Block, Span)> = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != b'@' {
+            i += 1;
+            continue;
+        }
+        let Some((name, args)) = directive_at(&masked, i) else {
+            i += 1;
+            continue;
+        };
+        let span = i..i + 1 + name.len();
+        i = args.as_ref().map_or(span.end, |args| args.end);
+
+        if let Some(block) = BLOCKS.iter().find(|block| block.opener == name) {
+            if opens_block(block, &masked, args.as_ref()) {
+                stack.push((block, span));
+            }
+            continue;
+        }
+        if BLOCKS.iter().all(|block| !block.closers.contains(&name)) {
+            continue;
+        }
+        match stack
+            .iter()
+            .rposition(|(open, _)| open.closers.contains(&name))
+        {
+            // A closer for the innermost open block pairs cleanly.
+            Some(index) if index + 1 == stack.len() => {
+                let (_, opener_span) = stack.pop().unwrap();
+                out.push((opener_span, span));
+            }
+            // A closer for a block further out means everything opened
+            // after it was never closed; there is nothing sensible to
+            // fold for either side, so just unwind past it.
+            Some(index) => stack.truncate(index),
+            None => {}
+        }
+    }
+
+    out
+}
+
 /// Whether an occurrence of `block`'s opener with `args` opens a block.
 fn opens_block(block: &Block, content: &str, args: Option<&Span>) -> bool {
     match block.opens {
@@ -597,5 +658,45 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// `fold_pairs` spans as `(name, opener_start, closer_end)` triples,
+    /// for readable assertions.
+    fn pairs(content: &str) -> Vec<(&str, usize, usize)> {
+        fold_pairs(content)
+            .into_iter()
+            .map(|(opener, closer)| {
+                (
+                    &content[opener.start + 1..opener.end],
+                    opener.start,
+                    closer.end,
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_paired_block_folds_from_its_opener_to_its_closer() {
+        let blade = "@foreach ($rows as $row)\n<p>{{ $row }}</p>\n@endforeach\n";
+        assert_eq!(pairs(blade), [("foreach", 0, blade.len() - 1)]);
+    }
+
+    #[test]
+    fn nested_blocks_each_fold_independently() {
+        let blade = "@if ($ok)\n@foreach ($rows as $row)\n{{ $row }}\n@endforeach\n@endif\n";
+        let found = pairs(blade);
+        assert_eq!(found.len(), 2);
+        assert!(found.iter().any(|(name, ..)| *name == "if"));
+        assert!(found.iter().any(|(name, ..)| *name == "foreach"));
+    }
+
+    #[test]
+    fn a_mismatched_closer_folds_neither_side() {
+        assert!(pairs("@foreach ($rows as $row)\n@endif\n").is_empty());
+    }
+
+    #[test]
+    fn an_unclosed_block_does_not_fold() {
+        assert!(pairs("@if ($ok)\n<p>hi</p>\n").is_empty());
     }
 }

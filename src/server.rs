@@ -1484,7 +1484,7 @@ impl LanguageServer for Backend {
         let u = uri.clone();
         self.coalesced_whole_file("folding_range", &uri, move || {
             backend.handle_with_uri("folding_range", &u, |content| {
-                backend.handle_folding_range(content)
+                backend.handle_folding_range(&u, content)
             })
         })
         .await

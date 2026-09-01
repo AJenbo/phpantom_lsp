@@ -118,35 +118,6 @@ In `tests/integration/diagnostics_blade.rs`:
 
 ---
 
-## BL14. Folding ranges for Blade files
-
-**Impact: Low-Medium · Complexity: Medium**
-
-`textDocument/foldingRange` on a `.blade.php` file currently returns
-ranges in virtual-PHP coordinates, which don't line up with the
-original template, because `folding.rs` never translates through the
-source map.
-
-- Translate each `FoldingRange` through `source_map.php_to_blade`
-  before returning, matching the pattern in `inlay_hints.rs`.
-- Add Blade-native fold regions the underlying PHP has no concept of:
-  `@if`/`@endif` and friends (the block stack `src/blade/balance.rs`
-  already walks),
-  `<x-component>`...`</x-component>` tag bodies, `@section`/
-  `@endsection`, `@push`/`@endpush`.
-- Matches the folding behaviour other Blade-aware editors already
-  provide.
-
-### Tests
-
-New file `tests/integration/folding_blade.rs`:
-
-- `@foreach`/`@endforeach` folds
-- `<x-alert>`...`</x-alert>` folds
-- fold ranges land on the correct Blade lines, not virtual-PHP lines
-
----
-
 ## BL15. Document outline (symbols) for Blade files
 
 **Impact: Low-Medium · Complexity: Medium-High**

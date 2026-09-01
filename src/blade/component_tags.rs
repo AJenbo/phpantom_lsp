@@ -10,6 +10,7 @@
 //! string attribute never appear in it at all. This module scans the
 //! original Blade source directly instead.
 
+use std::ops::Range;
 use std::path::PathBuf;
 
 use crate::Backend;
@@ -505,6 +506,92 @@ pub(crate) fn scan_component_tag_calls(
         i = end;
     }
     results
+}
+
+/// Every well-nested component tag body in `content`, as
+/// `(opening_span, closing_span)` covering the full extent of
+/// `<x-…>`…`</x-…>` and `<livewire:…>`…`</livewire:…>`.
+///
+/// Mirrors [`super::balance::check`]'s tolerance for malformed input: a
+/// closing tag that does not match the innermost open tag is left alone
+/// rather than guessed at, so crossed or unclosed tags simply don't fold.
+pub(crate) fn fold_pairs(content: &str) -> Vec<(Range<usize>, Range<usize>)> {
+    if !TAG_PREFIXES.iter().any(|prefix| content.contains(prefix)) {
+        return Vec::new();
+    }
+    let masked = mask_inert_regions(content, true);
+    let bytes = masked.as_bytes();
+
+    let mut out = Vec::new();
+    let mut stack: Vec<(String, Range<usize>)> = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != b'<' {
+            i += 1;
+            continue;
+        }
+
+        // Closing tag: `</x-…>` or `</livewire:…>`.
+        if bytes.get(i + 1) == Some(&b'/') {
+            let Some(prefix) = TAG_PREFIXES
+                .iter()
+                .find(|prefix| masked[i + 2..].starts_with(&prefix[1..]))
+            else {
+                i += 1;
+                continue;
+            };
+            let name_start = i + 2 + (prefix.len() - 1);
+            let mut j = name_start;
+            while j < bytes.len() && is_tag_name_char(bytes[j]) {
+                j += 1;
+            }
+            let Some(close) = find_byte(&masked, j, b'>') else {
+                break;
+            };
+            let name = &masked[name_start..j];
+            if stack.last().is_some_and(|(open_name, _)| open_name == name) {
+                let (_, opener_span) = stack.pop().unwrap();
+                out.push((opener_span, i..close + 1));
+            } else if let Some(idx) = stack.iter().rposition(|(open_name, _)| open_name == name) {
+                // A closer for a tag further out means everything opened
+                // after it was never closed; unwind past it without
+                // folding either side.
+                stack.truncate(idx);
+            }
+            i = close + 1;
+            continue;
+        }
+
+        // Opening tag: `<x-…>` or `<livewire:…>`.
+        let Some(prefix) = TAG_PREFIXES
+            .iter()
+            .find(|prefix| masked[i..].starts_with(**prefix))
+        else {
+            i += 1;
+            continue;
+        };
+        let name_start = i + prefix.len();
+        let mut j = name_start;
+        while j < bytes.len() && is_tag_name_char(bytes[j]) {
+            j += 1;
+        }
+        if j == name_start {
+            i += 1;
+            continue;
+        }
+        let name = masked[name_start..j].to_string();
+        let mut bound_index = 0usize;
+        let (end, _) = scan_tag_attributes(&masked, j, &[], &mut bound_index);
+        // `scan_tag_attributes` only breaks on a standalone `/` right
+        // before `>`, so this is the same self-closing test it applies.
+        let self_closing = end >= 2 && bytes[end - 2] == b'/';
+        if !self_closing {
+            stack.push((name, i..end));
+        }
+        i = end;
+    }
+
+    out
 }
 
 fn find_byte(content: &str, from: usize, needle: u8) -> Option<usize> {
@@ -1091,5 +1178,53 @@ mod tests {
     #[test]
     fn a_closing_tag_is_not_an_opening_one() {
         assert_eq!(context_at("<div></x-al|"), None);
+    }
+
+    /// `fold_pairs` spans as `(opener_start, closer_end)` pairs, for
+    /// readable assertions.
+    fn tag_pairs(content: &str) -> Vec<(usize, usize)> {
+        fold_pairs(content)
+            .into_iter()
+            .map(|(opener, closer)| (opener.start, closer.end))
+            .collect()
+    }
+
+    #[test]
+    fn a_component_tag_body_folds_from_open_to_close() {
+        let blade = "<x-alert>\n<p>hi</p>\n</x-alert>\n";
+        assert_eq!(tag_pairs(blade), [(0, blade.len() - 1)]);
+    }
+
+    #[test]
+    fn a_self_closing_tag_folds_nothing() {
+        assert!(tag_pairs("<x-alert />\n<p>after</p>\n").is_empty());
+    }
+
+    #[test]
+    fn nested_component_tags_each_fold_independently() {
+        let blade = "<x-card>\n<x-alert>\n<p>hi</p>\n</x-alert>\n</x-card>\n";
+        assert_eq!(tag_pairs(blade).len(), 2);
+    }
+
+    #[test]
+    fn a_mismatched_closing_tag_folds_nothing() {
+        assert!(tag_pairs("<x-alert>\n<p>hi</p>\n</x-card>\n").is_empty());
+    }
+
+    #[test]
+    fn an_unclosed_tag_does_not_fold() {
+        assert!(tag_pairs("<x-alert>\n<p>hi</p>\n").is_empty());
+    }
+
+    #[test]
+    fn a_livewire_tag_body_folds() {
+        let blade = "<livewire:counter>\n<p>slot</p>\n</livewire:counter>\n";
+        assert_eq!(tag_pairs(blade), [(0, blade.len() - 1)]);
+    }
+
+    #[test]
+    fn a_bracket_in_an_attribute_value_does_not_close_the_opening_tag_early() {
+        let blade = "<x-alert :items=\"$a > $b\">\n<p>hi</p>\n</x-alert>\n";
+        assert_eq!(tag_pairs(blade), [(0, blade.len() - 1)]);
     }
 }
