@@ -118,33 +118,6 @@ In `tests/integration/diagnostics_blade.rs`:
 
 ---
 
-## BL15. Document outline (symbols) for Blade files
-
-**Impact: Low-Medium · Complexity: Medium-High**
-
-A `.blade.php` file today reports no outline, or an outline positioned
-in virtual-PHP coordinates, because `document_symbols.rs` never
-translates through the source map.
-
-- Translate symbol ranges/selection ranges through
-  `source_map.php_to_blade`.
-- Build a Blade-native symbol tree on top of the translated PHP
-  symbols: `@section`s and `@push`/`@stack` blocks as top-level
-  symbols, `<x-component>` tags as child symbols showing the resolved
-  component FQN — degrade to the bare tag name if the component
-  doesn't resolve.
-- Matches the structure-view behaviour other Blade-aware editors
-  already provide.
-
-### Tests
-
-New file `tests/integration/document_symbols_blade.rs`:
-
-- `@section('content')` appears as an outline entry
-- `<x-alert>` appears as an outline entry with the resolved FQN
-
----
-
 ## BL24. Named slot variables scoped to the component that receives them
 
 **Impact: Low-Medium · Complexity: Medium**

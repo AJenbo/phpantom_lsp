@@ -89,6 +89,27 @@ impl Backend {
         }
         namespaces
     }
+
+    /// The view an `<x-…>` tag with no class behind it renders: an
+    /// anonymous component is a template, so its name is the closest
+    /// thing it has to a class name.
+    ///
+    /// The first candidate the project ships wins, in the order
+    /// [`view_names_for_component_tag`] tries them.
+    ///
+    /// `anonymous` is passed in rather than read here because resolving
+    /// the registrations touches the filesystem, and a caller asking
+    /// about every tag in a file only has to do that once.
+    pub(crate) fn anonymous_component_view(
+        &self,
+        tag: &str,
+        anonymous: &[AnonymousNamespace],
+    ) -> Option<String> {
+        let discovery = self.blade_discovery();
+        view_names_for_component_tag(tag, anonymous)
+            .into_iter()
+            .find(|name| discovery.views.contains_key(name))
+    }
 }
 
 /// The bare tag names (without the `x-` prefix) a Blade file's own view
@@ -508,22 +529,40 @@ pub(crate) fn scan_component_tag_calls(
     results
 }
 
-/// Every well-nested component tag body in `content`, as
-/// `(opening_span, closing_span)` covering the full extent of
-/// `<x-…>`…`</x-…>` and `<livewire:…>`…`</livewire:…>`.
+/// One component tag written in a template.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TagSpan {
+    pub(crate) kind: TagKind,
+    /// The component the tag names, without the opening (`alert`,
+    /// `counter`).
+    pub(crate) name: String,
+    /// The name's own bytes in the raw Blade source.
+    pub(crate) name_span: Range<usize>,
+    /// The opening tag through its matching closing tag, or the opening
+    /// tag alone when it is self-closing or never closed.
+    pub(crate) span: Range<usize>,
+    /// Whether a matching closing tag was found, so [`Self::span`] covers
+    /// a body rather than the opening tag on its own.
+    pub(crate) closed: bool,
+}
+
+/// Every component tag in `content`, in document order:
+/// `<x-…>`…`</x-…>` and `<livewire:…>`…`</livewire:…>`, self-closing and
+/// unclosed ones included.
 ///
 /// Mirrors [`super::balance::check`]'s tolerance for malformed input: a
 /// closing tag that does not match the innermost open tag is left alone
-/// rather than guessed at, so crossed or unclosed tags simply don't fold.
-pub(crate) fn fold_pairs(content: &str) -> Vec<(Range<usize>, Range<usize>)> {
+/// rather than guessed at, so a crossed or unclosed tag is reported
+/// unclosed rather than paired with a closer that is not its own.
+pub(crate) fn tag_spans(content: &str) -> Vec<TagSpan> {
     if !TAG_PREFIXES.iter().any(|prefix| content.contains(prefix)) {
         return Vec::new();
     }
     let masked = mask_inert_regions(content, true);
     let bytes = masked.as_bytes();
 
-    let mut out = Vec::new();
-    let mut stack: Vec<(String, Range<usize>)> = Vec::new();
+    let mut out: Vec<TagSpan> = Vec::new();
+    let mut stack: Vec<TagSpan> = Vec::new();
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] != b'<' {
@@ -549,14 +588,16 @@ pub(crate) fn fold_pairs(content: &str) -> Vec<(Range<usize>, Range<usize>)> {
                 break;
             };
             let name = &masked[name_start..j];
-            if stack.last().is_some_and(|(open_name, _)| open_name == name) {
-                let (_, opener_span) = stack.pop().unwrap();
-                out.push((opener_span, i..close + 1));
-            } else if let Some(idx) = stack.iter().rposition(|(open_name, _)| open_name == name) {
+            if stack.last().is_some_and(|open| open.name == name) {
+                let mut open = stack.pop().unwrap();
+                open.span.end = close + 1;
+                open.closed = true;
+                out.push(open);
+            } else if let Some(idx) = stack.iter().rposition(|open| open.name == name) {
                 // A closer for a tag further out means everything opened
-                // after it was never closed; unwind past it without
-                // folding either side.
-                stack.truncate(idx);
+                // after it was never closed; those keep the opening tag as
+                // their extent.
+                out.extend(stack.drain(idx..));
             }
             i = close + 1;
             continue;
@@ -579,18 +620,39 @@ pub(crate) fn fold_pairs(content: &str) -> Vec<(Range<usize>, Range<usize>)> {
             i += 1;
             continue;
         }
-        let name = masked[name_start..j].to_string();
         let mut bound_index = 0usize;
         let (end, _) = scan_tag_attributes(&masked, j, &[], &mut bound_index);
         // `scan_tag_attributes` only breaks on a standalone `/` right
         // before `>`, so this is the same self-closing test it applies.
         let self_closing = end >= 2 && bytes[end - 2] == b'/';
-        if !self_closing {
-            stack.push((name, i..end));
+        let tag = TagSpan {
+            kind: if *prefix == TagKind::Livewire.opening() {
+                TagKind::Livewire
+            } else {
+                TagKind::Blade
+            },
+            name: masked[name_start..j].to_string(),
+            name_span: name_start..j,
+            span: i..end,
+            closed: false,
+        };
+        if self_closing {
+            out.push(tag);
+        } else {
+            stack.push(tag);
         }
         i = end;
     }
 
+    // Whatever is still open closed nothing, and stands for its opening
+    // tag alone.
+    out.append(&mut stack);
+    out.sort_by(|a, b| {
+        a.span
+            .start
+            .cmp(&b.span.start)
+            .then(b.span.end.cmp(&a.span.end))
+    });
     out
 }
 
@@ -1180,51 +1242,72 @@ mod tests {
         assert_eq!(context_at("<div></x-al|"), None);
     }
 
-    /// `fold_pairs` spans as `(opener_start, closer_end)` pairs, for
-    /// readable assertions.
-    fn tag_pairs(content: &str) -> Vec<(usize, usize)> {
-        fold_pairs(content)
+    /// The spans of the tags [`tag_spans`] found a body for, as
+    /// `(start, end)` pairs, for readable assertions.
+    fn tag_bodies(content: &str) -> Vec<(usize, usize)> {
+        tag_spans(content)
             .into_iter()
-            .map(|(opener, closer)| (opener.start, closer.end))
+            .filter(|tag| tag.closed)
+            .map(|tag| (tag.span.start, tag.span.end))
             .collect()
     }
 
     #[test]
-    fn a_component_tag_body_folds_from_open_to_close() {
+    fn a_component_tag_body_runs_from_open_to_close() {
         let blade = "<x-alert>\n<p>hi</p>\n</x-alert>\n";
-        assert_eq!(tag_pairs(blade), [(0, blade.len() - 1)]);
+        assert_eq!(tag_bodies(blade), [(0, blade.len() - 1)]);
     }
 
     #[test]
-    fn a_self_closing_tag_folds_nothing() {
-        assert!(tag_pairs("<x-alert />\n<p>after</p>\n").is_empty());
+    fn a_self_closing_tag_has_no_body() {
+        let blade = "<x-alert />\n<p>after</p>\n";
+        assert!(tag_bodies(blade).is_empty());
+        // It is still a tag, spanning itself alone.
+        let tags = tag_spans(blade);
+        assert_eq!(tags.len(), 1);
+        assert_eq!(&blade[tags[0].span.clone()], "<x-alert />");
     }
 
     #[test]
-    fn nested_component_tags_each_fold_independently() {
+    fn nested_component_tags_each_span_independently() {
         let blade = "<x-card>\n<x-alert>\n<p>hi</p>\n</x-alert>\n</x-card>\n";
-        assert_eq!(tag_pairs(blade).len(), 2);
+        assert_eq!(tag_bodies(blade).len(), 2);
     }
 
     #[test]
-    fn a_mismatched_closing_tag_folds_nothing() {
-        assert!(tag_pairs("<x-alert>\n<p>hi</p>\n</x-card>\n").is_empty());
+    fn a_mismatched_closing_tag_closes_nothing() {
+        assert!(tag_bodies("<x-alert>\n<p>hi</p>\n</x-card>\n").is_empty());
     }
 
     #[test]
-    fn an_unclosed_tag_does_not_fold() {
-        assert!(tag_pairs("<x-alert>\n<p>hi</p>\n").is_empty());
+    fn an_unclosed_tag_spans_its_opening_tag_alone() {
+        let blade = "<x-alert>\n<p>hi</p>\n";
+        assert!(tag_bodies(blade).is_empty());
+        let tags = tag_spans(blade);
+        assert_eq!(tags.len(), 1);
+        assert_eq!(&blade[tags[0].span.clone()], "<x-alert>");
     }
 
     #[test]
-    fn a_livewire_tag_body_folds() {
+    fn a_livewire_tag_body_is_found() {
         let blade = "<livewire:counter>\n<p>slot</p>\n</livewire:counter>\n";
-        assert_eq!(tag_pairs(blade), [(0, blade.len() - 1)]);
+        assert_eq!(tag_bodies(blade), [(0, blade.len() - 1)]);
+        let tags = tag_spans(blade);
+        assert_eq!(tags[0].kind, TagKind::Livewire);
+        assert_eq!(tags[0].name, "counter");
+        assert_eq!(&blade[tags[0].name_span.clone()], "counter");
     }
 
     #[test]
     fn a_bracket_in_an_attribute_value_does_not_close_the_opening_tag_early() {
         let blade = "<x-alert :items=\"$a > $b\">\n<p>hi</p>\n</x-alert>\n";
-        assert_eq!(tag_pairs(blade), [(0, blade.len() - 1)]);
+        assert_eq!(tag_bodies(blade), [(0, blade.len() - 1)]);
+    }
+
+    #[test]
+    fn tags_come_back_in_document_order() {
+        let blade = "<x-card>\n<x-alert />\n</x-card>\n<x-note />\n";
+        let names: Vec<String> = tag_spans(blade).into_iter().map(|tag| tag.name).collect();
+        assert_eq!(names, ["card", "alert", "note"]);
     }
 }

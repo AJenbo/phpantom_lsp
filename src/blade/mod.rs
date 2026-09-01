@@ -10,6 +10,7 @@ pub mod directives;
 pub(crate) mod discovery;
 pub(crate) mod implicit_props;
 pub(crate) mod layout;
+pub(crate) mod outline;
 pub mod preprocessor;
 pub(crate) mod shared_vars;
 pub(crate) mod signature;

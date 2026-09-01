@@ -40,7 +40,6 @@ contributor even though it's short.
 | BL24 | [Named slot variables scoped to the component that receives them](todo/blade.md#bl24-named-slot-variables-scoped-to-the-component-that-receives-them) | Low-Medium | Medium |
 | BL17 | [`format --check` CLI subcommand for CI](todo/blade.md#bl17-format-check-cli-subcommand-for-ci) (depends on BL16)         | Low-Medium | Medium     |
 | BL1  | [Blade-aware code actions](todo/blade.md#bl1-blade-aware-code-actions)                                                      | Medium     | Medium-High |
-| BL15 | [Document outline (symbols) for Blade files](todo/blade.md#bl15-document-outline-symbols-for-blade-files)                   | Low-Medium | Medium-High |
 | BL16 | [Blade-aware formatting](todo/blade.md#bl16-blade-aware-formatting)                                                          | Low-Medium | High       |
 |      | **Release 0.11.0**                                                                                                                                        |             |             |
 

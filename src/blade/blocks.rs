@@ -72,6 +72,9 @@ pub(crate) struct BlockRef {
     pub(crate) role: BlockRole,
     /// The name's own bytes, inside the quotes, in the raw Blade source.
     pub(crate) name_span: Span,
+    /// The directive that holds the name (`@section`), without its
+    /// argument list.
+    pub(crate) directive_span: Span,
 }
 
 /// A directive whose argument list holds a section or stack name.
@@ -313,10 +316,10 @@ pub(crate) fn analyse(content: &str) -> TemplateBlocks {
             i += 1;
             continue;
         };
-        let name_end = i + 1 + directive.len();
+        let directive_span = i..i + 1 + directive.len();
         // Continue past the argument list so a directive name written
         // inside one is not read as a directive of its own.
-        i = args.as_ref().map_or(name_end, |args| args.end);
+        i = args.as_ref().map_or(directive_span.end, |args| args.end);
 
         if let Some((_, renders)) = SECTION_CLOSERS
             .iter()
@@ -357,6 +360,7 @@ pub(crate) fn analyse(content: &str) -> TemplateBlocks {
                         kind: entry.kind,
                         role: entry.role,
                         name_span,
+                        directive_span,
                     });
                 }
                 None => {

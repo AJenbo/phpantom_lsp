@@ -100,20 +100,24 @@ impl Backend {
 fn collect_blade_native_folds(raw: &str, ranges: &mut Vec<FoldingRange>) {
     let idx = crate::text_position::LineIndex::new(raw);
 
-    for (opener, closer) in crate::blade::balance::fold_pairs(raw) {
+    for pair in crate::blade::balance::block_pairs(raw) {
         ranges.push(range_from_offsets(
             &idx,
-            opener.start as u32,
-            closer.end as u32,
+            pair.opener.start as u32,
+            pair.closer.end as u32,
             None,
         ));
     }
 
-    for (opener, closer) in crate::blade::component_tags::fold_pairs(raw) {
+    // A tag with no closing tag of its own has no body to fold away.
+    for tag in crate::blade::component_tags::tag_spans(raw) {
+        if !tag.closed {
+            continue;
+        }
         ranges.push(range_from_offsets(
             &idx,
-            opener.start as u32,
-            closer.end as u32,
+            tag.span.start as u32,
+            tag.span.end as u32,
             None,
         ));
     }
