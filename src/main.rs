@@ -132,6 +132,29 @@ enum Command {
         format: Option<FormatArg>,
     },
 
+    /// Move a class, namespace, PHP file, or PSR-4 directory.
+    Move {
+        /// Source FQN, namespace, PHP file, or directory.
+        #[arg(value_name = "FROM")]
+        from: String,
+
+        /// Destination FQN, namespace, PHP file, or directory.
+        #[arg(value_name = "TO")]
+        to: String,
+
+        /// Show what would change without writing files.
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Project root directory. Defaults to the current working directory.
+        #[arg(long, value_name = "DIR")]
+        project_root: Option<std::path::PathBuf>,
+
+        /// Output format.
+        #[arg(long, value_name = "FORMAT", default_value = "table")]
+        format: MoveFormatArg,
+    },
+
     /// Create a default .phpantom.toml configuration file.
     ///
     /// Writes to the current directory, or with --global to the
@@ -197,6 +220,23 @@ enum FormatArg {
     Github,
     /// Machine-readable JSON object.
     Json,
+}
+
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+enum MoveFormatArg {
+    /// Human-readable summary.
+    Table,
+    /// Machine-readable JSON object.
+    Json,
+}
+
+impl From<MoveFormatArg> for phpantom_lsp::move_cli::MoveOutputFormat {
+    fn from(arg: MoveFormatArg) -> Self {
+        match arg {
+            MoveFormatArg::Table => Self::Table,
+            MoveFormatArg::Json => Self::Json,
+        }
+    }
 }
 
 impl From<FormatArg> for phpantom_lsp::analyse::OutputFormat {
@@ -369,6 +409,30 @@ async fn async_main() {
             };
 
             let exit_code = phpantom_lsp::fix::run(options).await;
+            std::process::exit(exit_code);
+        }
+        Some(Command::Move {
+            from,
+            to,
+            dry_run,
+            project_root,
+            format,
+        }) => {
+            let workspace_root = project_root
+                .or_else(|| std::env::current_dir().ok())
+                .unwrap_or_else(|| {
+                    eprintln!("Error: cannot determine project root directory");
+                    std::process::exit(1);
+                });
+            let options = phpantom_lsp::move_cli::MoveOptions {
+                from,
+                to,
+                workspace_root,
+                dry_run,
+                output_format: format.into(),
+                global_config: phpantom_lsp::config::global_config_path(),
+            };
+            let exit_code = phpantom_lsp::move_cli::run(options).await;
             std::process::exit(exit_code);
         }
         // The wasm build drives the server through the exported `lsp_handle`

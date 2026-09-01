@@ -115,6 +115,7 @@ src/
 ├── phpstan.rs, phpcs.rs, mago.rs, phpstan_ignore.rs   # External analyzer integrations
 ├── analyse/                # `analyze` CLI subcommand (batch diagnostics, output formatting)
 ├── fix.rs                  # `fix` CLI subcommand (automated code fixes)
+├── move_cli.rs             # `move` CLI subcommand (class/namespace refactoring)
 ├── self_update.rs          # Binary self-update
 │
 │   # Blade & shared utilities

@@ -12,6 +12,7 @@ use std::sync::atomic::Ordering;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::composer;
 use crate::symbol_map::SymbolKind;
 use crate::text_position::{line_start_byte_offset, offset_to_position, ranges_overlap};
 use crate::util::strip_fqn_prefix;
@@ -19,6 +20,14 @@ use crate::util::strip_fqn_prefix;
 use super::RenameOutcome;
 
 impl Backend {
+    /// Plan a namespace-prefix move without requiring an LSP cursor position.
+    pub(crate) fn plan_namespace_move(&self, old_prefix: &str, new_prefix: &str) -> RenameOutcome {
+        self.build_namespace_prefix_rename_edit(
+            strip_fqn_prefix(old_prefix),
+            strip_fqn_prefix(new_prefix),
+        )
+    }
+
     /// Build a `WorkspaceEdit` for renaming a namespace segment.
     ///
     /// `full_ns` is the full namespace at the declaration site (e.g.
@@ -574,44 +583,29 @@ impl Backend {
         let psr4 = self.workspace.psr4_mappings.read();
         let workspace_root = self.workspace.workspace_root.read().clone()?;
 
+        // The destination directory has to come from whichever mapping
+        // covers the *new* namespace, which need not be the one covering
+        // the old one: a namespace can move between mappings, or out of
+        // the autoload map entirely.  Deriving it from the old mapping
+        // instead builds a path around a prefix the new name never had.
+        // No mapping covers the destination means no file can be placed
+        // there, so nothing moves and the declarations are rewritten in
+        // place.
+        let new_dir = composer::psr4_directory_for_namespace(&psr4, &workspace_root, new_prefix)?;
+
         let mut ops: Vec<(Url, Url)> = Vec::new();
 
         for mapping in psr4.iter() {
-            let mapping_ns = mapping.prefix.trim_end_matches('\\');
-
-            // Check if old_prefix starts with this PSR-4 mapping's namespace.
-            let old_lower = old_prefix.to_lowercase();
-            let mapping_lower = mapping_ns.to_lowercase();
-
-            let relative_ns = if old_lower == mapping_lower {
-                ""
-            } else if old_lower.starts_with(&format!("{}\\", mapping_lower)) {
-                &old_prefix[mapping_ns.len() + 1..]
-            } else {
+            let Some(relative_ns) = composer::namespace_below_prefix(old_prefix, &mapping.prefix)
+            else {
                 continue;
-            };
-
-            let new_relative_ns = if old_prefix.len() == mapping_ns.len() {
-                // We're renaming at the PSR-4 root itself — new_prefix
-                // replaces the mapping prefix entirely in the path.
-                let new_without_mapping = &new_prefix[mapping_ns.len()..];
-                new_without_mapping.trim_start_matches('\\').to_string()
-            } else {
-                let suffix = &new_prefix[mapping_ns.len() + 1..];
-                suffix.to_string()
             };
 
             let base_dir = workspace_root.join(&mapping.base_path);
             let old_dir = if relative_ns.is_empty() {
-                base_dir.clone()
-            } else {
-                base_dir.join(relative_ns.replace('\\', std::path::MAIN_SEPARATOR_STR))
-            };
-
-            let new_dir = if new_relative_ns.is_empty() {
                 base_dir
             } else {
-                base_dir.join(new_relative_ns.replace('\\', std::path::MAIN_SEPARATOR_STR))
+                base_dir.join(relative_ns.replace('\\', std::path::MAIN_SEPARATOR_STR))
             };
 
             if old_dir == new_dir {

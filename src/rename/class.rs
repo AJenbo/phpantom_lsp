@@ -20,6 +20,62 @@ use crate::util::{build_fqn, strip_fqn_prefix};
 use super::RenameOutcome;
 
 impl Backend {
+    /// Plan a class move without requiring an LSP cursor position.
+    pub(crate) fn plan_class_move(&self, old_fqn: &str, new_fqn: &str) -> RenameOutcome {
+        let old_fqn = strip_fqn_prefix(old_fqn);
+        let definition_uri = self
+            .symbols
+            .fqn_uri_index
+            .read()
+            .get(old_fqn)
+            .cloned()
+            .ok_or_else(|| format!("Class `{old_fqn}` was not found."))?;
+        // `textDocument/rename` refuses a symbol declared in a vendor
+        // package, and moving one headlessly is no safer: the edits would
+        // land in a tree the next `composer install` overwrites.
+        if self
+            .workspace
+            .vendor_uri_prefixes
+            .lock()
+            .iter()
+            .any(|prefix| definition_uri.starts_with(prefix.as_str()))
+        {
+            return Err(format!(
+                "`{old_fqn}` is declared in an installed package and cannot be moved."
+            ));
+        }
+        let content = self
+            .get_file_content(&definition_uri)
+            .ok_or_else(|| format!("Could not read the definition of `{old_fqn}`."))?;
+        let symbol_map = self
+            .symbol_maps
+            .read()
+            .get(&definition_uri)
+            .cloned()
+            .ok_or_else(|| format!("Could not index the definition of `{old_fqn}`."))?;
+        let span = symbol_map
+            .spans
+            .iter()
+            .find(|span| {
+                matches!(
+                    &span.kind,
+                    SymbolKind::ClassDeclaration { name }
+                        if name.eq_ignore_ascii_case(crate::util::short_name(old_fqn))
+                )
+            })
+            .ok_or_else(|| format!("Could not locate the declaration of `{old_fqn}`."))?;
+        let position = offset_to_position(&content, span.start as usize);
+        let locations = self
+            .find_references_for_rename(&definition_uri, &content, position, true)
+            .ok_or_else(|| format!("Could not find references to `{old_fqn}`."))?;
+        if !self.rename_locations_verified(&span.kind, &locations) {
+            return Err(format!(
+                "The workspace changed while `{old_fqn}` was being indexed; retry the move."
+            ));
+        }
+        self.build_class_move_edit(old_fqn, new_fqn, &locations)
+    }
+
     /// Resolve the fully-qualified class name for a class rename.
     ///
     /// Returns `Some(fqn)` when the symbol being renamed is a class
