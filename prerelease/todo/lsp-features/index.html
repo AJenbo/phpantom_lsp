@@ -1493,6 +1493,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#f22-merge-a-namespace-onto-one-that-shares-a-class-name" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        F22. Merge a namespace onto one that shares a class name
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2194,6 +2205,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#f22-merge-a-namespace-onto-one-that-shares-a-class-name" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        F22. Merge a namespace onto one that shares a class name
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2742,6 +2764,46 @@ but is worth a quick re-check after the migration in case the newer
 <code>lsp-types</code> changes the shape of that capability struct.</p>
 <p><strong>Where to look:</strong> <code>src/server.rs</code> (<code>initialize</code>, <code>type_hierarchy_registration</code>),
 <code>src/type_hierarchy.rs</code>.</p>
+<hr />
+<h2 id="f22-merge-a-namespace-onto-one-that-shares-a-class-name">F22. Merge a namespace onto one that shares a class name<a class="headerlink" href="#f22-merge-a-namespace-onto-one-that-shares-a-class-name" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
+<p>Renaming <code>App\Internal</code> to an <code>App\Support</code> that already exists now
+merges: the files move into the existing directory one at a time
+instead of the source directory being renamed on top of the
+destination. Where the two namespaces declare the same class name
+(<code>App\Internal\Helper</code> and <code>App\Support\Helper</code> both exist), the whole
+rename is refused with a message naming the clash, because the merge
+has no well-defined answer for that name — see
+<code>namespace_merge_conflict</code> in <code>src/rename/namespace.rs</code>.</p>
+<p>Refusing is the safe answer, not the desirable one: a user merging
+twenty files should not be blocked by one clash. What is missing is a
+partial merge that moves everything except the clashing names and
+leaves those behind <em>intact</em>. "Intact" is the hard part and the reason
+this is deferred rather than done:</p>
+<ul>
+<li>The clashing class's file must keep its own <code>namespace</code> declaration,
+  so that file's namespace-declaration edit has to be suppressed while
+  its siblings' are kept. Today the namespace rename rewrites by
+  string prefix over raw text with no per-class granularity.</li>
+<li>Every reference to the clashing FQN (<code>use App\Internal\Helper;</code>,
+  <code>\App\Internal\Helper</code>, and unqualified <code>Helper</code> inside the old
+  namespace) must be left pointing at the old name. Rewriting them is
+  what makes a naive partial merge worse than a refusal: the reference
+  silently resolves to the <em>other</em> class.</li>
+<li>A file holding both a clashing class and a non-clashing one cannot
+  half-move, so it has to be reported as a clash too.</li>
+<li>The classes that do move out of the old namespace stop being
+  namespace-siblings of the ones left behind, so the files left behind
+  need <code>use</code> imports added for them — the same rule
+  <code>build_class_move_edit</code> already applies for a single class move.</li>
+</ul>
+<p>The refusal message should then list only the names that could not
+move, and the response should still carry the edits for everything
+that could.</p>
+<p><strong>Where to look:</strong> <code>src/rename/namespace.rs</code>
+(<code>namespace_merge_conflict</code>, <code>build_namespace_prefix_rename_edit</code>,
+<code>collect_merge_move_ops</code>), <code>src/rename/class.rs</code> (the import-adding
+rule to mirror).</p>
 
 
 
