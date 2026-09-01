@@ -862,62 +862,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#bl14-folding-ranges-for-blade-files" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        BL14. Folding ranges for Blade files
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="BL14. Folding ranges for Blade files">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#tests_1" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Tests
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#bl15-document-outline-symbols-for-blade-files" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        BL15. Document outline (symbols) for Blade files
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="BL15. Document outline (symbols) for Blade files">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#tests_2" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Tests
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#bl24-named-slot-variables-scoped-to-the-component-that-receives-them" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -930,7 +874,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#tests_3" class="md-nav__link">
+  <a href="#tests_1" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Tests
@@ -969,7 +913,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#tests_4" class="md-nav__link">
+  <a href="#tests_2" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Tests
@@ -997,7 +941,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#tests_5" class="md-nav__link">
+  <a href="#tests_3" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Tests
@@ -1568,62 +1512,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#bl14-folding-ranges-for-blade-files" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        BL14. Folding ranges for Blade files
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="BL14. Folding ranges for Blade files">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#tests_1" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Tests
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#bl15-document-outline-symbols-for-blade-files" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        BL15. Document outline (symbols) for Blade files
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="BL15. Document outline (symbols) for Blade files">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#tests_2" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Tests
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#bl24-named-slot-variables-scoped-to-the-component-that-receives-them" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1636,7 +1524,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#tests_3" class="md-nav__link">
+  <a href="#tests_1" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Tests
@@ -1675,7 +1563,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#tests_4" class="md-nav__link">
+  <a href="#tests_2" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Tests
@@ -1703,7 +1591,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#tests_5" class="md-nav__link">
+  <a href="#tests_3" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Tests
@@ -1870,54 +1758,6 @@ reported today.</p>
   nothing</li>
 </ul>
 <hr />
-<h2 id="bl14-folding-ranges-for-blade-files">BL14. Folding ranges for Blade files<a class="headerlink" href="#bl14-folding-ranges-for-blade-files" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<p><code>textDocument/foldingRange</code> on a <code>.blade.php</code> file currently returns
-ranges in virtual-PHP coordinates, which don't line up with the
-original template, because <code>folding.rs</code> never translates through the
-source map.</p>
-<ul>
-<li>Translate each <code>FoldingRange</code> through <code>source_map.php_to_blade</code>
-  before returning, matching the pattern in <code>inlay_hints.rs</code>.</li>
-<li>Add Blade-native fold regions the underlying PHP has no concept of:
-  <code>@if</code>/<code>@endif</code> and friends (the block stack <code>src/blade/balance.rs</code>
-  already walks),
-  <code>&lt;x-component&gt;</code>...<code>&lt;/x-component&gt;</code> tag bodies, <code>@section</code>/
-  <code>@endsection</code>, <code>@push</code>/<code>@endpush</code>.</li>
-<li>Matches the folding behaviour other Blade-aware editors already
-  provide.</li>
-</ul>
-<h3 id="tests_1">Tests<a class="headerlink" href="#tests_1" title="Permanent link">&para;</a></h3>
-<p>New file <code>tests/integration/folding_blade.rs</code>:</p>
-<ul>
-<li><code>@foreach</code>/<code>@endforeach</code> folds</li>
-<li><code>&lt;x-alert&gt;</code>...<code>&lt;/x-alert&gt;</code> folds</li>
-<li>fold ranges land on the correct Blade lines, not virtual-PHP lines</li>
-</ul>
-<hr />
-<h2 id="bl15-document-outline-symbols-for-blade-files">BL15. Document outline (symbols) for Blade files<a class="headerlink" href="#bl15-document-outline-symbols-for-blade-files" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
-<p>A <code>.blade.php</code> file today reports no outline, or an outline positioned
-in virtual-PHP coordinates, because <code>document_symbols.rs</code> never
-translates through the source map.</p>
-<ul>
-<li>Translate symbol ranges/selection ranges through
-  <code>source_map.php_to_blade</code>.</li>
-<li>Build a Blade-native symbol tree on top of the translated PHP
-  symbols: <code>@section</code>s and <code>@push</code>/<code>@stack</code> blocks as top-level
-  symbols, <code>&lt;x-component&gt;</code> tags as child symbols showing the resolved
-  component FQN — degrade to the bare tag name if the component
-  doesn't resolve.</li>
-<li>Matches the structure-view behaviour other Blade-aware editors
-  already provide.</li>
-</ul>
-<h3 id="tests_2">Tests<a class="headerlink" href="#tests_2" title="Permanent link">&para;</a></h3>
-<p>New file <code>tests/integration/document_symbols_blade.rs</code>:</p>
-<ul>
-<li><code>@section('content')</code> appears as an outline entry</li>
-<li><code>&lt;x-alert&gt;</code> appears as an outline entry with the resolved FQN</li>
-</ul>
-<hr />
 <h2 id="bl24-named-slot-variables-scoped-to-the-component-that-receives-them">BL24. Named slot variables scoped to the component that receives them<a class="headerlink" href="#bl24-named-slot-variables-scoped-to-the-component-that-receives-them" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
 <p>Deferred from the component-tag work: <code>&lt;x-slot:title&gt;</code> and its legacy
@@ -1939,7 +1779,7 @@ children and declaring those names in the component template's prologue
 as <code>\Illuminate\View\ComponentSlot</code>, the same way
 <code>scan_component_tag_calls</code> already turns a tag's attributes into that
 template's variables.</p>
-<h3 id="tests_3">Tests<a class="headerlink" href="#tests_3" title="Permanent link">&para;</a></h3>
+<h3 id="tests_1">Tests<a class="headerlink" href="#tests_1" title="Permanent link">&para;</a></h3>
 <ul>
 <li><code>&lt;x-slot:title&gt;</code> in a caller declares <code>$title</code> in the component's
   template, not in the caller's.</li>
@@ -2060,7 +1900,7 @@ real possibility, given we skip the regex/placeholder round-tripping
 entirely), it can become the default rather than staying a fallback.
 See BL17 below for exposing it as a standalone CI check once it
 reaches that bar.</p>
-<h3 id="tests_4">Tests<a class="headerlink" href="#tests_4" title="Permanent link">&para;</a></h3>
+<h3 id="tests_2">Tests<a class="headerlink" href="#tests_2" title="Permanent link">&para;</a></h3>
 <ul>
 <li><code>formatting</code> on a <code>.blade.php</code> file returns no edits (short-term
   behaviour) rather than corrupting the file, until the long-term
@@ -2094,7 +1934,7 @@ the LSP connection at all.</p>
   external tool, which <code>--check</code> should honour identically to
   <code>format</code> without <code>--check</code>).</li>
 </ul>
-<h3 id="tests_5">Tests<a class="headerlink" href="#tests_5" title="Permanent link">&para;</a></h3>
+<h3 id="tests_3">Tests<a class="headerlink" href="#tests_3" title="Permanent link">&para;</a></h3>
 <ul>
 <li><code>format --check</code> on an already-formatted project exits 0 with no
   output.</li>
