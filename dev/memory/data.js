@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788224794583,
+  "lastUpdate": 1788230821207,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -26213,6 +26213,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 71.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "0340c45c41d3757898f257e242b40e7e26d49fff",
+          "message": "A class named inside a `@phpstan-type` or `@phpstan-import-type` is a reference to it\n\nBoth tags were already read for their types: the aliases they declare\nresolve, expand through inheritance chains, and drive completion. What\nwas missing is that the class names written inside them were never\nrecorded in the symbol map, because `emit_tag_symbols` had no arm for\n`TagValue::TypeAlias` or `TagValue::TypeAliasImport` and both fell\nthrough to the catch-all.\n\nThat span is what every name-level feature reads, so the omission went\nwell past colour. The tag name was highlighted (the generic `@word`\nscan catches it) and the whole rest of the line came back as one flat\ncomment run; go-to-definition on the class did nothing; it appeared in\nneither find-references nor document-highlight; and a class rename\nwalked past it, leaving the alias naming a class that no longer\nexists. The last of those is silent breakage, not a cosmetic gap.\n\nThe type behind a `@phpstan-type` now goes through `emit_type_symbols`\nlike any other docblock type, and the identifier after a\n`@phpstan-import-type`'s `from` through `emit_identifier_span`. The\n`@psalm-` and bare `@type` spellings parse to the same values and are\ncovered by a test rather than assumed.\n\nThe alias names themselves deliberately get no span: `UserRow` in\n`@phpstan-type UserRow …` and `Row` in `… as Row` are not classes, so\nclaiming them would resolve to nothing and feed the unknown-class\ndiagnostic. An alias referenced inside another alias is still not\nreported, since `unknown_classes` already skips names it finds in\n`type_aliases` — `analyze examples/php` reports the same 101\ndiagnostics before and after.",
+          "timestamp": "2026-08-31T21:33:21-05:00",
+          "tree_id": "02354459ec65a82d9dafc6fb163d3e672a0f6e6b",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/0340c45c41d3757898f257e242b40e7e26d49fff"
+        },
+        "date": 1788230815055,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 36.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 73.5,
             "unit": "MiB"
           }
         ]
