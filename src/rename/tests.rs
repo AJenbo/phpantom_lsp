@@ -5797,3 +5797,44 @@ async fn namespace_rename_does_not_capture_a_sibling_directory_with_the_same_pre
         edited_uris(&ws)
     );
 }
+
+#[tokio::test]
+async fn rename_class_updates_phpstan_type_and_import_type_tags() {
+    // A class named inside a `@phpstan-type` definition or after a
+    // `@phpstan-import-type`'s `from` is a real reference to it, so a
+    // rename has to carry both along or the alias silently goes stale.
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                       // 0
+        "namespace App;\n",                              // 1
+        "\n",                                            // 2
+        "class User {}\n",                               // 3
+        "\n",                                            // 4
+        "/**\n",                                         // 5
+        " * @phpstan-type UserRow array{owner: User}\n", // 6
+        " * @phpstan-import-type Row from User\n",       // 7
+        " */\n",                                         // 8
+        "class Repo {}\n",                               // 9
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    let edit = rename(&backend, &uri, 3, 6, "Account")
+        .await
+        .expect("expected a workspace edit");
+    let result = apply_edits(text, &edits_for_uri(&edit, &uri));
+
+    assert!(
+        result.contains("@phpstan-type UserRow array{owner: Account}"),
+        "the alias definition should follow the rename:\n{result}"
+    );
+    assert!(
+        result.contains("@phpstan-import-type Row from Account"),
+        "the imported-from class should follow the rename:\n{result}"
+    );
+    assert!(
+        result.contains("UserRow"),
+        "the alias name is not the class and must not be rewritten:\n{result}"
+    );
+}
