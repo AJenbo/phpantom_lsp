@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788457898726,
+  "lastUpdate": 1788459210600,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -26383,6 +26383,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 76,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "9c3f121059da6b9a8c3d1e910a6cdfe06cb17b66",
+          "message": "test: distinguish import class quick fixes",
+          "timestamp": "2026-09-03T12:56:29-05:00",
+          "tree_id": "177c385111e4e7788b33169cc70d9b5dafe7d907",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/9c3f121059da6b9a8c3d1e910a6cdfe06cb17b66"
+        },
+        "date": 1788459203831,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 36.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 74.6,
             "unit": "MiB"
           }
         ]
