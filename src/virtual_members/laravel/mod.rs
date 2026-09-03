@@ -182,7 +182,8 @@ pub(crate) use route_names::{
 };
 pub(crate) use storage::{
     FILESYSTEM_MANAGER_FQN, LaravelStorageDriverIndex, StorageDriverRegistration,
-    extract_storage_driver_registrations, patch_storage_disk_type,
+    extract_storage_driver_registrations, is_storage_facade_name, patch_storage_disk_type,
+    storage_facade_local_names,
 };
 pub(crate) use trans_keys::{collect_trans_declarations, trans_line, unresolved_trans_type};
 pub(crate) use validation_rules::{safe_call_receiver_variable, safe_source_variable};

@@ -762,6 +762,21 @@ pub struct Backend {
     /// `$user->can()`, `$this->authorize()`, and `@can` check.  Empty for
     /// non-Laravel projects.  See [`virtual_members::laravel::gates`].
     pub(crate) laravel_gates: Arc<RwLock<virtual_members::laravel::LaravelGateIndex>>,
+    /// Config keys the project declares at runtime rather than in a
+    /// `config/` file (`Config::set()`, the array form of the `config()`
+    /// helper, `Storage::fake()`), keyed by the file each write is written
+    /// in so an edit that removes one takes the key with it.  A test that
+    /// configures a disk in `setUp()` before exercising it is the common
+    /// shape.  Empty for non-Laravel projects.
+    pub(crate) laravel_runtime_config_keys: Arc<RwLock<HashMap<String, Vec<String>>>>,
+    /// Whether the workspace is an application rather than a library.
+    ///
+    /// A library's configuration is supplied by whatever application
+    /// installs it, so the config keys it reads are declared in a file we
+    /// never see and none of them can be judged.  See
+    /// [`crate::composer::is_application_project`].  Starts `true` so a
+    /// workspace with no `composer.json` to classify behaves as before.
+    pub(crate) is_application: Arc<std::sync::atomic::AtomicBool>,
     /// Laravel macro seed files (service providers plus the app's provider
     /// registration files), mapped to the class references each contributed
     /// at the last macro-index build.  An edit that changes a seed's
@@ -1141,6 +1156,8 @@ impl Backend {
             laravel_gates: Arc::new(RwLock::new(
                 virtual_members::laravel::LaravelGateIndex::default(),
             )),
+            laravel_runtime_config_keys: Arc::new(RwLock::new(HashMap::new())),
+            is_application: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             laravel_macro_seeds: Arc::new(RwLock::new(HashMap::new())),
             laravel_macro_mixin_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
             laravel_date_class: Arc::new(RwLock::new(None)),
@@ -1253,6 +1270,8 @@ impl Backend {
             laravel_gates: Arc::new(RwLock::new(
                 virtual_members::laravel::LaravelGateIndex::default(),
             )),
+            laravel_runtime_config_keys: Arc::new(RwLock::new(HashMap::new())),
+            is_application: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             laravel_macro_seeds: Arc::new(RwLock::new(HashMap::new())),
             laravel_macro_mixin_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
             laravel_date_class: Arc::new(RwLock::new(None)),
@@ -1817,6 +1836,10 @@ impl Backend {
                 // behind.  Created/changed files rebuild it when re-parsed
                 // below.
                 self.symbols.uri_globals_index.write().remove(uri);
+                // A deleted file no longer declares the config keys it wrote
+                // at runtime.  A file that was merely changed re-registers
+                // them when it is re-parsed below.
+                self.laravel_runtime_config_keys.write().remove(uri);
             }
         }
 
@@ -1905,6 +1928,8 @@ impl Backend {
             laravel_has_commands: Arc::clone(&self.laravel_has_commands),
             laravel_morph_map: Arc::clone(&self.laravel_morph_map),
             laravel_gates: Arc::clone(&self.laravel_gates),
+            laravel_runtime_config_keys: Arc::clone(&self.laravel_runtime_config_keys),
+            is_application: Arc::clone(&self.is_application),
             laravel_macro_seeds: Arc::clone(&self.laravel_macro_seeds),
             laravel_macro_mixin_uris: Arc::clone(&self.laravel_macro_mixin_uris),
             laravel_date_class: Arc::clone(&self.laravel_date_class),

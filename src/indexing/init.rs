@@ -73,6 +73,17 @@ impl Backend {
             .unwrap_or(false);
         self.resolved_class_cache.write().set_laravel(is_laravel);
 
+        // A library's configuration is declared by whatever application
+        // installs it, so the keys it reads cannot be judged.  An `artisan`
+        // file settles it for an application whose `composer.json` says
+        // neither way.
+        self.set_is_application(
+            composer_json
+                .as_ref()
+                .is_some_and(composer::is_application_project)
+                || root.join("artisan").is_file(),
+        );
+
         // A permission package answers authorization checks from the database,
         // so the abilities this project uses are not written in its source and
         // the unknown-ability diagnostic has nothing to judge them against.
@@ -409,6 +420,10 @@ impl Backend {
         // authorizing from the database opens the ability space workspace-wide,
         // since the gate index that judges abilities is shared.
         let mut any_runtime_permissions = false;
+        // One application among the subprojects makes the workspace's config
+        // files the whole configuration; a workspace of libraries alone reads
+        // keys that only the installing application declares.
+        let mut any_application = false;
 
         for (sub_idx, (sub_root, vendor_dir)) in subprojects.iter().enumerate() {
             // Each subproject owns an equal slice of the 10..80 range;
@@ -436,11 +451,13 @@ impl Backend {
             }
             skip_dirs.insert(sub_root.clone());
 
-            if (!any_laravel || !any_runtime_permissions)
+            if (!any_laravel || !any_runtime_permissions || !any_application)
                 && let Some(pkg) = composer::read_composer_package(sub_root)
             {
                 any_laravel |= composer::is_laravel_project(&pkg);
                 any_runtime_permissions |= composer::has_runtime_permission_package(&pkg);
+                any_application |=
+                    composer::is_application_project(&pkg) || sub_root.join("artisan").is_file();
             }
 
             // ── PSR-4 mappings ──────────────────────────────────────
@@ -504,6 +521,7 @@ impl Backend {
         }
 
         self.resolved_class_cache.write().set_laravel(any_laravel);
+        self.set_is_application(any_application);
         self.laravel_gates
             .write()
             .set_runtime_permission_package(any_runtime_permissions);

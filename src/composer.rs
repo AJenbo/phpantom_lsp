@@ -1317,6 +1317,33 @@ pub(crate) fn is_laravel_application(package: &ComposerPackage) -> bool {
         })
 }
 
+/// Detect whether `package` describes an application rather than a library
+/// that something else installs.
+///
+/// An application owns its configuration: the `config/` files it ships, plus
+/// the framework defaults they merge with, are the whole of what exists, so a
+/// key nothing declares is a typo.  A library's configuration belongs to
+/// whatever application installs it, and that application is a file we never
+/// see, so every key the library reads is unjudgeable.
+///
+/// Composer's `type` says which it is outright when it is set (`project` is
+/// what the Laravel skeleton ships).  A `composer.json` that leaves the type
+/// at its `library` default is read from what it requires: the framework
+/// itself in `require` is an application, while a library depends on the
+/// `illuminate/*` components it uses and keeps its copy of the framework in
+/// `require-dev` for its test suite.  This is why it cannot share
+/// [`is_laravel_application`], which counts a dev-only dependency too.
+pub(crate) fn is_application_project(package: &ComposerPackage) -> bool {
+    if let Some(kind) = &package.r#type {
+        return kind.0.eq_ignore_ascii_case("project");
+    }
+    package.require.keys().any(|name| {
+        ["laravel/framework", "laravel/laravel"]
+            .iter()
+            .any(|app| name.eq_ignore_ascii_case(app))
+    })
+}
+
 /// Packages that answer authorization checks from a runtime permission
 /// table rather than from `Gate::define()` calls or policy classes.
 ///
@@ -1467,6 +1494,35 @@ mod tests {
         let library = pkg(r#"{"require": {"illuminate/support": "^11.0"}}"#);
         assert!(is_laravel_project(&library));
         assert!(!is_laravel_application(&library));
+    }
+
+    // ── is_application_project ──────────────────────────────────────
+
+    /// The declared type settles it on its own, whichever way it points.
+    #[test]
+    fn a_declared_type_decides_whether_a_project_is_an_application() {
+        assert!(is_application_project(&pkg(
+            r#"{"type": "project", "require": {"illuminate/support": "^11.0"}}"#
+        )));
+        assert!(!is_application_project(&pkg(
+            r#"{"type": "library", "require": {"laravel/framework": "^11.0"}}"#
+        )));
+    }
+
+    /// Without one, requiring the framework itself is what tells an
+    /// application apart from a package that keeps its copy for tests.
+    #[test]
+    fn an_untyped_package_is_read_from_what_it_requires() {
+        assert!(is_application_project(&pkg(
+            r#"{"require": {"laravel/framework": "^11.0"}}"#
+        )));
+        assert!(!is_application_project(&pkg(
+            r#"{"require": {"illuminate/support": "^11.0"},
+                "require-dev": {"laravel/framework": "^11.0"}}"#
+        )));
+        assert!(!is_application_project(&pkg(
+            r#"{"require": {"symfony/console": "^7.0"}}"#
+        )));
     }
 
     // ── has_runtime_permission_package ──────────────────────────────

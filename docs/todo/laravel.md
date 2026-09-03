@@ -682,9 +682,9 @@ already parses those files. Auth guards (`auth('...')`,
 `Auth::guard()`, `->middleware('auth:web')`), cache stores
 (`Cache::store()`), log channels (`Log::channel()`), and storage disks
 (`Storage::disk()`, test fakes, disk eviction, and `#[Storage]`) already
-complete against their config subtree — but all of them
-route through the generic `LaravelStringKind::Config` kind rather than
-a dedicated one, so they get completion plus the shared config
+complete against their config subtree — but all of them route through
+the generic `LaravelStringKind::Config` kind rather than a dedicated
+one, so they get completion plus the shared config
 diagnostics/go-to-definition and nothing family-specific (a "cache
 store" hovers with the same generic wording as any other config key).
 `Log::stack()` (array values) isn't recognized at all. Generalize into

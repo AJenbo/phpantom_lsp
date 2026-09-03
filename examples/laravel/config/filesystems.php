@@ -6,6 +6,11 @@ return [
 
     'disks' => [
 
+        'local' => [
+            'driver' => 'local',
+            'root' => 'storage/app',
+        ],
+
         'avatars' => [
             'driver' => 'local',
             'root' => 'storage/app/avatars',

@@ -21,6 +21,7 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::symbol_map::LaravelStringKind;
 use crate::text_position::position_to_offset;
+use crate::virtual_members::laravel::{is_storage_facade_name, storage_facade_local_names};
 
 // ─── Context ────────────────────────────────────────────────────────────────
 
@@ -211,107 +212,6 @@ fn string_argument_context<'a>(
     })
 }
 
-fn imported_item_is_storage(
-    item: &str,
-    group_prefix: Option<&str>,
-    expected_fqn: &str,
-    referenced_name: &str,
-) -> Option<bool> {
-    let mut words = item.split_whitespace();
-    let imported_name = words.next()?;
-    let alias = match words.next() {
-        Some(as_keyword) if as_keyword.eq_ignore_ascii_case("as") => Some(words.next()?),
-        Some(_) => return None,
-        None => None,
-    };
-    if words.next().is_some() {
-        return None;
-    }
-
-    let imported_name = imported_name.trim_start_matches('\\');
-    let class_matches = if let Some(prefix) = group_prefix {
-        let expected_prefix = expected_fqn
-            .strip_suffix("Storage")
-            .unwrap_or(expected_fqn)
-            .trim_end_matches('\\');
-        prefix
-            .trim_start_matches('\\')
-            .trim_end_matches('\\')
-            .eq_ignore_ascii_case(expected_prefix)
-            && imported_name.eq_ignore_ascii_case("Storage")
-    } else {
-        imported_name.eq_ignore_ascii_case(expected_fqn)
-    };
-    let local_name =
-        alias.unwrap_or_else(|| imported_name.rsplit('\\').next().unwrap_or(imported_name));
-    local_name
-        .eq_ignore_ascii_case(referenced_name)
-        .then_some(class_matches)
-}
-
-/// Whether a class spelling resolves to Laravel's Storage facade.
-fn is_storage_facade_reference(content: &str, class_name: &str) -> bool {
-    const STORAGE_FACADE: &str = "Illuminate\\Support\\Facades\\Storage";
-
-    let is_root_qualified = class_name.starts_with('\\');
-    let class_name = class_name.trim_start_matches('\\');
-    if class_name.contains('\\') {
-        return class_name.eq_ignore_ascii_case(STORAGE_FACADE);
-    }
-
-    for statement in content.split(';') {
-        let mut line_offset = 0usize;
-        let mut clause = None;
-        for line in statement.split_inclusive('\n') {
-            let trimmed = line.trim_start();
-            if trimmed
-                .get(..4)
-                .is_some_and(|prefix| prefix.eq_ignore_ascii_case("use "))
-            {
-                let leading = line.len() - trimmed.len();
-                clause = Some(statement[line_offset + leading + 4..].trim());
-                break;
-            }
-            line_offset += line.len();
-        }
-        let Some(clause) = clause else {
-            continue;
-        };
-
-        if let Some(open) = clause.find('{') {
-            let Some(close) = clause.rfind('}') else {
-                continue;
-            };
-            let prefix = clause[..open].trim();
-            if let Some(matches) = clause[open + 1..close].split(',').find_map(|item| {
-                imported_item_is_storage(item, Some(prefix), STORAGE_FACADE, class_name)
-            }) {
-                return matches;
-            }
-        } else if let Some(matches) = clause
-            .split(',')
-            .find_map(|item| imported_item_is_storage(item, None, STORAGE_FACADE, class_name))
-        {
-            return matches;
-        }
-    }
-
-    class_name.eq_ignore_ascii_case("Storage")
-        && (is_root_qualified || !source_has_namespace(content))
-}
-
-fn source_has_namespace(content: &str) -> bool {
-    content.lines().any(|line| {
-        let mut line = line.trim_start();
-        if let Some(rest) = line.strip_prefix("<?php") {
-            line = rest.trim_start();
-        }
-        line.get(..9)
-            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("namespace"))
-            && line.as_bytes().get(9).is_some_and(u8::is_ascii_whitespace)
-    })
-}
-
 // ─── Detection ──────────────────────────────────────────────────────────────
 
 /// Detect if the cursor is inside a supported string argument of a Laravel
@@ -431,12 +331,27 @@ fn detect_laravel_string_key_context(
             }
         };
         let fqn_matches = |expected_short: &str| attr_matches(ATTR_NS, expected_short);
+        // `#[Storage]` turns any argument into a `filesystems.disks.*` key,
+        // so an application's own same-named attribute would invent one.
+        // The short spelling therefore has to be imported by that exact
+        // name, matching what the symbol map records.
+        let storage_attr_matches = || {
+            if is_fqn {
+                attr_class == format!("{ATTR_NS}Storage")
+            } else {
+                short == "Storage"
+                    && crate::text_scan::imports_class_as(
+                        content,
+                        &format!("{ATTR_NS}Storage"),
+                        "Storage",
+                    )
+            }
+        };
 
-        if argument.named_argument.is_some()
-            && (!fqn_matches("Storage")
-                || argument
-                    .named_argument
-                    .is_some_and(|name| !name.eq_ignore_ascii_case("disk")))
+        // `#[Storage(disk: '…')]` is the one container attribute whose
+        // argument is recognised by name.
+        if let Some(name) = argument.named_argument
+            && !(storage_attr_matches() && name.eq_ignore_ascii_case("disk"))
         {
             return None;
         }
@@ -452,7 +367,7 @@ fn detect_laravel_string_key_context(
             (Some(LaravelStringKind::Config), Some("cache.stores."))
         } else if fqn_matches("Log") {
             (Some(LaravelStringKind::Config), Some("logging.channels."))
-        } else if fqn_matches("Storage") {
+        } else if storage_attr_matches() {
             (Some(LaravelStringKind::Config), Some("filesystems.disks."))
         } else if fqn_matches("Auth") || fqn_matches("Authenticated") {
             (Some(LaravelStringKind::Config), Some("auth.guards."))
@@ -475,23 +390,21 @@ fn detect_laravel_string_key_context(
         let class_name = &before_colons[cls_start..];
         let short = class_name.rsplit('\\').next().unwrap_or(class_name);
 
-        let storage_argument = if is_storage_facade_reference(content, class_name) {
-            if func_name.eq_ignore_ascii_case("disk") {
-                Some(("name", false))
-            } else if func_name.eq_ignore_ascii_case("fake")
-                || func_name.eq_ignore_ascii_case("persistentFake")
-            {
-                Some(("disk", false))
-            } else if func_name.eq_ignore_ascii_case("forgetDisk") {
-                Some(("disk", true))
-            } else {
-                None
-            }
-        } else {
-            None
-        };
         let fn_lower = func_name.to_ascii_lowercase();
         let short_lower = short.to_ascii_lowercase();
+
+        // The `Storage` facade's disk-name arguments: the parameter the disk
+        // goes in, and whether that parameter also accepts a list.  The
+        // facade is only resolved through the file's imports once a method
+        // name has matched — `disk()`, `fake()` and `forgetDisk()` are common
+        // names on unrelated facades, and resolving scans the whole buffer.
+        let storage_argument = match fn_lower.as_str() {
+            "disk" => Some(("name", false)),
+            "fake" | "persistentfake" => Some(("disk", false)),
+            "forgetdisk" => Some(("disk", true)),
+            _ => None,
+        }
+        .filter(|_| is_storage_facade_name(class_name, &storage_facade_local_names(content)));
         let accepts_array = matches!(
             (short_lower.as_str(), fn_lower.as_str()),
             ("config", "getmany") | ("route", "is" | "currentroutenamed")
@@ -621,10 +534,21 @@ fn detect_laravel_string_key_context(
         };
         (k, None)
     } else {
-        if argument.named_argument.is_some() || argument.shape != StringArgumentShape::Scalar {
+        let fn_lower = func_name.to_ascii_lowercase();
+        // The Blade preprocessor lowers `@includeFirst`/`@componentFirst`/
+        // `@extendsFirst` and `@canany` to markers that name their candidates
+        // inside an array literal rather than as a plain first argument.
+        let accepts_array = matches!(
+            fn_lower.as_str(),
+            "blade_view_directive" | "blade_can_directive"
+        );
+        if argument.named_argument.is_some()
+            || (argument.shape != StringArgumentShape::Scalar
+                && (!accepts_array || !before_quote.trim_end().ends_with('[')))
+        {
             return None;
         }
-        match func_name.to_ascii_lowercase().as_str() {
+        match fn_lower.as_str() {
             "route" | "to_route" => (Some(LaravelStringKind::Route), None),
             "config" => (Some(LaravelStringKind::Config), None),
             "view" | "blade_view_directive" | "blade_each_directive" => {
@@ -1139,6 +1063,10 @@ impl Backend {
     fn string_key_candidates(&self, kind: &LaravelStringKind) -> Vec<String> {
         match kind {
             LaravelStringKind::Route => self.cached_route_names(),
+            // Only the keys `config/` declares: a key written at runtime is
+            // extracted from the same literal the cursor is inside, so the
+            // half-typed name of a `Storage::fake('…')` under the cursor
+            // would be offered back as a completion for itself.
             LaravelStringKind::Config => self.cached_config_keys(),
             LaravelStringKind::View => self.cached_view_names(),
             LaravelStringKind::Trans => self.cached_trans_keys(),
@@ -1407,6 +1335,28 @@ mod tests {
         }
     }
 
+    /// `@includeFirst`, `@componentFirst`, `@extendsFirst` and `@canany`
+    /// name their candidates inside an array literal, so the marker calls
+    /// they compile to have to complete there and not only for a plain
+    /// first argument.
+    #[test]
+    fn detects_the_blade_markers_that_list_their_names_in_an_array() {
+        for (marker, value, kind) in [
+            ("blade_view_directive", "partials.", LaravelStringKind::View),
+            ("blade_can_directive", "upd", LaravelStringKind::GateAbility),
+        ] {
+            let content = format!("<?php\n{marker}(['{value}']);\n");
+            let cursor = content.find(value).unwrap() + value.len();
+            let ctx = detect_laravel_string_key_context(
+                &content,
+                crate::text_position::offset_to_position(&content, cursor),
+            )
+            .unwrap_or_else(|| panic!("should detect {marker} array context"));
+            assert_eq!(ctx.kind, kind);
+            assert_eq!(ctx.prefix, value);
+        }
+    }
+
     #[test]
     fn detects_artisan_call_command() {
         let content = "<?php\nArtisan::call('app:');\n";
@@ -1556,6 +1506,23 @@ mod tests {
     }
 
     #[test]
+    fn detects_static_config_mutators_and_translation_queries() {
+        for method in ["prepend", "push"] {
+            let content = format!("<?php\nConfig::{method}('app.providers');\n");
+            let ctx = detect_at_end(&content, "app.providers")
+                .unwrap_or_else(|| panic!("should detect Config::{method}() context"));
+            assert_eq!(ctx.kind, LaravelStringKind::Config);
+        }
+
+        for method in ["get", "has", "hasForLocale", "choice"] {
+            let content = format!("<?php\nLang::{method}('messages.saved');\n");
+            let ctx = detect_at_end(&content, "messages.saved")
+                .unwrap_or_else(|| panic!("should detect Lang::{method}() context"));
+            assert_eq!(ctx.kind, LaravelStringKind::Trans);
+        }
+    }
+
+    #[test]
     fn storage_argument_scanning_preserves_existing_static_contexts() {
         for (expression, expected_kind, expected_prefix) in [
             (
@@ -1645,15 +1612,17 @@ mod tests {
             );
         }
 
-        const FACADE: &str = "Illuminate\\Support\\Facades\\Storage";
-        assert_eq!(
-            imported_item_is_storage("Storage nope", None, FACADE, "Storage"),
-            None
-        );
-        assert_eq!(
-            imported_item_is_storage("Storage as Disks trailing", None, FACADE, "Disks"),
-            None
-        );
+        // A malformed import binds nothing, so the short name is left to the
+        // global-alias rule rather than treated as an import of the facade.
+        for content in [
+            "<?php\nnamespace App;\nuse Illuminate\\Support\\Facades\\Storage nope;\nStorage::disk('arch');\n",
+            "<?php\nnamespace App;\nuse Illuminate\\Support\\Facades\\Storage as Disks trailing;\nDisks::disk('arch');\n",
+        ] {
+            assert!(
+                detect_at_end(content, "arch").is_none(),
+                "source: {content}"
+            );
+        }
     }
 
     #[test]
