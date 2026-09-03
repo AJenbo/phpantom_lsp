@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788290993839,
+  "lastUpdate": 1788457898726,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -26349,6 +26349,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 74.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "73c9caddcb86b4e1ed2d41ba9efee5287028fa60",
+          "message": "feat: import qualified symbols with a code action\n\nAllow qualified class, function, and constant references to be replaced with imports and short names across the current namespace. Generate aliases when existing imports occupy the natural short name.",
+          "timestamp": "2026-09-03T12:34:01-05:00",
+          "tree_id": "bd1bfed8143ab8109196908ae808461ace8cc76f",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/73c9caddcb86b4e1ed2d41ba9efee5287028fa60"
+        },
+        "date": 1788457891840,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 36.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 76,
             "unit": "MiB"
           }
         ]
