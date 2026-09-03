@@ -390,6 +390,81 @@ pub(crate) fn check(content: &str) -> Vec<Imbalance> {
     out
 }
 
+/// A block directive and the closer that ends it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct BlockPair {
+    /// The opener itself (`@section`), without its argument list.
+    pub(crate) opener: Span,
+    /// The opener's argument list, parentheses included, when it has one.
+    pub(crate) args: Option<Span>,
+    /// The directive that closes the block (`@endsection`).
+    pub(crate) closer: Span,
+}
+
+/// Every well-nested block-directive pair in `content`, covering
+/// `@directive(...)` through its matching `@enddirective`.
+///
+/// Mirrors [`check`]'s tolerance for malformed input: a closer that does
+/// not match the innermost open block is left alone rather than guessed
+/// at, so mismatched or unclosed blocks (already reported by [`check`])
+/// are simply not paired.
+pub(crate) fn block_pairs(content: &str) -> Vec<BlockPair> {
+    if !content.contains('@') {
+        return Vec::new();
+    }
+
+    let regions = inert_regions(content, true);
+    let masked = mask_regions(content, &regions);
+    let bytes = masked.as_bytes();
+
+    let mut out: Vec<BlockPair> = Vec::new();
+    let mut stack: Vec<(&Block, Span, Option<Span>)> = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != b'@' {
+            i += 1;
+            continue;
+        }
+        let Some((name, args)) = directive_at(&masked, i) else {
+            i += 1;
+            continue;
+        };
+        let span = i..i + 1 + name.len();
+        i = args.as_ref().map_or(span.end, |args| args.end);
+
+        if let Some(block) = BLOCKS.iter().find(|block| block.opener == name) {
+            if opens_block(block, &masked, args.as_ref()) {
+                stack.push((block, span, args));
+            }
+            continue;
+        }
+        if BLOCKS.iter().all(|block| !block.closers.contains(&name)) {
+            continue;
+        }
+        match stack
+            .iter()
+            .rposition(|(open, ..)| open.closers.contains(&name))
+        {
+            // A closer for the innermost open block pairs cleanly.
+            Some(index) if index + 1 == stack.len() => {
+                let (_, opener, args) = stack.pop().unwrap();
+                out.push(BlockPair {
+                    opener,
+                    args,
+                    closer: span,
+                });
+            }
+            // A closer for a block further out means everything opened
+            // after it was never closed; there is nothing sensible to
+            // pair for either side, so just unwind past it.
+            Some(index) => stack.truncate(index),
+            None => {}
+        }
+    }
+
+    out
+}
+
 /// Whether an occurrence of `block`'s opener with `args` opens a block.
 fn opens_block(block: &Block, content: &str, args: Option<&Span>) -> bool {
     match block.opens {
@@ -597,5 +672,57 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// `block_pairs` spans as `(name, opener_start, closer_end)` triples,
+    /// for readable assertions.
+    fn pairs(content: &str) -> Vec<(&str, usize, usize)> {
+        block_pairs(content)
+            .into_iter()
+            .map(|pair| {
+                (
+                    &content[pair.opener.start + 1..pair.opener.end],
+                    pair.opener.start,
+                    pair.closer.end,
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_paired_block_spans_from_its_opener_to_its_closer() {
+        let blade = "@foreach ($rows as $row)\n<p>{{ $row }}</p>\n@endforeach\n";
+        assert_eq!(pairs(blade), [("foreach", 0, blade.len() - 1)]);
+    }
+
+    /// The argument list travels with the pair, so a reader that has to
+    /// know *which* section a block opens does not rescan for it.
+    #[test]
+    fn a_pair_carries_the_openers_argument_list() {
+        let blade = "@section('body')\n<p>hi</p>\n@endsection\n";
+        let args = block_pairs(blade)[0]
+            .args
+            .clone()
+            .expect("section has args");
+        assert_eq!(&blade[args], "('body')");
+    }
+
+    #[test]
+    fn nested_blocks_each_pair_independently() {
+        let blade = "@if ($ok)\n@foreach ($rows as $row)\n{{ $row }}\n@endforeach\n@endif\n";
+        let found = pairs(blade);
+        assert_eq!(found.len(), 2);
+        assert!(found.iter().any(|(name, ..)| *name == "if"));
+        assert!(found.iter().any(|(name, ..)| *name == "foreach"));
+    }
+
+    #[test]
+    fn a_mismatched_closer_pairs_neither_side() {
+        assert!(pairs("@foreach ($rows as $row)\n@endif\n").is_empty());
+    }
+
+    #[test]
+    fn an_unclosed_block_does_not_pair() {
+        assert!(pairs("@if ($ok)\n<p>hi</p>\n").is_empty());
     }
 }

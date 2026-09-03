@@ -1,11 +1,17 @@
 use super::TemplateKind;
-use super::directives::{match_directive, translate_directive};
+use super::directives::{
+    CUSTOM_MARKER, CustomDirectives, CustomForm, match_directive, translate_directive,
+};
 use super::source_map::BladeSourceMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Mode {
     Html,
-    Php,
+    /// PHP expression/statement content scanned for the `}}` / `!!}` echo
+    /// terminators and `@endphp`. The `bool` is true when the mode was
+    /// entered through a raw `{!! … !!}` echo, whose emitted `echo` has no
+    /// `e(` wrapper and so must be closed with a bare `;` instead of `);`.
+    Php(bool),
     /// A raw `<?php` / `<?=` / `<?` tag embedded directly in the template
     /// (i.e. not via `@php`/`@endphp`). Content is passed through verbatim
     /// with no directive/echo scanning, and the mode ends at `?>`. The
@@ -25,11 +31,12 @@ enum Mode {
     Comment,
     /// The expression of a Blade component bound attribute
     /// (`:name="$expr"` or the `:$var` shorthand). The expression is
-    /// emitted verbatim as a real PHP argument to `blade_directive(...)`
-    /// so the forward walker sees the variables it uses; the surrounding
-    /// tag markup stays masked. `Some(quote)` is the delimiting quote of
-    /// a `:name="..."` value; `None` is the shorthand `:$var`, which ends
-    /// at the first character that cannot be part of the variable name.
+    /// emitted verbatim as a real PHP argument to
+    /// `blade_bound_attr_directive(...)` so the forward walker sees the
+    /// variables it uses; the surrounding tag markup stays masked.
+    /// `Some(quote)` is the delimiting quote of a `:name="..."` value;
+    /// `None` is the shorthand `:$var`, which ends at the first character
+    /// that cannot be part of the variable name.
     BoundAttr(Option<char>),
     /// The parenthesised argument list of an `@use(...)` or `@inject(...)`
     /// directive. Unlike `DirectiveArgs`, the argument text is captured and
@@ -118,7 +125,14 @@ pub struct ComponentParameter {
 }
 
 pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
-    preprocess_with_vars(content, &[], TemplateKind::View, None, None)
+    preprocess_with_vars(
+        content,
+        &[],
+        TemplateKind::View,
+        None,
+        None,
+        &CustomDirectives::default(),
+    )
 }
 
 /// The variables Blade puts in a component view's scope on top of the data
@@ -210,12 +224,18 @@ fn is_php_variable_name(name: &str) -> bool {
 /// carries that class's members and the tag's attributes are checked as
 /// the arguments the framework passes them as.  Without one (or for a tag
 /// it cannot answer for) the tag degrades to a comment.
+///
+/// `custom_directives` are the ones the project's service providers
+/// registered with `Blade::directive()` / `Blade::if()`.  A directive in
+/// that set lowers to a marker call keeping its argument as real PHP,
+/// instead of degrading to the comment an unrecognised `@name` becomes.
 pub fn preprocess_with_vars(
     content: &str,
     injected_vars: &[(String, String)],
     kind: TemplateKind,
     this_class: Option<&str>,
     components: Option<&dyn ComponentResolver>,
+    custom_directives: &CustomDirectives,
 ) -> (String, BladeSourceMap) {
     let mut virtual_php = String::with_capacity(content.len() + 512);
     let mut source_map = BladeSourceMap::default();
@@ -271,7 +291,7 @@ pub fn preprocess_with_vars(
     }
 
     // ── Prologue ──
-    virtual_php.push_str("<?php if (!function_exists('blade_directive')) { function blade_directive(...$args) {} function blade_view_directive(...$args) {} function blade_each_directive(...$args) {} function blade_can_directive(...$args): bool { return true; } function blade_section_directive(...$args): bool { return true; } function blade_stack_directive(...$args): bool { return true; } function blade_push_if_directive(...$args) {} }\n");
+    virtual_php.push_str("<?php if (!function_exists('blade_directive')) { function blade_directive(...$args) {} function blade_bound_attr_directive(...$args) {} function blade_view_directive(...$args) {} function blade_each_directive(...$args) {} function blade_can_directive(...$args): bool { return true; } function blade_section_directive(...$args): bool { return true; } function blade_stack_directive(...$args): bool { return true; } function blade_push_if_directive(...$args) {} function blade_custom_directive(...$args): bool { return true; } }\n");
     // Where hoisted `@use` imports are spliced in once the whole
     // template has been scanned: still in the prologue, so they precede
     // every name they import (name resolution runs in source order and
@@ -352,15 +372,31 @@ pub fn preprocess_with_vars(
     // opens; see `bound_attr_spans_lines`.
     let mut bound_attr_multiline = false;
     // What closes the expression currently open in `Mode::BoundAttr`:
-    // `);` for the `blade_directive(` call an ordinary bound attribute
-    // becomes, and `;` for one that is an argument of the surrounding
-    // tag's component call and is bound to a variable for it.
+    // `);` for the `blade_bound_attr_directive(` call an ordinary bound
+    // attribute becomes, and `;` for one that is an argument of the
+    // surrounding tag's component call and is bound to a variable for it.
     let mut bound_attr_suffix = ");";
     // The component call the surrounding tag opened, if any; see
     // `OpenComponentCall`.
     let mut open_call: Option<OpenComponentCall> = None;
 
     let lines: Vec<&str> = content.lines().collect();
+
+    // The last line holding each echo terminator, computed once so an echo
+    // opener can ask "is there a terminator anywhere after me?" without
+    // rescanning the rest of the file per opener (an opener with none
+    // would otherwise cost O(file) each, O(file²) across a file of them).
+    let last_escaped_echo_close = lines.iter().rposition(|l| l.contains("}}"));
+    let last_raw_echo_close = lines.iter().rposition(|l| l.contains("!!}"));
+    // Whether the echo currently open in `Mode::Php` has no terminator
+    // anywhere ahead of it. Blade compiles an unpaired opener as literal
+    // text, but masking it would break completion inside an echo that is
+    // simply not finished being typed yet, so the expression is kept and
+    // closed at end of line instead: one line degrades rather than the
+    // whole rest of the template being swallowed as PHP. Line-scoped:
+    // reset at the top of each line, since an echo it applies to never
+    // survives the line that opened it.
+    let mut echo_closes_at_eol;
 
     for (line_idx, line) in lines.iter().enumerate() {
         let mut processed = String::new();
@@ -370,8 +406,10 @@ pub fn preprocess_with_vars(
         let line_chars: Vec<char> = line.chars().collect();
         let mut buffer = String::new();
 
+        echo_closes_at_eol = false;
+
         if mode == Mode::Html && in_php_directive_block {
-            mode = Mode::Php;
+            mode = Mode::Php(false);
         }
 
         let mut char_idx = 0;
@@ -461,18 +499,35 @@ pub fn preprocess_with_vars(
             let mut next_mode = mode;
 
             if mode == Mode::Html {
-                if remaining.starts_with(&['{', '{']) {
+                if remaining.starts_with(&['{', '{'])
+                    && !remaining[1..].starts_with(&['{', '!', '!'])
+                {
                     let is_comment = remaining.starts_with(&['{', '{', '-', '-']);
-                    let is_raw = remaining.starts_with(&['{', '{', '!', '!']);
                     replacement = if is_comment {
                         " /* ".to_string()
-                    } else if is_raw {
-                        " echo (".to_string()
                     } else {
                         " echo e(".to_string()
                     };
-                    match_len = if is_comment || is_raw { 4 } else { 2 };
-                    next_mode = if is_comment { Mode::Comment } else { Mode::Php };
+                    match_len = if is_comment { 4 } else { 2 };
+                    next_mode = if is_comment {
+                        Mode::Comment
+                    } else {
+                        echo_closes_at_eol = !contains_seq(&remaining[2..], &['}', '}'])
+                            && last_escaped_echo_close.is_none_or(|last| last <= line_idx);
+                        Mode::Php(false)
+                    };
+                } else if remaining.starts_with(&['{', '!', '!']) {
+                    // `{!! … !!}` outputs unescaped, so it compiles to a
+                    // naked `echo` with no `e()` wrapper. Blade matches its
+                    // echo tags longest-opening-first, so in `{{!! … !!}}`
+                    // the raw echo starts at the second `{` and the outer
+                    // braces are literal text — the guard above keeps the
+                    // first `{` from being read as an escaped echo instead.
+                    replacement = " echo ".to_string();
+                    match_len = 3;
+                    next_mode = Mode::Php(true);
+                    echo_closes_at_eol = !contains_seq(&remaining[3..], &['!', '!', '}'])
+                        && last_raw_echo_close.is_none_or(|last| last <= line_idx);
                 } else if remaining.starts_with(&['<', '?', 'p', 'h', 'p']) {
                     // Raw <?php tag embedded directly in the template (not via @php).
                     match_len = 5;
@@ -534,7 +589,7 @@ pub fn preprocess_with_vars(
                             let after_php = rest_str[3..].trim_start();
                             if !after_php.starts_with('(') {
                                 in_php_directive_block = true;
-                                next_mode = Mode::Php;
+                                next_mode = Mode::Php(false);
                                 replacement = "".to_string();
                             } else {
                                 replacement = format!(" {} ", translate_directive(directive));
@@ -766,7 +821,63 @@ pub fn preprocess_with_vars(
                             }
                         } else {
                             replacement = format!(" {}; ", translate_directive(directive));
-                            next_mode = Mode::Php;
+                            next_mode = Mode::Php(false);
+                        }
+                    } else if let Some((name, form)) = custom_directives.match_directive(&rest_str)
+                    {
+                        // A directive one of the project's service providers
+                        // registered. Blade's own compiler checks its custom
+                        // table *before* its built-in directives, but a
+                        // registration shadowing a core name would break the
+                        // block structure of every template that writes it
+                        // (and of Blade's own compiled output), so the core
+                        // table wins here.
+                        //
+                        // The handler is a callback returning arbitrary PHP,
+                        // so only the argument list is reproduced: it stays
+                        // real PHP that gets type-checked, passed to a marker
+                        // that stands in for whatever the handler emits. An
+                        // argument list is optional — Blade hands the handler
+                        // an empty expression when there is none — so a bare
+                        // name must not enter `DirectiveArgs`, which would
+                        // hunt the rest of the template for a closing paren
+                        // that was never opened.
+                        match_len = 1 + name.len();
+                        let has_args = rest_str[name.len()..].trim_start().starts_with('(');
+                        match form {
+                            CustomForm::End => {
+                                replacement = " endif; ".to_string();
+                                next_mode = Mode::Html;
+                            }
+                            CustomForm::Open | CustomForm::Else => {
+                                let keyword = if form == CustomForm::Open {
+                                    "if"
+                                } else {
+                                    "elseif"
+                                };
+                                if has_args {
+                                    // The marker's own `(` is left open for
+                                    // the directive's argument list to close,
+                                    // so the suffix closes both it and the
+                                    // condition.
+                                    replacement = format!(" {keyword} ({CUSTOM_MARKER} ");
+                                    next_mode = Mode::DirectiveArgs("):");
+                                    paren_depth = 0;
+                                } else {
+                                    replacement = format!(" {keyword} ({CUSTOM_MARKER}()): ");
+                                    next_mode = Mode::Html;
+                                }
+                            }
+                            CustomForm::Statement => {
+                                if has_args {
+                                    replacement = format!(" {CUSTOM_MARKER} ");
+                                    next_mode = Mode::DirectiveArgs(";");
+                                    paren_depth = 0;
+                                } else {
+                                    replacement = format!(" {CUSTOM_MARKER}(); ");
+                                    next_mode = Mode::Html;
+                                }
+                            }
                         }
                     }
                 } else if remaining.starts_with(&[':'])
@@ -780,10 +891,15 @@ pub fn preprocess_with_vars(
                     // `:$var` shorthand. The expression stays where the
                     // template wrote it, either as an argument of the
                     // component call the tag opened or, when it names no
-                    // parameter of it, as a `blade_directive(...)` call of
-                    // its own so its variables are still seen. The rest of
-                    // the tag stays masked. A leading `::` is an escaped
-                    // literal colon and is left alone.
+                    // parameter of it, as a `blade_bound_attr_directive(...)`
+                    // call of its own so its variables are still seen. That
+                    // marker is exclusive to bound attributes (unlike the
+                    // generic `blade_directive` shared by `@class`, `@json`,
+                    // and friends), so a scan counting bound attributes can
+                    // count its calls without another directive's call
+                    // shifting the sequence. The rest of the tag stays
+                    // masked. A leading `::` is an escaped literal colon and
+                    // is left alone.
                     let shorthand = remaining.get(1) == Some(&'$')
                         && remaining
                             .get(2)
@@ -811,7 +927,7 @@ pub fn preprocess_with_vars(
                             .map(|variable| format!(" {variable} = "));
                         let (prefix, suffix) = match &argument {
                             Some(prefix) => (prefix.as_str(), ";"),
-                            None => (" blade_directive(", ");"),
+                            None => (" blade_bound_attr_directive(", ");"),
                         };
                         replacement = prefix.to_string();
                         bound_attr_suffix = suffix;
@@ -848,14 +964,19 @@ pub fn preprocess_with_vars(
                     match_len = 2;
                     next_mode = Mode::Html;
                 }
-            } else if mode == Mode::Php {
-                if remaining.starts_with(&['}', '}']) || remaining.starts_with(&['!', '!', '}']) {
+            } else if let Mode::Php(raw_echo) = mode {
+                // Each echo form only closes at its own terminator: `!!}`
+                // ends a raw echo and `}}` an escaped one, exactly as
+                // Blade's compiler matches them. A raw echo opened a bare
+                // `echo ` with no `e(`, so there is no call to close, only
+                // the statement.
+                if raw_echo && remaining.starts_with(&['!', '!', '}']) {
+                    replacement = "; ".to_string();
+                    match_len = 3;
+                    next_mode = Mode::Html;
+                } else if !raw_echo && remaining.starts_with(&['}', '}']) {
                     replacement = "); ".to_string();
-                    match_len = if remaining.starts_with(&['!', '!', '}']) {
-                        3
-                    } else {
-                        2
-                    };
+                    match_len = 2;
                     next_mode = Mode::Html;
                 } else if remaining.starts_with(&['@', 'e', 'n', 'd', 'p', 'h', 'p']) {
                     in_php_directive_block = false;
@@ -1044,11 +1165,34 @@ pub fn preprocess_with_vars(
             current_utf16_col += ch.len_utf16() as u32;
         }
 
+        // An echo opener with nothing left in the file that could close it
+        // is literal text to Blade, but masking it would break completion
+        // inside an echo that is simply not finished being typed yet. Keep
+        // the expression and close it at end of line instead, so at most
+        // one line degrades rather than every later line being emitted as
+        // PHP and the wrapper's closing brace landing inside the unclosed
+        // echo.
+        if let Mode::Php(raw_echo) = mode
+            && echo_closes_at_eol
+        {
+            flush_buffer(
+                &mut processed,
+                &mut buffer,
+                mode,
+                current_utf16_col,
+                &mut adjustments,
+            );
+            processed.push_str(if raw_echo { "; " } else { "); " });
+            adjustments.push((current_utf16_col, utf16_count(&processed) as u32));
+            mode = Mode::Html;
+            in_string = None;
+        }
+
         // A bound-attribute expression whose closing quote is on a later
         // line (what a formatter produces for a long array or argument
         // list) stays open: this line's PHP is flushed as-is and the next
-        // line continues the same `blade_directive(` call. Cutting it off
-        // here would truncate the expression mid-syntax.
+        // line continues the same `blade_bound_attr_directive(` call.
+        // Cutting it off here would truncate the expression mid-syntax.
         //
         // When the closing quote never appears at all the attribute is
         // malformed, and the call is closed off so only the attribute
@@ -1101,8 +1245,8 @@ pub fn preprocess_with_vars(
     }
 
     // Likewise for a multi-line bound attribute whose closing quote turned
-    // out to be unreachable: leaving `blade_directive(` open would swallow
-    // the wrapper's closing brace.
+    // out to be unreachable: leaving `blade_bound_attr_directive(` open
+    // would swallow the wrapper's closing brace.
     if let Mode::BoundAttr(_) = mode {
         virtual_php.push_str(bound_attr_suffix);
         virtual_php.push('\n');
@@ -1669,6 +1813,11 @@ fn bound_attr_open_len(rem: &[char]) -> Option<usize> {
     }
 }
 
+/// Whether `needle` occurs anywhere in `haystack`.
+fn contains_seq(haystack: &[char], needle: &[char]) -> bool {
+    haystack.windows(needle.len()).any(|w| w == needle)
+}
+
 /// Whether a bound attribute delimited by `quote` closes on a line after
 /// the one it opens on. `rest` is the remainder of the opening line (after
 /// the opening quote) and `following` the lines after it.
@@ -1802,6 +1951,7 @@ mod tests {
             TemplateKind::View,
             Some("App\\Livewire\\Counter"),
             None,
+            &Default::default(),
         );
         assert!(
             php.contains(
@@ -1830,6 +1980,7 @@ mod tests {
             TemplateKind::Component,
             None,
             None,
+            &Default::default(),
         );
         assert!(
             php.contains("/** @var \\Illuminate\\View\\ComponentAttributeBag $attributes */")
@@ -1873,6 +2024,7 @@ mod tests {
             TemplateKind::Component,
             None,
             None,
+            &Default::default(),
         );
         assert!(
             !php.contains("$attributes = null;"),
@@ -1894,6 +2046,7 @@ mod tests {
             TemplateKind::View,
             None,
             None,
+            &Default::default(),
         );
         assert!(
             php.contains("/** @var array<int, string> $results */"),
@@ -1942,6 +2095,7 @@ mod tests {
             TemplateKind::View,
             None,
             None,
+            &Default::default(),
         );
         assert_eq!(map.prologue_lines, super::super::PROLOGUE_LINES + 2);
         assert!(
@@ -1968,6 +2122,7 @@ mod tests {
             TemplateKind::View,
             None,
             None,
+            &Default::default(),
         );
         assert!(
             php.contains("/** @var mixed $x */") && !php.contains("evil()"),
@@ -1993,6 +2148,7 @@ mod tests {
             TemplateKind::Component,
             None,
             None,
+            &Default::default(),
         );
         assert!(
             !php.contains("wire:model.live") && !php.contains("@click"),
@@ -2088,6 +2244,130 @@ mod tests {
             php.contains("blade_directive ($value);"),
             "unexpected @dump(...) translation: {}",
             php
+        );
+    }
+
+    /// The directives a project registered, as the provider scan would have
+    /// recorded them.
+    fn registered(names: &[(&str, bool)]) -> CustomDirectives {
+        let registrations: Vec<super::super::directives::CustomDirective> = names
+            .iter()
+            .map(
+                |(name, conditional)| super::super::directives::CustomDirective {
+                    name: name.to_string(),
+                    conditional: *conditional,
+                },
+            )
+            .collect();
+        CustomDirectives::from_registrations(&registrations)
+    }
+
+    /// The wrapped template body of a preprocessed template, without the
+    /// prologue — whose marker declarations would otherwise answer a search
+    /// for a marker the body never calls.
+    fn preprocess_with_directives(content: &str, directives: &CustomDirectives) -> String {
+        let (php, _) =
+            preprocess_with_vars(content, &[], TemplateKind::View, None, None, directives);
+        let body_start = php
+            .find("global $errors")
+            .expect("wrapper function prologue");
+        php[body_start..].to_string()
+    }
+
+    /// A `Blade::directive()` registration is a statement whose argument the
+    /// template still gets type-checked on, rather than the comment an
+    /// unregistered `@name` degrades to.
+    #[test]
+    fn a_registered_directive_keeps_its_argument_as_real_php() {
+        let php = preprocess_with_directives(
+            "<p>@datetime($post->createdAt)</p>",
+            &registered(&[("datetime", false)]),
+        );
+        assert!(
+            php.contains("blade_custom_directive ($post->createdAt);"),
+            "unexpected @datetime translation: {php}"
+        );
+    }
+
+    /// Blade hands a handler an empty expression when the template writes no
+    /// argument list, so a bare name must complete on the spot instead of
+    /// scanning ahead for a closing paren that was never opened.
+    #[test]
+    fn a_registered_directive_without_arguments_stands_alone() {
+        let php = preprocess_with_directives(
+            "<p>@datetime</p>{{ $after }}",
+            &registered(&[("datetime", false)]),
+        );
+        assert!(
+            php.contains("blade_custom_directive();"),
+            "unexpected bare @datetime translation: {php}"
+        );
+        assert!(
+            php.contains("echo e( $after"),
+            "the rest of the template must still be scanned as Blade: {php}"
+        );
+    }
+
+    /// `Blade::if('admin')` gives the template four directives, and the
+    /// three that are not the `@end` open a real condition so the `@endadmin`
+    /// closing them balances.
+    #[test]
+    fn a_registered_condition_opens_a_real_if() {
+        let php = preprocess_with_directives(
+            "@admin('editor')\n<p>yes</p>\n@elseadmin('viewer')\n<p>maybe</p>\n@endadmin\n<p>after</p>",
+            &registered(&[("admin", true)]),
+        );
+        assert!(
+            php.contains("if (blade_custom_directive ('editor')):"),
+            "@admin should open a balanced if: {php}"
+        );
+        assert!(
+            php.contains("elseif (blade_custom_directive ('viewer')):"),
+            "@elseadmin should open a balanced elseif: {php}"
+        );
+        assert!(
+            php.contains("endif;"),
+            "@endadmin should close what @admin opened: {php}"
+        );
+    }
+
+    /// The argument list is optional for every member of the family, and
+    /// `@unlessadmin` is closed by the same `@endadmin` as `@admin`.
+    #[test]
+    fn a_registered_condition_without_arguments_is_still_balanced() {
+        let php = preprocess_with_directives(
+            "@unlessadmin\n<p>no</p>\n@endadmin\n",
+            &registered(&[("admin", true)]),
+        );
+        assert!(
+            php.contains("if (blade_custom_directive()):") && php.contains("endif;"),
+            "a bare @unlessadmin must open and close a real if: {php}"
+        );
+    }
+
+    /// Nothing was registered, so the directive is still what it always was:
+    /// inert markup, with its argument not read as PHP at all.
+    #[test]
+    fn an_unregistered_directive_stays_masked() {
+        let php = preprocess_with_directives("<p>@datetime($x)</p>", &CustomDirectives::default());
+        assert!(
+            !php.contains("blade_custom_directive") && !php.contains("$x"),
+            "an unregistered directive must stay masked: {php}"
+        );
+    }
+
+    /// Blade's compiler consults its custom table before its own directives,
+    /// but a registration shadowing a core name would break the block
+    /// structure of every template that writes it, so the core table wins.
+    #[test]
+    fn a_registration_does_not_shadow_a_core_directive() {
+        let php = preprocess_with_directives(
+            "@if ($ok)\n<p>hi</p>\n@endif\n",
+            &registered(&[("if", false), ("endif", false)]),
+        );
+        assert!(
+            php.contains("($ok):") && !php.contains("blade_custom_directive"),
+            "@if must still compile as Blade's own directive: {php}"
         );
     }
 
@@ -2277,7 +2557,7 @@ mod tests {
         let content = r#"<x-img.size :src="$image" alt="x" />"#;
         let (php, _) = preprocess(content);
         assert!(
-            php.contains("blade_directive($image);"),
+            php.contains("blade_bound_attr_directive($image);"),
             "bound attribute expression should be emitted as PHP: {}",
             php
         );
@@ -2302,14 +2582,14 @@ mod tests {
         let content = r#"<livewire:edit-channel :key="$item->id" />"#;
         let (php, _) = preprocess(content);
         assert!(
-            php.contains("blade_directive($item->id);"),
+            php.contains("blade_bound_attr_directive($item->id);"),
             "method-call expression in a bound attribute should be emitted: {}",
             php
         );
         // The `:` inside the `livewire:edit-channel` tag name is part of
         // the name, not an attribute, so it must not open a directive call.
         assert!(
-            !php.contains("blade_directive(edit-channel"),
+            !php.contains("blade_bound_attr_directive(edit-channel"),
             "namespace colon in the tag name must not be treated as a binding: {}",
             php
         );
@@ -2374,6 +2654,7 @@ mod tests {
             TemplateKind::View,
             None,
             Some(&resolver as &dyn ComponentResolver),
+            &Default::default(),
         )
         .0
     }
@@ -2436,7 +2717,7 @@ mod tests {
             "an attribute the attribute bag takes is not an argument: {php}"
         );
         assert!(
-            php.contains("blade_directive($id);"),
+            php.contains("blade_bound_attr_directive($id);"),
             "a bound attribute that is not an argument still contributes \
              its expression: {php}"
         );
@@ -2541,7 +2822,7 @@ mod tests {
             "an anonymous component is declared, not built: {php}"
         );
         assert!(
-            php.contains("blade_directive($t);"),
+            php.contains("blade_bound_attr_directive($t);"),
             "its attributes still contribute their expressions: {php}"
         );
     }
@@ -2583,7 +2864,7 @@ mod tests {
             "a bound attribute on a multi-line component tag: {php}"
         );
         assert!(
-            !php.contains("blade_directive(notAnAttr"),
+            !php.contains("blade_bound_attr_directive(notAnAttr"),
             "a colon after the tag closed is not an attribute: {php}"
         );
     }
@@ -2619,7 +2900,8 @@ mod tests {
             "no unresolved tag may bind a component: {php}"
         );
         assert!(
-            php.contains("blade_directive($name);") && php.contains("blade_directive($v);"),
+            php.contains("blade_bound_attr_directive($name);")
+                && php.contains("blade_bound_attr_directive($v);"),
             "a dynamic component's expressions are still parsed: {php}"
         );
     }
@@ -2631,7 +2913,7 @@ mod tests {
         let content = r#"<x-alert :$message />"#;
         let (php, _) = preprocess(content);
         assert!(
-            php.contains("blade_directive($message);"),
+            php.contains("blade_bound_attr_directive($message);"),
             "`:$var` shorthand should emit the variable as PHP: {}",
             php
         );
@@ -2645,7 +2927,7 @@ mod tests {
         let content = r#"<x-btn :class="$active ? 'on' : 'off'" />"#;
         let (php, _) = preprocess(content);
         assert!(
-            php.contains("blade_directive($active ? 'on' : 'off');"),
+            php.contains("blade_bound_attr_directive($active ? 'on' : 'off');"),
             "inner string literals should be preserved in the expression: {}",
             php
         );
@@ -2661,14 +2943,15 @@ mod tests {
         let (php, _) = preprocess(content);
         // The only binding here is `:real="$v"`.
         assert!(
-            php.contains("blade_directive($v);"),
+            php.contains("blade_bound_attr_directive($v);"),
             "the real binding should still be emitted: {}",
             php
         );
-        // The prologue declares `function blade_directive(...)` once, so a
-        // single binding yields two occurrences of `blade_directive(`.
+        // The prologue declares `function blade_bound_attr_directive(...)`
+        // once, so a single binding yields two occurrences of
+        // `blade_bound_attr_directive(`.
         assert_eq!(
-            php.matches("blade_directive(").count(),
+            php.matches("blade_bound_attr_directive(").count(),
             2,
             "no spurious bindings from value/text/escaped colons: {}",
             php
@@ -2692,10 +2975,11 @@ mod tests {
     fn test_preprocess_bound_attribute_ignored_outside_tag() {
         let content = r#"<p>ratio :w="16" here</p>"#;
         let (php, _) = preprocess(content);
-        // Only the prologue's `function blade_directive(...)` declaration
-        // should remain; no binding call is emitted for a colon in text.
+        // Only the prologue's `function blade_bound_attr_directive(...)`
+        // declaration should remain; no binding call is emitted for a colon
+        // in text.
         assert_eq!(
-            php.matches("blade_directive(").count(),
+            php.matches("blade_bound_attr_directive(").count(),
             1,
             "a colon in text (outside a tag span) is not a binding: {}",
             php
@@ -2709,7 +2993,7 @@ mod tests {
         let content = "<x-img.size\n    :src=\"$image\"\n/>";
         let (php, _) = preprocess(content);
         assert!(
-            php.contains("blade_directive($image);"),
+            php.contains("blade_bound_attr_directive($image);"),
             "binding on a continuation line should be recognized: {}",
             php
         );
@@ -2723,7 +3007,7 @@ mod tests {
         let content = "<x-file.upload name=\"image\"\n    :rules=\"[\n        'Dimensions must match: 2420 x 1614',\n        'Max file size: 2 mb',\n    ]\" />\n";
         let (php, _) = preprocess(content);
         assert!(
-            php.contains("blade_directive([") && php.contains("]);"),
+            php.contains("blade_bound_attr_directive([") && php.contains("]);"),
             "the wrapped array must be emitted whole: {}",
             php
         );
@@ -2764,7 +3048,7 @@ mod tests {
         let content = "<x-alert :message=\"$msg\n<p>{{ $after }}</p>\n";
         let (php, _) = preprocess(content);
         assert!(
-            php.contains("blade_directive($msg);"),
+            php.contains("blade_bound_attr_directive($msg);"),
             "an unterminated attribute must be closed at end of line: {}",
             php
         );
@@ -2793,6 +3077,101 @@ mod tests {
         assert!(
             php.contains("echo e( \"}} \" );"),
             "Failed to parse braces inside string: {}",
+            php
+        );
+    }
+
+    /// A raw `{!! … !!}` echo compiles to a naked `echo` with no `e()`
+    /// wrapper, and it starts at `{!!`, not `{{!!`: `{!! $v !!}` after a
+    /// `<?php $v = …; ?>` block must count as a use of `$v`.
+    #[test]
+    fn test_preprocess_raw_echo_single_brace() {
+        let content = "<?php\n$acmeProfile = \"xxx\";\n?>\n\n{!! $acmeProfile !!}\n";
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("echo  $acmeProfile ;"),
+            "raw echo should emit a naked echo of the expression: {}",
+            php
+        );
+    }
+
+    /// Blade matches echo tags longest-opening-first, so `{{!! $v !!}}` is
+    /// a literal `{`, a raw echo of `$v`, and a literal `}` — not an
+    /// escaped echo of `!! $v !!`.
+    #[test]
+    fn test_preprocess_raw_echo_wrapped_in_extra_braces() {
+        let content = "{{!! $html !!}}";
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("echo  $html ;"),
+            "the raw echo inside the extra braces should still compile: {}",
+            php
+        );
+        assert!(
+            !php.contains("echo e("),
+            "the outer braces are literal text, not an escaped echo: {}",
+            php
+        );
+    }
+
+    #[test]
+    fn test_preprocess_raw_and_escaped_echo_close_independently() {
+        let content = "{!! $html !!} and {{ $safe }}";
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("echo  $html ;"),
+            "raw echo emits without e(): {}",
+            php
+        );
+        assert!(
+            php.contains("echo e( $safe );"),
+            "escaped echo still wraps in e(): {}",
+            php
+        );
+    }
+
+    /// An echo opener that nothing in the rest of the file closes must not
+    /// swallow every later line as PHP: it is closed at end of line, so at
+    /// most one line degrades and the rest of the template still parses.
+    #[test]
+    fn test_preprocess_unterminated_echo_opener_is_closed_at_end_of_line() {
+        let content = "<script>if (a) {!!b}</script>\n{{ $after }}\n<p>plain markup</p>\n";
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("echo e( $after );"),
+            "the echo on the next line must still compile: {}",
+            php
+        );
+        assert!(
+            !php.contains("plain markup"),
+            "later markup must be masked as HTML, not emitted as PHP: {}",
+            php
+        );
+        // The unclosed echo must be closed as a statement rather than
+        // left to swallow the wrapper function's closing brace.
+        assert!(
+            php.contains("echo b}</script>; "),
+            "the opener's own line degrades and is closed at its end: {}",
+            php
+        );
+    }
+
+    /// A half-typed echo is not an unpaired opener when a terminator exists
+    /// further down (e.g. the user is typing inside an echo whose `!!}` is
+    /// already there, or another echo's terminator follows): the expression
+    /// must stay open so completion keeps working mid-edit.
+    #[test]
+    fn test_preprocess_echo_spanning_lines_stays_open() {
+        let content = "{{ $user\n    ->name }}\n";
+        let (php, _) = preprocess(content);
+        assert!(
+            php.contains("echo e( $user"),
+            "the multi-line echo must open: {}",
+            php
+        );
+        assert!(
+            php.contains("->name );"),
+            "the multi-line echo must close at its own terminator: {}",
             php
         );
     }

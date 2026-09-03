@@ -129,6 +129,12 @@ pub(crate) type ParseErrorEntry = (String, u32, u32);
 /// [`Backend::uri_globals_index`] so a re-parse can evict what an edit removed.
 pub(crate) type UriGlobals = (Vec<String>, Vec<String>);
 
+/// The `[indexing] extensions` set and Laravel classification last pushed
+/// to the client as a `workspace/didChangeWatchedFiles` registration:
+/// `(extra_extensions, is_laravel)`. `None` until the first registration.
+/// See [`Backend::registered_watcher_state`].
+pub(crate) type WatchedFileRegistrationState = Option<(Vec<String>, bool)>;
+
 // ─── Module declarations ────────────────────────────────────────────────────
 
 /// Maximum number of LSP requests the tower-lsp transport processes
@@ -222,6 +228,7 @@ mod backend;
 pub mod benevolent_builtins;
 pub mod blade;
 pub(crate) mod call_args;
+mod call_hierarchy;
 pub mod ci_map;
 pub(crate) mod class_loader_memo;
 pub(crate) mod class_lookup;
@@ -252,6 +259,7 @@ mod lsp_dispatch;
 mod mago;
 #[cfg(feature = "mem-audit")]
 mod mem_audit;
+pub mod move_cli;
 pub(crate) mod names;
 mod parser;
 pub(crate) mod phar;
@@ -332,10 +340,11 @@ pub use virtual_members::resolve_class_fully;
 ///   `collect_unknown_member_diagnostics` (includes unresolved-member-access logic)
 #[derive(Default)]
 pub(crate) struct LaravelStringKeyCache {
-    /// Named routes with the URI each was registered with.  Shared behind an
+    /// Named routes with the URI each was registered with, plus any group
+    /// prefixes whose full set of children is unknowable.  Shared behind an
     /// `Arc` because both the name list and the parameter names of one route
     /// are read from it, and cloning the whole table per read would be waste.
-    pub routes: Option<std::sync::Arc<Vec<crate::virtual_members::laravel::RouteEntry>>>,
+    pub routes: Option<std::sync::Arc<crate::virtual_members::laravel::RouteDiscovery>>,
     /// Config keys are shared by completion and the parallel diagnostic pass.
     /// Keeping the immutable sorted list behind an `Arc` avoids cloning every
     /// key on each resource-name keystroke or file diagnostic.
@@ -412,7 +421,19 @@ impl LaravelStringKeyCache {
         {
             self.gate_abilities = None;
         }
-        if uri.contains("/routes/") {
+        // A Folio page registers a route without ever touching `routes/`, so
+        // its own edits have to invalidate the route cache too — gated on
+        // the page mentioning `Folio` at all (its `name()` import or a
+        // fully-qualified call), the same way the `Gate::` check above
+        // avoids paying for every unrelated Blade edit.  `bootstrap/app.php`
+        // is where a Folio mount is most commonly registered
+        // (`withRouting(pages: ...)`), and it is not a service provider, so
+        // it needs its own trigger rather than riding along with one.
+        if uri.contains("/routes/")
+            || uri.ends_with("/bootstrap/app.php")
+            || (uri.ends_with(".blade.php")
+                && memchr::memmem::find(content.as_bytes(), b"Folio").is_some())
+        {
             self.routes = None;
         }
         if uri.contains("/config/") {
@@ -453,6 +474,14 @@ pub(crate) struct ExternalToolWorker {
     /// Last-published diagnostics per file URI, merged into fast/slow
     /// diagnostic publishes so results stay visible between tool runs.
     pub(crate) last_diags: Arc<Mutex<HashMap<String, Vec<tower_lsp::lsp_types::Diagnostic>>>>,
+    /// Per-URI write counter, bumped every time this worker stores a
+    /// single-file result in [`last_diags`].
+    ///
+    /// A project-wide run of the same tool snapshots this map before it
+    /// starts and compares each entry again just before writing, so its
+    /// scan-time results can never clobber a fresher single-file result
+    /// that landed while the project-wide run was still in flight.
+    generations: Arc<Mutex<HashMap<String, u64>>>,
 }
 
 impl ExternalToolWorker {
@@ -461,7 +490,53 @@ impl ExternalToolWorker {
             notify: Arc::new(tokio::sync::Notify::new()),
             pending_uri: Arc::new(Mutex::new(None)),
             last_diags: Arc::new(Mutex::new(HashMap::new())),
+            generations: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    /// Store a single-file run's result and mark the URI as freshly
+    /// written, superseding any project-wide run still in flight.
+    pub(crate) fn store_file_result(
+        &self,
+        uri: &str,
+        diags: Vec<tower_lsp::lsp_types::Diagnostic>,
+    ) {
+        let mut cache = self.last_diags.lock();
+        cache.insert(uri.to_string(), diags);
+        *self.generations.lock().entry(uri.to_string()).or_insert(0) += 1;
+    }
+
+    /// Snapshot the per-URI write counters, to be handed back to
+    /// [`store_scan_result`](Self::store_scan_result) once a
+    /// project-wide run of this tool finishes.
+    pub(crate) fn generation_snapshot(&self) -> HashMap<String, u64> {
+        self.generations.lock().clone()
+    }
+
+    /// Store a project-wide run's result for one URI, unless a
+    /// single-file run has written to that URI since `snapshot` was
+    /// taken.  Returns whether the write happened.
+    ///
+    /// Both locks are taken in the same order as `store_file_result`,
+    /// which makes the check-then-write atomic against it.
+    pub(crate) fn store_scan_result(
+        &self,
+        snapshot: &HashMap<String, u64>,
+        uri: &str,
+        diags: Vec<tower_lsp::lsp_types::Diagnostic>,
+    ) -> bool {
+        let mut cache = self.last_diags.lock();
+        if self.generations.lock().get(uri).copied() != snapshot.get(uri).copied() {
+            return false;
+        }
+        cache.insert(uri.to_string(), diags);
+        true
+    }
+
+    /// Drop a URI's cached result and write counter (on `did_close`).
+    pub(crate) fn forget(&self, uri: &str) {
+        self.last_diags.lock().remove(uri);
+        self.generations.lock().remove(uri);
     }
 }
 
@@ -471,6 +546,7 @@ impl Clone for ExternalToolWorker {
             notify: Arc::clone(&self.notify),
             pending_uri: Arc::clone(&self.pending_uri),
             last_diags: Arc::clone(&self.last_diags),
+            generations: Arc::clone(&self.generations),
         }
     }
 }
@@ -728,6 +804,12 @@ pub struct Backend {
     /// The per-provider scans the merged table above was built from, so an
     /// edit to one provider rebuilds the merge without re-reading the rest.
     pub(crate) laravel_provider_scans: Arc<RwLock<virtual_members::laravel::ProviderScans>>,
+    /// The Blade directives the project's providers register, expanded from
+    /// the merged table's `custom_directives` into every name a template can
+    /// write.  Kept separate from the table because the Blade preprocessor
+    /// reads it on every keystroke in a template and must not pay for the
+    /// expansion each time.
+    pub(crate) blade_custom_directives: Arc<RwLock<blade::directives::CustomDirectives>>,
     /// Cached Laravel string key enumerations (route names, config keys,
     /// view names, translation keys).  `None` = not yet computed.
     /// Invalidated when a file in `routes/`, `config/`, `resources/views/`,
@@ -797,6 +879,16 @@ pub struct Backend {
     pub(crate) supports_work_done_progress: Arc<std::sync::atomic::AtomicBool>,
     /// Whether the client supports dynamic registration for type hierarchy.
     pub(crate) supports_type_hierarchy_dynamic_registration: Arc<std::sync::atomic::AtomicBool>,
+    /// The `[indexing] extensions` set and Laravel classification last
+    /// pushed to the client as a `workspace/didChangeWatchedFiles`
+    /// registration. `None` until `initialized` performs the first
+    /// registration.
+    ///
+    /// Compared on every config reload
+    /// ([`indexing::watch::reregister_watched_files_if_changed`]) so a
+    /// live `.phpantom.toml` edit that adds or removes an extension can
+    /// push a fresh registration instead of requiring a restart.
+    pub(crate) registered_watcher_state: Arc<RwLock<WatchedFileRegistrationState>>,
     /// Whether the client supports `window/showDocument`.
     ///
     /// Set during `initialize` based on the client's
@@ -1062,6 +1154,9 @@ impl Backend {
             laravel_provider_scans: Arc::new(RwLock::new(
                 virtual_members::laravel::ProviderScans::default(),
             )),
+            blade_custom_directives: Arc::new(RwLock::new(
+                blade::directives::CustomDirectives::default(),
+            )),
             laravel_string_key_cache: Arc::new(RwLock::new(LaravelStringKeyCache::default())),
             laravel_string_key_build_locks: Arc::new(LaravelStringKeyBuildLocks::default()),
             schema_index: Arc::new(RwLock::new(
@@ -1080,6 +1175,7 @@ impl Backend {
             supports_type_hierarchy_dynamic_registration: Arc::new(
                 std::sync::atomic::AtomicBool::new(false),
             ),
+            registered_watcher_state: Arc::new(RwLock::new(None)),
             supports_show_document: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_semantic_tokens_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_inlay_hint_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -1106,6 +1202,11 @@ impl Backend {
     /// the cost of building three large `HashMap`s (14,597 entries total)
     /// that most tests never consult.  Tests that need specific stubs
     /// override the relevant fields after construction.
+    ///
+    /// The workspace environment is also isolated from the global
+    /// `.phpantom.toml`, so a test asserts against the project config it
+    /// writes itself rather than against the config directory of whoever
+    /// happens to be running the suite.
     fn test_defaults() -> Self {
         let (laravel_aliases, resolved_class_cache) = new_alias_slot_and_cache();
         Self {
@@ -1117,7 +1218,7 @@ impl Backend {
             reference_index: reference_index::new_reference_index(),
             skip_reference_index: false,
             symbols: SymbolIndex::new(),
-            workspace: WorkspaceEnv::new(),
+            workspace: WorkspaceEnv::new_isolated(),
             parse_errors: Arc::new(RwLock::new(HashMap::new())),
             did_change_parse_locks: Arc::new(Mutex::new(HashMap::new())),
             whole_file_coalesce: Arc::new(WholeFileCoalesce::default()),
@@ -1165,6 +1266,9 @@ impl Backend {
             laravel_provider_scans: Arc::new(RwLock::new(
                 virtual_members::laravel::ProviderScans::default(),
             )),
+            blade_custom_directives: Arc::new(RwLock::new(
+                blade::directives::CustomDirectives::default(),
+            )),
             laravel_string_key_cache: Arc::new(RwLock::new(LaravelStringKeyCache::default())),
             laravel_string_key_build_locks: Arc::new(LaravelStringKeyBuildLocks::default()),
             schema_index: Arc::new(RwLock::new(
@@ -1182,6 +1286,7 @@ impl Backend {
             supports_type_hierarchy_dynamic_registration: Arc::new(
                 std::sync::atomic::AtomicBool::new(false),
             ),
+            registered_watcher_state: Arc::new(RwLock::new(None)),
             supports_show_document: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_semantic_tokens_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_inlay_hint_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -1223,6 +1328,12 @@ impl Backend {
         }
     }
 
+    /// Create a headless backend for refactoring commands that need the
+    /// workspace-wide reference index.
+    pub fn new_headless_refactoring() -> Self {
+        Self::defaults()
+    }
+
     /// Create a `Backend` without an LSP client (for unit / integration tests).
     ///
     /// Uses empty stub indices for fast construction.  Tests that need
@@ -1243,7 +1354,10 @@ impl Backend {
     /// behaviour.
     pub fn new_test_with_full_stubs() -> Self {
         virtual_members::phpdoc::clear_mixin_cache();
-        let backend = Self::defaults();
+        let backend = Self {
+            workspace: WorkspaceEnv::new_isolated(),
+            ..Self::defaults()
+        };
         backend.set_php_version(backend.php_version());
         backend
     }
@@ -1294,7 +1408,7 @@ impl Backend {
             workspace: WorkspaceEnv {
                 workspace_root: Arc::new(RwLock::new(Some(workspace_root))),
                 psr4_mappings: Arc::new(RwLock::new(psr4_mappings)),
-                ..WorkspaceEnv::new()
+                ..WorkspaceEnv::new_isolated()
             },
             ..Self::test_defaults()
         }
@@ -1805,6 +1919,7 @@ impl Backend {
             laravel_date_seed_uris: Arc::clone(&self.laravel_date_seed_uris),
             laravel_provider_resources: Arc::clone(&self.laravel_provider_resources),
             laravel_provider_scans: Arc::clone(&self.laravel_provider_scans),
+            blade_custom_directives: Arc::clone(&self.blade_custom_directives),
             laravel_string_key_cache: Arc::clone(&self.laravel_string_key_cache),
             laravel_string_key_build_locks: Arc::clone(&self.laravel_string_key_build_locks),
             schema_index: Arc::clone(&self.schema_index),
@@ -1823,6 +1938,7 @@ impl Backend {
             supports_type_hierarchy_dynamic_registration: Arc::clone(
                 &self.supports_type_hierarchy_dynamic_registration,
             ),
+            registered_watcher_state: Arc::clone(&self.registered_watcher_state),
             supports_show_document: Arc::clone(&self.supports_show_document),
             supports_semantic_tokens_refresh: Arc::clone(&self.supports_semantic_tokens_refresh),
             supports_inlay_hint_refresh: Arc::clone(&self.supports_inlay_hint_refresh),
@@ -1864,10 +1980,72 @@ impl Backend {
 
     /// Replace the current configuration.
     ///
-    /// Used by integration tests to enable opt-in diagnostics like
-    /// `unresolved-member-access` without needing a `.phpantom.toml` file.
+    /// Used when (re)loading `.phpantom.toml` and by integration tests
+    /// to enable opt-in diagnostics like `unresolved-member-access`
+    /// without needing a `.phpantom.toml` file. Resets the compiled
+    /// `[indexing]` filters so the next scan sees the new settings.
     pub fn set_config(&self, config: config::Config) {
         *self.workspace.config.lock() = config;
+        *self.workspace.index_filters.write() = None;
+    }
+
+    /// Return the compiled `[indexing]` exclude globs and extra PHP
+    /// extensions, building them on first use from the union of the
+    /// `.phpantom.toml` layer and the client-supplied layer.
+    ///
+    /// The two layers are unioned rather than one overriding the other:
+    /// both name files that are not worth indexing, and a client cannot
+    /// know what a project's config file already excludes. The compiled
+    /// result is cached until [`set_config`](Self::set_config) or
+    /// [`set_client_indexing_options`](Self::set_client_indexing_options)
+    /// invalidates it, so glob compilation never runs on a per-file path.
+    pub(crate) fn index_filters(&self) -> Arc<classmap_scanner::IndexFilters> {
+        if let Some(filters) = self.workspace.index_filters.read().as_ref() {
+            return Arc::clone(filters);
+        }
+        let root = self.workspace.workspace_root.read().clone();
+        let indexing = self.config().indexing;
+        let client = self.workspace.client_indexing.read();
+
+        // The overwhelmingly common case is one layer or the other being
+        // empty, so only pay for a merged allocation when both contribute.
+        let compiled = if client.is_empty() {
+            classmap_scanner::IndexFilters::compile(
+                root.as_deref(),
+                indexing.exclude(),
+                indexing.extensions(),
+            )
+        } else {
+            // The config file's patterns go last so a `!` re-include in
+            // `.phpantom.toml` can still override an exclude the editor
+            // forwarded: gitignore semantics give the last match priority.
+            let exclude = [client.exclude.as_slice(), indexing.exclude()].concat();
+            let extensions = [client.extensions.as_slice(), indexing.extensions()].concat();
+            classmap_scanner::IndexFilters::compile(root.as_deref(), &exclude, &extensions)
+        };
+        drop(client);
+
+        let compiled = Arc::new(compiled);
+        *self.workspace.index_filters.write() = Some(Arc::clone(&compiled));
+        compiled
+    }
+
+    /// Replace the client-supplied file filters.
+    ///
+    /// Called from the `initialize` handshake and again whenever a
+    /// `workspace/didChangeConfiguration` arrives. Returns whether the
+    /// filters actually changed, so the caller can skip the rescan and
+    /// watcher churn a no-op settings push would otherwise cause (clients
+    /// re-send their whole settings tree for edits to unrelated keys).
+    pub fn set_client_indexing_options(&self, options: config::ClientIndexingOptions) -> bool {
+        let mut current = self.workspace.client_indexing.write();
+        if *current == options {
+            return false;
+        }
+        *current = options;
+        drop(current);
+        *self.workspace.index_filters.write() = None;
+        true
     }
 
     /// Record whether the client handles `window/showDocument`.

@@ -1411,3 +1411,264 @@ function acrossIterations(string $slug, string $marker): void {{
     let messages = type_error_messages(&backend, uri, &text);
     assert_eq!(messages.len(), 2, "got {messages:?}");
 }
+
+/// Scaffolding for an `instanceof` check on a subject whose declared type
+/// names no class: the shape a route parameter or a container lookup
+/// arrives as.
+const BROAD_SUBJECT_SCAFFOLD: &str = r#"<?php
+namespace BroadSubject;
+
+class Server {}
+
+class Auth {
+    public function canManageServer(Server $server): bool { return true; }
+}
+
+function auth_user(): Auth { return new Auth(); }
+function abort(int $code, string $message): void {}
+"#;
+
+/// `instanceof` on an `object|string` subject proves the subject *is* the
+/// class: the `object` alternative is subsumed by it and the `string` one
+/// is ruled out by the check succeeding, so neither may survive to be
+/// judged against a parameter type.
+#[test]
+fn an_instanceof_check_replaces_a_union_that_names_no_class() {
+    let backend = create_test_backend();
+    let uri = "file:///broad_subject.php";
+    let text = format!(
+        "{BROAD_SUBJECT_SCAFFOLD}
+class Controller {{
+    /** @param object|string $server */
+    public function orChain($server): void {{
+        if (! $server instanceof Server || ! auth_user()->canManageServer($server)) {{
+            abort(403, 'nope');
+        }}
+    }}
+
+    /** @param object|string $server */
+    public function andChain($server): bool {{
+        return $server instanceof Server && auth_user()->canManageServer($server);
+    }}
+
+    /** @param object|string $server */
+    public function truthyBranch($server): void {{
+        if ($server instanceof Server) {{
+            auth_user()->canManageServer($server);
+        }}
+    }}
+
+    /** @param object|string $server */
+    public function guardClause($server): void {{
+        if (! $server instanceof Server) {{
+            abort(403, 'nope');
+            return;
+        }}
+        auth_user()->canManageServer($server);
+    }}
+}}
+"
+    );
+    let messages = type_error_messages(&backend, uri, &text);
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// A property guard interleaved with a chained call still narrows, and
+/// the interleaving does not invent diagnostics.  The time this takes is
+/// guarded separately by
+/// `diag_timing::property_narrowing_beside_a_chained_call_stays_bounded`.
+#[test]
+fn a_property_guard_beside_a_chained_call_narrows() {
+    let backend = create_test_backend();
+    let uri = "file:///repro_probe.php";
+    let text = r#"<?php
+class Work   { public function changed(string $k): bool { return true; } public function run(): void {} }
+class Holder { public function getWork(): Work { return new Work(); } }
+class Ops    { public bool $a = false; }
+
+function probe(Holder $h): void {
+  $o = new Ops();
+  if ($h->getWork()->changed("k")) { $o->a = true; }
+  if ($o->a) { $h->getWork()->run(); }
+}
+"#;
+    let mut diags = Vec::new();
+    backend.update_ast(uri, text);
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+    assert!(diags.is_empty(), "expected no diagnostics, got {diags:?}");
+}
+
+/// An `&&` operand that pins the subject to one class outranks a later
+/// `||` operand that only lists alternatives.  The disjunction's own
+/// left-hand branch says nothing about the subject, so reading its
+/// right-hand `instanceof` as a peer of the first operand would answer
+/// `Generic|Template` and reject the `Generic` parameter.
+#[test]
+fn a_definite_conjunct_survives_an_alternatives_operand() {
+    let backend = create_test_backend();
+    let uri = "file:///definite_conjunct.php";
+    let text = r#"<?php
+namespace Repro;
+
+class TypeNode {}
+class Generic extends TypeNode {}
+class Template extends TypeNode {}
+
+function needGeneric(Generic $b): void {}
+
+function build(TypeNode $bound, string $boundClass): void {
+    if ($bound instanceof Generic && ($boundClass === Generic::class || $bound instanceof Template)) {
+        needGeneric($bound);
+    }
+}
+"#;
+    let messages = type_error_messages(&backend, uri, text);
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// With nothing pinning the subject down, a `||` operand still narrows
+/// it to the alternatives it lists.
+#[test]
+fn an_alternatives_operand_still_narrows_an_unpinned_subject() {
+    let backend = create_test_backend();
+    let uri = "file:///alternatives_only.php";
+    let text = r#"<?php
+namespace Repro;
+
+class TypeNode {}
+class Generic extends TypeNode {}
+class Template extends TypeNode {}
+
+function needNode(TypeNode $b): void {}
+function needGeneric(Generic $b): void {}
+
+function build(object $bound, bool $flag): void {
+    if (($bound instanceof Generic || $bound instanceof Template) && $flag) {
+        needNode($bound);
+        needGeneric($bound);
+    }
+}
+"#;
+    let messages = type_error_messages(&backend, uri, text);
+    assert_eq!(
+        messages.len(),
+        1,
+        "the union must still reach both calls: {messages:?}"
+    );
+    assert!(
+        messages[0].contains("Generic|Repro\\Template") || messages[0].contains("Generic|Template"),
+        "got {messages:?}"
+    );
+}
+
+/// Entering `A || B` says one of them held, so an `instanceof` sitting
+/// beside an unrelated operand proves nothing about its subject.  Reading
+/// it as though it had held hid the `null` the guard never ruled out.
+#[test]
+fn an_instanceof_beside_an_unrelated_operand_narrows_nothing() {
+    let backend = create_test_backend();
+    let uri = "file:///or_leg_instanceof.php";
+    let text = r#"<?php
+namespace Repro;
+
+class Variable {}
+
+function needVariable(Variable $v): void {}
+
+function f(?Variable $v, bool $flag): void {
+    if ($v instanceof Variable || $flag) {
+        needVariable($v);
+    }
+}
+"#;
+    let messages = type_error_messages(&backend, uri, text);
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("?Repro\\Variable") || messages[0].contains("?Variable"));
+}
+
+/// Two legs checking two different subjects narrow neither: whichever one
+/// let the branch in, the other was never tested.
+#[test]
+fn or_legs_on_separate_subjects_narrow_neither() {
+    let backend = create_test_backend();
+    let uri = "file:///or_legs_two_subjects.php";
+    let text = r#"<?php
+namespace Repro;
+
+class Variable {}
+
+function needVariable(Variable $v): void {}
+
+function f(?Variable $a, ?Variable $b): void {
+    if ($a instanceof Variable || $b instanceof Variable) {
+        needVariable($a);
+        needVariable($b);
+    }
+}
+"#;
+    let messages = type_error_messages(&backend, uri, text);
+    assert_eq!(messages.len(), 2, "got {messages:?}");
+}
+
+/// The legs join, so a check the whole disjunction admits still narrows:
+/// both legs name a class, and the branch body gets their union.
+#[test]
+fn or_legs_naming_one_subject_join_to_their_union() {
+    let backend = create_test_backend();
+    let uri = "file:///or_legs_union.php";
+    let text = r#"<?php
+namespace Repro;
+
+class Node {}
+class Name extends Node {}
+class Value extends Node {}
+
+function needNode(Node $n): void {}
+function needName(Name $n): void {}
+
+function f(object $n): void {
+    if ($n instanceof Name || $n instanceof Value) {
+        needNode($n);
+        needName($n);
+    }
+}
+"#;
+    let messages = type_error_messages(&backend, uri, text);
+    assert_eq!(
+        messages.len(),
+        1,
+        "only the Name call may fail: {messages:?}"
+    );
+    assert!(
+        messages[0].contains("Name|Repro\\Value") || messages[0].contains("Name|Value"),
+        "got {messages:?}"
+    );
+}
+
+/// A leg the branch already ruled out describes a run that cannot happen,
+/// so what it concluded stays out of the join.  `$price` holds an `Amount`
+/// outright here, which makes the `is_null()` half unreachable; joining
+/// the `null` it writes would hand the body a type nothing could have.
+#[test]
+fn an_impossible_leg_does_not_put_back_what_the_scope_ruled_out() {
+    let backend = create_test_backend();
+    let uri = "file:///impossible_or_leg.php";
+    let text = r#"<?php
+namespace Repro;
+
+class Amount {
+    public function isZero(): bool { return true; }
+}
+
+function needAmount(Amount $a): void {}
+
+function f(): void {
+    $price = new Amount();
+    if (is_null($price) || $price->isZero()) {
+        needAmount($price);
+    }
+}
+"#;
+    let messages = type_error_messages(&backend, uri, text);
+    assert!(messages.is_empty(), "got {messages:?}");
+}

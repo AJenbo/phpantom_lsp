@@ -325,8 +325,16 @@ pub(crate) fn compute_existence_guards(content: &str) -> ExistenceGuards {
 
 /// Check if the existence call at position `start` is negated by a `!`.
 fn is_negated(bytes: &[u8], start: usize) -> bool {
-    // Scan backward from start, skipping whitespace, looking for `!`.
+    // A global function written the explicit way (`!\class_exists(…)`)
+    // carries a `\` between the `!` and the name, with no room for
+    // whitespace in between. Step over it first, or the scan below reads
+    // it as the character that ends the search and calls the check
+    // un-negated.
     let mut j = start;
+    if j > 0 && bytes[j - 1] == b'\\' {
+        j -= 1;
+    }
+    // Scan backward, skipping whitespace, looking for `!`.
     while j > 0 {
         j -= 1;
         match bytes[j] {
@@ -575,7 +583,13 @@ fn extract_string_literal(bytes: &[u8], pos: usize) -> Option<(String, usize)> {
     if end >= len {
         return None;
     }
-    let name = String::from_utf8_lossy(&bytes[start..end]).to_string();
+    // The runtime value, not the source text: a class named in a guard is
+    // written `'Vendor\\Optional\\Config'` as often as `'Vendor\Optional\Config'`,
+    // and only one of those matches the reference it guards unless the
+    // escapes are resolved first.
+    let raw = String::from_utf8_lossy(&bytes[pos..=end]);
+    let name = crate::util::unescape_php_string_literal(&raw)
+        .unwrap_or_else(|| String::from_utf8_lossy(&bytes[start..end]).to_string());
     Some((name, end + 1))
 }
 
@@ -777,6 +791,70 @@ pub(crate) fn find_innermost_enclosing_class(
         .filter(|(c, start)| offset >= *start && offset <= c.end_offset)
         .min_by_key(|(c, start)| c.end_offset.saturating_sub(*start))
         .map(|(c, _)| c.as_ref())
+}
+
+/// Find the name of the method whose body contains `offset`, if any.
+///
+/// Used by the `@deprecated` usage pass to tell whether a call site sits
+/// inside a method that itself overrides/implements the deprecated
+/// member being referenced there — PHPStan's own deprecation rule
+/// (`DefaultDeprecatedScopeResolver` in phpstan/phpstan-deprecation-rules)
+/// exempts that pattern instead of flagging legacy code for calling
+/// other legacy code.
+///
+/// Offset containment is checked against the method body's braces only,
+/// so a call inside a nested closure or arrow function is still
+/// attributed to the enclosing method — matching PHPStan, which resolves
+/// `Scope::getFunction()` to the same enclosing method from inside an
+/// arrow function body.
+pub(crate) fn find_enclosing_method_name(content: &str, offset: u32) -> Option<String> {
+    crate::parser::with_parsed_program(content, "find_enclosing_method_name", |program, _| {
+        find_enclosing_method_name_in_statements(&program.statements, offset)
+    })
+}
+
+fn find_enclosing_method_name_in_statements<'a>(
+    statements: &mago_syntax::cst::Sequence<'a, mago_syntax::cst::Statement<'a>>,
+    offset: u32,
+) -> Option<String> {
+    use mago_syntax::cst::Statement;
+
+    for stmt in statements.iter() {
+        let found = match stmt {
+            Statement::Class(class) => find_method_name_in_members(class.members.iter(), offset),
+            Statement::Trait(tr) => find_method_name_in_members(tr.members.iter(), offset),
+            Statement::Enum(en) => find_method_name_in_members(en.members.iter(), offset),
+            Statement::Namespace(ns) => {
+                return find_enclosing_method_name_in_statements(ns.statements(), offset);
+            }
+            _ => None,
+        };
+        if let Some(name) = found {
+            return Some(name.to_string());
+        }
+    }
+    None
+}
+
+fn find_method_name_in_members<'a>(
+    members: impl Iterator<Item = &'a mago_syntax::cst::class_like::member::ClassLikeMember<'a>>,
+    offset: u32,
+) -> Option<&'a str> {
+    use mago_syntax::cst::class_like::member::ClassLikeMember;
+    use mago_syntax::cst::class_like::method::MethodBody;
+
+    for member in members {
+        if let ClassLikeMember::Method(method) = member
+            && let MethodBody::Concrete(block) = &method.body
+        {
+            let body_start = block.left_brace.start.offset;
+            let body_end = block.right_brace.end.offset;
+            if offset >= body_start && offset <= body_end {
+                return Some(crate::atom::bytes_to_str(method.name.value));
+            }
+        }
+    }
+    None
 }
 
 /// Returns `true` when a call expression's `resolve_callable_target*`

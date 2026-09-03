@@ -189,8 +189,8 @@ async fn test_goto_definition_constant_same_file() {
                 "APP_VERSION is defined on line 1"
             );
             assert_eq!(
-                location.range.start.character, 0,
-                "define() starts at column 0"
+                location.range.start.character, 8,
+                "the target is the name inside the quotes, past `define('`"
             );
         }
         other => panic!("Expected Scalar location, got: {:?}", other),
@@ -354,8 +354,8 @@ async fn test_goto_definition_constant_indented_define() {
                 "DEBUG_MODE is defined on line 2"
             );
             assert_eq!(
-                location.range.start.character, 4,
-                "define() is indented by 4 spaces"
+                location.range.start.character, 12,
+                "the target is the name inside the quotes of a define() indented by 4 spaces"
             );
         }
         other => panic!("Expected Scalar location, got: {:?}", other),

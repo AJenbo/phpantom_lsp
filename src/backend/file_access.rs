@@ -253,15 +253,18 @@ impl Backend {
     /// the offset is in the global namespace or the file has no namespace.
     pub(crate) fn namespace_at_offset(&self, uri: &str, byte_offset: u32) -> Option<String> {
         let nmap = self.file_namespaces.read();
-        let spans = nmap.get(uri)?;
-        for span in spans {
-            if byte_offset >= span.start && byte_offset <= span.end {
-                return span.namespace.clone();
-            }
-        }
-        // Fallback: if the offset is past all namespace blocks (e.g.
-        // code after the last closing brace), return the last namespace.
-        spans.last().and_then(|s| s.namespace.clone())
+        namespace_in_spans(nmap.get(uri)?, byte_offset).map(str::to_string)
+    }
+
+    /// A copy of a file's namespace blocks, for callers that resolve many
+    /// offsets against the same file and would otherwise take the
+    /// `file_namespaces` lock once per offset.
+    pub(crate) fn namespace_spans_for_uri(&self, uri: &str) -> Vec<NamespaceSpan> {
+        self.file_namespaces
+            .read()
+            .get(uri)
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// Return the first namespace declared in a file.
@@ -336,4 +339,18 @@ impl Backend {
         // The file will be re-parsed from disk on next access via
         // parse_and_cache_file when needed (issue #99).
     }
+}
+
+/// The namespace in effect at `byte_offset` among a file's namespace
+/// blocks, or `None` for the global namespace.
+///
+/// An offset past every block (code after the last closing brace) belongs
+/// to the last one.
+pub(crate) fn namespace_in_spans(spans: &[NamespaceSpan], byte_offset: u32) -> Option<&str> {
+    for span in spans {
+        if byte_offset >= span.start && byte_offset <= span.end {
+            return span.namespace.as_deref();
+        }
+    }
+    spans.last().and_then(|s| s.namespace.as_deref())
 }

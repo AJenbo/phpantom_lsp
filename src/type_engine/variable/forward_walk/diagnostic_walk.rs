@@ -153,25 +153,12 @@ pub(crate) fn walk_closures_in_expr<'b>(
             // Build a fresh scope for the closure.
             let mut closure_scope = ScopeState::new();
 
-            // PHP closures implicitly capture `$this` from the
-            // enclosing class method.  Seed it from the outer scope
-            // so that `$this->prop` inside the closure resolves
-            // without calling `resolve_variable_types`.
-            let this_types = outer_scope.get("$this");
-            if !this_types.is_empty() {
-                closure_scope.set("$this", this_types.to_vec());
-            }
-
-            // Seed with `use(...)` variables from the outer scope.
-            if let Some(ref use_clause) = closure.use_clause {
-                for use_var in use_clause.variables.iter() {
-                    let var_name = bytes_to_str(use_var.variable.name).to_string();
-                    let from_outer = outer_scope.get(&var_name);
-                    if !from_outer.is_empty() {
-                        closure_scope.set(&var_name, from_outer.to_vec());
-                    }
-                }
-            }
+            // Seed `$this`, the `use (…)` variables, and the paths read
+            // through them from the outer scope, so that `$this->prop`
+            // inside the closure resolves without calling
+            // `resolve_variable_types` and a captured path keeps whatever
+            // the code above the closure proved about it.
+            seed_closure_captures(&mut closure_scope, outer_scope, closure.use_clause.as_ref());
 
             // Seed with parameter types, using callable inference when
             // available.  Filter out any inferred params whose base
@@ -194,7 +181,10 @@ pub(crate) fn walk_closures_in_expr<'b>(
             record_scope_snapshot(body_span.start.offset, &closure_scope);
 
             // Walk the closure body.
-            walk_body_for_diagnostics(closure.body.statements.iter(), &mut closure_scope, ctx);
+            {
+                let _barrier = suspend_return_edges();
+                walk_body_for_diagnostics(closure.body.statements.iter(), &mut closure_scope, ctx);
+            }
 
             // Record at body end (closure scope).
             record_scope_snapshot(body_span.end.offset, &closure_scope);
@@ -302,6 +292,14 @@ pub(crate) fn walk_closures_in_expr<'b>(
         Expression::UnaryPrefix(prefix) => {
             walk_closures_in_expr(prefix.operand, outer_scope, ctx, None);
         }
+        // A subscript evaluates both halves, so a closure written in
+        // either one still needs its parameter scope — the immediately
+        // indexed dispatch table (`['a' => fn (X $x) => …][$name]`)
+        // writes it in the subscripted expression.
+        Expression::ArrayAccess(aa) => {
+            walk_closures_in_expr(aa.array, outer_scope, ctx, None);
+            walk_closures_in_expr(aa.index, outer_scope, ctx, None);
+        }
         Expression::Conditional(cond) => {
             walk_closures_in_expr(cond.condition, outer_scope, ctx, None);
             if let Some(then_expr) = cond.then {
@@ -328,7 +326,10 @@ pub(crate) fn walk_closures_in_expr<'b>(
             }
             // The anonymous class's own method bodies have their own
             // `$this` (the anonymous class), so walk them separately.
-            walk_anonymous_class_member_bodies(anon, ctx);
+            {
+                let _barrier = suspend_return_edges();
+                walk_anonymous_class_member_bodies(anon, ctx);
+            }
 
             // Restore the outer scope immediately after the anonymous
             // class body so that code following it in the same expression
@@ -553,10 +554,10 @@ pub(crate) fn walk_closure_in_partial_call_args<'b, F>(
 }
 
 /// Check whether a `/** … */` docblock is directly attached to the
-/// code at `fn_offset` — i.e. only whitespace separates the closing
-/// `*/` from `fn_offset`.  This prevents `@param` annotations from
-/// sibling closures/arrow functions from leaking across statement
-/// boundaries.
+/// code at `fn_offset` — i.e. only whitespace, the `static`/`function`
+/// keywords, or an assignment target separates the closing `*/` from
+/// `fn_offset`.  This prevents `@param` annotations from sibling
+/// closures/arrow functions from leaking across statement boundaries.
 pub(crate) fn is_docblock_adjacent(content: &str, fn_offset: usize) -> bool {
     let before = match content.get(..fn_offset) {
         Some(s) => s,
@@ -575,7 +576,43 @@ pub(crate) fn is_docblock_adjacent(content: &str, fn_offset: usize) -> bool {
     let trimmed = trimmed
         .trim_end_matches(|c: char| c.is_ascii_alphanumeric() || c == '_')
         .trim_end();
-    trimmed.ends_with("*/")
+    if trimmed.ends_with("*/") {
+        return true;
+    }
+    // A closure stored in a variable carries its docblock above the whole
+    // statement, because that is where PHP attaches the comment:
+    //
+    //   /** @param Arg[] $callArgs */
+    //   $setOffsetValueTypes = static function (array $callArgs) { … };
+    //
+    // Stepping back over the assignment target reaches it.  Only a plain
+    // assignment is stepped over — a call argument or an array element is
+    // not — which is what keeps a sibling closure's annotation out.
+    match assignment_target_start(trimmed) {
+        Some(start) => trimmed[..start].trim_end().ends_with("*/"),
+        None => false,
+    }
+}
+
+/// Byte offset of the assignment target in text that ends with a plain
+/// `=`, or `None` when the text does not end in an assignment to a simple
+/// lvalue (`$fn =`, `$this->fn =`, `$fns[] =`, `$fns['k'] =`).
+fn assignment_target_start(before: &str) -> Option<usize> {
+    let rest = before.strip_suffix('=')?;
+    // Comparisons, arrows and compound assignments all put another
+    // operator character right before the `=`; none of them assigns.
+    if rest.ends_with(|c: char| "=!<>.+-*/%?&|^:".contains(c)) {
+        return None;
+    }
+    let rest = rest.trim_end();
+    let start = rest.rfind('$')?;
+    rest[start..]
+        .chars()
+        .all(|c| {
+            c.is_ascii_alphanumeric()
+                || matches!(c, '_' | '$' | '[' | ']' | '-' | '>' | ':' | '\'' | '"')
+        })
+        .then_some(start)
 }
 
 /// Seed a closure/arrow function scope with parameter types, using
@@ -1021,20 +1058,84 @@ pub(crate) fn walk_class_member_body<'b>(
     use mago_syntax::cst::class_like::member::ClassLikeMember;
     use mago_syntax::cst::class_like::method::MethodBody;
 
-    if let ClassLikeMember::Method(method) = member
-        && let MethodBody::Concrete(block) = &method.body
-    {
-        let method_name = bytes_to_str(method.name.value).to_string();
-        let is_static = method.modifiers.contains_static();
-        analyze_function_body(
-            method.parameter_list.parameters.iter(),
-            block.statements.iter(),
-            method.span().start.offset,
-            enclosing_class,
-            Some(&method_name),
-            is_static,
-            diag_ctx,
-        );
+    match member {
+        ClassLikeMember::Method(method) => {
+            // A constructor-promoted property carries its hooks in the
+            // parameter list, so they need walking whether or not the
+            // constructor itself has a body.
+            for param in method.parameter_list.parameters.iter() {
+                if let Some(hooks) = &param.hooks {
+                    walk_property_hook_bodies(
+                        param.hint.as_ref(),
+                        hooks,
+                        enclosing_class,
+                        diag_ctx,
+                    );
+                }
+            }
+
+            let MethodBody::Concrete(block) = &method.body else {
+                return;
+            };
+            let method_name = bytes_to_str(method.name.value).to_string();
+            let is_static = method.modifiers.contains_static();
+            analyze_function_body(
+                method.parameter_list.parameters.iter(),
+                block.statements.iter(),
+                method.span().start.offset,
+                enclosing_class,
+                Some(&method_name),
+                is_static,
+                diag_ctx,
+            );
+        }
+        ClassLikeMember::Property(Property::Hooked(hooked)) => {
+            walk_property_hook_bodies(
+                hooked.hint.as_ref(),
+                &hooked.hook_list,
+                enclosing_class,
+                diag_ctx,
+            );
+        }
+        _ => {}
+    }
+}
+
+/// Walk the `get`/`set` bodies of a hooked property.
+///
+/// Each hook gets its own seeded scope, exactly as a method body does.
+/// Without one the snapshot in force inside the hook is whatever the
+/// previously walked body left behind, so `$this` resolves to that body's
+/// class and every `$this->member` in the hook is flagged as unknown.
+fn walk_property_hook_bodies(
+    property_hint: Option<&Hint<'_>>,
+    hook_list: &PropertyHookList<'_>,
+    enclosing_class: &ClassInfo,
+    diag_ctx: &DiagnosticWalkCtx<'_>,
+) {
+    let ctx = diag_ctx.forward_walk_ctx(enclosing_class);
+
+    for hook in hook_list.hooks.iter() {
+        let PropertyHookBody::Concrete(body) = &hook.body else {
+            continue;
+        };
+
+        let mut scope = seed_property_hook_scope(property_hint, hook, &ctx);
+        record_scope_snapshot(hook.span().start.offset, &scope);
+
+        match body {
+            PropertyHookConcreteBody::Block(block) => {
+                walk_body_for_diagnostics(block.statements.iter(), &mut scope, &ctx);
+            }
+            // A one-line hook holds a single expression with nothing to
+            // assign into the scope, so the snapshot above already
+            // describes every point in it — except inside a closure
+            // embedded in that expression, whose parameters need their
+            // own snapshot.
+            PropertyHookConcreteBody::Expression(expr_body) => {
+                walk_closures_in_expr(expr_body.expression, &scope, &ctx, None);
+            }
+        }
     }
 }
 
@@ -1047,6 +1148,26 @@ pub(crate) struct DiagnosticWalkCtx<'a> {
     backend: Option<&'a crate::Backend>,
     loaders: Loaders<'a>,
     resolved_class_cache: Option<&'a crate::virtual_members::ResolvedClassCache>,
+}
+
+impl<'a> DiagnosticWalkCtx<'a> {
+    /// Build the forward-walk context for a body belonging to
+    /// `current_class`.  The diagnostic pass walks the whole file, so the
+    /// cursor is past the end of every body it visits.
+    fn forward_walk_ctx<'c>(&'c self, current_class: &'c ClassInfo) -> ForwardWalkCtx<'c> {
+        ForwardWalkCtx {
+            current_class,
+            all_classes: self.local_classes,
+            content: self.content,
+            cursor_offset: u32::MAX,
+            class_loader: self.class_loader,
+            backend: self.backend,
+            loaders: self.loaders,
+            resolved_class_cache: self.resolved_class_cache,
+            enclosing_return_type: None,
+            top_level_scope: None,
+        }
+    }
 }
 
 /// Run the forward walker on a single function/method body and record
@@ -1065,18 +1186,7 @@ pub(crate) fn analyze_function_body<'b>(
     is_static: bool,
     diag_ctx: &DiagnosticWalkCtx<'_>,
 ) {
-    let ctx = ForwardWalkCtx {
-        current_class,
-        all_classes: diag_ctx.local_classes,
-        content: diag_ctx.content,
-        cursor_offset: u32::MAX,
-        class_loader: diag_ctx.class_loader,
-        backend: diag_ctx.backend,
-        loaders: diag_ctx.loaders,
-        resolved_class_cache: diag_ctx.resolved_class_cache,
-        enclosing_return_type: None,
-        top_level_scope: None,
-    };
+    let ctx = diag_ctx.forward_walk_ctx(current_class);
 
     seed_and_walk_function_body(
         parameters,
@@ -1111,7 +1221,7 @@ pub(crate) fn seed_and_walk_function_body<'b>(
     // resolve from the scope instead of falling through to the backward
     // scanner.
     if !is_static {
-        seed_this(&mut scope, ctx.current_class);
+        seed_this(&mut scope, ctx);
     }
 
     // Seed scope with parameter types.
@@ -1133,12 +1243,17 @@ pub(crate) fn seed_and_walk_function_body<'b>(
     // remain unresolved.
     seed_superglobals(&mut scope);
 
+    // A `static $var;` local holds whatever an earlier call left in it,
+    // which the top-to-bottom walk below cannot see.
+    let body: Vec<&Statement<'_>> = body_statements.collect();
+    super::static_locals::seed_static_locals(&mut scope, &body, ctx);
+
     // Record the scope right at the function body start so that
     // member accesses on parameters before any assignment are covered.
     record_scope_snapshot(fn_span_start, &scope);
 
     // Walk the entire body, recording snapshots at each statement.
-    walk_body_for_diagnostics(body_statements, &mut scope, ctx);
+    walk_body_for_diagnostics(body.iter().copied(), &mut scope, ctx);
 }
 
 /// Walk the method bodies of an anonymous class expression, seeding

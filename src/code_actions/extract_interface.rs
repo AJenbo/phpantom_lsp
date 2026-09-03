@@ -530,6 +530,7 @@ mod tests {
             if_this_is: None,
             self_out: None,
             is_pure: false,
+            is_impure: false,
         })
     }
 

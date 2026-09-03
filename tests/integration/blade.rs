@@ -826,6 +826,30 @@ mod tests {
             messages
         );
     }
+
+    /// A raw `{!! … !!}` echo starts at `{!!` (one brace), so a variable
+    /// declared in a `<?php ?>` block and only read by a raw echo is used,
+    /// not dead.
+    #[tokio::test]
+    async fn test_a_variable_read_by_a_raw_echo_is_not_unused() {
+        let body = "<?php\n$acmeProfile = \"xxx\";\n?>\n\n{!! $acmeProfile !!}\n";
+        let (backend, _dir, uri) = component_workspace("resources/views/profile.blade.php", body);
+        open_blade(&backend, &uri, body).await;
+
+        let virtual_php = backend
+            .blade_virtual_php(uri.as_str())
+            .expect("blade virtual content");
+        let mut diags = Vec::new();
+        backend.collect_unused_variable_diagnostics(uri.as_str(), &virtual_php, &mut diags);
+        let messages: Vec<String> = diags.into_iter().map(|d| d.message).collect();
+
+        assert!(
+            messages.is_empty(),
+            "a variable read by a raw echo must not be reported unused: {:?}",
+            messages
+        );
+    }
+
     /// `@unless (!$user)` is how Blade spells a doubly negated truthiness
     /// guard, since `@unless` compiles to `if(!…)` and the condition adds a
     /// `!` of its own.  The pair cancels, so the body sees what

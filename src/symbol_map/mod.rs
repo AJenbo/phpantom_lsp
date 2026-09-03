@@ -531,6 +531,10 @@ pub(crate) enum LaravelStringKind {
     /// `$this->app->make('payments')` asks the container for, and the one a
     /// service provider registers it under.
     ContainerBinding,
+    /// An environment variable name: the string `env('APP_NAME')` or
+    /// `Env::get('APP_NAME')` reads, resolving to the line that declares it
+    /// in the project's `.env`.
+    Env,
 }
 
 impl LaravelStringKind {
@@ -658,19 +662,28 @@ pub(crate) enum ViewReceiverClass {
     /// Laravel's view factory, whose `make()` / `first()` / `exists()` /
     /// `renderWhen()` / `renderUnless()` / `renderEach()` all name one.
     Factory,
-    /// A mailable, whose `view()` / `text()` / `markdown()` name the
-    /// template the message is built from.
+    /// A mailable, whose `text()` names the plain-text template the message
+    /// is built from.
     Mailable,
+    /// Anything a mail template is set on: a mailable, or the mail message a
+    /// notification's `toMail()` returns.  The two share no base class, but
+    /// `view()` and `markdown()` mean the same thing on both.
+    MailTemplate,
 }
 
 impl ViewReceiverClass {
-    /// The fully qualified name a receiver's type must be a subtype of.
-    pub(crate) fn fqn(self) -> &'static str {
+    /// The fully qualified names a receiver's type must be a subtype of one
+    /// of.
+    pub(crate) fn fqns(self) -> &'static [&'static str] {
         match self {
             // The concrete `Illuminate\View\Factory` implements the
             // contract, so the contract covers both spellings.
-            Self::Factory => "Illuminate\\Contracts\\View\\Factory",
-            Self::Mailable => "Illuminate\\Mail\\Mailable",
+            Self::Factory => &["Illuminate\\Contracts\\View\\Factory"],
+            Self::Mailable => &["Illuminate\\Mail\\Mailable"],
+            Self::MailTemplate => &[
+                "Illuminate\\Mail\\Mailable",
+                "Illuminate\\Notifications\\Messages\\MailMessage",
+            ],
         }
     }
 }

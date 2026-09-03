@@ -1096,13 +1096,19 @@ async fn test_completion_multiple_matching_stub_functions() {
     );
 }
 
-/// User-defined function should take precedence over stub function with
-/// the same name (user version appears, stub version is deduplicated away).
+/// A project file that redeclares a global PHP function is offered once,
+/// on the stub's signature rather than its own.
+///
+/// PHP fatals on redeclaring an internal function, so such a declaration
+/// never runs: the file is a signature stub written for tooling (packages
+/// like `phpstan/php-8-stubs` ship one PHP file per builtin, and
+/// phpstorm-stubs itself is a Composer dependency of plenty of projects).
+/// Its watered-down signature would otherwise displace the stub's for the
+/// whole session.
 #[tokio::test]
-async fn test_completion_user_function_shadows_stub() {
+async fn test_completion_redeclared_builtin_keeps_the_stub_signature() {
     let backend = create_test_backend_with_function_stubs();
 
-    // Register a user-defined function with the same name as a stub
     let uri = Url::parse("file:///shadow.php").unwrap();
     let text = concat!(
         "<?php\n",
@@ -1128,13 +1134,6 @@ async fn test_completion_user_function_shadows_stub() {
             .iter()
             .map(|i| (&i.label, &i.detail))
             .collect::<Vec<_>>()
-    );
-
-    // The user-defined version should win: detail shows return type, description shows "function"
-    assert_eq!(
-        str_contains_items[0].detail.as_deref(),
-        Some("bool"),
-        "User-defined function should show return type as detail"
     );
 }
 

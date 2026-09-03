@@ -1,6 +1,5 @@
 use mago_span::HasSpan;
 use mago_syntax::cst::sequence::TokenSeparatedSequence;
-use mago_syntax::cst::*;
 
 use super::*;
 
@@ -73,6 +72,31 @@ pub(super) fn resolve_laravel_container_attr(
         .map(LaravelContainerAttribute::Resource)
 }
 
+/// Namespace prefix for the attributes a form request is configured with.
+const LARAVEL_HTTP_ATTR_NS: &str = "Illuminate\\Foundation\\Http\\Attributes\\";
+
+/// Whether an attribute class name refers to `#[RedirectToRoute]`, whose one
+/// argument names the route a failed form request bounces back to.
+///
+/// The short spelling requires the file to import from that namespace, cached
+/// in `import_cache` the same way [`resolve_laravel_container_attr`] caches
+/// its own: `RedirectToRoute` is a plausible name for an application's own
+/// attribute.
+pub(super) fn is_laravel_redirect_route_attr(
+    class_name: &str,
+    import_cache: &mut Option<bool>,
+    content: &str,
+) -> bool {
+    if class_name.contains('\\') {
+        return class_name.strip_prefix(LARAVEL_HTTP_ATTR_NS) == Some("RedirectToRoute");
+    }
+    if class_name != "RedirectToRoute" {
+        return false;
+    }
+    *import_cache
+        .get_or_insert_with(|| content.contains("use Illuminate\\Foundation\\Http\\Attributes\\"))
+}
+
 /// If the first argument of `argument_list` is a non-empty, non-interpolated
 /// string literal, push a [`SymbolKind::LaravelStringKey`] span covering the
 /// string content (inside the quotes) onto `spans`.
@@ -101,6 +125,21 @@ pub(super) fn try_emit_laravel_string_span_at(
     spans: &mut Vec<SymbolSpan>,
 ) {
     emit_laravel_string_span(kind, false, index, argument_list, content, spans);
+}
+
+/// The [`try_emit_laravel_string_span`] variant for the variadic predicates
+/// that take a list of names rather than one: `Route::is('admin.*',
+/// 'account.*')` asks whether the current route is any of them, so every
+/// argument names one.
+pub(super) fn try_emit_laravel_string_spans_all(
+    kind: crate::symbol_map::LaravelStringKind,
+    argument_list: &ArgumentList<'_>,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    for argument in argument_list.arguments.iter() {
+        push_laravel_string_span(kind, false, false, argument.value(), content, spans);
+    }
 }
 
 /// Emit a config-backed resource name from a parameter selected by name or
@@ -225,12 +264,18 @@ pub(super) fn try_emit_blade_block_span(
 /// Emit the config-key span for a call on the config repository, marking
 /// `Config::set('…')` as a write: it declares the key it names, so the key
 /// need not exist in any `config/*.php` file.
+///
+/// `getMany()` is the one member of the family that takes a list rather than
+/// a key, so it names as many keys as the list holds.
 pub(super) fn try_emit_laravel_config_key_span(
     member_name: &str,
     argument_list: &ArgumentList<'_>,
     content: &str,
     spans: &mut Vec<SymbolSpan>,
 ) {
+    if member_name.eq_ignore_ascii_case("getMany") {
+        return try_emit_config_get_many_spans(argument_list, content, spans);
+    }
     emit_laravel_string_span(
         crate::symbol_map::LaravelStringKind::Config,
         member_name.eq_ignore_ascii_case("set"),
@@ -239,6 +284,41 @@ pub(super) fn try_emit_laravel_config_key_span(
         content,
         spans,
     );
+}
+
+/// Push a config-key span for every key a `getMany()` argument names.
+///
+/// The array takes both spellings the repository reads: a bare entry is the
+/// key itself, and a key/value entry names the key on the left with the
+/// default it falls back to on the right.
+pub(super) fn try_emit_config_get_many_spans(
+    argument_list: &ArgumentList<'_>,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    let Some(first_arg) = argument_list.arguments.iter().next() else {
+        return;
+    };
+    let elements = match first_arg.value() {
+        Expression::Array(array) => &array.elements,
+        Expression::LegacyArray(array) => &array.elements,
+        _ => return,
+    };
+    for element in elements.iter() {
+        let key = match element {
+            ArrayElement::Value(value) => value.value,
+            ArrayElement::KeyValue(kv) => kv.key,
+            ArrayElement::Variadic(_) | ArrayElement::Missing(_) => continue,
+        };
+        push_laravel_string_span(
+            crate::symbol_map::LaravelStringKind::Config,
+            false,
+            false,
+            key,
+            content,
+            spans,
+        );
+    }
 }
 
 fn emit_laravel_string_span(
@@ -502,10 +582,10 @@ pub(super) fn view_receiver_method(
     {
         return Some((ViewReceiverClass::Factory, FIRST));
     }
-    if member_name.eq_ignore_ascii_case("view")
-        || member_name.eq_ignore_ascii_case("text")
-        || member_name.eq_ignore_ascii_case("markdown")
-    {
+    if member_name.eq_ignore_ascii_case("view") || member_name.eq_ignore_ascii_case("markdown") {
+        return Some((ViewReceiverClass::MailTemplate, FIRST));
+    }
+    if member_name.eq_ignore_ascii_case("text") {
         return Some((ViewReceiverClass::Mailable, FIRST));
     }
     if member_name.eq_ignore_ascii_case("renderWhen")
@@ -555,17 +635,78 @@ pub(super) fn record_view_receiver_sites(
     }
 }
 
-/// Whether `object` is a bare `view()` (or `\view()`) helper call, which
-/// returns the view factory itself rather than a rendered view.
-pub(super) fn is_laravel_view_factory_call(object: &Expression<'_>) -> bool {
+/// Whether `object` is a bare `name()` (or `\name()`) helper call: the
+/// argument-less spelling, which hands back the service the helper wraps
+/// rather than a result built from what it was passed.
+fn is_bare_helper_call(object: &Expression<'_>, name: &str) -> bool {
     let Expression::Call(Call::Function(func_call)) = object else {
         return false;
     };
     let Expression::Identifier(ident) = func_call.function else {
         return false;
     };
-    strip_fqn_prefix(bytes_to_str(ident.value())).eq_ignore_ascii_case("view")
+    strip_fqn_prefix(bytes_to_str(ident.value())).eq_ignore_ascii_case(name)
         && func_call.argument_list.arguments.is_empty()
+}
+
+/// Whether `object` is a bare `view()` (or `\view()`) helper call, which
+/// returns the view factory itself rather than a rendered view.
+pub(super) fn is_laravel_view_factory_call(object: &Expression<'_>) -> bool {
+    is_bare_helper_call(object, "view")
+}
+
+/// Whether `object` is one of the bare helper calls whose result names a
+/// route in the methods it receives: `redirect()` (the redirector),
+/// `url()` (the URL generator), and `response()` (the response factory).
+pub(super) fn is_route_name_helper_receiver(object: &Expression<'_>) -> bool {
+    is_bare_helper_call(object, "redirect")
+        || is_bare_helper_call(object, "url")
+        || is_bare_helper_call(object, "response")
+}
+
+/// Whether `member_name` takes the name of the route it points at as its
+/// first argument.
+///
+/// The redirector and the URL generator share the `route()` /
+/// `signedRoute()` / `temporarySignedRoute()` family; the response factory's
+/// `redirectToRoute()` is the same thing under another name.  Every caller
+/// checks its receiver first, so the lowercasing here is paid only for the
+/// handful of calls that could be one of these.
+pub(super) fn is_route_name_method(member_name: &str) -> bool {
+    matches!(
+        member_name.to_ascii_lowercase().as_str(),
+        "route" | "signedroute" | "temporarysignedroute" | "redirecttoroute"
+    )
+}
+
+/// Whether a static call on one of Laravel's URL-building facades names a
+/// route in its first argument.
+pub(super) fn is_route_name_facade_call(clean_subject: &str, member_name: &str) -> bool {
+    let is_facade = clean_subject.eq_ignore_ascii_case("URL")
+        || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\URL")
+        || clean_subject.eq_ignore_ascii_case("Redirect")
+        || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\Redirect")
+        || clean_subject.eq_ignore_ascii_case("Response")
+        || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\Response");
+    is_facade && is_route_name_method(member_name)
+}
+
+/// Whether `member_name` is the request's "is the current route named …?"
+/// predicate, whose every argument is a route-name pattern.
+///
+/// Laravel spells this check `routeIs()` precisely to keep it apart from
+/// `is()`, which matches URIs, so the name carries the whole meaning and no
+/// receiver has to vouch for it.
+pub(super) fn is_request_route_pattern_method(member_name: &str) -> bool {
+    member_name.eq_ignore_ascii_case("routeIs")
+}
+
+/// The `Route` facade's spellings of the same check.
+///
+/// `Route::is()` reads route names where `$request->is()` reads URIs, so this
+/// one is only recognised on the facade.
+pub(super) fn is_route_facade_pattern_method(member_name: &str) -> bool {
+    member_name.eq_ignore_ascii_case("is") || member_name.eq_ignore_ascii_case("currentRouteNamed")
 }
 
 /// Whether `object` names the service container the way source spells it:
@@ -1504,13 +1645,15 @@ pub(super) fn emit_compact_name_elem_spans(
     }
 }
 
-/// Returns `true` if `name` is a method on Laravel's `Repository` config contract
-/// that accepts a config key as its first argument.
+/// Returns `true` if `name` is a method on Laravel's `Repository` config
+/// contract that accepts config keys — one as its first argument, or a list
+/// of them in the case of `getMany()`.
 pub(super) fn is_config_repository_method(name: &str) -> bool {
     matches!(
         name.to_ascii_lowercase().as_str(),
         "has"
             | "get"
+            | "getmany"
             | "string"
             | "integer"
             | "float"

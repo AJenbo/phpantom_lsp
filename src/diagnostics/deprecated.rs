@@ -9,23 +9,31 @@
 //! not noisy.  The message includes the deprecation reason when one is
 //! provided in the tag (e.g. `@deprecated Use NewHelper instead`).
 //!
-//! Variable type resolution is cached per `(variable_name, enclosing_class)`
-//! pair so that multiple member accesses on the same variable (e.g.
-//! `$user->getName()` and `$user->getEmail()`) only trigger a single
-//! resolution pass instead of re-parsing the file for each access.
+//! Variable type resolution is cached per [`SubjectCacheKey`] so that
+//! multiple member accesses on the same variable (e.g. `$user->getName()`
+//! and `$user->getEmail()`) only trigger a single resolution pass instead
+//! of re-parsing the file for each access.  The key is shared with the
+//! unknown-member pass, which is what keeps a same-named variable in
+//! another method (or another branch of an `instanceof` check) from
+//! reusing this one's type.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::symbol_map::SymbolKind;
+use crate::symbol_map::{ClassRefContext, SymbolKind};
 use crate::type_engine::resolver::{ResolutionCtx, SubjectOutcome, resolve_subject_outcome};
 use crate::types::AccessKind;
-use crate::types::ClassInfo;
-use crate::virtual_members::resolve_class_fully_cached;
+use crate::types::{ClassInfo, ClassLikeKind};
+use crate::virtual_members::{ResolvedClassCache, resolve_class_fully_cached};
 
-use super::helpers::{FileDiagnosticContext, resolve_to_fqn};
+use super::helpers::{
+    FileDiagnosticContext, find_enclosing_method_name, find_innermost_enclosing_class,
+    resolve_to_fqn,
+};
+use super::subject_cache::SubjectCacheKey;
 
 impl Backend {
     /// Collect `@deprecated` usage diagnostics for a single file.
@@ -55,13 +63,22 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
-        // Cache of resolved variable types.  Keyed by
-        // `(variable_name, enclosing_class_name)` so that all member
-        // accesses on the same variable within the same class share a
-        // single resolution pass.  This turns O(n * parse) into O(k *
-        // parse) where k is the number of distinct variables, not the
-        // number of member accesses.
-        let mut var_type_cache: HashMap<(String, String), Option<ClassInfo>> = HashMap::new();
+        // ── Parse cache for this diagnostic pass ────────────────────────
+        // Each subject resolution below re-parses the file via
+        // `with_parsed_program` unless a parse cache is active; one pass
+        // over a file with many distinct subjects must parse it once,
+        // not once per subject.
+        let _parse_guard = crate::parser::with_parse_cache(content);
+
+        // ── Chain resolution cache for this diagnostic pass ─────────────
+        let _chain_guard = crate::type_engine::resolver::with_chain_resolution_cache();
+
+        // Cache of resolved variable types, keyed the same way as the
+        // unknown-member pass so that all member accesses guaranteed to
+        // see the same type share a single resolution pass.  This turns
+        // O(n * parse) into O(k * parse) where k is the number of
+        // distinct subjects, not the number of member accesses.
+        let mut var_type_cache: HashMap<SubjectCacheKey, Option<ClassInfo>> = HashMap::new();
 
         let symbol_map = &ctx.symbol_map;
         let file_resolved_names = &ctx.file.resolved_names;
@@ -89,7 +106,20 @@ impl Backend {
         for span in &symbol_map.spans {
             match &span.kind {
                 // ── Class references (type hints, new Foo, extends, etc.) ─
-                SymbolKind::ClassReference { name, is_fqn, .. } => {
+                SymbolKind::ClassReference {
+                    name,
+                    is_fqn,
+                    context,
+                    ..
+                } => {
+                    // An import is not a usage: it only says which `Foo`
+                    // the names below mean.  Whatever the file does with
+                    // the class is flagged where it does it, and flagging
+                    // the import as well puts a second marker on code the
+                    // developer has already been told about.
+                    if matches!(context, ClassRefContext::UseImport) {
+                        continue;
+                    }
                     // Prefer mago-names byte-offset lookup when available —
                     // it applies PHP's full name resolution rules.  Fall
                     // back to the legacy resolve_to_fqn helper otherwise.
@@ -105,6 +135,14 @@ impl Backend {
 
                     if let Some(cls) = self.find_or_load_class(&resolved_name)
                         && let Some(msg) = &cls.deprecation_message
+                        && !is_within_deprecated_scope(
+                            self,
+                            local_classes,
+                            &class_loader,
+                            cache,
+                            content,
+                            span.start,
+                        )
                         && let Some(range) = self.offset_range_to_lsp_range(
                             uri,
                             content,
@@ -148,30 +186,26 @@ impl Backend {
                     let base_class = match base_class {
                         Some(c) => c,
                         None if subject_str.starts_with('$') => {
-                            let enclosing_name = local_classes
-                                .iter()
-                                .find(|c| {
-                                    !c.name.starts_with("__anonymous@")
-                                        && span.start >= c.start_offset
-                                        && span.start <= c.end_offset
-                                })
-                                .map(|c| c.name.to_string())
-                                .unwrap_or_default();
+                            let enclosing_class =
+                                find_innermost_enclosing_class(local_classes, span.start);
 
-                            let cache_key = (subject_str.trim().to_string(), enclosing_name);
+                            let access_kind = if *is_static {
+                                AccessKind::DoubleColon
+                            } else {
+                                AccessKind::Arrow
+                            };
 
-                            let cached = var_type_cache.entry(cache_key).or_insert_with_key(|_| {
-                                let enclosing_class = local_classes
-                                    .iter()
-                                    .find(|c| {
-                                        !c.name.starts_with("__anonymous@")
-                                            && span.start >= c.start_offset
-                                            && span.start <= c.end_offset
-                                    })
-                                    .map(|c| ClassInfo::clone(c));
+                            let cache_key = SubjectCacheKey::build(
+                                symbol_map,
+                                enclosing_class,
+                                subject_str.trim(),
+                                access_kind,
+                                span.start,
+                            );
 
+                            let cached = var_type_cache.entry(cache_key).or_insert_with(|| {
                                 let rctx = ResolutionCtx {
-                                    current_class: enclosing_class.as_ref(),
+                                    current_class: enclosing_class,
                                     all_classes: local_classes,
                                     content,
                                     cursor_offset: span.start,
@@ -181,11 +215,11 @@ impl Backend {
                                     resolved_class_cache: Some(cache),
                                     function_loader: Some(&function_loader),
                                     scope_var_resolver: None,
-                                    is_in_static_method: false,
+                                    is_in_static_method: symbol_map.is_in_static_method(span.start),
                                     preserve_static: false,
                                 };
 
-                                resolve_variable_subject(subject_str, *is_static, &rctx)
+                                resolve_variable_subject(subject_str, access_kind, &rctx)
                             });
 
                             match cached {
@@ -215,6 +249,14 @@ impl Backend {
                             .get_method(member_name)
                             .or_else(|| resolved.get_method(member_name))
                             && let Some(msg) = &method.deprecation_message
+                            && !is_within_deprecated_scope(
+                                self,
+                                local_classes,
+                                &class_loader,
+                                cache,
+                                content,
+                                span.start,
+                            )
                             && let Some(range) = self.offset_range_to_lsp_range(
                                 uri,
                                 content,
@@ -241,6 +283,14 @@ impl Backend {
                             .find(|p| p.name == *member_name)
                             .or_else(|| resolved.properties.iter().find(|p| p.name == *member_name))
                             && let Some(msg) = &prop.deprecation_message
+                            && !is_within_deprecated_scope(
+                                self,
+                                local_classes,
+                                &class_loader,
+                                cache,
+                                content,
+                                span.start,
+                            )
                             && let Some(range) = self.offset_range_to_lsp_range(
                                 uri,
                                 content,
@@ -264,6 +314,14 @@ impl Backend {
                             && let Some(constant) =
                                 resolved.constants.iter().find(|c| c.name == *member_name)
                             && let Some(msg) = &constant.deprecation_message
+                            && !is_within_deprecated_scope(
+                                self,
+                                local_classes,
+                                &class_loader,
+                                cache,
+                                content,
+                                span.start,
+                            )
                             && let Some(range) = self.offset_range_to_lsp_range(
                                 uri,
                                 content,
@@ -300,6 +358,14 @@ impl Backend {
                         file_use_map,
                         ctx.file.namespace_at(span.start),
                     ) && let Some(msg) = &func_info.deprecation_message
+                        && !is_within_deprecated_scope(
+                            self,
+                            local_classes,
+                            &class_loader,
+                            cache,
+                            content,
+                            span.start,
+                        )
                         && let Some(range) = self.offset_range_to_lsp_range(
                             uri,
                             content,
@@ -372,6 +438,69 @@ fn deprecated_diagnostic(
     }
 }
 
+/// Whether `offset` sits inside a scope that PHPStan's own deprecation
+/// rule treats as deprecated: the enclosing class/trait itself, or the
+/// enclosing method.
+///
+/// The method check also covers an override that implements/overrides a
+/// deprecated interface or parent method without a `@deprecated` tag of
+/// its own — inheritance enrichment (`inheritance::enrichment`) already
+/// propagates `deprecation_message` onto such overrides, so a plain
+/// lookup on the resolved class is enough.
+///
+/// Mirrors `DefaultDeprecatedScopeResolver` in
+/// phpstan/phpstan-deprecation-rules: deprecated code calling other
+/// deprecated code isn't worth flagging (e.g. a `Type::hasProperty()`
+/// override delegating to the same deprecated method on other `Type`
+/// instances).
+fn is_within_deprecated_scope(
+    backend: &Backend,
+    local_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    cache: &ResolvedClassCache,
+    content: &str,
+    offset: u32,
+) -> bool {
+    let Some(enclosing) = find_innermost_enclosing_class(local_classes, offset) else {
+        return false;
+    };
+    if enclosing.deprecation_message.is_some() {
+        return true;
+    }
+
+    let Some(method_name) = find_enclosing_method_name(content, offset) else {
+        return false;
+    };
+    let resolved = resolve_class_fully_cached(enclosing, class_loader, cache);
+    if resolved
+        .get_method(&method_name)
+        .is_some_and(|m| m.deprecation_message.is_some())
+    {
+        return true;
+    }
+
+    // A trait method never runs on the trait: PHP flattens it into every
+    // class that uses it, so whether it is the deprecated implementation
+    // of something is decided over there.  Read the bound all of its
+    // users satisfy — the same view of `$this` the type engine takes
+    // inside a trait body — and ask the question there.
+    if enclosing.kind != ClassLikeKind::Trait {
+        return false;
+    }
+    crate::type_engine::trait_context::trait_this_bounds(
+        enclosing,
+        local_classes,
+        class_loader,
+        Some(backend),
+    )
+    .iter()
+    .any(|bound| {
+        resolve_class_fully_cached(bound, class_loader, cache)
+            .get_method(&method_name)
+            .is_some_and(|m| m.deprecation_message.is_some())
+    })
+}
+
 /// Resolve a member access subject text to a class FQN.
 ///
 /// Handles:
@@ -413,15 +542,9 @@ fn resolve_subject_to_class_name(
 /// avoiding backward-scanner fallthroughs.
 fn resolve_variable_subject(
     subject_text: &str,
-    is_static: bool,
+    access_kind: AccessKind,
     rctx: &ResolutionCtx<'_>,
 ) -> Option<ClassInfo> {
-    let access_kind = if is_static {
-        AccessKind::DoubleColon
-    } else {
-        AccessKind::Arrow
-    };
-
     match resolve_subject_outcome(subject_text.trim(), access_kind, rctx) {
         SubjectOutcome::Resolved(classes) => {
             classes.into_iter().next().map(|arc| ClassInfo::clone(&arc))

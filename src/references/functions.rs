@@ -38,32 +38,50 @@ impl Backend {
             let file_namespace = self.first_file_namespace(file_uri);
             let file_use_map = std::cell::OnceCell::new();
 
-            // First pass: resolved-name check. Function imports can be aliased
-            // (`use function Foo\bar as baz; baz()`), so the call-site text
-            // alone is not enough to decide whether this file can match.
+            // Function imports can be aliased (`use function Foo\bar as
+            // baz; baz()`), so the call-site text alone is not enough to
+            // decide whether this file can match.
+            let function_matches = |name: &str, offset: u32| -> bool {
+                let resolved =
+                    if let Some(fqn) = resolved_names.as_ref().and_then(|rn| rn.get(offset)) {
+                        fqn.to_string()
+                    } else {
+                        let use_map = file_use_map.get_or_init(|| {
+                            self.file_imports
+                                .read()
+                                .get(file_uri)
+                                .cloned()
+                                .unwrap_or_default()
+                        });
+                        Self::resolve_to_fqn(name, use_map, &file_namespace)
+                    };
+                // Function names are case-insensitive in PHP, so `HELPER()`
+                // is a call to `helper` and has to compare equal to it.
+                let resolved_normalized = strip_fqn_prefix(&resolved);
+                if resolved_normalized.eq_ignore_ascii_case(target) {
+                    return true;
+                }
+                // PHP falls back from an unqualified call to the global
+                // function of the same name only once the namespace-
+                // qualified guess above turns out not to be declared
+                // anywhere; a qualified call, or a target that itself
+                // lives in a namespace, can never be reached this way,
+                // so a sibling-namespace function of the same short name
+                // is never treated as a match.
+                !name.contains('\\')
+                    && !target.contains('\\')
+                    && crate::util::short_name(resolved_normalized)
+                        .eq_ignore_ascii_case(target_short)
+                    && !self
+                        .symbols
+                        .global_functions
+                        .read()
+                        .contains_key(resolved_normalized)
+            };
+
             let has_potential_match = symbol_map.spans.iter().any(|span| {
                 if let SymbolKind::FunctionCall { name, .. } = &span.kind {
-                    if name == target_short {
-                        true
-                    } else {
-                        let resolved = if let Some(fqn) =
-                            resolved_names.as_ref().and_then(|rn| rn.get(span.start))
-                        {
-                            fqn.to_string()
-                        } else {
-                            let use_map = file_use_map.get_or_init(|| {
-                                self.file_imports
-                                    .read()
-                                    .get(file_uri)
-                                    .cloned()
-                                    .unwrap_or_default()
-                            });
-                            Self::resolve_to_fqn(name, use_map, &file_namespace)
-                        };
-                        let resolved_normalized = strip_fqn_prefix(&resolved);
-                        resolved_normalized == target
-                            || crate::util::short_name(resolved_normalized) == target_short
-                    }
+                    function_matches(name, span.start)
                 } else {
                     false
                 }
@@ -91,26 +109,7 @@ impl Backend {
                         continue;
                     }
 
-                    let resolved = if let Some(fqn) =
-                        resolved_names.as_ref().and_then(|rn| rn.get(span.start))
-                    {
-                        fqn.to_string()
-                    } else {
-                        let use_map = file_use_map.get_or_init(|| {
-                            self.file_imports
-                                .read()
-                                .get(file_uri)
-                                .cloned()
-                                .unwrap_or_default()
-                        });
-                        Self::resolve_to_fqn(name, use_map, &file_namespace)
-                    };
-
-                    // Input boundary: resolve_to_fqn may return a leading `\`.
-                    let resolved_normalized = strip_fqn_prefix(&resolved);
-                    if resolved_normalized == target
-                        || crate::util::short_name(resolved_normalized) == target_short
-                    {
+                    if function_matches(name, span.start) {
                         if file_content.is_none() {
                             file_content = self.reference_file_content_arc(file_uri);
                         }
@@ -164,7 +163,20 @@ impl Backend {
                     .and_then(|rn| rn.get(offset))
                     .map(strip_fqn_prefix)
                     .unwrap_or(strip_fqn_prefix(name));
-                resolved == target || crate::util::short_name(resolved) == target_short
+                if resolved == target {
+                    return true;
+                }
+                // PHP falls back from an unqualified reference to the
+                // global constant of the same name only once the
+                // namespace-qualified guess above turns out not to be
+                // declared anywhere; a qualified reference, or a target
+                // that itself lives in a namespace, can never be reached
+                // this way, so a sibling-namespace constant of the same
+                // short name is never treated as a match.
+                !name.contains('\\')
+                    && !target.contains('\\')
+                    && crate::util::short_name(resolved) == target_short
+                    && !self.symbols.global_defines.read().contains_key(resolved)
             };
 
             let has_potential_match = symbol_map.spans.iter().any(|span| match &span.kind {

@@ -1,12 +1,18 @@
 //! Laravel string key completion.
 //!
-//! Offers autocompletion for route names, config keys, view names, and
-//! translation keys inside their respective helper calls:
+//! Offers autocompletion for the keys a Laravel call site names, inside
+//! whichever helper, facade method, or attribute names them:
 //!
-//! - `route('|')` / `to_route('|')` → route names
+//! - `route('|')` / `URL::signedRoute('|')` / `Route::is('|')` → route names
 //! - `config('|')` / `Config::get('|')` → config keys
 //! - `view('|')` / `View::make('|')` → view names
 //! - `__('|')` / `trans('|')` / `Lang::get('|')` → translation keys
+//! - `env('|')` / `Env::get('|')` → environment variables
+//!
+//! Detection is textual rather than AST-based: it runs on a buffer that is
+//! mid-edit, where the call being typed usually does not parse yet.  The
+//! symbol map decides the same question for a *complete* file, and the two
+//! are kept in step by hand.
 
 use std::collections::HashMap;
 
@@ -988,6 +994,20 @@ fn detect_laravel_string_key_context_inner<'a>(
                 .named_argument
                 .is_none_or(|name| name == trigger.argument)
                 .then_some(LaravelStringKind::ConfigResource(trigger.kind))
+        } else if resolve_known_class_reference(
+            content,
+            reference,
+            "Illuminate\\Foundation\\Http\\Attributes",
+            &["RedirectToRoute"],
+            false,
+            indexed_class_exists,
+        )
+        .is_some()
+        {
+            argument
+                .named_argument
+                .is_none()
+                .then_some(LaravelStringKind::Route)
         } else {
             None
         }
@@ -1009,6 +1029,13 @@ fn detect_laravel_string_key_context_inner<'a>(
         // unrelated `Vendor\Config as Foo` target into the legacy short-name
         // table would otherwise misclassify `Foo::get()` as Laravel Config.
         let short = written_class.rsplit('\\').next().unwrap_or(written_class);
+
+        let fn_lower = func_name.to_ascii_lowercase();
+        let short_lower = short.to_ascii_lowercase();
+        let legacy_accepts_array = matches!(
+            (short_lower.as_str(), fn_lower.as_str()),
+            ("config", "getmany") | ("route", "is" | "currentroutenamed")
+        );
 
         if let Some(trigger) =
             config_resource_static_trigger(content, reference, func_name, indexed_class_exists)
@@ -1035,18 +1062,30 @@ fn detect_laravel_string_key_context_inner<'a>(
             prefix = middleware_prefix;
             content_start_offset += relative_start;
             Some(middleware_kind)
-        } else if argument.named_argument.is_some() || argument.shape != StringArgumentShape::Scalar
+        } else if argument.named_argument.is_some()
+            || (argument.shape != StringArgumentShape::Scalar
+                && (!legacy_accepts_array || !before_quote.trim_end().ends_with('[')))
         {
             None
         } else {
-            let fn_lower = func_name.to_ascii_lowercase();
-            match (short.to_ascii_lowercase().as_str(), fn_lower.as_str()) {
+            match (short_lower.as_str(), fn_lower.as_str()) {
                 (
                     "config",
-                    "get" | "set" | "has" | "boolean" | "array" | "collection" | "prepend" | "push",
+                    "get" | "getmany" | "set" | "has" | "boolean" | "array" | "collection"
+                    | "prepend" | "push",
                 ) => Some(LaravelStringKind::Config),
                 ("view", "make" | "exists") => Some(LaravelStringKind::View),
-                ("lang", "get" | "has" | "choice") => Some(LaravelStringKind::Trans),
+                ("lang", "get" | "has" | "hasforlocale" | "choice") => {
+                    Some(LaravelStringKind::Trans)
+                }
+                // Route names reached through the URL-building facades, and the
+                // "is the current route named …?" predicates.
+                (
+                    "url" | "redirect" | "response",
+                    "route" | "signedroute" | "temporarysignedroute" | "redirecttoroute",
+                ) => Some(LaravelStringKind::Route),
+                ("route", "is" | "currentroutenamed") => Some(LaravelStringKind::Route),
+                ("env", "get" | "getorfail") => Some(LaravelStringKind::Env),
                 // Artisan command names.
                 ("artisan", "call" | "queue") => Some(LaravelStringKind::Command),
                 ("schedule", "command") => Some(LaravelStringKind::Command),
@@ -1139,7 +1178,10 @@ fn detect_laravel_string_key_context_inner<'a>(
             if argument.named_argument.is_some() || argument.shape != StringArgumentShape::Scalar {
                 return None;
             }
-            if func_name.eq_ignore_ascii_case("route") {
+            if matches!(
+                func_name.to_ascii_lowercase().as_str(),
+                "route" | "signedroute" | "temporarysignedroute" | "redirecttoroute" | "routeis"
+            ) {
                 Some(LaravelStringKind::Route)
                 // `$this->call('cmd')` / `$this->callSilently('cmd')` inside a
                 // console command run another Artisan command.  Restricted to a
@@ -1195,6 +1237,7 @@ fn detect_laravel_string_key_context_inner<'a>(
                     Some(LaravelStringKind::View)
                 }
                 "__" | "trans" | "trans_choice" => Some(LaravelStringKind::Trans),
+                "env" => Some(LaravelStringKind::Env),
                 // The Blade preprocessor lowers `@can`/`@cannot`/`@canany` to
                 // this call, so completion inside the directive works too.
                 "blade_can_directive" => Some(LaravelStringKind::GateAbility),
@@ -1409,10 +1452,11 @@ impl Backend {
         value
     }
 
-    /// Every named route in the project, with the URI it was registered with.
+    /// Every named route in the project, with the URI it was registered with,
+    /// plus group prefixes whose full set of children is unknowable.
     pub(crate) fn cached_routes(
         &self,
-    ) -> std::sync::Arc<Vec<crate::virtual_members::laravel::RouteEntry>> {
+    ) -> std::sync::Arc<crate::virtual_members::laravel::RouteDiscovery> {
         self.cached_laravel_enumeration(
             &self.laravel_string_key_build_locks.routes,
             |cache| cache.routes.clone(),
@@ -1423,6 +1467,7 @@ impl Backend {
 
     pub(crate) fn cached_route_names(&self) -> Vec<String> {
         self.cached_routes()
+            .routes
             .iter()
             .map(|route| route.name.clone())
             .collect()
@@ -1684,6 +1729,7 @@ fn string_key_item_kind(kind: &LaravelStringKind) -> CompletionItemKind {
         LaravelStringKind::Trans => CompletionItemKind::TEXT,
         LaravelStringKind::MorphAlias => CompletionItemKind::ENUM_MEMBER,
         LaravelStringKind::GateAbility => CompletionItemKind::METHOD,
+        LaravelStringKind::Env => CompletionItemKind::CONSTANT,
         LaravelStringKind::Route
         | LaravelStringKind::Command
         | LaravelStringKind::Section
@@ -1760,6 +1806,7 @@ impl Backend {
                 aliases
             }
             LaravelStringKind::GateAbility => self.cached_gate_abilities(),
+            LaravelStringKind::Env => crate::virtual_members::laravel::enumerate_env_keys(self),
             LaravelStringKind::Section
             | LaravelStringKind::Stack
             | LaravelStringKind::ContainerBinding => Vec::new(),
@@ -2011,6 +2058,68 @@ mod tests {
         assert_eq!(ctx.prefix, "ho");
     }
 
+    /// Every call that names a route completes route names, whichever of
+    /// the URL-building helpers it hangs off.
+    #[test]
+    fn detects_the_route_helpers_beyond_the_route_function() {
+        for call in [
+            "URL::signedRoute('orders.",
+            "Redirect::temporarySignedRoute('orders.",
+            "Response::redirectToRoute('orders.",
+            "Route::is('orders.",
+            "redirect()->route('orders.",
+            "$request->routeIs('orders.",
+        ] {
+            let content = format!("<?php\n{call}");
+            let col = content.lines().nth(1).unwrap().len() as u32;
+            let ctx = detect_laravel_string_key_context(&content, Position::new(1, col))
+                .unwrap_or_else(|| panic!("should detect `{call}` as a route context"));
+            assert!(matches!(ctx.kind, LaravelStringKind::Route), "for `{call}`");
+            assert_eq!(ctx.prefix, "orders.", "for `{call}`");
+        }
+    }
+
+    /// A `getMany()` key is the first entry of an array literal rather than
+    /// the first argument, and `Env::get()` names an environment variable.
+    #[test]
+    fn detects_the_list_and_environment_call_shapes() {
+        let content = "<?php\nConfig::getMany(['app.";
+        let col = content.lines().nth(1).unwrap().len() as u32;
+        let ctx = detect_laravel_string_key_context(content, Position::new(1, col))
+            .expect("should detect getMany() as a config context");
+        assert!(matches!(ctx.kind, LaravelStringKind::Config));
+        assert_eq!(ctx.prefix, "app.");
+
+        for call in ["Env::get('APP_", "env('APP_"] {
+            let content = format!("<?php\n{call}");
+            let col = content.lines().nth(1).unwrap().len() as u32;
+            let ctx = detect_laravel_string_key_context(&content, Position::new(1, col))
+                .unwrap_or_else(|| panic!("should detect `{call}` as an environment context"));
+            assert!(matches!(ctx.kind, LaravelStringKind::Env), "for `{call}`");
+            assert_eq!(ctx.prefix, "APP_", "for `{call}`");
+        }
+    }
+
+    /// `#[RedirectToRoute]` names a route rather than a config key, but only
+    /// where the file imports Laravel's attribute.
+    #[test]
+    fn detects_the_redirect_to_route_attribute() {
+        let content = "<?php\nuse Illuminate\\Foundation\\Http\\Attributes\\RedirectToRoute;\n\
+                       #[RedirectToRoute('lo";
+        let col = content.lines().nth(2).unwrap().len() as u32;
+        let ctx = detect_laravel_string_key_context(content, Position::new(2, col))
+            .expect("should detect the attribute as a route context");
+        assert!(matches!(ctx.kind, LaravelStringKind::Route));
+        assert_eq!(ctx.prefix, "lo");
+
+        let unimported = "<?php\n#[RedirectToRoute('lo";
+        let col = unimported.lines().nth(1).unwrap().len() as u32;
+        assert!(
+            detect_laravel_string_key_context(unimported, Position::new(1, col)).is_none(),
+            "an attribute of the same name from elsewhere names no route"
+        );
+    }
+
     /// The preprocessor compiles Blade's render directives into marker
     /// calls, so completion inside `@include('` and `@each('` reaches the
     /// view index through those names.
@@ -2174,6 +2283,23 @@ mod tests {
         let ctx = ctx.expect("should detect Config::get() context");
         assert!(matches!(ctx.kind, LaravelStringKind::Config));
         assert_eq!(ctx.prefix, "app.");
+    }
+
+    #[test]
+    fn detects_static_config_mutators_and_translation_queries() {
+        for method in ["prepend", "push"] {
+            let content = format!("<?php\nConfig::{method}('app.providers');\n");
+            let ctx = detect_at_end(&content, "app.providers")
+                .unwrap_or_else(|| panic!("should detect Config::{method}() context"));
+            assert_eq!(ctx.kind, LaravelStringKind::Config);
+        }
+
+        for method in ["get", "has", "hasForLocale", "choice"] {
+            let content = format!("<?php\nLang::{method}('messages.saved');\n");
+            let ctx = detect_at_end(&content, "messages.saved")
+                .unwrap_or_else(|| panic!("should detect Lang::{method}() context"));
+            assert_eq!(ctx.kind, LaravelStringKind::Trans);
+        }
     }
 
     #[test]

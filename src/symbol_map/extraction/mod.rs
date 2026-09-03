@@ -98,6 +98,10 @@ struct ExtractionCtx<'a> {
     /// Whether the file imports from `PHPUnit\Framework\Attributes\`, cached
     /// the same way as [`Self::has_laravel_container_attrs`].
     has_phpunit_attrs: Option<bool>,
+    /// Whether the file imports from `Illuminate\Foundation\Http\Attributes\`,
+    /// cached the same way.  Gates recognition of a short `#[RedirectToRoute]`
+    /// as a route-name reference.
+    has_laravel_http_attrs: Option<bool>,
     /// Whether the members currently being extracted belong to a class that
     /// syntactically extends an Artisan console command (or is `#[AsCommand]`
     /// decorated).  Gates recognition of `$this->call('cmd')` /
@@ -233,6 +237,7 @@ fn extract_symbol_map_inner(
         cond_block_end_stack: Vec::new(),
         has_laravel_container_attrs: None,
         has_phpunit_attrs: None,
+        has_laravel_http_attrs: None,
         in_console_command: false,
         in_mailable: false,
         covers_default_class: None,

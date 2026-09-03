@@ -151,6 +151,7 @@ impl Backend {
                     branch_aware: false,
                     match_arm_narrowing: HashMap::new(),
                     scope_var_resolver: None,
+                    scope_proofs: None,
                 };
                 let Some(ty) =
                     crate::type_engine::variable::foreach_resolution::resolve_expression_type(
@@ -161,11 +162,9 @@ impl Backend {
                     continue;
                 };
                 for site in call.sites {
-                    if crate::class_lookup::is_subtype_of_named(
-                        &ty,
-                        site.receiver.fqn(),
-                        &class_loader,
-                    ) {
+                    if site.receiver.fqns().iter().any(|fqn| {
+                        crate::class_lookup::is_subtype_of_named(&ty, fqn, &class_loader)
+                    }) {
                         confirmed.push(site.to_span());
                     }
                 }

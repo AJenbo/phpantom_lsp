@@ -65,6 +65,7 @@ pub(crate) fn resolve_laravel_string_key(
         LaravelStringKind::MorphAlias => resolve_morph_alias_definitions(backend, key),
         LaravelStringKind::GateAbility => resolve_gate_ability_definitions(backend, key),
         LaravelStringKind::ContainerBinding => resolve_container_binding_definitions(backend, key),
+        LaravelStringKind::Env => super::env_vars::resolve_env_definitions(backend, key),
     }
 }
 
@@ -253,9 +254,8 @@ pub(crate) fn find_laravel_string_key_references(
         | LaravelStringKind::Command
         | LaravelStringKind::MorphAlias
         | LaravelStringKind::GateAbility
-        | LaravelStringKind::ContainerBinding => {
-            find_string_key_usages(kind, key, backend, snapshot)
-        }
+        | LaravelStringKind::ContainerBinding
+        | LaravelStringKind::Env => find_string_key_usages(kind, key, backend, snapshot),
     };
 
     if include_declaration && !kind.is_config_backed() {

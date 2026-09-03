@@ -46,8 +46,8 @@ pub(crate) fn has_scope_attribute(method: &class_like::method::Method<'_>) -> bo
 /// patterns like `$this->hasMany(Post::class)`.  If found, it returns
 /// a synthesized return type string (e.g. `HasMany<Post>`).
 ///
-/// This enables relationship property synthesis on models that don't
-/// use Larastan-style `@return` annotations.
+/// This enables relationship property synthesis on models whose
+/// relationship methods carry no generic `@return` annotation.
 pub(crate) fn infer_relationship_from_method<'a>(
     method: &class_like::method::Method<'a>,
     doc_ctx: Option<&DocblockCtx<'a>>,

@@ -1,0 +1,22 @@
+// test: return type inferred from body of a static method call
+// feature: completion
+// A static call with no declared return type reads its return type off
+// the body via the same fallback as an instance call.
+// expect: barMethod(
+---
+<?php
+
+class StaticReturnFactory {
+    public static function make() {
+        return new StaticReturnItem();
+    }
+}
+
+class StaticReturnItem {
+    public function barMethod(): void {}
+}
+
+function testStaticReturn(): void {
+    $item = StaticReturnFactory::make();
+    $item-><>
+}

@@ -4,8 +4,9 @@
 //! Laravel's `Illuminate\Support\Traits\Macroable` trait lets any class
 //! register new methods at runtime via `SomeClass::macro('name', $closure)`,
 //! typically from a service provider's `boot()`.  Full runtime fidelity is
-//! not achievable statically (Larastan boots the app and reads the runtime
-//! `static::$macros` via reflection), but the common literal registration
+//! not achievable statically (the Laravel PHPStan extensions boot the app
+//! and read the runtime `static::$macros` via reflection), but the common
+//! literal registration
 //! pattern is recoverable from source.
 //!
 //! This module extracts registrations of the shape

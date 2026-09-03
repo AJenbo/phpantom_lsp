@@ -375,11 +375,46 @@ pub fn resolve_class_fully_with_generics(
     // Resolve the base class (cached at (FQN, [])).
     let base = resolve_class_fully_inner(class, class_loader, cache);
 
+    // Set when the rebind below had to stop at base inheritance because
+    // this specialisation was already being resolved on this thread.  The
+    // result is missing its virtual members, `@mixin` methods, and
+    // framework patches, so it is fit to return to the re-entrant caller
+    // but must not be cached as if it were the finished article.
+    let mut post_merge_skipped = false;
+
     let mut result = if !base.template_params.is_empty() {
         Arc::new(crate::inheritance::apply_generic_args(&base, generic_args))
-    } else if let Some(rebound) =
+    } else if let Some((overridden, mut rebound)) =
         crate::inheritance::rebind_extends_only_generics(class, class_loader, generic_args)
     {
+        // The rebind restarts from base inheritance, so everything the
+        // full resolution layers on top (virtual members, `@mixin`
+        // expansion, interface members, framework patches) has to run
+        // again over the re-merged class.  `mark_in_flight` keeps a
+        // provider that resolves this same specialisation from
+        // recursing back into the rebind; on re-entry the caller gets
+        // the base-inheritance-only result instead.
+        let temp_cache;
+        let stage_cache: &ResolvedClassCache = match cache {
+            Some(c) => c,
+            None => match super::cache::active_resolved_class_cache() {
+                Some(active) => active,
+                None => {
+                    temp_cache = super::cache::new_resolved_class_cache();
+                    &temp_cache
+                }
+            },
+        };
+        if stage_cache.write().mark_in_flight(fqn) {
+            let _in_flight = InFlightGuard {
+                cache: stage_cache,
+                fqn,
+            };
+            apply_post_merge_stages(&mut rebound, &overridden, class_loader, stage_cache);
+        } else {
+            post_merge_skipped = true;
+        }
+        rebound.rebuild_method_index();
         Arc::new(rebound)
     } else {
         base
@@ -399,7 +434,9 @@ pub fn resolve_class_fully_with_generics(
         result = Arc::new(proxy);
     }
 
-    if let Some(c) = cache {
+    if let Some(c) = cache
+        && !post_merge_skipped
+    {
         c.write().insert(cache_key, Arc::clone(&result));
     }
 
@@ -543,6 +580,34 @@ fn resolve_class_fully_inner(
 
     // ── Uncached resolution ─────────────────────────────────────────
     let mut merged = resolve_class_with_inheritance(effective_class, class_loader);
+    apply_post_merge_stages(&mut merged, effective_class, class_loader, cache);
+
+    // ── Cache store ─────────────────────────────────────────────────
+    merged.rebuild_method_index();
+    let result = Arc::new(merged);
+    cache.write().insert(cache_key, Arc::clone(&result));
+
+    result
+}
+
+/// Layer virtual members, interface members, and framework patches onto
+/// an inheritance-merged class.
+///
+/// Split out of [`resolve_class_fully_inner`] so that a class re-merged
+/// under an overridden `@extends` binding (see
+/// [`rebind_extends_only_generics`](crate::inheritance::rebind_extends_only_generics))
+/// goes through exactly the same stages instead of stopping at base
+/// inheritance.  `effective_class` is the un-merged class the stages
+/// read structural information from (interfaces, `@implements`
+/// generics, the parent chain); `merged` is the result of running the
+/// inheritance merge over it.
+fn apply_post_merge_stages(
+    merged: &mut ClassInfo,
+    effective_class: &ClassInfo,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    cache: &ResolvedClassCache,
+) {
+    let fqn = effective_class.fqn();
 
     // Whether Laravel-specific resolution should run.  A throwaway
     // cache defaults to `true`, so behaviour is unchanged for
@@ -582,7 +647,7 @@ fn resolve_class_fully_inner(
 
     let providers = default_providers(is_laravel);
     if !providers.is_empty() {
-        apply_virtual_members(&mut merged, class_loader, &providers, Some(cache));
+        apply_virtual_members(merged, class_loader, &providers, Some(cache));
     }
 
     // ── Interface member merging ────────────────────────────────────
@@ -758,11 +823,7 @@ fn resolve_class_fully_inner(
             // right input for the substituted case too.
             let resolved_iface = resolve_class_fully_inner(&iface, class_loader, Some(cache));
 
-            merge_interface_members_into(
-                &mut merged,
-                ClassInfo::clone(&resolved_iface),
-                &iface_subs,
-            );
+            merge_interface_members_into(merged, ClassInfo::clone(&resolved_iface), &iface_subs);
         }
     }
 
@@ -790,15 +851,8 @@ fn resolve_class_fully_inner(
     // `laravel/patches.rs` for the full patch inventory.  Skipped for
     // non-Laravel projects.
     if is_laravel {
-        apply_laravel_patches(&mut merged, &fqn);
+        apply_laravel_patches(merged, &fqn);
     }
-
-    // ── Cache store ─────────────────────────────────────────────────
-    merged.rebuild_method_index();
-    let result = Arc::new(merged);
-    cache.write().insert(cache_key, Arc::clone(&result));
-
-    result
 }
 
 /// Merge resolved interface members into a class, applying `@implements`

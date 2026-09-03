@@ -1291,10 +1291,15 @@ impl Backend {
                         .and_then(docblock::extract_self_out_type_from_info);
 
                     // `@pure` promises the call changes nothing, which is what
-                    // lets a check recorded about the receiver survive it.
+                    // lets a check recorded about the receiver survive it;
+                    // `@impure` is the opposite promise, for a call whose
+                    // return type does not already give it away.
                     let is_pure = method_docblock_info
                         .as_ref()
                         .is_some_and(docblock::declares_pure);
+                    let is_impure = method_docblock_info
+                        .as_ref()
+                        .is_some_and(docblock::declares_impure);
 
                     methods.push(MethodInfo {
                         name,
@@ -1326,6 +1331,7 @@ impl Backend {
                             .and_then(crate::docblock::extract_if_this_is_type),
                         self_out,
                         is_pure,
+                        is_impure,
                     });
                     method_bodies.push((methods.len() - 1, &method.body));
                 }

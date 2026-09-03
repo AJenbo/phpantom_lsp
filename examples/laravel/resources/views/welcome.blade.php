@@ -22,6 +22,12 @@
     @if($user)
         <p>Hello, {{ $user->name }}!</p>
         <p>Email: {{ $user->email }}</p>
+
+        {{-- A raw echo opens at its own single brace, so what it holds is
+             PHP like any other expression: bio() is an @method on
+             BlogAuthor and completes, hovers, and navigates here. The only
+             difference from the escaped form is the missing e() call. --}}
+        <p>{!! $user->bio() !!}</p>
     @endif
 
     {{-- The inline @php(…) directive assigns just like the block form:
@@ -108,7 +114,10 @@
          project ships (a class-backed one is listed as the class it names,
          an anonymous one as its template). Inside a tag whose name is
          written, typing a space offers the attributes that component takes,
-         plain and `:` bound.
+         plain and `:` bound. A template that declares no @props still
+         offers the variables it reads and never defines, since the tag is
+         the only thing that can fill one: `<x-widgets::badge ` offers
+         `label` and `author`, and `<x-alert ` offers `messages`.
          Ctrl+Click any tag name below to open what it renders: the class
          for a class-backed component, the template for an anonymous one. --}}
 
@@ -171,6 +180,22 @@
          resources/views/components/card.blade.php --}}
     @php($bakery = \App\Models\Bakery::firstOrFail())
     <x-card :bakery="$bakery" footer="Baked today" />
+
+    {{-- @priceTag and the @bakeryOpen family are this project's own
+         directives, registered in DemoServiceProvider::boot() with
+         Blade::directive() and Blade::if(). Neither exists in Blade, so that
+         registration is the only record of them: without it a template
+         writing them gets nothing at all.
+         Try: type `@price` and `@bakery` on a line of their own — both
+         complete like Blade's own directives. What a directive is handed
+         stays real PHP, so hover $bakery below and change `dough_temp` to a
+         column the model does not have to see it reported. --}}
+    @priceTag($bakery->dough_temp)
+    @bakeryOpen($bakery)
+        <p>{{ __('messages.welcome') }}</p>
+    @elsebakeryOpen($bakery)
+        <p>{{ trans('auth.failed') }}</p>
+    @endbakeryOpen
 
     {{-- @verbatim: content inside is skipped by the preprocessor --}}
     @verbatim

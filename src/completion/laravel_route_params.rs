@@ -77,8 +77,11 @@ impl Backend {
         let cursor_offset = position_to_offset(content, position) as usize;
         let ctx = detect_context(content, cursor_offset, code)?;
 
-        let routes = self.cached_routes();
-        let route = routes.iter().find(|route| route.name == ctx.route_name)?;
+        let discovery = self.cached_routes();
+        let route = discovery
+            .routes
+            .iter()
+            .find(|route| route.name == ctx.route_name)?;
         let params = route_uri_parameters(&route.uri);
         if params.is_empty() {
             return None;

@@ -769,8 +769,12 @@ impl Backend {
 
     /// Try to extract the constant name, byte offset, and value from a
     /// `define('NAME', value)` call expression.  Returns
-    /// `Some((name, define_keyword_offset, value_text))` if the expression
-    /// is a function call to `define` whose first argument is a string literal.
+    /// `Some((name, name_offset, value_text))` if the expression is a
+    /// function call to `define` whose first argument is a string literal.
+    ///
+    /// The offset points at the name inside the quotes, the way a `const`
+    /// declaration's points at its identifier, so go-to-definition and the
+    /// symbol outlines land on the name rather than on `define`.
     fn try_extract_define_info(
         expr: &Expression<'_>,
         content: &str,
@@ -795,7 +799,7 @@ impl Backend {
                 && let Some(name) = lit_str.value.and_then(literal_bytes_to_str)
                 && !name.is_empty()
             {
-                let offset = ident.span().start.offset;
+                let offset = lit_str.span.start.offset + 1;
                 // Extract the value from the second argument if present.
                 let value_text = args.get(1).and_then(|arg| {
                     let val_expr = match arg {

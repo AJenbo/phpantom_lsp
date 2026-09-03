@@ -164,9 +164,22 @@ impl PhpType {
             match supertype.kind() {
                 TypeKind::Named(sup) => {
                     let sup_l = sup.to_ascii_lowercase();
+                    // `float` and `number` are on this list for the same
+                    // reason a bare `int` is a subtype of them: PHP widens
+                    // an integer to a float on the way in, in strict mode
+                    // too.  A range is still an integer, so bounding it
+                    // takes nothing away from that.
                     if matches!(
                         sup_l.as_str(),
-                        "int" | "integer" | "numeric" | "scalar" | "array-key"
+                        "int"
+                            | "integer"
+                            | "float"
+                            | "double"
+                            | "real"
+                            | "numeric"
+                            | "number"
+                            | "scalar"
+                            | "array-key"
                     ) {
                         return true;
                     }
@@ -334,12 +347,18 @@ impl PhpType {
             return matches!(sup.to_ascii_lowercase().as_str(), "array" | "iterable");
         }
 
-        // ── class-string subtyping ──────────────────────────────────
+        // ── class-string / interface-string subtyping ───────────────
+        //
+        // Both name a PHP symbol, so every string refinement the named
+        // lattice already records for the spelling holds of them too:
+        // they are non-empty, never `"0"`, and usable as an array key.
+        // Reaching that table through the kind's own name is what keeps
+        // the two ways of spelling the type — a dedicated `ClassString`
+        // node and a bare `Named("class-string")` — answering alike,
+        // rather than the dedicated node knowing only `string`.
         match (self.kind(), supertype.kind()) {
-            (TypeKind::ClassString(_), TypeKind::Named(sup))
-                if matches!(sup.to_ascii_lowercase().as_str(), "string" | "class-string") =>
-            {
-                return true;
+            (TypeKind::ClassString(_), TypeKind::Named(sup)) => {
+                return is_named_subtype("class-string", sup);
             }
             (TypeKind::ClassString(Some(sub_inner)), TypeKind::ClassString(Some(sup_inner))) => {
                 return sub_inner.is_subtype_of(sup_inner);
@@ -347,18 +366,8 @@ impl PhpType {
             (TypeKind::ClassString(Some(_)), TypeKind::ClassString(None)) => {
                 return true;
             }
-            _ => {}
-        }
-
-        // ── interface-string subtyping ──────────────────────────────
-        match (self.kind(), supertype.kind()) {
-            (TypeKind::InterfaceString(_), TypeKind::Named(sup))
-                if matches!(
-                    sup.to_ascii_lowercase().as_str(),
-                    "string" | "class-string" | "interface-string"
-                ) =>
-            {
-                return true;
+            (TypeKind::InterfaceString(_), TypeKind::Named(sup)) => {
+                return is_named_subtype("interface-string", sup);
             }
             _ => {}
         }
@@ -606,7 +615,15 @@ pub(crate) fn is_named_subtype(sub: &str, sup: &str) -> bool {
                 | "non-empty-literal-string"
         ),
 
-        "non-empty-string" | "truthy-string" | "non-falsy-string" => matches!(
+        // An interface and an enum are class-likes, so the string that
+        // names one is a `class-string`.  A trait is not — `trait-string`
+        // is its own thing, and PHPStan keeps the two apart.
+        "class-string" => matches!(sub_n, "interface-string" | "enum-string"),
+
+        // `non-falsy-string` and its Psalm synonym `truthy-string` exclude
+        // both `""` and `"0"`, so they are strictly narrower than
+        // `non-empty-string`, which excludes only `""`.
+        "non-empty-string" => matches!(
             sub_n,
             "non-empty-literal-string"
                 | "non-empty-lowercase-string"
@@ -616,6 +633,23 @@ pub(crate) fn is_named_subtype(sub: &str, sup: &str) -> bool {
                 | "interface-string"
                 | "trait-string"
                 | "enum-string"
+                | "truthy-string"
+                | "non-falsy-string"
+        ),
+
+        // The `non-empty-*` refinements are absent here on purpose: each
+        // one still admits `"0"`, which is falsy, so none of them is a
+        // subtype of the strict arm. What remains are the string kinds
+        // that name a PHP symbol, and a symbol name can never be `"0"`.
+        "truthy-string" | "non-falsy-string" => matches!(
+            sub_n,
+            "callable-string"
+                | "class-string"
+                | "interface-string"
+                | "trait-string"
+                | "enum-string"
+                | "truthy-string"
+                | "non-falsy-string"
         ),
 
         "literal-string" => matches!(sub_n, "non-empty-literal-string"),
@@ -834,6 +868,34 @@ pub(crate) fn literal_is_subtype_of(lit: &LiteralValue, supertype: &PhpType) -> 
                 // only int|float runtime values.
                 if matches!(sup_l.as_str(), "numeric-string" | "numeric") && lit.is_numeric_string()
                 {
+                    return true;
+                }
+
+                // Lowercase/uppercase string refinements are exactly what
+                // `strtolower`/`strtoupper` would leave unchanged; a content
+                // with no cased characters at all (digits, punctuation, "")
+                // satisfies both.
+                if matches!(
+                    sup_l.as_str(),
+                    "lowercase-string" | "non-empty-lowercase-string"
+                ) && !content.bytes().any(|b| b.is_ascii_uppercase())
+                    && (sup_l != "non-empty-lowercase-string" || !content.is_empty())
+                {
+                    return true;
+                }
+                if matches!(
+                    sup_l.as_str(),
+                    "uppercase-string" | "non-empty-uppercase-string"
+                ) && !content.bytes().any(|b| b.is_ascii_lowercase())
+                    && (sup_l != "non-empty-uppercase-string" || !content.is_empty())
+                {
+                    return true;
+                }
+
+                // `callable-string` enforcement needs the function/method
+                // symbol table, which this layer cannot see; stay silent
+                // rather than reject every function-name literal.
+                if sup_l == "callable-string" {
                     return true;
                 }
 

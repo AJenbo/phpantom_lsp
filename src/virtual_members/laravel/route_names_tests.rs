@@ -3,9 +3,30 @@ use super::*;
 /// Collect the routes of a single route file, as `enumerate_all_routes` does
 /// per file (without the workspace walk).
 fn routes_of(content: &str) -> Vec<RouteEntry> {
+    routes_and_prefixes(content).0
+}
+
+fn routes_and_prefixes(content: &str) -> (Vec<RouteEntry>, Vec<String>) {
+    let (routes, prefixes, _) = routes_and_open_names(content);
+    (routes, prefixes)
+}
+
+fn routes_and_open_names(content: &str) -> (Vec<RouteEntry>, Vec<String>, Vec<String>) {
     let mut out = Vec::new();
-    collect_all_names_from_file(content, None, None, &MacroScope::default(), &mut out);
-    out
+    let mut open_prefixes = Vec::new();
+    let mut open_suffixes = Vec::new();
+    collect_all_names_from_file(
+        content,
+        None,
+        None,
+        &MacroScope::default(),
+        &mut RouteSink {
+            out: &mut out,
+            open_prefixes: &mut open_prefixes,
+            open_suffixes: &mut open_suffixes,
+        },
+    );
+    (out, open_prefixes, open_suffixes)
 }
 
 /// Collect the routes of a route file that can call the router macros
@@ -36,7 +57,19 @@ fn routes_with_macros(content: &str, macro_source: &str, names: &[&str]) -> Vec<
     };
 
     let mut out = Vec::new();
-    collect_all_names_from_file(content, None, None, &scope, &mut out);
+    let mut open_prefixes = Vec::new();
+    let mut open_suffixes = Vec::new();
+    collect_all_names_from_file(
+        content,
+        None,
+        None,
+        &scope,
+        &mut RouteSink {
+            out: &mut out,
+            open_prefixes: &mut open_prefixes,
+            open_suffixes: &mut open_suffixes,
+        },
+    );
     out
 }
 
@@ -706,12 +739,18 @@ fn registrations_inside_a_provider_method_are_collected() {
 fn routes_of_file(path: &Path, workspace_root: &Path) -> Vec<RouteEntry> {
     let content = std::fs::read_to_string(path).unwrap();
     let mut out = Vec::new();
+    let mut open_prefixes = Vec::new();
+    let mut open_suffixes = Vec::new();
     collect_all_names_from_file(
         &content,
         Some(path),
         Some(workspace_root),
         &MacroScope::default(),
-        &mut out,
+        &mut RouteSink {
+            out: &mut out,
+            open_prefixes: &mut open_prefixes,
+            open_suffixes: &mut open_suffixes,
+        },
     );
     out
 }
@@ -906,4 +945,193 @@ fn an_unknown_chain_link_is_still_walked_through() {
         .map(|r| r.name)
         .collect();
     assert_eq!(names, vec!["dashboard".to_string()]);
+}
+
+// ─── Open prefixes and suffixes (dynamic group names) ───────────────────────
+
+#[test]
+fn dynamic_name_in_group_chain_records_an_open_prefix() {
+    let content = "\
+<?php
+Route::name('filament.')
+    ->group(function () {
+        Route::name($panelId . '.')->group(function () {
+            Route::get('/dashboard', fn() => 'hi')->name('pages.dashboard');
+        });
+    });
+";
+    let (routes, prefixes, suffixes) = routes_and_open_names(content);
+    assert!(
+        prefixes.contains(&"filament.".to_string()),
+        "the known static prefix should be recorded as open, got: {prefixes:?}"
+    );
+    // The route inside the dynamic group is also recorded as an open suffix,
+    // since the real name has an unrecoverable run of characters ahead of it.
+    assert!(
+        suffixes.contains(&"filament.pages.dashboard".to_string()),
+        "the route inside the dynamic group should be recorded as an open suffix too, got: {suffixes:?}"
+    );
+    // The statically resolvable route inside the dynamic group is still found.
+    let names: Vec<&str> = routes.iter().map(|r| r.name.as_str()).collect();
+    assert!(
+        names.contains(&"filament.pages.dashboard"),
+        "statically resolvable routes inside the group should still be collected, got: {names:?}"
+    );
+}
+
+#[test]
+fn top_level_dynamic_name_group_records_the_literal_head_of_its_name() {
+    let content = "\
+<?php
+Route::name('filament.' . $panelId . '.')
+    ->group(function () {
+        Route::get('/dashboard', fn() => 'hi')->name('pages.dashboard');
+    });
+";
+    let (_, prefixes, suffixes) = routes_and_open_names(content);
+    assert!(
+        prefixes.contains(&"filament.".to_string()),
+        "a group with no enclosing literal group should still record what its own name spells out, got: {prefixes:?}"
+    );
+    assert!(
+        suffixes.contains(&"pages.dashboard".to_string()),
+        "the route registered inside the group should be recorded as an open suffix, got: {suffixes:?}"
+    );
+}
+
+#[test]
+fn interpolated_group_name_records_the_literal_head() {
+    let content = "\
+<?php
+Route::name(\"filament.{$panelId}.\")->group(function () {
+    Route::get('/dashboard', fn() => 'hi')->name('pages.dashboard');
+});
+";
+    let (_, prefixes, suffixes) = routes_and_open_names(content);
+    assert!(
+        prefixes.contains(&"filament.".to_string()),
+        "an interpolated name should record the text ahead of the first hole, got: {prefixes:?}"
+    );
+    assert!(
+        suffixes.contains(&"pages.dashboard".to_string()),
+        "the route registered inside the group should be recorded as an open suffix, got: {suffixes:?}"
+    );
+}
+
+#[test]
+fn legacy_array_group_with_a_dynamic_name_records_an_open_prefix() {
+    let content = "\
+<?php
+Route::group(['as' => 'filament.' . $panelId . '.'], function () {
+    Route::get('/dashboard', fn() => 'hi')->name('pages.dashboard');
+});
+";
+    let (_, prefixes, suffixes) = routes_and_open_names(content);
+    assert!(
+        prefixes.contains(&"filament.".to_string()),
+        "the array form of a dynamic group name should record an open prefix too, got: {prefixes:?}"
+    );
+    assert!(
+        suffixes.contains(&"pages.dashboard".to_string()),
+        "the route registered inside the group should be recorded as an open suffix, got: {suffixes:?}"
+    );
+}
+
+/// A group whose name spells out nothing at all (no enclosing literal group,
+/// and its own `->name()` argument is entirely a variable) records no open
+/// prefix, since the empty prefix would match every route name in the
+/// project.  It must still record the names it registers as open suffixes,
+/// or every `route()` call naming one of them is wrongly flagged unknown.
+#[test]
+fn a_wholly_unknown_group_name_records_the_names_it_registers() {
+    let content = "\
+<?php
+Route::name($panelId)->group(function () {
+    Route::get('/dashboard', fn() => 'hi')->name('pages.dashboard');
+});
+";
+    let (_, prefixes, suffixes) = routes_and_open_names(content);
+    assert!(
+        prefixes.is_empty(),
+        "an entirely unknown group name should not open every route name, got: {prefixes:?}"
+    );
+    assert!(
+        suffixes.contains(&"pages.dashboard".to_string()),
+        "the route registered inside the group should be recorded as an open suffix, got: {suffixes:?}"
+    );
+}
+
+/// `Route::resource()` generates a whole family of route names rather than
+/// registering one at a time, and each of those also needs recording as an
+/// open suffix when it sits under an unknowable group.
+#[test]
+fn a_resource_under_a_wholly_unknown_group_records_its_generated_names() {
+    let content = "\
+<?php
+Route::name($panelId)->group(function () {
+    Route::resource('photos', PhotoController::class);
+});
+";
+    let (_, prefixes, suffixes) = routes_and_open_names(content);
+    assert!(
+        prefixes.is_empty(),
+        "an entirely unknown group name should not open every route name, got: {prefixes:?}"
+    );
+    assert!(
+        suffixes.contains(&"photos.index".to_string()),
+        "the resource's generated names should be recorded as open suffixes, got: {suffixes:?}"
+    );
+}
+
+#[test]
+fn fully_static_group_does_not_record_an_open_prefix() {
+    let content = "\
+<?php
+Route::name('admin.')->group(function () {
+    Route::get('/dashboard', fn() => 'hi')->name('dashboard');
+});
+";
+    let (_, prefixes, suffixes) = routes_and_open_names(content);
+    assert!(
+        prefixes.is_empty(),
+        "a fully static group should not record an open prefix, got: {prefixes:?}"
+    );
+    assert!(
+        suffixes.is_empty(),
+        "a fully static group should not record an open suffix, got: {suffixes:?}"
+    );
+}
+
+/// A name without a star is compared as itself, so the overwhelmingly common
+/// call site pays nothing for the pattern support.
+#[test]
+fn a_plain_name_matches_only_itself() {
+    assert!(route_name_matches("orders.show", "orders.show"));
+    assert!(!route_name_matches("orders.show", "orders.showAll"));
+    assert!(!route_name_matches("orders.show", "orders"));
+}
+
+/// `Route::is('admin.*')` matches whatever the project registers under the
+/// prefix, the way Laravel's own `Str::is()` does.
+#[test]
+fn a_star_stands_for_any_run_of_characters() {
+    assert!(route_name_matches("admin.*", "admin.users.index"));
+    assert!(route_name_matches("admin.*", "admin."));
+    assert!(!route_name_matches("admin.*", "administration.index"));
+    assert!(route_name_matches("*.index", "admin.users.index"));
+    assert!(!route_name_matches("*.index", "admin.users.show"));
+    assert!(route_name_matches("*", "anything.at.all"));
+}
+
+/// A star between two literals has to leave room for both, and the segment
+/// after the last star is anchored at the end rather than found anywhere.
+#[test]
+fn the_segments_around_a_star_are_anchored() {
+    assert!(route_name_matches("orders.*.edit", "orders.items.edit"));
+    assert!(!route_name_matches("orders.*.edit", "orders.items.editAll"));
+    // The earliest match of an inner segment must not strand the rest: the
+    // trailing `c` here is the second one in the name.
+    assert!(route_name_matches("a*c", "acbc"));
+    assert!(route_name_matches("a*b*c", "axbyc"));
+    assert!(!route_name_matches("a*b*c", "axc"));
 }

@@ -53,19 +53,35 @@
 //!   their raw `PhpType`.
 //! - [`facade_owner`]: picking the concrete container class that types a
 //!   static call made through a Laravel facade.
+//! - [`out_param`]: what a callee leaves in a by-reference parameter,
+//!   read out of its body when the declaration is wider than what the
+//!   body assigns.
+//! - [`reflection`]: typing a property read through the Reflection API,
+//!   whose result depends on the property name passed at the call site.
 mod arg_type_resolution;
 mod callable_target;
 mod facade_owner;
+mod out_param;
+mod reflection;
 mod return_types;
 mod target_cache;
 mod template_subs;
 
+pub(crate) use out_param::{OutParamCallee, effective_out_type};
+
 pub(crate) use facade_owner::facade_concrete_owner;
+pub(crate) use reflection::{
+    is_reflected_property_call, is_reflected_property_class, resolve_reflected_property_at_call,
+    resolve_reflected_property_at_new,
+};
 pub(crate) use return_types::{
     MethodReturnCtx, folded_class_constant_type, folded_global_constant_type,
     resolve_static_access_type,
 };
-pub(crate) use target_cache::{activate_type_engine_caches, try_infer_body_return_type};
+pub(crate) use target_cache::{
+    activate_type_engine_caches, body_inference_in_progress, call_site_param_types,
+    try_infer_body_return_type,
+};
 pub(crate) use template_subs::{
     array_literal_shape_type, bind_callable_param_template, bind_callable_return_template,
     build_call_template_subs, evaluate_constant_operands, finish_template_subs,

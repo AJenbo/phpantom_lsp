@@ -147,7 +147,7 @@ impl Backend {
                 // bindings, hover is useful to show the resolved type and
                 // any docblock descriptions.
                 if let Some(def_kind) = self.lookup_var_def_kind_at(uri, name, cursor_offset)
-                    && !matches!(
+                    && (!matches!(
                         def_kind,
                         VarDefKind::Assignment
                             | VarDefKind::CompoundAssignment
@@ -156,8 +156,13 @@ impl Backend {
                             | VarDefKind::Catch
                             | VarDefKind::ArrayDestructuring
                             | VarDefKind::ListDestructuring
-                    )
+                    ) || (def_kind == VarDefKind::Parameter
+                        && self.is_promoted_property_param(uri, symbol.start)))
                 {
+                    // A constructor-promoted parameter declares a property,
+                    // not a local variable, so it follows the same
+                    // "already visible on screen" rule as any other
+                    // property declaration.
                     return None;
                 }
                 self.hover_variable(name, uri, content, cursor_offset, current_class, &ctx)
@@ -403,9 +408,17 @@ impl Backend {
 
             SymbolKind::FunctionCall {
                 name,
+                is_definition,
                 is_docblock_reference,
-                ..
             } => {
+                // The user is already at the function's own declaration —
+                // showing hover here would just repeat the signature and
+                // docblock that are already on screen, same as a class or
+                // member declaration.
+                if *is_definition {
+                    return None;
+                }
+
                 // An unqualified `@see name()` describes the documented
                 // class's own member first, as phpDocumentor reads it.
                 if *is_docblock_reference
@@ -483,7 +496,18 @@ impl Backend {
                 }
             }
 
-            SymbolKind::ConstantReference { name, .. } => {
+            SymbolKind::ConstantReference {
+                name,
+                is_definition,
+            } => {
+                // The user is already at the `const NAME = ...;` declaration
+                // — the value is on the same line, so showing hover here
+                // would just repeat it, same as a class or member
+                // declaration.
+                if *is_definition {
+                    return None;
+                }
+
                 // The name is resolved against the file the same way the
                 // type engine resolves it, so a namespaced constant is
                 // found through whichever spelling the reference used.
@@ -546,11 +570,17 @@ impl Backend {
                 );
                 let detail = if let Some(loc) = locations.first() {
                     let path = loc.uri.path();
-                    let short_path = path
-                        .rsplit("/routes/")
-                        .next()
-                        .map(|p| format!("routes/{}", p))
-                        .unwrap_or_else(|| path.to_string());
+                    // A conventional route file lives under `routes/`, so
+                    // that segment onward is the useful part; a Folio page
+                    // lives anywhere under the view roots, so it falls back
+                    // to a workspace-relative path the same way View does.
+                    let short_path = path.rsplit_once("/routes/").map_or_else(
+                        || {
+                            self.workspace_relative_path(loc.uri.as_str())
+                                .unwrap_or_else(|| path.to_string())
+                        },
+                        |(_, rest)| format!("routes/{}", rest),
+                    );
                     format!("Defined in `{}`", short_path)
                 } else {
                     "Route name".to_string()
@@ -593,18 +623,12 @@ impl Backend {
                     self, kind, key, uri,
                 );
                 let detail = if let Some(loc) = locations.first() {
-                    let path = loc.uri.path();
                     // Show the path relative to the workspace root so
                     // custom view directories (from `config/view.php`)
                     // display cleanly rather than as absolute paths.
                     let short_path = self
-                        .workspace
-                        .workspace_root
-                        .read()
-                        .as_deref()
-                        .and_then(|root| path.strip_prefix(&format!("{}/", root.to_string_lossy())))
-                        .map(|rel| rel.to_string())
-                        .unwrap_or_else(|| path.to_string());
+                        .workspace_relative_path(loc.uri.as_str())
+                        .unwrap_or_else(|| loc.uri.path().to_string());
                     format!("`{}`", short_path)
                 } else {
                     "View template".to_string()
@@ -622,7 +646,15 @@ impl Backend {
                         .next()
                         .map(|p| format!("lang/{}", p))
                         .unwrap_or_else(|| path.to_string());
-                    format!("Defined in `{}`", short_path)
+                    // The line as written: a `:placeholder` is left in
+                    // place, since what it stands for is decided by the
+                    // call site rather than by the translation.
+                    match crate::virtual_members::laravel::trans_line(self, key, &loc.uri) {
+                        Some(line) => {
+                            format!("{}\n\nDefined in `{}`", inline_code(&line), short_path)
+                        }
+                        None => format!("Defined in `{}`", short_path),
+                    }
                 } else {
                     "Translation key".to_string()
                 };
@@ -690,6 +722,26 @@ impl Backend {
                     None => "Container binding".to_string(),
                 };
                 ("Container", detail)
+            }
+            LaravelStringKind::Env => {
+                // The value is shown like every sibling hover shows what its
+                // key resolves to, except for names that read as naming a
+                // credential: those are the ones worth not putting on screen
+                // during a screen share.
+                let detail = match crate::virtual_members::laravel::env_declaration(self, key) {
+                    Some(decl) => {
+                        let value = if crate::virtual_members::laravel::env_name_is_sensitive(key) {
+                            "Value hidden".to_string()
+                        } else if decl.value.is_empty() {
+                            "Set to an empty value".to_string()
+                        } else {
+                            inline_code(&decl.value)
+                        };
+                        format!("{}\n\nDeclared in `{}`", value, decl.file)
+                    }
+                    None => "Not declared in `.env`".to_string(),
+                };
+                ("Env", detail)
             }
         };
 

@@ -115,6 +115,7 @@ src/
 ├── phpstan.rs, phpcs.rs, mago.rs, phpstan_ignore.rs   # External analyzer integrations
 ├── analyse/                # `analyze` CLI subcommand (batch diagnostics, output formatting)
 ├── fix.rs                  # `fix` CLI subcommand (automated code fixes)
+├── move_cli.rs             # `move` CLI subcommand (class/namespace refactoring)
 ├── self_update.rs          # Binary self-update
 │
 │   # Blade & shared utilities
@@ -1169,11 +1170,13 @@ native diagnostic set.
 
 Each worker is created during `initialized` via `clone_for_diagnostic_worker`, which builds a shallow clone of the `Backend`. All `Arc`-wrapped fields (maps, caches, the notify/pending slots) are shared by `Arc::clone`, so every worker sees all mutations the main `Backend` makes. The PHPStan and PHPCS workers each have their own notify handle, pending-URI slot, and diagnostic cache so they run independently of each other and of the native diagnostic worker.
 
-Non-`Arc` fields are snapshotted at spawn time: `php_version`, `vendor_uri_prefixes`, `vendor_dir_paths`, and `config`. These fields are only written during `initialized` (before the workers are spawned) and never change afterwards. If a future feature adds hot-reloading of `.phpantom.toml` or runtime PHP version changes, the workers would need to be notified or re-cloned. This invariant ("init-time fields are write-once") should be verified before adding any post-init mutation to these fields.
+Non-`Arc` fields are snapshotted at spawn time: `php_version`, `vendor_uri_prefixes`, and `vendor_dir_paths`. These fields are only written during `initialized` (before the workers are spawned) and never change afterwards. If a future feature adds runtime PHP version changes, the workers would need to be notified or re-cloned. This invariant ("init-time fields are write-once") should be verified before adding any post-init mutation to these fields.
+
+`config` is the one exception: it is wrapped in `Arc<Mutex<Config>>` rather than snapshotted, because it *is* hot-reloaded. `src/indexing/watch.rs` reloads it on a project's own `.phpantom.toml` change (via `apply_watched_file_changes`) and on a global config change (via `global_config_watcher`, a background task polling the global config file's mtime since it lives outside the workspace and no client file watcher glob can reach it). Both reloads run on a cloned `Backend`, so `config` has to be `Arc`-shared for the write to reach every other clone, including the long-lived one that answers LSP requests.
 
 ### Workspace diagnostics (files that are not open)
 
-Everything above diagnoses files the user has opened. `src/diagnostics/workspace.rs` covers the rest of the project: after the full background index finishes (which itself only starts after startup indexing completes), it runs the same fast/slow collectors over every unopened user file on a throttled worker pool, then runs each configured external tool once over the whole project (only when that tool has its own project-level config file, e.g. `phpstan.neon`). Results are stored in `Backend::workspace_diags` and reported through `workspace/diagnostic` (or pushed directly for non-pull clients). This pass never runs before the server is usable — it is chained onto the tail of the full-index task, so it can never compete with startup for CPU. Toggle with `[diagnostics] workspace` / `workspace-external` in `.phpantom.toml`.
+Everything above diagnoses files the user has opened. `src/diagnostics/workspace.rs` covers the rest of the project, off by default and enabled with `[diagnostics] workspace = true`: after the full background index finishes (which itself only starts after startup indexing completes), it runs the same fast/slow collectors over every unopened user file on a throttled worker pool, then runs each configured external tool once over the whole project (only when that tool has its own project-level config file, e.g. `phpstan.neon`). Results are stored in `Backend::workspace_diags` and reported through `workspace/diagnostic` (or pushed directly for non-pull clients). This pass never runs before the server is usable — it is chained onto the tail of the full-index task, so it can never compete with startup for CPU. Toggle with `[diagnostics] workspace` / `workspace-external` in `.phpantom.toml`.
 
 ## Forward Walker
 
@@ -1181,6 +1184,16 @@ The forward walker (`src/type_engine/variable/forward_walk/`) walks
 method bodies top-to-bottom, building a scope of variable types at
 each statement boundary. It is shared by diagnostics, completion,
 hover, go-to-definition, and signature help.
+
+The same walk answers which branches cannot run
+(`forward_walk/reachability.rs`): a guard whose value the source decides
+(a boolean literal, the logical operators over decidable operands, or a
+`method_exists()` naming one class and one method) marks its dead
+branches. The walker uses that to keep a dead branch out of the join
+after the `if`; the diagnostic pass collects the branches' byte ranges
+while the scope cache is live and drops everything the collectors
+reported inside one, since no collector knows on its own whether the
+span it is looking at can be reached.
 
 ## Name Resolution
 

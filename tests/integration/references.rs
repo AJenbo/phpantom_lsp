@@ -1,4 +1,4 @@
-use crate::common::create_test_backend;
+use crate::common::{create_test_backend, create_test_backend_with_full_stubs};
 use tower_lsp::lsp_types::Position;
 
 use std::sync::Arc;
@@ -160,6 +160,77 @@ class Baz {
         results.len(),
         3,
         "Expected 3 references (1 declaration + 2 usages), got {}: {:#?}",
+        results.len(),
+        results
+    );
+}
+
+#[test]
+fn class_references_include_differently_cased_spellings() {
+    // PHP resolves class names case-insensitively, so every spelling of
+    // `Widget` below is a reference to the same class.
+    let backend = create_test_backend();
+    let uri = "file:///tmp/test_refs_class_case.php";
+    let content = r#"<?php
+
+class Widget {}
+
+class Uses {
+    public function test(): void {
+        $a = new WIDGET();
+        $b = new Widget();
+        $c = new widget();
+    }
+}
+"#;
+
+    open_file(&backend, uri, content);
+
+    // Cursor on `Widget` in the class declaration (line 2, col 6).
+    let results = backend
+        .find_references(uri, content, Position::new(2, 6), true)
+        .expect("should find references");
+
+    assert_no_duplicates(&results, "class_references_case");
+    assert_eq!(
+        results.len(),
+        4,
+        "Expected the declaration plus all 3 spellings, got {}: {:#?}",
+        results.len(),
+        results
+    );
+}
+
+#[test]
+fn constructor_references_include_differently_cased_instantiations() {
+    let backend = create_test_backend();
+    let uri = "file:///tmp/test_refs_ctor_case.php";
+    let content = r#"<?php
+
+class Widget {
+    public function __construct(int $size) {}
+}
+
+class Uses {
+    public function test(): void {
+        $a = new WIDGET(1);
+        $b = new Widget(2);
+    }
+}
+"#;
+
+    open_file(&backend, uri, content);
+
+    // Cursor on `__construct` (line 3, col 20).
+    let results = backend
+        .find_references(uri, content, Position::new(3, 20), true)
+        .expect("should find constructor references");
+
+    assert_no_duplicates(&results, "constructor_references_case");
+    assert_eq!(
+        results.len(),
+        3,
+        "Expected the declaration plus both instantiations, got {}: {:#?}",
         results.len(),
         results
     );
@@ -2362,6 +2433,130 @@ $w = new Widget();
         results.len(),
         4,
         "Expected 4 references (declaration + self + Widget + new), got {}: {:#?}",
+        results.len(),
+        results
+    );
+}
+
+/// `new self()` and `new static()` instantiate through the `self`/`static`
+/// keywords rather than a named `ClassReference`, and must be reported
+/// alongside plain `new ClassName()` sites.
+#[test]
+fn constructor_references_include_new_self_and_static() {
+    let backend = create_test_backend();
+    let uri = "file:///tmp/test_refs_ctor_new_self_static.php";
+    let content = r#"<?php
+
+class ConfigPaths {
+    public function __construct() {}
+
+    public static function home(): ConfigPaths {
+        return new self();
+    }
+
+    public static function viaStatic(): ConfigPaths {
+        return new static();
+    }
+}
+"#;
+
+    open_file(&backend, uri, content);
+
+    // Cursor on ConfigPaths's `__construct` declaration (line 3).
+    let results = backend
+        .find_references(uri, content, Position::new(3, 22), true)
+        .expect("should find references");
+
+    assert_no_duplicates(
+        &results,
+        "constructor_references_include_new_self_and_static",
+    );
+
+    assert!(
+        has_location_on_line(&results, 3),
+        "missing constructor declaration: {results:#?}"
+    );
+    assert!(
+        has_location_on_line(&results, 6),
+        "missing new self() call: {results:#?}"
+    );
+    assert!(
+        has_location_on_line(&results, 10),
+        "missing new static() call: {results:#?}"
+    );
+    assert_eq!(
+        results.len(),
+        3,
+        "Expected 3 references (declaration + new self + new static), got {}: {:#?}",
+        results.len(),
+        results
+    );
+}
+
+/// A constant read off a value a reflection-based accessor returned is a
+/// real reference to it, even though nothing in the accessor's signature
+/// says which class comes back: the class was decided by the arguments the
+/// call passed, and reading the accessor's body recovers it.
+///
+/// `Accessor::fetchProperty()` is `Psy\Sudo::fetchProperty()` verbatim, and
+/// `Psy\Shell::VERSION` read through it is the reference this used to miss.
+#[test]
+fn constant_read_through_a_reflection_accessor_is_a_reference() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///tmp/test_refs_reflection_accessor.php";
+    let content = r#"<?php
+
+class Shell {
+    const VERSION = 'v1.0.0';
+}
+
+class Configuration {
+    private ?Shell $shell = null;
+}
+
+class Accessor {
+    /**
+     * @return mixed Value of $object->property
+     */
+    public static function fetchProperty($object, string $property)
+    {
+        $prop = self::getProperty(new \ReflectionObject($object), $property);
+
+        return $prop->getValue($object);
+    }
+
+    private static function getProperty(\ReflectionClass $refl, string $property): \ReflectionProperty
+    {
+        return $refl->getProperty($property);
+    }
+}
+
+function probe(Configuration $config): void {
+    $shell = Accessor::fetchProperty($config, 'shell');
+    echo $shell::VERSION;
+}
+"#;
+
+    open_file(&backend, uri, content);
+
+    // Cursor on `VERSION` in the constant declaration (line 3).
+    let results = backend
+        .find_references(uri, content, Position::new(3, 10), true)
+        .expect("should find references");
+
+    assert_no_duplicates(&results, "reflection_accessor_constant_references");
+    assert!(
+        has_location_on_line(&results, 3),
+        "missing the declaration: {results:#?}"
+    );
+    assert!(
+        has_location_on_line(&results, 29),
+        "missing the read through the accessor: {results:#?}"
+    );
+    assert_eq!(
+        results.len(),
+        2,
+        "Expected 2 references (declaration + read), got {}: {:#?}",
         results.len(),
         results
     );

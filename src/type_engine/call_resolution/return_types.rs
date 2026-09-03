@@ -56,7 +56,20 @@ pub(crate) struct MethodReturnCtx<'a> {
     /// When `true`, the magic-method fallback checks `__callStatic`
     /// instead of `__call`.
     pub is_static: bool,
+    /// The types the call site's arguments resolve to, indexed by
+    /// declared parameter, for a method whose return type has to be read
+    /// off its body.
+    ///
+    /// Resolving an argument is as expensive as resolving any other
+    /// expression and almost every call needs none of it, so this is a
+    /// closure the body-inference fallback calls only once it is certain
+    /// it is going to read a body.  `None` from a caller that has no
+    /// argument AST to resolve.
+    pub call_args: CallSiteArgResolver<'a>,
 }
+
+/// See [`MethodReturnCtx::call_args`].
+pub(crate) type CallSiteArgResolver<'a> = Option<&'a dyn Fn() -> Vec<PhpType>>;
 
 /// Build a [`VarClassStringResolver`] closure from a [`ResolutionCtx`].
 ///
@@ -178,7 +191,7 @@ fn resolve_request_accessor_at_call(
     // receiver is usually an app's own `FormRequest` subclass that never
     // redeclares it, so its parameters have to be found by walking the
     // parent chain rather than reading `receiver`'s own members.
-    let method = crate::type_engine::types::narrowing::find_method_in_chain_where(
+    let (method, _) = crate::type_engine::types::narrowing::find_method_in_chain_where(
         receiver,
         method_name,
         ctx.class_loader,
@@ -309,6 +322,59 @@ fn replace_support_carbon_return(ty: &PhpType, configured_class: &str) -> Option
         }
         _ => None,
     }
+}
+
+/// Resolve a method's PHPStan-style conditional return type (if any)
+/// against call-site arguments and template substitutions, returning the
+/// winning branch with template substitutions already applied.
+///
+/// Returns `None` when the method has no conditional return type, or when
+/// the condition cannot be decided from the arguments — callers fall back
+/// to the method's plain `return_type` in that case.  Shared by
+/// [`Backend::resolve_method_return_types_with_args`] (which needs the
+/// winning branch's classes) and the call-chain hint capture in
+/// `resolve_call_return_types_on_receiver_inner` (which needs the winning
+/// branch's full type, e.g. to preserve an intersection) so the two agree
+/// on what a conditional return type resolves to.
+fn resolve_conditional_return_hint(
+    method: &MethodInfo,
+    text_args: &str,
+    var_resolver: VarClassStringResolver<'_>,
+    template_subs: &HashMap<String, PhpType>,
+    calling_class_name: Option<&str>,
+    declaring_fqn: &str,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<PhpType> {
+    let cond = method.conditional_return.as_ref()?;
+    let class_values =
+        crate::inheritance::class_scoped_template_values(template_subs, &method.template_params);
+    let tpl = TemplateContext {
+        defaults: Some(class_values.as_ref()),
+        params: &method.template_params,
+        bindings: &method.template_bindings,
+        arg_type_resolver: None,
+    };
+    let resolved = if !text_args.is_empty() {
+        resolve_conditional_with_text_args_and_defaults(
+            cond,
+            &method.parameters,
+            text_args,
+            var_resolver,
+            crate::type_engine::conditional_resolution::ConditionalClassContext {
+                calling: calling_class_name,
+                declaring: Some(declaring_fqn),
+            },
+            class_loader,
+            &tpl,
+        )
+    } else {
+        resolve_conditional_without_args_and_defaults(cond, &method.parameters, tpl.defaults)
+    }?;
+    Some(if !template_subs.is_empty() {
+        resolved.substitute(template_subs)
+    } else {
+        resolved
+    })
 }
 
 impl Backend {
@@ -443,6 +509,30 @@ impl Backend {
                     )
                 });
 
+                // A property read through the Reflection API: the name
+                // handed to `getProperty()` decides the type, so the
+                // stub's `ReflectionProperty` / `mixed` return types are
+                // as specific as an annotation can be.
+                if super::is_reflected_property_call(method_name)
+                    && let Some(ty) = super::resolve_reflected_property_at_call(
+                        method_name,
+                        &split_text_args(text_args).to_vec(),
+                        &lhs_resolved,
+                        ctx,
+                    )
+                {
+                    let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                        &ty,
+                        "",
+                        ctx.all_classes,
+                        ctx.class_loader,
+                    );
+                    if let Some(ref mut hint_out) = return_type_hint_out {
+                        **hint_out = Some(ty);
+                    }
+                    return classes;
+                }
+
                 // Guard-aware auth user model: a `user()` call on a
                 // `Guard`/`Request` subtype resolves to the model
                 // configured for the guard named at the call site
@@ -573,12 +663,36 @@ impl Backend {
                             ctx.resolved_class_cache,
                         );
                         if let Some(m) = merged.get_method_ci(method_name) {
-                            if let Some(ref ret) = m.return_type {
-                                let substituted = if !template_subs.is_empty() {
-                                    ret.substitute(&template_subs)
-                                } else {
-                                    ret.clone()
-                                };
+                            // Try the conditional return type first, exactly
+                            // as `resolve_method_return_types_with_args`
+                            // does for the classes below — a conditional
+                            // return type (e.g. `mock()`'s `(TInstance
+                            // is class-string<T> ? T&MockInterface :
+                            // MockInterface)`) often carries no plain
+                            // `return_type` at all, so reading only
+                            // `return_type` here would leave the hint
+                            // empty even though the classes resolve fine,
+                            // silently dropping the winning branch's shape
+                            // (e.g. an intersection) from the hint.
+                            let substituted = resolve_conditional_return_hint(
+                                m,
+                                text_args,
+                                Some(&var_resolver),
+                                &template_subs,
+                                ctx.current_class.map(|c| c.name.as_str()),
+                                merged.fqn().as_str(),
+                                ctx.class_loader,
+                            )
+                            .or_else(|| {
+                                m.return_type.as_ref().map(|ret| {
+                                    if !template_subs.is_empty() {
+                                        ret.substitute(&template_subs)
+                                    } else {
+                                        ret.clone()
+                                    }
+                                })
+                            });
+                            if let Some(substituted) = substituted {
                                 // Collapse any conditional nested inside the
                                 // return type (e.g. `Collection<($k is
                                 // array|string ? array-key : TGroupKey), …>`)
@@ -655,6 +769,10 @@ impl Backend {
                         cache: ctx.resolved_class_cache,
                         calling_class_name: ctx.current_class.map(|c| c.name.as_str()),
                         is_static: false,
+                        // A chain link is reached from resolved receiver
+                        // types, not from the call AST, so there is no
+                        // argument list here to resolve.
+                        call_args: None,
                     };
                     if let Some((date_class, date_return_type)) =
                         Self::configured_laravel_date_return(&owner, method_name, ctx.class_loader)
@@ -720,6 +838,7 @@ impl Backend {
                                 cache: ctx.resolved_class_cache,
                                 calling_class_name: ctx.current_class.map(|c| c.name.as_str()),
                                 is_static: true,
+                                call_args: None,
                             };
                             ClassInfo::extend_unique_arc(
                                 &mut union_results,
@@ -822,6 +941,7 @@ impl Backend {
                         cache: ctx.resolved_class_cache,
                         calling_class_name: ctx.current_class.map(|c| c.name.as_str()),
                         is_static: true,
+                        call_args: None,
                     };
                     if let Some((date_class, date_return_type)) =
                         Self::configured_laravel_date_return(&merged, method_name, ctx.class_loader)
@@ -871,8 +991,8 @@ impl Backend {
                 // when the class is loadable (i.e. inside a Laravel project).
                 //
                 // Not strictly sound (the declared type is the interface),
-                // but it mirrors Larastan's `NowAndTodayExtension`, which the
-                // ecosystem is written against.  See the matching note in
+                // but it is what the Laravel PHPStan extensions infer too, and
+                // the ecosystem is written against it.  See the matching note in
                 // `rhs_resolution.rs`.
                 if matches!(
                     normalized_func,
@@ -905,6 +1025,24 @@ impl Backend {
                 if !text_args.is_empty() {
                     let owner_name = ctx.current_class.map(|c| c.name.as_str()).unwrap_or("");
                     let fn_args = TextArrayFuncArgs::new(text_args, ctx);
+
+                    // String builtins over literal arguments: the stub
+                    // declares the widest string the function can return,
+                    // but a call whose arguments are all literals has one
+                    // answer.  It names no class, so it travels purely as
+                    // the hint.
+                    if crate::type_engine::variable::string_func_rules::is_foldable_string_func(
+                        func_name,
+                    ) && let Some(folded) =
+                        crate::type_engine::variable::string_func_rules::string_func_literal_type(
+                            func_name, &fn_args,
+                        )
+                    {
+                        if let Some(ref mut hint_out) = return_type_hint_out {
+                            **hint_out = Some(folded);
+                        }
+                        return Vec::new();
+                    }
 
                     // Element-extracting functions (`array_pop`, `current`,
                     // …): the call's type *is* the element type.
@@ -1018,6 +1156,7 @@ impl Backend {
                                     .into_iter()
                                     .map(str::to_string)
                                     .collect::<Vec<String>>(),
+                                None,
                                 ctx,
                             );
                             let classes: Vec<Arc<ClassInfo>> =
@@ -1067,6 +1206,7 @@ impl Backend {
                         let subs = crate::type_engine::variable::rhs_resolution::build_function_template_subs(
                             &func_info,
                             &split_args,
+                            None,
                             ctx,
                         );
 
@@ -1221,6 +1361,22 @@ impl Backend {
                     None => return vec![],
                 };
 
+                // `new ReflectionProperty(C::class, 'name')` is the value
+                // `ReflectionClass::getProperty('name')` builds, written
+                // the other way, so it carries the same class and name.
+                if super::is_reflected_property_class(cls_arc.fqn().as_str())
+                    && let Some(ty) = super::resolve_reflected_property_at_new(
+                        &cls_arc,
+                        &split_text_args(text_args),
+                        ctx,
+                    )
+                {
+                    if let Some(ref mut hint_out) = return_type_hint_out {
+                        **hint_out = Some(ty);
+                    }
+                    return vec![cls_arc];
+                }
+
                 // Fast path: no template params, no inference needed.
                 if cls_arc.template_params.is_empty() || text_args.is_empty() {
                     return vec![cls_arc];
@@ -1341,12 +1497,8 @@ impl Backend {
                                     {
                                         // Extract the element type from array-like types
                                         // so we bind T to the element, not the whole array.
-                                        if let Some(elem_type) =
-                                            resolved_type.extract_value_type(false)
-                                        {
-                                            crate::type_engine::variable::rhs_resolution::insert_or_union(&mut subs, tpl_name.to_string(), elem_type.clone());
-                                        } else {
-                                            crate::type_engine::variable::rhs_resolution::insert_or_union(&mut subs, tpl_name.to_string(), resolved_type);
+                                        if let Some(elem_type) = crate::type_engine::variable::rhs_resolution::array_element_binding(resolved_type) {
+                                            crate::type_engine::variable::rhs_resolution::insert_or_union(&mut subs, tpl_name.to_string(), elem_type);
                                         }
                                     }
                                 }
@@ -1425,7 +1577,8 @@ impl Backend {
                     }
                 }
 
-                // Fallback: resolve unbound template params to bounds.
+                // Fallback: resolve omitted template params to their defaults
+                // and otherwise erase them to their bounds.
                 let type_args = crate::inheritance::default_type_args(&cls_arc);
                 let substituted = crate::virtual_members::resolve_class_fully_with_type_args(
                     &cls_arc,
@@ -1444,13 +1597,62 @@ impl Backend {
             //    ClassName that SubjectExpr::parse couldn't distinguish
             //    from a function name) ───────────────────────────────
             _ => {
-                let callee_classes = ResolvedType::into_arced_classes(
-                    crate::type_engine::resolver::resolve_target_classes_expr(
-                        callee,
-                        AccessKind::Arrow,
-                        ctx,
-                    ),
+                let callee_resolved = crate::type_engine::resolver::resolve_target_classes_expr(
+                    callee,
+                    AccessKind::Arrow,
+                    ctx,
                 );
+
+                // A callable-typed callee carries its return type in the
+                // type string rather than on a class, which is how a
+                // property annotated `@var callable(): Scope` arrives
+                // here.  Read it the same way the `$fn(…)` path does.
+                // Subject resolution keeps only class-typed results, so a
+                // property whose type is a bare `callable(…): T` comes back
+                // empty and its declared hint has to be read directly.
+                let mut callable_types: Vec<PhpType> = callee_resolved
+                    .iter()
+                    .map(|rt| rt.type_string.clone())
+                    .collect();
+                if callable_types.is_empty()
+                    && let SubjectExpr::PropertyChain { base, property } = callee
+                {
+                    let owners = ResolvedType::into_arced_classes(
+                        crate::type_engine::resolver::resolve_target_classes_expr(
+                            base,
+                            AccessKind::Arrow,
+                            ctx,
+                        ),
+                    );
+                    for owner in &owners {
+                        if let Some(hint) = crate::inheritance::resolve_property_type_hint(
+                            owner,
+                            property,
+                            ctx.class_loader,
+                        ) {
+                            callable_types.push(hint);
+                        }
+                    }
+                }
+                for ty in &callable_types {
+                    if let Some(ret_type) = ty.callable_return_type() {
+                        let classes: Vec<Arc<ClassInfo>> =
+                            crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                                ret_type,
+                                "",
+                                ctx.all_classes,
+                                ctx.class_loader,
+                            );
+                        if !classes.is_empty() {
+                            if let Some(ref mut hint_out) = return_type_hint_out {
+                                **hint_out = Some(ret_type.clone());
+                            }
+                            return classes;
+                        }
+                    }
+                }
+
+                let callee_classes = ResolvedType::into_arced_classes(callee_resolved);
 
                 // When the callee resolves to an object with __invoke(),
                 // the call returns __invoke()'s return type, not the
@@ -1493,64 +1695,32 @@ impl Backend {
     ) -> Vec<Arc<ClassInfo>> {
         let all_classes = mr_ctx.all_classes;
         let class_loader = mr_ctx.class_loader;
-        let template_subs = mr_ctx.template_subs;
+        let template_values =
+            crate::inheritance::template_values_with_defaults(class_info, mr_ctx.template_subs);
+        let template_subs = template_values.as_ref();
         let var_resolver = mr_ctx.var_resolver;
         // Helper: try to resolve a method's conditional return type, falling
         // back to template-substituted return type, then plain return type.
         let resolve_method = |method: &MethodInfo| -> Vec<Arc<ClassInfo>> {
             // Try conditional return type first (PHPStan syntax)
-            if let Some(ref cond) = method.conditional_return {
-                let tpl = TemplateContext {
-                    defaults: Some(
-                        &class_info
-                            .template_param_defaults
-                            .iter()
-                            .map(|(k, v)| (k.to_string(), v.clone()))
-                            .collect::<HashMap<String, PhpType>>(),
-                    ),
-                    params: &method.template_params,
-                    bindings: &method.template_bindings,
-                    arg_type_resolver: None,
-                };
-                let resolved_type = if !text_args.is_empty() {
-                    resolve_conditional_with_text_args_and_defaults(
-                        cond,
-                        &method.parameters,
-                        text_args,
-                        var_resolver,
-                        crate::type_engine::conditional_resolution::ConditionalClassContext {
-                            calling: mr_ctx.calling_class_name,
-                            declaring: Some(class_info.fqn().as_str()),
-                        },
-                        mr_ctx.class_loader,
-                        &tpl,
-                    )
-                } else {
-                    resolve_conditional_without_args_and_defaults(
-                        cond,
-                        &method.parameters,
-                        tpl.defaults,
-                    )
-                };
-                if let Some(ref parsed) = resolved_type {
-                    // Apply method-level template substitutions to the
-                    // resolved conditional type (e.g. `TModel` → concrete
-                    // class when TModel is a method-level @template param).
-                    let effective = if !template_subs.is_empty() {
-                        parsed.substitute(template_subs)
-                    } else {
-                        parsed.clone()
-                    };
-                    let classes: Vec<Arc<ClassInfo>> =
-                        crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                            &effective,
-                            &class_info.fqn(),
-                            all_classes,
-                            class_loader,
-                        );
-                    if !classes.is_empty() {
-                        return classes;
-                    }
+            if let Some(effective) = resolve_conditional_return_hint(
+                method,
+                text_args,
+                var_resolver,
+                template_subs,
+                mr_ctx.calling_class_name,
+                class_info.fqn().as_str(),
+                mr_ctx.class_loader,
+            ) {
+                let classes: Vec<Arc<ClassInfo>> =
+                    crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                        &effective,
+                        &class_info.fqn(),
+                        all_classes,
+                        class_loader,
+                    );
+                if !classes.is_empty() {
+                    return classes;
                 }
             }
 
@@ -1576,8 +1746,13 @@ impl Backend {
                 }
             }
 
-            // Fall back to plain return type
-            if let Some(ref ret) = method.return_type {
+            // Fall back to plain return type.  A `mixed` return (native or
+            // docblock) carries no information, so it is treated the same
+            // as no declared type at all: skip straight to body inference
+            // below rather than resolving it to zero classes here.
+            if let Some(ref ret) = method.return_type
+                && !ret.is_mixed()
+            {
                 // When the return type is `parent`, resolve to the actual
                 // parent class rather than returning the owning class.
                 if ret.is_parent_ref() {
@@ -1617,12 +1792,20 @@ impl Backend {
             }
             // Try body return type inference as a last resort.
             // Only for real (non-virtual, non-stub) methods that genuinely
-            // lack a return type declaration and docblock @return tag.
+            // lack a return type declaration and docblock @return tag, or
+            // whose only declared type is `mixed`.
             if method.name_offset != 0
                 && !method.is_virtual
                 && let Some(backend) = mr_ctx.backend
-                && let Some(inferred) =
-                    try_infer_body_return_type(backend, &class_info.fqn(), method)
+                && let Some(inferred) = try_infer_body_return_type(
+                    backend,
+                    &class_info.fqn(),
+                    method,
+                    &mr_ctx
+                        .call_args
+                        .map(|resolve| resolve())
+                        .unwrap_or_default(),
+                )
             {
                 // A body-inferred `return $this` yields a self-like marker.
                 // Map it to the receiver class so the chain continues with

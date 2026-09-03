@@ -26,7 +26,7 @@ dependency.
 
 | Item | Reason |
 |------|--------|
-| Editor-side Blade language registration | The tree-sitter grammar, `.blade.php` file association, and `languageId: "blade"` wiring belong to editor extensions, not the server. Zed's official PHP extension (which absorbed PHPantom's plain-PHP wiring; this repo no longer bundles `zed-extension/`) will not grow Blade support — that registration belongs to the planned `zed-laravel` extension. On VS Code, Blade extensions already set `languageId` to `"blade"`, so PHPantom's integration needs to register for both `"php"` and `"blade"`. Neovim's `lspconfig` can be configured to send `.blade.php` files with the correct `languageId`. |
+| Editor-side Blade language registration | The tree-sitter grammar, `.blade.php` file association, and `languageId: "blade"` wiring belong to editor extensions, not the server. Zed's official PHP extension (which absorbed PHPantom's plain-PHP wiring; this repo no longer bundles `zed-extension/`) will not grow Blade support — that registration belongs to a third-party Blade extension instead, which already exists (`zed-laravel-blade`, MIT, unaffiliated) and lists PHPantom as one of several selectable language servers alongside Intelephense, PhpTools, and Phpactor. On VS Code, Blade extensions already set `languageId` to `"blade"`, so PHPantom's integration needs to register for both `"php"` and `"blade"`. Neovim's `lspconfig` can be configured to send `.blade.php` files with the correct `languageId`. |
 | Rendering or booting to resolve templates | Consistent with `laravel.md`: we never run PHP or boot a Laravel application. |
 
 ---
@@ -70,29 +70,6 @@ dependency.
 
 ---
 
-## BL11. Custom directive discovery
-
-**Impact: Medium · Complexity: Medium**
-
-`Blade::directive('datetime', …)` and `Blade::if('env', …)`
-registrations in app and package service providers declare
-project-specific directives. (Component namespace/path registrations —
-`Blade::componentNamespace()`, `Blade::anonymousComponentPath()`,
-`Blade::anonymousComponentNamespace()` — are already scanned into
-`ProviderResources` and extend the discovery index; see
-`src/virtual_members/laravel/provider_resources.rs`. What remains is the
-directive-registration half.) Scan literal directive registrations too
-— the same provider-scanning shape as the macro scanner — so that:
-
-- known custom directives stop degrading to comments in the
-  preprocessor and instead map to expression-preserving PHP (their
-  argument is still type-checked);
-- `Blade::if('admin')` synthesizes the full family (`@admin`,
-  `@elseadmin`, `@endadmin`, `@unlessadmin`);
-- directive name completion (`DIRECTIVE_COMPLETIONS` in
-  `src/blade/directives.rs`) includes them.
-
----
 
 ## BL1. Blade-aware code actions
 
@@ -138,62 +115,6 @@ In `tests/integration/diagnostics_blade.rs`:
 - `<x-alert>` with no closing tag → unclosed-tag diagnostic
 - self-closing tags, and tags whose attributes contain `>`, report
   nothing
-
----
-
-## BL14. Folding ranges for Blade files
-
-**Impact: Low-Medium · Complexity: Medium**
-
-`textDocument/foldingRange` on a `.blade.php` file currently returns
-ranges in virtual-PHP coordinates, which don't line up with the
-original template, because `folding.rs` never translates through the
-source map.
-
-- Translate each `FoldingRange` through `source_map.php_to_blade`
-  before returning, matching the pattern in `inlay_hints.rs`.
-- Add Blade-native fold regions the underlying PHP has no concept of:
-  `@if`/`@endif` and friends (the block stack `src/blade/balance.rs`
-  already walks),
-  `<x-component>`...`</x-component>` tag bodies, `@section`/
-  `@endsection`, `@push`/`@endpush`.
-- Matches the folding behaviour other Blade-aware editors already
-  provide.
-
-### Tests
-
-New file `tests/integration/folding_blade.rs`:
-
-- `@foreach`/`@endforeach` folds
-- `<x-alert>`...`</x-alert>` folds
-- fold ranges land on the correct Blade lines, not virtual-PHP lines
-
----
-
-## BL15. Document outline (symbols) for Blade files
-
-**Impact: Low-Medium · Complexity: Medium-High**
-
-A `.blade.php` file today reports no outline, or an outline positioned
-in virtual-PHP coordinates, because `document_symbols.rs` never
-translates through the source map.
-
-- Translate symbol ranges/selection ranges through
-  `source_map.php_to_blade`.
-- Build a Blade-native symbol tree on top of the translated PHP
-  symbols: `@section`s and `@push`/`@stack` blocks as top-level
-  symbols, `<x-component>` tags as child symbols showing the resolved
-  component FQN — degrade to the bare tag name if the component
-  doesn't resolve.
-- Matches the structure-view behaviour other Blade-aware editors
-  already provide.
-
-### Tests
-
-New file `tests/integration/document_symbols_blade.rs`:
-
-- `@section('content')` appears as an outline entry
-- `<x-alert>` appears as an outline entry with the resolved FQN
 
 ---
 

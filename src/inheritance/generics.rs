@@ -5,6 +5,7 @@
 //! or `@use Trait<Type>`, this module maps template parameters to concrete types
 //! and rewrites method/property signatures accordingly.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use crate::atom::Atom;
@@ -388,13 +389,9 @@ pub(crate) fn build_generic_subs(
     for (i, param_name) in class.template_params.iter().enumerate() {
         if i < offset {
             // Skipped (right-aligned) params: fall back to their
-            // declared upper bound or `mixed` so the raw template
-            // name never leaks into downstream consumers.
-            let fallback = class
-                .template_param_bounds
-                .get(param_name)
-                .cloned()
-                .unwrap_or_else(PhpType::mixed);
+            // declared default, upper bound, or `mixed` so the raw
+            // template name never leaks into downstream consumers.
+            let fallback = default_type_arg(class, param_name);
             subs.insert(param_name.to_string(), fallback);
             continue;
         }
@@ -402,12 +399,9 @@ pub(crate) fn build_generic_subs(
             subs.insert(param_name.to_string(), arg.clone());
         } else {
             // Unbound param (more template params than type args and
-            // right-alignment didn't apply): use upper bound or `mixed`.
-            let fallback = class
-                .template_param_bounds
-                .get(param_name)
-                .cloned()
-                .unwrap_or_else(PhpType::mixed);
+            // right-alignment didn't apply): use its default before
+            // falling back to the upper bound or `mixed`.
+            let fallback = default_type_arg(class, param_name);
             subs.insert(param_name.to_string(), fallback);
         }
     }
@@ -419,25 +413,96 @@ pub(crate) fn build_generic_subs(
 /// have no concrete bindings (e.g. `new Collection()` without a generic
 /// annotation).
 ///
-/// Each template parameter is mapped to its declared upper bound
-/// (`@template T of Foo` → `Foo`) or `mixed` when no bound exists.
+/// Each template parameter is mapped to its declared default when present
+/// (`@template T of Foo = Bar` → `Bar`), otherwise to its upper bound
+/// (`@template T of Foo` → `Foo`) or `mixed` when neither exists.
 /// The returned vector is ordered to match `class.template_params`.
 ///
-/// This follows PHPStan's `resolveToBounds()` semantics: unbound
-/// template parameters are erased to their bounds so that downstream
-/// consumers never see raw template names like `TValue`.
+/// A declared default is the concrete argument an omitted generic parameter
+/// receives. Parameters without one follow PHPStan's `resolveToBounds()`
+/// semantics so downstream consumers never see raw names like `TValue`.
 pub(crate) fn default_type_args(class: &ClassInfo) -> Vec<PhpType> {
     class
         .template_params
         .iter()
-        .map(|p| {
-            class
-                .template_param_bounds
-                .get(p)
-                .cloned()
-                .unwrap_or_else(PhpType::mixed)
-        })
+        .map(|p| default_type_arg(class, p))
         .collect()
+}
+
+/// Overlay call-site template values on a class's declared defaults.
+///
+/// Known receiver or method substitutions take precedence. The borrowed fast
+/// path avoids work for the common case where the class declares no defaults,
+/// or where the receiver already supplies every defaulted parameter.
+pub(crate) fn template_values_with_defaults<'a>(
+    class: &ClassInfo,
+    values: &'a HashMap<String, PhpType>,
+) -> Cow<'a, HashMap<String, PhpType>> {
+    if class.template_param_defaults.is_empty()
+        || class
+            .template_param_defaults
+            .keys()
+            .all(|name| values.contains_key(name.as_str()))
+    {
+        return Cow::Borrowed(values);
+    }
+
+    let mut merged = HashMap::with_capacity(class.template_param_defaults.len() + values.len());
+    merged.extend(
+        class
+            .template_param_defaults
+            .iter()
+            .map(|(name, default)| (name.to_string(), default.clone())),
+    );
+    merged.extend(
+        values
+            .iter()
+            .map(|(name, value)| (name.clone(), value.clone())),
+    );
+    Cow::Owned(merged)
+}
+
+/// Drop a method's own `@template` parameters from a call's template values.
+///
+/// A conditional keyed on a class-level parameter (`TAsync is false`) is
+/// decided by the value that parameter holds, but one keyed on the method's
+/// own (`T is int`) is decided by the argument that binds `T` — comparing it
+/// against the substituted value instead reads a resolved type as though it
+/// were a literal and picks the wrong branch. Stripping the method's names
+/// leaves those conditionals to the argument-binding path.
+pub(crate) fn class_scoped_template_values<'a>(
+    values: &'a HashMap<String, PhpType>,
+    method_template_params: &[Atom],
+) -> Cow<'a, HashMap<String, PhpType>> {
+    if method_template_params.is_empty()
+        || !method_template_params
+            .iter()
+            .any(|name| values.contains_key(name.as_str()))
+    {
+        return Cow::Borrowed(values);
+    }
+
+    Cow::Owned(
+        values
+            .iter()
+            .filter(|(name, _)| {
+                !method_template_params
+                    .iter()
+                    .any(|param| param.as_str() == name.as_str())
+            })
+            .map(|(name, value)| (name.clone(), value.clone()))
+            .collect(),
+    )
+}
+
+#[inline]
+fn default_type_arg(class: &ClassInfo, param: &Atom) -> PhpType {
+    class
+        .template_param_defaults
+        .get(param)
+        .or_else(|| class.template_param_bounds.get(param))
+        .cloned()
+        .unwrap_or_else(PhpType::mixed)
 }
 
 /// Apply explicit generic type arguments to a class's members.

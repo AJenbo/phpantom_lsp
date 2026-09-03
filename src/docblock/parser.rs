@@ -153,6 +153,10 @@ pub struct MethodParamTagInfo {
 #[derive(Debug, Clone, Default)]
 pub struct AssertTagInfo {
     pub negated: bool,
+    /// Whether the tag was written with the `=` modifier (`=Type`,
+    /// `!=Type`), which asserts value equality rather than a subtype
+    /// relationship.
+    pub is_equality: bool,
     /// The asserted type, or `None` for the truthy / falsy / non-empty
     /// patterns, which assert a shape rather than a type.
     pub type_text: Option<String>,
@@ -612,6 +616,7 @@ fn tag_value_info(value: &TagValue<'_>, docblock: &str, base_offset: u32) -> Tag
         | TagValue::AssertIfTrue(value)
         | TagValue::AssertIfFalse(value) => TagValueInfo::Assert(AssertTagInfo {
             negated: value.is_negated(),
+            is_equality: value.is_equality(),
             type_text: match value.pattern {
                 AssertPattern::Type(t) => ty(t),
                 _ => None,

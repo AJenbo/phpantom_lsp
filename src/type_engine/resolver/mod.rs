@@ -34,7 +34,7 @@ mod property_narrowing;
 
 pub(crate) use context::{
     FunctionLoaderFn, Loaders, ResolutionCtx, ScopeVarResolverFn, VarResolutionCtx,
-    with_chain_resolution_cache,
+    with_chain_resolution_cache, with_isolated_chain_cache,
 };
 pub(crate) use property_narrowing::apply_property_narrowing;
 
@@ -244,6 +244,19 @@ fn chain_cache_key(expr: &SubjectExpr, ctx: &ResolutionCtx<'_>) -> Option<String
         return None;
     }
 
+    // The same subject text can mean different classes in different files
+    // (`use A\Pen;` in one, `use B\Pen;` in another, both spelling
+    // `Pen::make()`), and some activations of the chain cache — the
+    // reference-count pending-item loop, find-references/rename — span
+    // every file the request walks, not just one.  `ctx.content` is
+    // borrowed once per file for as long as any chain from that file is
+    // being resolved, so its pointer is a cheap per-file discriminator:
+    // the same technique `resolve_variable_types`'s re-entry guards use
+    // for the same reason (see `variable/resolution.rs`).  Two ResolutionCtx
+    // built from the same file share `content` and thus the pointer, so
+    // within-file sharing (the cache's actual purpose) is unaffected.
+    let file_id = ctx.content.as_ptr() as usize;
+
     // A chain that references a local variable (as receiver or as a call
     // argument) can resolve to different types at call sites where the
     // variable holds a different type — e.g. `$this->parse($stmt)` where
@@ -259,11 +272,15 @@ fn chain_cache_key(expr: &SubjectExpr, ctx: &ResolutionCtx<'_>) -> Option<String
     let mut vars = Vec::new();
     expr.collect_local_variables(&mut vars);
     Some(if vars.is_empty() {
-        expr.to_subject_text()
+        format!("{file_id:x}:{}", expr.to_subject_text())
     } else if let Some(disc) = scope_type_discriminator(&vars, ctx) {
-        format!("{}{}", expr.to_subject_text(), disc)
+        format!("{file_id:x}:{}{}", expr.to_subject_text(), disc)
     } else {
-        format!("{}@{}", expr.to_subject_text(), ctx.cursor_offset)
+        format!(
+            "{file_id:x}:{}@{}",
+            expr.to_subject_text(),
+            ctx.cursor_offset
+        )
     })
 }
 
@@ -345,32 +362,19 @@ fn resolve_target_classes_expr_inner(
                     .collect()
             };
 
-            // A trait annotated `@phpstan-require-extends Base` or
-            // `@phpstan-require-implements Contract` guarantees that every
-            // class using the trait satisfies that bound, so inside the
-            // trait's own methods `$this` can access those members. PHPStan
-            // only ever analyzes traits in the context of a using class, but
-            // we analyze them standalone, so resolve the required types
-            // alongside the trait itself.
+            // Inside a trait, `$this` is the class using the trait, never
+            // the trait itself — see `trait_context` for what stands in for
+            // it when the using class is not the one being analysed.
             if let Some(cc) = current_class
                 && cc.kind == ClassLikeKind::Trait
             {
-                if let Some(ref required) = cc.require_extends {
-                    let resolved = find_class_by_name(all_classes, required)
-                        .map(|cls| ResolvedType::from_arc(Arc::clone(cls)))
-                        .or_else(|| class_loader(required).map(ResolvedType::from_arc));
-                    if let Some(rt) = resolved {
-                        ResolvedType::extend_unique(&mut this_types, vec![rt]);
-                    }
-                }
-                for required in &cc.require_implements {
-                    let resolved = find_class_by_name(all_classes, required)
-                        .map(|cls| ResolvedType::from_arc(Arc::clone(cls)))
-                        .or_else(|| class_loader(required).map(ResolvedType::from_arc));
-                    if let Some(rt) = resolved {
-                        ResolvedType::extend_unique(&mut this_types, vec![rt]);
-                    }
-                }
+                crate::type_engine::trait_context::extend_this_with_trait_bounds(
+                    &mut this_types,
+                    cc,
+                    all_classes,
+                    class_loader,
+                    ctx.backend,
+                );
             }
 
             this_types
@@ -599,12 +603,21 @@ fn resolve_target_classes_expr_inner(
             // rebind on a class that only fixes its generics via
             // `@extends`) the hint's generic base names one of the
             // resolved classes directly, so the args are its own rebind
-            // rather than a leftover from an unrelated wrapper type.
+            // rather than a leftover from an unrelated wrapper type.  An
+            // intersection hint (e.g. a conditional return type's winning
+            // branch, `Foo&MockInterface`) is used unconditionally: without
+            // it, `classes` is a flat, untagged list of the intersection's
+            // members, which `types_joined` cannot tell apart from a union
+            // of alternatives.
             if let Some(h) = hint {
                 let hint_names_a_class = matches!(h.kind(), TypeKind::Generic(g) if classes
                     .iter()
                     .any(|c| g.name.as_str() == c.fqn().as_str() || g.name.as_str() == c.name.as_str()));
-                if classes.iter().any(|c| !c.template_params.is_empty()) || hint_names_a_class {
+                let is_intersection = matches!(h.kind(), TypeKind::Intersection(_));
+                if is_intersection
+                    || classes.iter().any(|c| !c.template_params.is_empty())
+                    || hint_names_a_class
+                {
                     return ResolvedType::from_classes_with_hint(classes, h);
                 }
                 // A scalar conditional branch (and the `object`/`?object`
@@ -1123,6 +1136,17 @@ pub(crate) enum SubjectOutcome {
     Scalar(PhpType),
     /// Subject resolved to a class name that couldn't be loaded.
     UnresolvableClass(PhpType),
+    /// Subject resolved to `mixed`.
+    ///
+    /// Distinct from [`Untyped`](Self::Untyped): `mixed` is an answer, not
+    /// the absence of one. It is what an undocblocked `array`'s elements,
+    /// a `@return mixed` accessor and a `mixed` parameter all hold, so the
+    /// gap is in what the code says about the value rather than in what
+    /// the type engine could work out. A member on it is unverifiable
+    /// either way, but the two are worth telling apart: one is a note
+    /// about the codebase's annotations, the other a report of our own
+    /// resolution falling short.
+    Mixed,
     /// Subject type could not be resolved — no class information
     /// available.
     Untyped,
@@ -1154,6 +1178,13 @@ pub(crate) fn resolve_subject_outcome(
 
         // ── All entries are type-string-only (no class info) ────
         let joined = ResolvedType::types_joined(&resolved);
+
+        // `mixed` is a resolved type, and one that absorbs whatever stands
+        // beside it, so it is answered before the narrower classifications
+        // below get a chance to describe only part of the value.
+        if joined.contains_mixed() {
+            return SubjectOutcome::Mixed;
+        }
 
         // Pure scalar — member access is a runtime crash, unless this
         // is a `::` access on a `string`-only subject (see
@@ -1196,6 +1227,12 @@ pub(crate) fn resolve_subject_outcome(
     {
         if let Some(scalar) = resolve_call_scalar_return(callee, access_kind, ctx) {
             return SubjectOutcome::Scalar(scalar);
+        }
+        // A declared `mixed` is why this resolved to no class, and saying
+        // so is the difference between reporting the codebase's missing
+        // annotation and reporting our own resolution falling short.
+        if call_returns_mixed(callee, access_kind, ctx) {
+            return SubjectOutcome::Mixed;
         }
         // Note: a call returning `object`/`?object` is already caught by
         // the "stdClass / object" check above — `resolve_target_classes`
@@ -1262,6 +1299,39 @@ fn resolve_call_scalar_return(
     access_kind: AccessKind,
     ctx: &ResolutionCtx<'_>,
 ) -> Option<PhpType> {
+    let hint = declared_call_return_type(callee, access_kind, ctx, &|hint| {
+        hint.all_members_primitive_scalar()
+    })?;
+    Some(hint.non_null_type().unwrap_or(hint))
+}
+
+/// Whether the method or function a call names declares `mixed`.
+///
+/// A call that resolves to no class at all has two very different causes
+/// — the declaration said `mixed`, or nothing could be worked out — and
+/// only the declaration is on record to tell them apart.
+fn call_returns_mixed(
+    callee: &SubjectExpr,
+    access_kind: AccessKind,
+    ctx: &ResolutionCtx<'_>,
+) -> bool {
+    declared_call_return_type(callee, access_kind, ctx, &PhpType::contains_mixed).is_some()
+}
+
+/// The return type declared on the method or function a call names, when
+/// `accept` recognises it.
+///
+/// Reads the hint straight off the `MethodInfo`/`FunctionInfo` rather than
+/// going through the full class resolution pipeline: the callers want to
+/// know what the declaration says, not what a resolver can make of it.
+/// `accept` is consulted per candidate so a receiver whose type is a union
+/// keeps looking past a class that declares something else.
+fn declared_call_return_type(
+    callee: &SubjectExpr,
+    access_kind: AccessKind,
+    ctx: &ResolutionCtx<'_>,
+    accept: &dyn Fn(&PhpType) -> bool,
+) -> Option<PhpType> {
     match callee {
         // Instance method call: $obj->getAge()
         SubjectExpr::MethodCall { base, method } => {
@@ -1274,10 +1344,9 @@ fn resolve_call_scalar_return(
                 );
                 if let Some(m) = resolved.get_method_ci(method)
                     && let Some(ref hint) = m.return_type
-                    && hint.all_members_primitive_scalar()
+                    && accept(hint)
                 {
-                    let scalar = hint.non_null_type().unwrap_or_else(|| hint.clone());
-                    return Some(scalar);
+                    return Some(hint.clone());
                 }
             }
             None
@@ -1287,10 +1356,9 @@ fn resolve_call_scalar_return(
             if let Some(fl) = ctx.function_loader
                 && let Some(func_info) = fl(fn_name, 0)
                 && let Some(ref hint) = func_info.return_type
-                && hint.all_members_primitive_scalar()
+                && accept(hint)
             {
-                let scalar = hint.non_null_type().unwrap_or_else(|| hint.clone());
-                return Some(scalar);
+                return Some(hint.clone());
             }
             None
         }
@@ -1305,10 +1373,9 @@ fn resolve_call_scalar_return(
                 );
                 if let Some(m) = resolved.get_method_ci(method)
                     && let Some(ref hint) = m.return_type
-                    && hint.all_members_primitive_scalar()
+                    && accept(hint)
                 {
-                    let scalar = hint.non_null_type().unwrap_or_else(|| hint.clone());
-                    return Some(scalar);
+                    return Some(hint.clone());
                 }
             }
             None
@@ -1716,11 +1783,14 @@ pub(crate) fn narrowable_call_key(expr: &SubjectExpr) -> Option<String> {
         return None;
     }
     match callee.as_ref() {
-        // Built from the callee rather than the whole expression so the
-        // key is spelled exactly as the AST side spells it, whatever
-        // whitespace stands between the parentheses.
-        SubjectExpr::MethodCall { base, .. } if base_roots_in_variable(base) => {
-            Some(format!("{}()", callee.to_subject_text()))
+        // Rendered through [`subject_scope_key`] rather than
+        // `to_subject_text`, so the key is spelled exactly as the AST side
+        // spells it: whatever whitespace stands between the parentheses,
+        // and `["0"]` rather than `[0]` for an element access on the way
+        // down. The receiver may itself be a call (`$e->getExpr()->getExpr()`),
+        // which the AST side keys the same way.
+        SubjectExpr::MethodCall { base, .. } if base.scope_key_roots_in_variable() => {
+            Some(subject_scope_key(expr))
         }
         _ => None,
     }
@@ -1740,12 +1810,11 @@ pub(crate) fn narrowable_call_key(expr: &SubjectExpr) -> Option<String> {
 fn subject_scope_key(expr: &SubjectExpr) -> String {
     // Collect the spine outermost-first, then render it from the base out.
     let mut spine = vec![expr];
-    while let Some(base) = match spine.last().expect("spine is seeded with `expr`") {
-        SubjectExpr::PropertyChain { base, .. } | SubjectExpr::ArrayAccess { base, .. } => {
-            Some(base.as_ref())
-        }
-        _ => None,
-    } {
+    while let Some(base) = spine
+        .last()
+        .expect("spine is seeded with `expr`")
+        .scope_key_base()
+    {
         spine.push(base);
     }
 
@@ -1764,11 +1833,26 @@ fn subject_scope_key(expr: &SubjectExpr) -> String {
                     match seg {
                         BracketSegment::StringKey(s) => key.push_str(&format!("[\"{}\"]", s)),
                         BracketSegment::IntKey(n) => key.push_str(&format!("[\"{}\"]", n)),
+                        // A computed index keeps its written form, matching
+                        // the `$types[$i]` / `$types[$count-2]` shape
+                        // `expr_to_subject_key` writes, so a guard on one
+                        // read narrows the next.
+                        BracketSegment::ComputedIndex(index) => {
+                            key.push_str(&format!("[{}]", index))
+                        }
                         BracketSegment::ElementAccess => key.push_str("[]"),
                     }
                 }
             }
-            _ => unreachable!("the spine only descends through property and array access"),
+            SubjectExpr::CallExpr { callee, .. } => {
+                let SubjectExpr::MethodCall { method, .. } = callee.as_ref() else {
+                    unreachable!("only a method call link is descended into")
+                };
+                key.push_str("->");
+                key.push_str(method);
+                key.push_str("()");
+            }
+            _ => unreachable!("the spine only descends through the links rendered here"),
         }
     }
     key

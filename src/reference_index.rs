@@ -6,6 +6,7 @@
 //! those scanners can skip files that cannot contain a match once the workspace
 //! has been fully parsed.
 
+use std::cell::OnceCell;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -14,13 +15,26 @@ use parking_lot::RwLock;
 
 use crate::Backend;
 use crate::atom::{AtomMap, AtomSet, atom};
+use crate::backend::file_access::namespace_in_spans;
 use crate::class_lookup::find_class_at_offset;
 use crate::symbol_map::{LaravelStringKind, SelfStaticParentKind, SymbolKind, SymbolMap};
+use crate::types::NamespaceSpan;
 use crate::util::{build_fqn, short_name, strip_fqn_prefix};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum ReferenceIndexKey {
+    /// A class/interface/trait/enum name, ASCII-lowercased.  PHP resolves
+    /// class names case-insensitively, so `new WIDGET()` and `new Widget()`
+    /// name the same class and have to land on the same key; build one with
+    /// [`class`](ReferenceIndexKey::class) or
+    /// [`class_owned`](ReferenceIndexKey::class_owned) rather than by hand.
     Class(String),
+    /// A function name, ASCII-lowercased.  PHP resolves function names
+    /// case-insensitively, so `HELPER()` and `helper()` are the same
+    /// function and have to land on the same key; build one with
+    /// [`function`](ReferenceIndexKey::function) or
+    /// [`function_owned`](ReferenceIndexKey::function_owned) rather than
+    /// by hand.
     Function(String),
     Constant(String),
     Member {
@@ -61,6 +75,34 @@ pub(crate) fn laravel_string_reference_key(
 }
 
 impl ReferenceIndexKey {
+    /// The key a class is indexed under, case-folded to match PHP's
+    /// case-insensitive class resolution.
+    pub(crate) fn class(name: &str) -> Self {
+        Self::Class(crate::ci_map::fold(name).into_owned())
+    }
+
+    /// [`class`](Self::class) for a name that is already owned, folding it
+    /// in place rather than allocating a second copy.  Every file the
+    /// workspace index publishes goes through here.
+    pub(crate) fn class_owned(mut name: String) -> Self {
+        name.make_ascii_lowercase();
+        Self::Class(name)
+    }
+
+    /// The key a function is indexed under, case-folded to match PHP's
+    /// case-insensitive function resolution.
+    pub(crate) fn function(name: &str) -> Self {
+        Self::Function(crate::ci_map::fold(name).into_owned())
+    }
+
+    /// [`function`](Self::function) for a name that is already owned,
+    /// folding it in place rather than allocating a second copy.  Every
+    /// file the workspace index publishes goes through here.
+    pub(crate) fn function_owned(mut name: String) -> Self {
+        name.make_ascii_lowercase();
+        Self::Function(name)
+    }
+
     /// Memory-audit tooling: heap bytes held by the key's name string.
     #[cfg(feature = "mem-audit")]
     pub(crate) fn audit_heap(&self) -> usize {
@@ -313,6 +355,10 @@ impl Backend {
         }
 
         let mut entries: Vec<(ReferenceIndexKey, bool)> = Vec::new();
+        // Resolving a namespace-qualified name back to the namespace it
+        // was written in needs the file's namespace blocks; cloning them
+        // once beats re-locking `file_namespaces` per span.
+        let namespaces = OnceCell::new();
         for span in &symbol_map.spans {
             let is_declaration = matches!(
                 &span.kind,
@@ -321,11 +367,15 @@ impl Backend {
                         is_definition: true,
                         ..
                     }
+                    | SymbolKind::ConstantReference {
+                        is_definition: true,
+                        ..
+                    }
                     | SymbolKind::MemberDeclaration { .. }
             );
 
-            for (key, is_resolved_name) in self.reference_keys_for_span(uri, span) {
-                entries.push((key, is_resolved_name && !is_declaration));
+            for (key, counts_as_reference) in self.reference_keys_for_span(uri, span, &namespaces) {
+                entries.push((key, counts_as_reference && !is_declaration));
             }
         }
 
@@ -368,13 +418,14 @@ impl Backend {
         entries
     }
 
-    /// The keys a span joins the index under, each paired with whether it
-    /// is the name the span actually resolves to (see
+    /// The keys a span joins the index under, each paired with whether the
+    /// span counts as a reference to that key (see
     /// [`reference_entries_for_symbol_map`]).
     fn reference_keys_for_span(
         &self,
         uri: &str,
         span: &crate::symbol_map::SymbolSpan,
+        namespaces: &OnceCell<Vec<NamespaceSpan>>,
     ) -> Vec<(ReferenceIndexKey, bool)> {
         match &span.kind {
             SymbolKind::ClassReference { name, is_fqn, .. } => {
@@ -414,11 +465,15 @@ impl Backend {
                     let (use_map, namespace) = self.use_map_and_namespace_at(uri, span.start);
                     normalize_symbol_name(Self::resolve_to_fqn(name, &use_map, &namespace))
                 };
-                function_keys(&resolved, name)
+                let global_fallback =
+                    self.names_global_fallback(uri, span.start, name, &resolved, namespaces);
+                function_keys(&resolved, name, global_fallback)
             }
             SymbolKind::ConstantReference { name, .. } => {
                 let resolved = self.constant_fqn_at(uri, span.start, name);
-                constant_keys(&resolved, name)
+                let global_fallback =
+                    self.names_global_fallback(uri, span.start, name, &resolved, namespaces);
+                constant_keys(&resolved, name, global_fallback)
             }
             SymbolKind::MemberAccess {
                 member_name,
@@ -456,6 +511,43 @@ impl Backend {
             .any(|prefix| uri.starts_with(prefix.as_str()))
     }
 
+    /// Whether an unqualified function or constant name at `offset` also
+    /// names the *global* symbol of that name.
+    ///
+    /// PHP resolves an unqualified function or constant by looking in the
+    /// current namespace first and falling back to the global namespace
+    /// when nothing is declared there, and mago-names always reports the
+    /// namespace-qualified guess.  So `helper()` written inside
+    /// `namespace App;` resolves to `App\helper` but calls the global
+    /// `helper()` whenever `App\helper` does not exist -- which is the
+    /// usual arrangement, since a global helper file is exactly what
+    /// namespaced code calls into.  Both spellings therefore have to be
+    /// credited with the reference; whether the namespaced one exists is
+    /// not knowable here (the file that would declare it may not be
+    /// parsed yet).
+    ///
+    /// A name reached through an import (`use function Foo\bar;`) or an
+    /// alias is *not* a fallback: it resolves to the imported symbol
+    /// outright.  Those are excluded by requiring that the resolved name
+    /// is the source name qualified with the namespace it was written in.
+    fn names_global_fallback(
+        &self,
+        uri: &str,
+        offset: u32,
+        source_name: &str,
+        resolved: &str,
+        namespaces: &OnceCell<Vec<NamespaceSpan>>,
+    ) -> bool {
+        if source_name.contains('\\') || !resolved.contains('\\') {
+            return false;
+        }
+        let spans = namespaces.get_or_init(|| self.namespace_spans_for_uri(uri));
+        let Some(namespace) = namespace_in_spans(spans, offset) else {
+            return false;
+        };
+        build_fqn(source_name, Some(namespace)) == resolved
+    }
+
     fn resolved_name_at(&self, uri: &str, offset: u32) -> Option<String> {
         self.resolved_names
             .read()
@@ -474,7 +566,7 @@ impl Backend {
         offset: u32,
         name: &str,
     ) -> ReferenceIndexKey {
-        ReferenceIndexKey::Function(self.function_fqn_at(uri, offset, name))
+        ReferenceIndexKey::function(&self.function_fqn_at(uri, offset, name))
     }
 
     /// The fully-qualified name of the function named at `offset` in
@@ -565,29 +657,50 @@ fn normalize_symbol_name(name: impl AsRef<str>) -> String {
 }
 
 fn class_keys(resolved: &str, source_name: &str) -> Vec<(ReferenceIndexKey, bool)> {
-    symbol_name_keys(resolved, source_name)
+    // A class has no global fallback: an unqualified `Widget` inside
+    // `namespace App;` names `App\Widget` and nothing else.
+    symbol_name_keys(resolved, source_name, false)
         .into_iter()
-        .map(|(name, is_resolved)| (ReferenceIndexKey::Class(name), is_resolved))
+        .map(|(name, counts)| (ReferenceIndexKey::class_owned(name), counts))
         .collect()
 }
 
-fn function_keys(resolved: &str, source_name: &str) -> Vec<(ReferenceIndexKey, bool)> {
-    symbol_name_keys(resolved, source_name)
+fn function_keys(
+    resolved: &str,
+    source_name: &str,
+    global_fallback: bool,
+) -> Vec<(ReferenceIndexKey, bool)> {
+    symbol_name_keys(resolved, source_name, global_fallback)
         .into_iter()
-        .map(|(name, is_resolved)| (ReferenceIndexKey::Function(name), is_resolved))
+        .map(|(name, counts)| (ReferenceIndexKey::function_owned(name), counts))
         .collect()
 }
 
-fn constant_keys(resolved: &str, source_name: &str) -> Vec<(ReferenceIndexKey, bool)> {
-    symbol_name_keys(resolved, source_name)
+fn constant_keys(
+    resolved: &str,
+    source_name: &str,
+    global_fallback: bool,
+) -> Vec<(ReferenceIndexKey, bool)> {
+    symbol_name_keys(resolved, source_name, global_fallback)
         .into_iter()
-        .map(|(name, is_resolved)| (ReferenceIndexKey::Constant(name), is_resolved))
+        .map(|(name, counts)| (ReferenceIndexKey::Constant(name), counts))
         .collect()
 }
 
 /// Every name a symbol reference can be searched by, each flagged with
-/// whether it is the name the reference resolves to.
-fn symbol_name_keys(resolved: &str, source_name: &str) -> Vec<(String, bool)> {
+/// whether the reference counts towards that name's reference count.
+///
+/// The resolved name always counts.  The alias keys normally do not (a
+/// reference to `App\Widget` is searchable under `Widget`, but counting it
+/// there would credit a global `\Widget` with it) -- except for the short
+/// name of a symbol PHP would fall back to globally, which the reference
+/// genuinely names as well; see
+/// [`names_global_fallback`](Backend::names_global_fallback).
+fn symbol_name_keys(
+    resolved: &str,
+    source_name: &str,
+    global_fallback: bool,
+) -> Vec<(String, bool)> {
     let resolved = normalize_symbol_name(resolved);
     let mut keys = vec![
         normalize_symbol_name(source_name),
@@ -596,7 +709,13 @@ fn symbol_name_keys(resolved: &str, source_name: &str) -> Vec<(String, bool)> {
     keys.sort();
     keys.dedup();
     keys.retain(|name| *name != resolved);
-    let mut keys: Vec<(String, bool)> = keys.into_iter().map(|name| (name, false)).collect();
+    let mut keys: Vec<(String, bool)> = keys
+        .into_iter()
+        .map(|name| {
+            let counts = global_fallback && name == short_name(&resolved);
+            (name, counts)
+        })
+        .collect();
     keys.push((resolved, true));
     keys
 }
@@ -619,8 +738,8 @@ mod tests {
             "<?php\nnamespace App;\nclass Foo {}\n$foo = new Foo();\n",
         );
 
-        let candidates = backend
-            .reference_candidate_uris_for_keys(&[ReferenceIndexKey::Class("App\\Foo".to_string())]);
+        let candidates =
+            backend.reference_candidate_uris_for_keys(&[ReferenceIndexKey::class("App\\Foo")]);
 
         assert!(candidates.is_none());
     }
@@ -631,8 +750,8 @@ mod tests {
         backend.skip_reference_index = true;
         backend.workspace_indexed.store(true, Ordering::Release);
 
-        let candidates = backend
-            .reference_candidate_uris_for_keys(&[ReferenceIndexKey::Class("App\\Foo".to_string())]);
+        let candidates =
+            backend.reference_candidate_uris_for_keys(&[ReferenceIndexKey::class("App\\Foo")]);
 
         assert!(candidates.is_none());
     }
@@ -647,16 +766,8 @@ mod tests {
         );
         backend.workspace_indexed.store(true, Ordering::Release);
 
-        assert_candidate_contains(
-            &backend,
-            ReferenceIndexKey::Class("App\\Foo".to_string()),
-            uri,
-        );
-        assert_candidate_contains(
-            &backend,
-            ReferenceIndexKey::Function("App\\helper".to_string()),
-            uri,
-        );
+        assert_candidate_contains(&backend, ReferenceIndexKey::class("App\\Foo"), uri);
+        assert_candidate_contains(&backend, ReferenceIndexKey::function("App\\helper"), uri);
         assert_candidate_contains(
             &backend,
             ReferenceIndexKey::Member {
@@ -773,16 +884,12 @@ mod tests {
         backend.update_ast(uri, "<?php\nnamespace App;\nclass Foo {}\nnew Foo();\n");
         backend.workspace_indexed.store(true, Ordering::Release);
 
-        assert_candidate_contains(
-            &backend,
-            ReferenceIndexKey::Class("App\\Foo".to_string()),
-            uri,
-        );
+        assert_candidate_contains(&backend, ReferenceIndexKey::class("App\\Foo"), uri);
 
         backend.clear_file_maps(uri);
 
-        let candidates = backend
-            .reference_candidate_uris_for_keys(&[ReferenceIndexKey::Class("App\\Foo".to_string())]);
+        let candidates =
+            backend.reference_candidate_uris_for_keys(&[ReferenceIndexKey::class("App\\Foo")]);
         assert!(candidates.unwrap().is_empty());
     }
 
@@ -796,24 +903,16 @@ mod tests {
             uri.clone(),
             class_declaration_symbol_map("Old"),
         )]);
-        assert_candidate_contains(&backend, ReferenceIndexKey::Class("Old".to_string()), &uri);
+        assert_candidate_contains(&backend, ReferenceIndexKey::class("Old"), &uri);
 
         backend.reindex_references_for_symbol_maps_batch(vec![
             (uri.clone(), class_declaration_symbol_map("First")),
             (uri.clone(), class_declaration_symbol_map("Second")),
         ]);
 
-        assert_candidate_not_contains(&backend, ReferenceIndexKey::Class("Old".to_string()), &uri);
-        assert_candidate_not_contains(
-            &backend,
-            ReferenceIndexKey::Class("First".to_string()),
-            &uri,
-        );
-        assert_candidate_contains(
-            &backend,
-            ReferenceIndexKey::Class("Second".to_string()),
-            &uri,
-        );
+        assert_candidate_not_contains(&backend, ReferenceIndexKey::class("Old"), &uri);
+        assert_candidate_not_contains(&backend, ReferenceIndexKey::class("First"), &uri);
+        assert_candidate_contains(&backend, ReferenceIndexKey::class("Second"), &uri);
     }
 
     #[test]
@@ -861,24 +960,16 @@ mod tests {
             ),
         ]);
 
-        assert_candidate_contains(
-            &backend,
-            ReferenceIndexKey::Class("User".to_string()),
-            &user_uri,
-        );
+        assert_candidate_contains(&backend, ReferenceIndexKey::class("User"), &user_uri);
+        assert_candidate_not_contains(&backend, ReferenceIndexKey::class("Package"), &vendor_uri);
         assert_candidate_not_contains(
             &backend,
-            ReferenceIndexKey::Class("Package".to_string()),
-            &vendor_uri,
-        );
-        assert_candidate_not_contains(
-            &backend,
-            ReferenceIndexKey::Class("StubClass".to_string()),
+            ReferenceIndexKey::class("StubClass"),
             "phpantom-stub://core.php",
         );
         assert_candidate_not_contains(
             &backend,
-            ReferenceIndexKey::Class("StubFunctionClass".to_string()),
+            ReferenceIndexKey::class("StubFunctionClass"),
             "phpantom-stub-fn://core.php",
         );
     }
@@ -902,7 +993,7 @@ mod tests {
         )]);
 
         let candidates = backend
-            .reference_candidate_uris_for_keys(&[ReferenceIndexKey::Class("self".to_string())])
+            .reference_candidate_uris_for_keys(&[ReferenceIndexKey::class("self")])
             .expect("workspace should be marked indexed");
         assert!(candidates.is_empty());
     }
@@ -951,7 +1042,7 @@ mod tests {
     #[test]
     fn evicting_unknown_uri_is_noop() {
         let mut index = ReferenceIndexInner::default();
-        let key = ReferenceIndexKey::Class("Foo".to_string());
+        let key = ReferenceIndexKey::class("Foo");
         let uri: Arc<str> = Arc::from("file:///project/src/Foo.php");
         index
             .by_key
@@ -962,6 +1053,117 @@ mod tests {
 
         evict_reference_index_uri_locked(&mut index, "file:///project/src/Other.php");
         assert!(index.by_key.contains_key(&key));
+    }
+
+    #[test]
+    fn a_constants_own_declaration_is_not_one_of_its_references() {
+        let backend = Backend::new_test();
+        let uri = "file:///project/src/constants.php";
+        backend.update_ast(uri, "<?php\nconst FOO = 1;\necho FOO;\n");
+        backend.workspace_indexed.store(true, Ordering::Release);
+
+        assert_eq!(
+            reference_count(&backend, ReferenceIndexKey::Constant("FOO".to_string())),
+            1,
+            "only the `echo FOO` use is a reference; the `const FOO` declaration is not"
+        );
+    }
+
+    #[test]
+    fn a_define_declaration_is_not_one_of_its_references() {
+        let backend = Backend::new_test();
+        let uri = "file:///project/src/constants.php";
+        backend.update_ast(uri, "<?php\ndefine('FOO', 1);\necho FOO;\n");
+        backend.workspace_indexed.store(true, Ordering::Release);
+
+        assert_eq!(
+            reference_count(&backend, ReferenceIndexKey::Constant("FOO".to_string())),
+            1
+        );
+    }
+
+    #[test]
+    fn an_unqualified_call_credits_the_global_function_it_can_fall_back_to() {
+        let backend = Backend::new_test();
+        let uri = "file:///project/src/Service.php";
+        backend.update_ast(
+            uri,
+            "<?php\nnamespace App;\nfunction run(): void {\n    helper();\n    helper();\n}\n",
+        );
+        backend.workspace_indexed.store(true, Ordering::Release);
+
+        // PHP calls `App\helper` when it exists and the global `helper`
+        // otherwise, so both spellings are credited.
+        assert_eq!(
+            reference_count(&backend, ReferenceIndexKey::function("App\\helper")),
+            2
+        );
+        assert_eq!(
+            reference_count(&backend, ReferenceIndexKey::function("helper")),
+            2
+        );
+    }
+
+    #[test]
+    fn an_imported_call_credits_only_the_function_it_imports() {
+        let backend = Backend::new_test();
+        let uri = "file:///project/src/Service.php";
+        backend.update_ast(
+            uri,
+            "<?php\nnamespace App;\nuse function Support\\helper;\nfunction run(): void {\n    helper();\n}\n",
+        );
+        backend.workspace_indexed.store(true, Ordering::Release);
+
+        // The `use function` import names it too, so both spans count.
+        assert_eq!(
+            reference_count(&backend, ReferenceIndexKey::function("Support\\helper")),
+            2
+        );
+        assert_eq!(
+            reference_count(&backend, ReferenceIndexKey::function("helper")),
+            0,
+            "an import resolves outright, so a global `helper` is not a fallback target"
+        );
+    }
+
+    #[test]
+    fn function_keys_ignore_the_case_the_call_is_spelled_with() {
+        let backend = Backend::new_test();
+        let uri = "file:///project/src/Service.php";
+        backend.update_ast(uri, "<?php\nfunction helper(): void {}\nHELPER();\n");
+        backend.workspace_indexed.store(true, Ordering::Release);
+
+        assert_eq!(
+            reference_count(&backend, ReferenceIndexKey::function("helper")),
+            1
+        );
+    }
+
+    #[test]
+    fn class_keys_ignore_the_case_the_reference_is_spelled_with() {
+        let backend = Backend::new_test();
+        let uri = "file:///project/src/Widget.php";
+        backend.update_ast(
+            uri,
+            "<?php\nnamespace App;\nclass Widget {}\n$a = new WIDGET();\n$b = new widget();\n",
+        );
+        backend.workspace_indexed.store(true, Ordering::Release);
+
+        assert_eq!(
+            reference_count(&backend, ReferenceIndexKey::class("App\\Widget")),
+            2
+        );
+        assert_candidate_contains(&backend, ReferenceIndexKey::class("App\\WIDGET"), uri);
+    }
+
+    /// How many references the whole index credits to `key`.
+    fn reference_count(backend: &Backend, key: ReferenceIndexKey) -> u32 {
+        backend
+            .reference_index
+            .read()
+            .get(&key)
+            .map(|entries| entries.values().copied().sum())
+            .unwrap_or(0)
     }
 
     fn assert_candidate_contains(backend: &Backend, key: ReferenceIndexKey, uri: &str) {

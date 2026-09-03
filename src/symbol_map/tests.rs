@@ -2995,6 +2995,210 @@ fn namespaced_standalone_constant_produces_constant_reference() {
 }
 
 #[test]
+fn define_call_names_the_constant_it_declares() {
+    let php = "<?php\ndefine('FOO', 1);\n";
+    let map = parse_and_extract(php);
+
+    let name_offset = php.find("FOO").unwrap() as u32;
+    let hit = map.lookup(name_offset).expect("define() names a constant");
+    assert!(
+        matches!(
+            hit.kind,
+            SymbolKind::ConstantReference {
+                ref name,
+                is_definition: true,
+            } if name == "FOO"
+        ),
+        "Expected the declaration of FOO, got {:?}",
+        hit.kind
+    );
+    assert_eq!(
+        (hit.start, hit.end),
+        (name_offset, name_offset + 3),
+        "the span covers the name alone so a rename edit leaves the quotes"
+    );
+}
+
+#[test]
+fn define_call_with_a_namespaced_name_keeps_the_namespace() {
+    let php = "<?php\ndefine('App\\FOO', 1);\n";
+    let map = parse_and_extract(php);
+
+    let name_offset = php.find("App").unwrap() as u32;
+    let hit = map
+        .lookup(name_offset)
+        .expect("a namespaced define() names a constant");
+    assert!(
+        matches!(
+            hit.kind,
+            SymbolKind::ConstantReference { ref name, .. } if name == "App\\FOO"
+        ),
+        "Expected the declaration of App\\FOO, got {:?}",
+        hit.kind
+    );
+}
+
+#[test]
+fn define_call_whose_name_needs_unescaping_declares_nothing() {
+    // The span is what a rename rewrites, so it may only cover a name the
+    // source spells literally.  `"FO\x4F"` reaches PHP as `FOO` but reads
+    // as something else, and rewriting it would corrupt the call.
+    let php = "<?php\ndefine(\"FO\\x4F\", 1);\n";
+    let map = parse_and_extract(php);
+
+    let name_offset = php.find("FO\\x4F").unwrap() as u32;
+    assert!(
+        map.lookup(name_offset).is_none(),
+        "An escaped name should declare nothing, got {:?}",
+        map.lookup(name_offset).map(|hit| &hit.kind)
+    );
+}
+
+#[test]
+fn define_call_with_a_non_literal_name_declares_nothing() {
+    // `define($name, 1)` names no constant the extractor can see, and a
+    // span over `$name` would make rename rewrite a variable.
+    let php = "<?php\nfunction t(string $name) { define($name, 1); }\n";
+    let map = parse_and_extract(php);
+
+    let name_offset = php.rfind("$name").unwrap() as u32;
+    let hit = map.lookup(name_offset).expect("the variable is navigable");
+    assert!(
+        matches!(hit.kind, SymbolKind::Variable { .. }),
+        "Expected a variable, got {:?}",
+        hit.kind
+    );
+}
+
+#[test]
+fn define_call_with_an_escaped_backslash_keeps_the_namespace() {
+    // The doubled backslash is a single-quoted string escape for `\`, so
+    // the constant this defines is the namespaced `App\FOO`, not the
+    // literal text `App\\FOO`.
+    let php = "<?php\ndefine('App\\\\FOO', 1);\n";
+    let map = parse_and_extract(php);
+
+    let name_offset = php.find("App").unwrap() as u32;
+    let hit = map
+        .lookup(name_offset)
+        .expect("an escaped namespaced define() names a constant");
+    assert!(
+        matches!(
+            hit.kind,
+            SymbolKind::ConstantReference { ref name, is_definition: true } if name == "App\\FOO"
+        ),
+        "Expected the declaration of App\\FOO, got {:?}",
+        hit.kind
+    );
+    assert_eq!(
+        (hit.start, hit.end),
+        (name_offset, name_offset + "App\\\\FOO".len() as u32),
+        "the span covers the whole escaped literal since nothing needs trimming off the front"
+    );
+}
+
+#[test]
+fn define_call_with_an_escaped_leading_backslash_strips_only_the_marker() {
+    // `\\App\\FOO` decodes to `\App\FOO` — a leading FQN marker in front of
+    // a namespaced name. Only the two raw bytes behind that marker should
+    // be trimmed from the front of the span.
+    let php = "<?php\ndefine('\\\\App\\\\FOO', 1);\n";
+    let map = parse_and_extract(php);
+
+    let quote_offset = php.find("define('").unwrap() as u32 + "define('".len() as u32;
+    let hit = map
+        .lookup(quote_offset + 2)
+        .expect("an escaped FQN-prefixed define() names a constant");
+    assert!(
+        matches!(
+            hit.kind,
+            SymbolKind::ConstantReference { ref name, is_definition: true } if name == "App\\FOO"
+        ),
+        "Expected the declaration of App\\FOO, got {:?}",
+        hit.kind
+    );
+    assert_eq!(
+        (hit.start, hit.end),
+        (
+            quote_offset + 2,
+            quote_offset + "\\\\App\\\\FOO".len() as u32
+        ),
+        "the leading escaped backslash (2 raw bytes) is trimmed, the rest of the literal is kept"
+    );
+}
+
+#[test]
+fn defined_call_names_the_constant_it_checks() {
+    let php = "<?php\nif (defined('FOO')) {}\n";
+    let map = parse_and_extract(php);
+
+    let name_offset = php.find("FOO").unwrap() as u32;
+    let hit = map.lookup(name_offset).expect("defined() names a constant");
+    assert!(
+        matches!(
+            hit.kind,
+            SymbolKind::ConstantReference {
+                ref name,
+                is_definition: false,
+            } if name == "FOO"
+        ),
+        "Expected a use of FOO, got {:?}",
+        hit.kind
+    );
+}
+
+#[test]
+fn constant_call_names_the_constant_it_reads() {
+    let php = "<?php\necho constant('FOO');\n";
+    let map = parse_and_extract(php);
+
+    let name_offset = php.find("FOO").unwrap() as u32;
+    let hit = map
+        .lookup(name_offset)
+        .expect("constant() names a constant");
+    assert!(
+        matches!(
+            hit.kind,
+            SymbolKind::ConstantReference {
+                ref name,
+                is_definition: false,
+            } if name == "FOO"
+        ),
+        "Expected a use of FOO, got {:?}",
+        hit.kind
+    );
+}
+
+#[test]
+fn constant_call_naming_a_class_constant_declares_nothing() {
+    // `constant('Foo::BAR')` names a class constant, not a global one; the
+    // member half belongs to `MemberAccess`, which this does not emit.
+    let php = "<?php\necho constant('Foo::BAR');\n";
+    let map = parse_and_extract(php);
+
+    let name_offset = php.find("Foo::BAR").unwrap() as u32;
+    assert!(
+        map.lookup(name_offset).is_none(),
+        "A class constant name should declare nothing, got {:?}",
+        map.lookup(name_offset).map(|hit| &hit.kind)
+    );
+}
+
+#[test]
+fn defined_call_with_a_non_literal_name_declares_nothing() {
+    let php = "<?php\nfunction t(string $name) { defined($name); }\n";
+    let map = parse_and_extract(php);
+
+    let name_offset = php.rfind("$name").unwrap() as u32;
+    let hit = map.lookup(name_offset).expect("the variable is navigable");
+    assert!(
+        matches!(hit.kind, SymbolKind::Variable { .. }),
+        "Expected a variable, got {:?}",
+        hit.kind
+    );
+}
+
+#[test]
 fn unquoted_offset_in_string_interpolation_is_not_a_class_reference() {
     // `"$data[code]"` reads `code` as the string key `'code'`, so the
     // offset is neither a constant nor a class name.
@@ -5419,4 +5623,151 @@ fn a_gate_definition_is_recorded_as_a_write() {
         map.gate_subjects.is_empty(),
         "a definition is not bound to a model"
     );
+}
+
+// ── Broadened Laravel call sites ────────────────────────────────────
+
+/// Every key of `kind` the map records, in source order.
+fn string_keys_of(map: &SymbolMap, wanted: LaravelStringKind) -> Vec<String> {
+    map.spans
+        .iter()
+        .filter_map(|span| match &span.kind {
+            SymbolKind::LaravelStringKey { kind, key, .. } if *kind == wanted => Some(key.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The signed-URL and redirect helpers name a route just as `route()` does,
+/// whether they are reached through a facade or through the helper call that
+/// returns the same object.
+#[test]
+fn a_route_name_is_read_from_every_helper_that_takes_one() {
+    for call in [
+        "URL::signedRoute('orders.show')",
+        "URL::temporarySignedRoute('orders.show', 60)",
+        "\\Illuminate\\Support\\Facades\\URL::route('orders.show')",
+        "Redirect::route('orders.show')",
+        "Redirect::signedRoute('orders.show')",
+        "Response::redirectToRoute('orders.show')",
+        "redirect()->route('orders.show')",
+        "redirect()->temporarySignedRoute('orders.show', 60)",
+        "url()->signedRoute('orders.show')",
+        "response()->redirectToRoute('orders.show')",
+    ] {
+        let map = parse_and_extract(&format!("<?php\n{call};\n"));
+        assert_eq!(
+            string_keys_of(&map, LaravelStringKind::Route),
+            vec!["orders.show".to_string()],
+            "`{call}` should name a route"
+        );
+    }
+}
+
+/// The route helpers are recognised by their receiver, so a same-named method
+/// on an unrelated object is left alone.
+#[test]
+fn a_route_method_on_an_unrelated_receiver_names_nothing() {
+    for call in [
+        "$builder->route('orders.show')",
+        // `redirect('/home')` returns the response, not the redirector.
+        "redirect('/home')->route('orders.show')",
+    ] {
+        let map = parse_and_extract(&format!("<?php\n{call};\n"));
+        assert!(
+            string_keys_of(&map, LaravelStringKind::Route).is_empty(),
+            "`{call}` should name no route"
+        );
+    }
+}
+
+/// The "is the current route named …?" predicates are variadic, so every
+/// argument names a route — and `$request->is()` reads URIs rather than
+/// names, so it names none.
+#[test]
+fn every_argument_of_a_route_check_names_a_route() {
+    let map = parse_and_extract("<?php\nRoute::is('admin.*', 'account.index');\n");
+    assert_eq!(
+        string_keys_of(&map, LaravelStringKind::Route),
+        vec!["admin.*".to_string(), "account.index".to_string()]
+    );
+
+    let map = parse_and_extract("<?php\n$request->routeIs('admin.*');\n");
+    assert_eq!(
+        string_keys_of(&map, LaravelStringKind::Route),
+        vec!["admin.*".to_string()]
+    );
+
+    let map = parse_and_extract("<?php\n$request->is('admin/*');\n");
+    assert!(string_keys_of(&map, LaravelStringKind::Route).is_empty());
+}
+
+/// A form request's `#[RedirectToRoute]` names the route a failed validation
+/// bounces back to, but only where the file imports the Laravel attribute.
+#[test]
+fn a_redirect_to_route_attribute_names_a_route() {
+    let imported = "<?php\nuse Illuminate\\Foundation\\Http\\Attributes\\RedirectToRoute;\n\
+                    #[RedirectToRoute('login')]\nclass StoreRequest {}\n";
+    assert_eq!(
+        string_keys_of(&parse_and_extract(imported), LaravelStringKind::Route),
+        vec!["login".to_string()]
+    );
+
+    let qualified = "<?php\n#[\\Illuminate\\Foundation\\Http\\Attributes\\RedirectToRoute('login')]\n\
+                     class StoreRequest {}\n";
+    assert_eq!(
+        string_keys_of(&parse_and_extract(qualified), LaravelStringKind::Route),
+        vec!["login".to_string()]
+    );
+
+    let unrelated = "<?php\n#[RedirectToRoute('login')]\nclass StoreRequest {}\n";
+    assert!(
+        string_keys_of(&parse_and_extract(unrelated), LaravelStringKind::Route).is_empty(),
+        "an attribute of the same name from elsewhere names no route"
+    );
+}
+
+/// `getMany()` takes a list rather than one key, in either of the two
+/// spellings the repository reads it in.
+#[test]
+fn get_many_names_every_config_key_it_lists() {
+    let map = parse_and_extract("<?php\nConfig::getMany(['app.name', 'app.timezone' => 'UTC']);\n");
+    assert_eq!(
+        string_keys_of(&map, LaravelStringKind::Config),
+        vec!["app.name".to_string(), "app.timezone".to_string()]
+    );
+
+    let map = parse_and_extract("<?php\nconfig()->getMany(['app.name']);\n");
+    assert_eq!(
+        string_keys_of(&map, LaravelStringKind::Config),
+        vec!["app.name".to_string()]
+    );
+}
+
+/// `hasForLocale()` asks the same question of the same keys `has()` does.
+#[test]
+fn has_for_locale_names_a_translation_key() {
+    let map = parse_and_extract("<?php\nLang::hasForLocale('messages.saved', 'da');\n");
+    assert_eq!(
+        string_keys_of(&map, LaravelStringKind::Trans),
+        vec!["messages.saved".to_string()]
+    );
+}
+
+/// Both spellings of an environment read record the variable they name.
+#[test]
+fn an_environment_variable_is_read_from_both_spellings() {
+    for call in [
+        "env('APP_NAME')",
+        "env('APP_NAME', 'Laravel')",
+        "Env::get('APP_NAME')",
+        "\\Illuminate\\Support\\Env::getOrFail('APP_NAME')",
+    ] {
+        let map = parse_and_extract(&format!("<?php\n{call};\n"));
+        assert_eq!(
+            string_keys_of(&map, LaravelStringKind::Env),
+            vec!["APP_NAME".to_string()],
+            "`{call}` should name an environment variable"
+        );
+    }
 }

@@ -17,8 +17,12 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 /// ASCII-lowercase a key, borrowing when it is already lowercase.
+///
+/// Exposed for the string-keyed indexes that have to fold a name the same
+/// way these maps do (the reference index keys functions by folded name,
+/// since PHP resolves them case-insensitively).
 #[inline]
-fn fold(key: &str) -> Cow<'_, str> {
+pub(crate) fn fold(key: &str) -> Cow<'_, str> {
     if key.bytes().any(|b| b.is_ascii_uppercase()) {
         Cow::Owned(key.to_ascii_lowercase())
     } else {

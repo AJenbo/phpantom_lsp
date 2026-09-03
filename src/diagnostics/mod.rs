@@ -133,8 +133,9 @@
 //!
 //! - **PHPCS proxy diagnostics** — run PHP_CodeSniffer via
 //!   `phpcs --report=json` and surface coding standard violations as
-//!   LSP diagnostics.  Auto-detected when `squizlabs/php_codesniffer`
-//!   is in `require-dev`; configurable under `[phpcs]`.
+//!   LSP diagnostics.  Auto-detected via `vendor/bin/phpcs` or `$PATH`,
+//!   independent of what `composer.json` declares; configurable under
+//!   `[phpcs]`.
 //!
 //!   PHPCS runs in its own **dedicated worker task**, following the
 //!   same pattern as the PHPStan worker.  At most one PHPCS process
@@ -235,6 +236,7 @@ mod readonly_writes;
 mod return_type_errors;
 mod stale;
 pub(crate) mod state;
+mod subject_cache;
 pub(crate) mod suppression;
 mod syntax_errors;
 mod type_errors;
@@ -342,6 +344,69 @@ impl Backend {
         uri_str: &str,
         content: &str,
         out: &mut Vec<Diagnostic>,
+        observe: Option<SlowDiagnosticObserver<'_>>,
+    ) {
+        // Where this pass's own diagnostics start, so the reachability
+        // filter below only judges what the collectors add and leaves any
+        // fast diagnostics the caller already collected.
+        let slow_start = out.len();
+
+        // ── Phase 2: forward-walked diagnostic scope cache ──────
+        // Walk every function/method body in the file once with the
+        // forward walker, recording scope snapshots at each statement
+        // boundary.  All subsequent `resolve_variable_types` calls
+        // from diagnostic collectors hit the cache (O(log N) lookup)
+        // instead of doing a full backward scan per member-access
+        // span.  This eliminates the O(N × depth × file_size) cost
+        // that caused multi-minute analysis times on large files.
+        //
+        // Held here rather than around the collectors alone: the same
+        // walk records which branches cannot run, and the filter below
+        // reads those ranges once the collectors are done.
+        let _scope_guard =
+            crate::type_engine::variable::forward_walk::with_diagnostic_scope_cache();
+
+        self.run_slow_collectors(uri_str, content, out, observe);
+
+        // ── Drop what a branch that cannot run reported ──────────────
+        // The collectors each walk spans of their own with no notion of
+        // control flow, so they judge a branch a decidable guard rules
+        // out exactly as readily as live code.  The walk that built the
+        // scope cache recorded those branches; nothing inside one is a
+        // finding.
+        let unreachable = crate::type_engine::variable::forward_walk::unreachable_ranges();
+        if !unreachable.is_empty() {
+            let dead: Vec<Range> = unreachable
+                .iter()
+                .filter_map(|&(start, end)| {
+                    offset_range_to_lsp_range(content, start as usize, end as usize)
+                })
+                .collect();
+            let mut i = slow_start;
+            while i < out.len() {
+                let start = out[i].range.start;
+                if dead
+                    .iter()
+                    .any(|range| start >= range.start && start < range.end)
+                {
+                    out.remove(i);
+                } else {
+                    i += 1;
+                }
+            }
+        }
+    }
+
+    /// Run every slow collector for `uri_str`, in order.
+    ///
+    /// Split out from [`Self::collect_slow_diagnostics_observed`] so the
+    /// observer's "stop here" can return from the collector list while
+    /// the reachability filter still runs on what was collected.
+    fn run_slow_collectors(
+        &self,
+        uri_str: &str,
+        content: &str,
+        out: &mut Vec<Diagnostic>,
         mut observe: Option<SlowDiagnosticObserver<'_>>,
     ) {
         // Activate the chain resolution cache so that all slow
@@ -360,17 +425,6 @@ impl Backend {
         // every `$q->where(...)`, `$query->where(...)`, and
         // `Product::query()->where(...)` call site in the file.
         let _resolver_guard = crate::type_engine::call_resolution::activate_type_engine_caches();
-
-        // ── Phase 2: forward-walked diagnostic scope cache ──────
-        // Walk every function/method body in the file once with the
-        // forward walker, recording scope snapshots at each statement
-        // boundary.  All subsequent `resolve_variable_types` calls
-        // from diagnostic collectors hit the cache (O(log N) lookup)
-        // instead of doing a full backward scan per member-access
-        // span.  This eliminates the O(N × depth × file_size) cost
-        // that caused multi-minute analysis times on large files.
-        let _scope_guard =
-            crate::type_engine::variable::forward_walk::with_diagnostic_scope_cache();
 
         // ── Shared per-file snapshot for the symbol-span collectors ────
         // Built once and reused by the forward-walker warm-up below and
@@ -690,7 +744,8 @@ impl Backend {
                         // proves nothing.
                         LaravelStringKind::Section
                         | LaravelStringKind::Stack
-                        | LaravelStringKind::ContainerBinding => return None,
+                        | LaravelStringKind::ContainerBinding
+                        | LaravelStringKind::Env => return None,
                     };
                     Some((checked, key.as_str(), span.start, span.end))
                 } else {
@@ -714,12 +769,24 @@ impl Backend {
         // enumerations.  Safe to call now that the `symbol_maps` read
         // lock has been released.
         let mut project_registers_routes = false;
-        let route_keys: HashSet<String> = if has_route {
-            let routes = self.cached_routes();
-            project_registers_routes = routes.iter().any(|route| !route.from_vendor);
-            routes.iter().map(|route| route.name.clone()).collect()
+        let (route_keys, route_open_prefixes, route_open_suffixes): (
+            HashSet<String>,
+            Vec<String>,
+            Vec<String>,
+        ) = if has_route {
+            let discovery = self.cached_routes();
+            project_registers_routes = discovery.routes.iter().any(|route| !route.from_vendor);
+            (
+                discovery
+                    .routes
+                    .iter()
+                    .map(|route| route.name.clone())
+                    .collect(),
+                discovery.open_prefixes.clone(),
+                discovery.open_suffixes.clone(),
+            )
         } else {
-            HashSet::new()
+            (HashSet::new(), Vec::new(), Vec::new())
         };
         let cached_config_keys = has_config.then(|| self.cached_config_keys());
         let config_keys = cached_config_keys.as_deref().map_or(&[][..], Vec::as_slice);
@@ -837,7 +904,34 @@ impl Backend {
                     if !project_registers_routes {
                         continue;
                     }
-                    (route_keys.contains(key), "route", "invalid_laravel_route")
+                    // A group whose `->name()` argument was not a string
+                    // literal (e.g. Filament's `Route::name($panelId . '.')`
+                    // has children we cannot enumerate statically.  Any route
+                    // that falls under such a prefix is unjudgeable, and so
+                    // is any route ending in one of the names such a group
+                    // registers, even when it recorded no known prefix at all
+                    // (e.g. a group with no enclosing literal group whose own
+                    // name is entirely a variable).
+                    if route_open_prefixes
+                        .iter()
+                        .any(|prefix| key.starts_with(prefix))
+                        || route_open_suffixes
+                            .iter()
+                            .any(|suffix| key.ends_with(suffix))
+                    {
+                        continue;
+                    }
+                    // A `Route::is('admin.*')` check names a pattern rather
+                    // than one route, and matches whatever the project has
+                    // under it.
+                    let valid = if key.contains('*') {
+                        route_keys.iter().any(|name| {
+                            crate::virtual_members::laravel::route_name_matches(key, name)
+                        })
+                    } else {
+                        route_keys.contains(key)
+                    };
+                    (valid, "route", "invalid_laravel_route")
                 }
                 CheckedStringKind::Config => {
                     // Only judge a key whose config file we actually read.
@@ -1045,6 +1139,10 @@ impl Backend {
 /// How long to wait after the last keystroke before publishing diagnostics.
 const DIAGNOSTIC_DEBOUNCE_MS: u64 = 500;
 
+/// How long to wait for a client to acknowledge a diagnostic refresh
+/// before giving up on it.
+const REFRESH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
 impl Backend {
     /// Deliver diagnostics for a single file.
     ///
@@ -1081,7 +1179,7 @@ impl Backend {
             let backend = self.clone_for_blocking();
             let uri = uri_str.to_string();
             let content = content.to_string();
-            crate::server::run_blocking_cancel_safe(move || {
+            crate::server::run_blocking_cancel_safe("fast diagnostics", move || {
                 let mut out = Vec::new();
                 let effective_owned = backend.blade_virtual_content.read().get(&uri).cloned();
                 let effective = effective_owned.as_deref().unwrap_or(&content);
@@ -1091,6 +1189,14 @@ impl Backend {
             .await
             .unwrap_or_default()
         };
+
+        // The collector above can take a while; re-check that the file is
+        // still open immediately before writing so a close that landed
+        // mid-compute can't resurrect the caches `clear_diagnostics_for_file`
+        // already purged (same rationale as the external tool workers).
+        if !self.open_files.read().contains_key(uri_str) {
+            return;
+        }
 
         {
             let mut cache = self.diag.last_fast.lock();
@@ -1106,7 +1212,7 @@ impl Backend {
             let backend = self.clone_for_blocking();
             let uri = uri_str.to_string();
             let content = content.to_string();
-            crate::server::run_blocking_cancel_safe(move || {
+            crate::server::run_blocking_cancel_safe("slow diagnostics", move || {
                 // The resolved-class cache guard contains a thread-local raw
                 // pointer; activate it on this blocking thread for the
                 // duration of the synchronous collection only.
@@ -1122,6 +1228,12 @@ impl Backend {
             .await
             .unwrap_or_default()
         };
+
+        // Re-check again: Phase 2 runs a full-file forward walk and can
+        // take seconds, plenty of time for a close to land mid-compute.
+        if !self.open_files.read().contains_key(uri_str) {
+            return;
+        }
 
         {
             let mut cache = self.diag.last_slow.lock();
@@ -1165,6 +1277,23 @@ impl Backend {
             Ok(u) => u,
             Err(_) => return false,
         };
+
+        // Serialize this URI's read-merge-write. Each per-source cache
+        // below is locked and released independently, so without this a
+        // second call that starts reading after this one can still finish
+        // writing first (or vice versa), landing a merge based on a
+        // stale snapshot after a fresher one. Dropped before the
+        // push-mode `.await` below since it guards only the synchronous
+        // merge and the pull-mode cache write.
+        let assemble_lock = {
+            let mut locks = self.diag.assemble_locks.lock();
+            Arc::clone(
+                locks
+                    .entry(uri_str.to_string())
+                    .or_insert_with(|| Arc::new(parking_lot::Mutex::new(()))),
+            )
+        };
+        let assemble_guard = assemble_lock.lock();
 
         // ── Read all per-source caches ──────────────────────────────
         let mut full = Vec::new();
@@ -1303,6 +1432,9 @@ impl Backend {
             let Some(client) = &self.client else {
                 return false;
             };
+            // Nothing left to serialize: push mode caches nothing, it
+            // only publishes the merged set inline.
+            drop(assemble_guard);
             client.publish_diagnostics(uri, full, None).await;
             false
         }
@@ -1319,7 +1451,14 @@ impl Backend {
             return;
         }
         if let Some(client) = &self.client {
-            let _ = client.workspace_diagnostic_refresh().await;
+            // A server-to-client request, so a client that is busy (or
+            // that never answers at all) would otherwise park this task
+            // indefinitely, and the background workspace pass awaits
+            // this as it streams results.  A refresh is best-effort
+            // (the editor re-pulls on its own schedule too), so timing
+            // out costs nothing.
+            let _ =
+                tokio::time::timeout(REFRESH_TIMEOUT, client.workspace_diagnostic_refresh()).await;
         }
     }
 
@@ -1626,13 +1765,17 @@ impl Backend {
         self.diag.last_fast.lock().remove(uri_str);
         self.diag.last_slow.lock().remove(uri_str);
         // Remove cached PHPStan, PHPCS, and Mago diagnostics too.
-        self.phpstan_tool.last_diags.lock().remove(uri_str);
-        self.phpcs_tool.last_diags.lock().remove(uri_str);
-        self.mago_lint_tool.last_diags.lock().remove(uri_str);
-        self.mago_analyze_tool.last_diags.lock().remove(uri_str);
+        self.phpstan_tool.forget(uri_str);
+        self.phpcs_tool.forget(uri_str);
+        self.mago_lint_tool.forget(uri_str);
+        self.mago_analyze_tool.forget(uri_str);
         // Remove pull-diagnostic caches.
         self.diag.result_ids.lock().remove(uri_str);
         self.diag.last_full.lock().remove(uri_str);
+        // Drop the per-URI assemble lock so the map doesn't grow
+        // unboundedly across a long editing session; a fresh one is
+        // created on demand if the URI is reopened.
+        self.diag.assemble_locks.lock().remove(uri_str);
 
         let client = match &self.client {
             Some(c) => c,
@@ -1655,10 +1798,14 @@ impl Backend {
             // the editor closes many files in a burst, each didClose
             // handler would await a response while the client is busy
             // sending more messages, deadlocking the tower-lsp
-            // service loop.
+            // service loop.  The detached task still gets the same cap
+            // as `request_diagnostic_refresh`, so a client that never
+            // answers leaves no task parked for the session.
             let client = client.clone();
             tokio::spawn(async move {
-                let _ = client.workspace_diagnostic_refresh().await;
+                let _ =
+                    tokio::time::timeout(REFRESH_TIMEOUT, client.workspace_diagnostic_refresh())
+                        .await;
             });
         }
 
@@ -2094,5 +2241,25 @@ mod tests {
             assert_ne!(result_id(), seen_before_close);
             assert_ne!(result_id(), last_seen_before_close);
         }
+    }
+
+    /// `publish_diagnostics_for_file` must not resurrect a closed file's
+    /// caches. Before the fix, both Phase 1 and Phase 2 wrote into
+    /// `last_fast`/`last_slow` (and cascaded into `last_full` via
+    /// `assemble_and_refresh`) unconditionally, so a close landing
+    /// mid-compute left the closed file's caches populated again right
+    /// after `clear_diagnostics_for_file` had purged them. A file that
+    /// was never in `open_files` exercises the same check.
+    #[tokio::test]
+    async fn publish_diagnostics_skips_write_when_file_not_open() {
+        let backend = Backend::new_test();
+        let uri = "file:///not_open.php";
+        let content = "<?php\nclass Foo {}\n";
+
+        backend.publish_diagnostics_for_file(uri, content).await;
+
+        assert!(backend.diag.last_fast.lock().get(uri).is_none());
+        assert!(backend.diag.last_slow.lock().get(uri).is_none());
+        assert!(backend.diag.last_full.lock().get(uri).is_none());
     }
 }

@@ -2340,7 +2340,7 @@ fn workspace_indexing_batch_merges_disk_files() {
 
     let use_uri = crate::util::path_to_uri(&src.join("Use.php"));
     let class_candidates = backend
-        .reference_candidate_uris_for_keys(&[ReferenceIndexKey::Class("App\\Impl\\A".to_string())])
+        .reference_candidate_uris_for_keys(&[ReferenceIndexKey::class("App\\Impl\\A")])
         .expect("reference index should be active after workspace indexing");
     assert!(class_candidates.contains(use_uri.as_str()));
 
@@ -2352,10 +2352,8 @@ fn workspace_indexing_batch_merges_disk_files() {
         .expect("reference index should be active after workspace indexing");
     assert!(member_candidates.contains(use_uri.as_str()));
 
-    let function_snapshot =
-        backend.user_file_symbol_maps_for_reference_keys(&[ReferenceIndexKey::Function(
-            "App\\helper".to_string(),
-        )]);
+    let function_snapshot = backend
+        .user_file_symbol_maps_for_reference_keys(&[ReferenceIndexKey::function("App\\helper")]);
     assert_eq!(
         function_snapshot.len(),
         1,
@@ -2386,10 +2384,8 @@ fn reference_key_snapshot_falls_back_until_workspace_index_ready() {
     );
     backend.update_ast(unrelated_uri, "<?php\nnamespace App;\nclass Other {}\n");
 
-    let snapshot =
-        backend.user_file_symbol_maps_for_reference_keys(&[ReferenceIndexKey::Function(
-            "App\\helper".to_string(),
-        )]);
+    let snapshot = backend
+        .user_file_symbol_maps_for_reference_keys(&[ReferenceIndexKey::function("App\\helper")]);
     let uris: std::collections::HashSet<_> = snapshot.into_iter().map(|(uri, _)| uri).collect();
 
     assert!(
@@ -2819,6 +2815,61 @@ async fn test_member_references_through_property_receivers() {
     }
 }
 
+/// A member reached through a value read out of the Reflection API is a
+/// reference like any other, once the reflected read types.
+///
+/// The receiver is `$value`, so the deleted name-vs-class-name fallback
+/// could not have matched `Shell` on spelling; the hit proves the type
+/// travelled from `Configuration::$shell` through `getProperty('shell')`
+/// and `getValue()`.
+#[tokio::test]
+async fn test_const_reference_through_a_reflected_property_read() {
+    let backend = Backend::new_test_with_full_stubs();
+    let uri_shell = Url::parse("file:///Shell.php").unwrap();
+    let uri_config = Url::parse("file:///Configuration.php").unwrap();
+    let uri_use = Url::parse("file:///probe.php").unwrap();
+
+    let text_shell = concat!(
+        "<?php\n",                     // L0
+        "namespace Psy;\n",            // L1
+        "class Shell {\n",             // L2
+        "    const VERSION = 'v1';\n", // L3
+        "}\n",                         // L4
+    );
+    let text_config = concat!(
+        "<?php\n",                             // L0
+        "namespace Psy;\n",                    // L1
+        "class Configuration {\n",             // L2
+        "    private ?Shell $shell = null;\n", // L3
+        "}\n",                                 // L4
+    );
+    let text_use = concat!(
+        "<?php\n",                                         // L0
+        "namespace Psy;\n",                                // L1
+        "function probe(Configuration $config): void {\n", // L2
+        "    $refl = new \\ReflectionObject($config);\n",  // L3
+        "    $reflected = $refl->getProperty('shell');\n", // L4
+        "    $value = $reflected->getValue($config);\n",   // L5
+        "    echo $value::VERSION;\n",                     // L6
+        "}\n",                                             // L7
+    );
+
+    open_file(&backend, &uri_shell, text_shell).await;
+    open_file(&backend, &uri_config, text_config).await;
+    open_file(&backend, &uri_use, text_use).await;
+
+    let locs = find_references(&backend, &uri_shell, 3, 11, false).await;
+    let lines: Vec<u32> = locs
+        .iter()
+        .filter(|l| l.uri == uri_use)
+        .map(|l| l.range.start.line)
+        .collect();
+    assert!(
+        lines.contains(&6),
+        "expected the VERSION read on probe.php line 6 to be a reference, got {lines:?}"
+    );
+}
+
 // ─── Laravel string-key gating (non-Laravel projects) ──────────────────────
 
 /// A non-Laravel project can define its own `config()` function (common in
@@ -2862,5 +2913,68 @@ async fn laravel_string_key_references_gated_on_is_laravel() {
         plain_locs.is_empty(),
         "a non-Laravel project's own config() must not produce Laravel string-key \
          references, got {plain_locs:?}"
+    );
+}
+
+#[tokio::test]
+async fn function_references_match_a_call_spelled_in_another_case() {
+    let backend = Backend::new_test();
+    let uri_a = Url::parse("file:///helpers.php").unwrap();
+    let uri_b = Url::parse("file:///main.php").unwrap();
+
+    let text_a = concat!(
+        "<?php\n",                      // L0
+        "function helper(): void {}\n", // L1
+    );
+    let text_b = concat!(
+        "<?php\n",                   // L0
+        "namespace App;\n",          // L1
+        "function demo(): void {\n", // L2
+        "    HELPER();\n",           // L3
+        "    helper();\n",           // L4
+        "}\n",                       // L5
+    );
+
+    open_file(&backend, &uri_a, text_a).await;
+    open_file(&backend, &uri_b, text_b).await;
+
+    let locs = find_references(&backend, &uri_a, 1, 10, false).await;
+    let lines: Vec<u32> = locs.iter().map(|l| l.range.start.line).collect();
+    assert_eq!(
+        lines,
+        vec![3, 4],
+        "PHP resolves function names case-insensitively, so HELPER() calls helper()"
+    );
+}
+
+#[tokio::test]
+async fn function_references_from_a_use_function_import_reach_its_call_sites() {
+    let backend = Backend::new_test();
+    let uri_a = Url::parse("file:///helpers.php").unwrap();
+    let uri_b = Url::parse("file:///main.php").unwrap();
+
+    let text_a = concat!(
+        "<?php\n",                     // L0
+        "namespace Support;\n",        // L1
+        "function shout(): void {}\n", // L2
+    );
+    let text_b = concat!(
+        "<?php\n",                        // L0
+        "namespace App;\n",               // L1
+        "use function Support\\shout;\n", // L2
+        "function demo(): void {\n",      // L3
+        "    shout();\n",                 // L4
+        "}\n",                            // L5
+    );
+
+    open_file(&backend, &uri_a, text_a).await;
+    open_file(&backend, &uri_b, text_b).await;
+
+    // Started from the import, whose span text is the qualified name.
+    let locs = find_references(&backend, &uri_b, 2, 22, false).await;
+    assert!(
+        locs.iter()
+            .any(|l| l.uri == uri_b && l.range.start.line == 4),
+        "expected the shout() call site, got {locs:?}"
     );
 }

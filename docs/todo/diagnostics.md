@@ -177,31 +177,64 @@ now resolves to `mixed` rather than to the surviving literal.
 
 ```php
 /** @param int $name */
-function greet(?string $name): void {}   // not flagged: int is not string at all
+function greet(string $name): void {}    // not flagged: int is not string at all
 
 /** @param Foo $value */
-function take(?Foo $value): void {}      // not flagged: `Foo` may be nullable
+function take(Bar $value): void {}       // not flagged: `Foo` may alias `Bar`
 ```
 
 `src/diagnostics/docblock_native_mismatch.rs` compares a documented type
-against its native hint on one axis only: whether the annotation denies a
-`null` the signature accepts. Two shapes are therefore still silent.
-
-The first is a documented type that is not a subtype of the native hint at
-all (`@param int` on a `?string`, `@return array` on a `: string`). That is
-the check PHPStan's `IncompatiblePhpDocTypeRule` performs, and the one the
-existing `is_type_compatible` in `src/diagnostics/type_errors/compatibility.rs`
+against its native hint on one axis only: whether the annotation admits a
+`null` the signature rules out. A documented type that is not a subtype of
+the native hint on any *other* axis (`@param int` on a `string`, `@return
+array` on a `: string`) stays silent. That is the check PHPStan's
+`IncompatiblePhpDocTypeRule` performs, and the one the existing
+`is_type_compatible` in `src/diagnostics/type_errors/compatibility.rs`
 already has the machinery for.
 
-The second is a bare class-like name, which `nullability_is_decidable` steps
-around on purpose: `Foo` may be a `@template` parameter or an imported
-`@psalm-type` alias that resolves to a nullable type, and the diagnostic has
-no resolution step that would tell those apart from a class named `Foo`.
-Resolving the name (against the declaration's own `@template` list, the
-enclosing class's, and the file's `@psalm-type`/`@psalm-import-type` tags)
-would let the nullability check cover the class-name case as well.
+Covering it means resolving the documented type's bare names first, since a
+`Foo` that a `@template` list or an imported `@psalm-type` alias stands
+behind may well be the native `Bar` after resolution. The nullability axis
+sidesteps that today: a name that resolves to something nullable never
+spells `null` itself, so the check simply does not fire on it.
 
-**Fix:** Resolve the documented type's names before comparing, then run the
-comparison through `is_type_compatible` rather than the nullability test
-alone. Both halves want the same measurement, so they are one change rather
-than two.
+**Fix:** Resolve the documented type's names against the declaration's own
+`@template` list, the enclosing class's, and the file's
+`@psalm-type`/`@psalm-import-type` tags, then run the comparison through
+`is_type_compatible` rather than the nullability test alone.
+
+---
+
+## D18. `array<int, T>` is accepted wherever a `list<T>` is declared
+
+**Impact: Low · Complexity: Medium-High**
+
+```php
+/**
+ * @param list<int> $values
+ * @return list<int>
+ */
+function keep(array $values): array {
+    return array_filter($values, fn ($v) => $v > 3);  // array<int, int>, not flagged
+}
+```
+
+`is_type_compatible` in `src/diagnostics/type_errors/compatibility.rs`
+carries an explicit MAYBE hatch for `array<int, X>` reaching a `list<X>`
+parameter or return type, on the grounds that PHP codebases spell the two
+interchangeably. The core `is_subtype_of` already rejects the direction
+(only `list<X>` satisfies `array<int, X>`, not the reverse), so the hatch
+is the only thing standing between us and PHPStan's report here.
+
+Now that `array_filter()` reports the `array<int, T>` it actually
+produces, the hatch is what keeps the second half of the over-claim
+alive: a function that hands back an unwrapped filter result still
+passes a declared `list<T>`.
+
+**Fix:** Drop the `array<int, X> → list<X>` arm and audit the corpus
+under `projects/` for what it starts reporting. The arm exists because
+plain `array<int, X>` is what an unannotated array resolves to in many
+places, so retiring it wants the resolver to answer `list<X>` for the
+shapes that genuinely are lists (literal arrays, `array_values()`,
+appended-to locals) first. Pay for it with resolver precision, the same
+way the supertype-where-subtype hatch was retired.

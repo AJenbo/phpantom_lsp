@@ -2317,6 +2317,96 @@ class User extends Model {
     );
 }
 
+/// A custom Eloquent builder is almost always written without generics
+/// (`class UserBuilder extends Builder {}`), so the model it queries is
+/// only known from the call site.  `User::query()` hands the builder the
+/// model, and every terminal method on the chain has to keep it — before
+/// this worked, `firstOrFail()` handed back the base `Model` (or leaked
+/// the raw `TModel`) and completion on the result was empty.
+#[tokio::test]
+async fn test_custom_builder_without_generics_keeps_model_type() {
+    let builder_php = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Builder;
+class UserBuilder extends Builder {
+    /** @return $this */
+    public function active() { return $this; }
+}
+";
+    let user_php = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+class User extends Model {
+    public function getName(): string { return ''; }
+    public function newEloquentBuilder($query): UserBuilder { return new UserBuilder(); }
+    public function test() {
+        $user = User::query()
+            ->active()
+            ->where('id', 1)
+            ->firstOrFail();
+        $user->
+    }
+    public function chain() {
+        $query = User::query()->lockForUpdate();
+        $query->
+    }
+}
+";
+    let (backend, dir) = make_workspace(&[
+        ("src/Models/UserBuilder.php", builder_php),
+        ("src/Models/User.php", user_php),
+    ]);
+
+    // "$user->" on line 11 — the model, not the base `Model`.
+    let items = complete_at(&backend, &dir, "src/Models/User.php", user_php, 11, 15).await;
+    let methods = method_names(&items);
+    assert!(
+        methods.contains(&"getName"),
+        "query()->active()->where()->firstOrFail() should return User, got: {:?}",
+        methods
+    );
+
+    // The builder itself keeps everything the full resolution gives it:
+    // its own methods, Eloquent Builder's, and the `@mixin Query\\Builder`
+    // ones that only reach it through the virtual member providers.
+    let items = complete_at(&backend, &dir, "src/Models/User.php", user_php, 15, 16).await;
+    let methods = method_names(&items);
+    for expected in ["active", "firstOrFail", "whereIn"] {
+        assert!(
+            methods.contains(&expected),
+            "custom builder should still offer {expected}, got: {:?}",
+            methods
+        );
+    }
+
+    // Hover must name the concrete model, not `Model` or `TModel`.
+    let uri = Url::from_file_path(dir.path().join("src/Models/User.php")).unwrap();
+    let hover = backend
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 11,
+                    character: 10,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .unwrap()
+        .expect("hover on $user");
+    let hover_text = match hover.contents {
+        HoverContents::Markup(m) => m.value,
+        _ => panic!("expected markup hover"),
+    };
+    assert!(
+        hover_text.contains("User") && !hover_text.contains("TModel"),
+        "hover on $user after a custom-builder chain should be User, got: {hover_text}"
+    );
+}
+
 #[tokio::test]
 async fn test_builder_lock_for_update_via_intermediate_variable() {
     let user_php = "\

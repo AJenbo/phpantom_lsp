@@ -8,6 +8,7 @@ use crate::Backend;
 use crate::atom::AtomMap;
 
 use crate::php_type::PhpType;
+use crate::type_engine::variable::forward_walk::ScopeProofs;
 use crate::types::*;
 
 // ─── Thread-local chain resolution cache ────────────────────────────────────
@@ -68,6 +69,29 @@ pub(crate) fn with_chain_resolution_cache() -> ChainCacheGuard {
         *cell.borrow_mut() = Some(HashMap::new());
     });
     ChainCacheGuard { owns: true }
+}
+
+/// Puts back the chain cache [`with_isolated_chain_cache`] set aside.
+pub(crate) struct IsolatedChainCacheGuard(Option<HashMap<String, Vec<ResolvedType>>>);
+
+impl Drop for IsolatedChainCacheGuard {
+    fn drop(&mut self) {
+        CHAIN_CACHE.with(|cell| {
+            *cell.borrow_mut() = self.0.take();
+        });
+    }
+}
+
+/// Swap the chain cache for an empty one until the returned guard drops.
+///
+/// A cached chain is keyed by the text of the expression and the types of
+/// the variables in it, falling back to the file offset it was written
+/// at.  Reading a method body with its parameters seeded from a call site
+/// asks about the same text at the same offset as every other call site
+/// does, so the entries either side of that walk describe a different
+/// scope than the one being resolved and neither may be shared with it.
+pub(crate) fn with_isolated_chain_cache() -> IsolatedChainCacheGuard {
+    IsolatedChainCacheGuard(CHAIN_CACHE.with(|cell| cell.borrow_mut().replace(HashMap::new())))
 }
 
 /// Type alias for the optional function-loader closure passed through
@@ -247,6 +271,15 @@ pub(crate) struct VarResolutionCtx<'a> {
     /// variable's types from the forward walker's in-progress
     /// `ScopeState`.
     pub scope_var_resolver: ScopeVarResolverFn<'a>,
+    /// The proofs that scope holds which are not variable types: what a
+    /// boolean stands for, which `preg_match` outcome a variable is, and
+    /// whose null a value's null stands for.
+    ///
+    /// Set alongside `scope_var_resolver`; `None` where no walker scope
+    /// exists.  Narrowing a ternary arm or a `match` arm reads these, so
+    /// a condition that tests a boolean recording an earlier check
+    /// narrows that check's subject instead of only the boolean.
+    pub scope_proofs: Option<ScopeProofs<'a>>,
 }
 
 impl<'a> VarResolutionCtx<'a> {
@@ -315,6 +348,7 @@ impl<'a> VarResolutionCtx<'a> {
             branch_aware: self.branch_aware,
             match_arm_narrowing: self.match_arm_narrowing.clone(),
             scope_var_resolver: self.scope_var_resolver,
+            scope_proofs: self.scope_proofs,
         }
     }
 
@@ -361,6 +395,7 @@ impl<'a> VarResolutionCtx<'a> {
             branch_aware: self.branch_aware,
             match_arm_narrowing,
             scope_var_resolver: self.scope_var_resolver,
+            scope_proofs: self.scope_proofs,
         }
     }
 }

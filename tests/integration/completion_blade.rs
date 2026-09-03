@@ -227,6 +227,20 @@ fn component_workspace(template: &str) -> (phpantom_lsp::Backend, tempfile::Temp
                 "resources/views/components/banner.blade.php",
                 "@props(['headline', 'subHeadline' => 'none'])\n<div>{{ $headline }}</div>\n",
             ),
+            (
+                "resources/views/components/hero.blade.php",
+                "@aware(['theme'])\n\
+                 @php($caption = strtoupper($title))\n\
+                 <h1 class=\"{{ $theme }}\">{{ $title }} {{ $subTitle }} {{ $caption }}</h1>\n\
+                 @foreach ($rows as $row)\n\
+                 <p>{{ $loop->index }}: {{ $row }}</p>\n\
+                 @endforeach\n\
+                 <div>{{ $slot }}</div>\n",
+            ),
+            (
+                "resources/views/components/notice.blade.php",
+                "@props(['level' => 'info'])\n<p class=\"{{ $level }}\">{{ $message }}</p>\n",
+            ),
             ("resources/views/page.blade.php", template),
         ],
     );
@@ -416,6 +430,61 @@ async fn an_anonymous_components_props_are_its_attributes() {
     assert!(
         labels.contains(&"headline") && labels.contains(&"sub-headline"),
         "expected the template's @props entries, got: {labels:?}"
+    );
+}
+
+#[tokio::test]
+async fn an_anonymous_component_without_props_offers_the_names_it_reads() {
+    let template = "<x-hero ";
+    let (backend, _dir, uri) = component_workspace(template);
+    open_blade(&backend, &uri, template).await;
+
+    let items = complete_typed(&backend, &uri, 0, 8).await;
+    let labels = labels(&items);
+    assert!(
+        labels.contains(&"title") && labels.contains(&"rows"),
+        "expected the template's undeclared reads, got: {labels:?}"
+    );
+    // A read of a camelCase variable is written as the kebab-case
+    // attribute Blade camel-cases back into it.
+    assert!(
+        labels.contains(&"sub-title"),
+        "expected the kebab-case spelling of $subTitle, got: {labels:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_name_the_component_template_supplies_itself_is_not_an_attribute() {
+    let template = "<x-hero ";
+    let (backend, _dir, uri) = component_workspace(template);
+    open_blade(&backend, &uri, template).await;
+
+    let items = complete_typed(&backend, &uri, 0, 8).await;
+    let labels = labels(&items);
+    for name in ["caption", "theme", "row", "loop", "slot"] {
+        assert!(
+            !labels.contains(&name),
+            "{name} is not the tag's to pass, got: {labels:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_declared_prop_keeps_its_default_beside_the_names_it_leaves_out() {
+    let template = "<x-notice ";
+    let (backend, _dir, uri) = component_workspace(template);
+    open_blade(&backend, &uri, template).await;
+
+    let items = complete_typed(&backend, &uri, 0, 10).await;
+    let level = items
+        .iter()
+        .find(|item| item.label == "level")
+        .unwrap_or_else(|| panic!("expected the declared prop, got: {:?}", labels(&items)));
+    assert_eq!(level.detail.as_deref(), Some("= 'info'"));
+    assert!(
+        labels(&items).contains(&"message"),
+        "expected the name @props leaves out, got: {:?}",
+        labels(&items)
     );
 }
 

@@ -5,10 +5,13 @@
 //! 1. **Project** — `.phpantom.toml` in the workspace root (next to
 //!    `composer.json`).
 //! 2. **Global** — `$XDG_CONFIG_HOME/phpantom_lsp/.phpantom.toml`
-//!    (typically `~/.config/phpantom_lsp/.phpantom.toml` on Linux).
+//!    (typically `~/.config/phpantom_lsp/.phpantom.toml` on Linux),
+//!    which `phpantom_lsp init --global` creates.
 //!
-//! Project settings override global settings.  When neither file
-//! exists, all settings use their defaults.
+//! The two are merged key by key rather than one replacing the other,
+//! so a project only has to spell out the settings where it differs
+//! from the user's defaults.  When neither file exists, all settings
+//! use their defaults.
 
 use std::path::{Path, PathBuf};
 
@@ -149,14 +152,16 @@ pub struct PhpConfig {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct DiagnosticsConfig {
-    /// Report member access on subjects whose type could not be resolved.
+    /// Report member access on a subject whose type cannot answer for it.
     ///
     /// Off by default. When enabled, PHPantom emits a hint-level
-    /// diagnostic on every `->`, `?->`, or `::` access where the
-    /// subject type is unknown (e.g. `mixed`, untyped variable, or a
-    /// return type PHPantom cannot infer). This is useful for
-    /// discovering gaps in type coverage but produces too many
-    /// diagnostics on codebases without comprehensive type annotations.
+    /// diagnostic on every `->`, `?->`, or `::` access where the subject
+    /// is `mixed` or where its type could not be worked out at all. The
+    /// message says which, since the first is an annotation missing from
+    /// the codebase and the second a gap in PHPantom's own inference.
+    /// This is useful for discovering gaps in type coverage but produces
+    /// too many diagnostics on codebases without comprehensive type
+    /// annotations.
     #[serde(rename = "unresolved-member-access")]
     pub unresolved_member_access: Option<bool>,
 
@@ -183,20 +188,24 @@ pub struct DiagnosticsConfig {
 
     /// Compute diagnostics for the whole workspace in the background.
     ///
-    /// On by default (requires the default `full` indexing strategy).
-    /// After the initial startup and the full background index finish,
-    /// PHPantom runs its native diagnostic collectors over every user
-    /// file in the workspace — not just the files open in the editor —
-    /// so project-wide problems appear in the editor's problems panel.
-    /// The pass is throttled to leave CPU headroom for interactive
-    /// requests. Set to `false` to only diagnose open files.
+    /// Off by default. When enabled (which requires the default `full`
+    /// indexing strategy), PHPantom runs its native diagnostic
+    /// collectors over every user file in the workspace once the initial
+    /// startup and the full background index finish — not just the files
+    /// open in the editor — so project-wide problems appear in the
+    /// editor's problems panel. The pass is throttled to leave CPU
+    /// headroom for interactive requests, but it still costs a
+    /// project-wide sweep on every session. While it is off, only open
+    /// files are diagnosed.
     pub workspace: Option<bool>,
 
     /// Run configured external tools (PHPStan, PHPCS, Mago) once over
     /// the whole project after workspace diagnostics finish.
     ///
-    /// On by default. Each tool only runs when it is enabled, resolvable,
-    /// and has its own project-level configuration file (`phpstan.neon`,
+    /// On by default, but it only takes effect when `workspace` is
+    /// enabled, since the project-wide run is chained onto that pass.
+    /// Each tool only runs when it is enabled, resolvable, and has its
+    /// own project-level configuration file (`phpstan.neon`,
     /// `phpcs.xml`, `mago.toml`) so the tool itself decides which paths
     /// to analyse. Set to `false` to keep external tools per-file only.
     #[serde(rename = "workspace-external")]
@@ -265,14 +274,15 @@ impl DiagnosticsConfig {
 
     /// Whether background workspace diagnostics are enabled.
     ///
-    /// Defaults to `true` (on) when not explicitly set.
+    /// Defaults to `false` (off) when not explicitly set.
     pub fn workspace_enabled(&self) -> bool {
-        self.workspace.unwrap_or(true)
+        self.workspace.unwrap_or(false)
     }
 
     /// Whether project-wide external tool runs are enabled.
     ///
-    /// Defaults to `true` (on) when not explicitly set.
+    /// Defaults to `true` (on) when not explicitly set, though it only
+    /// has an effect when [`workspace`](Self::workspace) is enabled.
     pub fn workspace_external_enabled(&self) -> bool {
         self.workspace_external.unwrap_or(true)
     }
@@ -397,6 +407,17 @@ pub struct MagoConfig {
     /// - `""` — disable Mago.
     /// - Any other value — use as the command.
     pub command: Option<String>,
+    /// Whether to proxy `mago lint` diagnostics.
+    ///
+    /// - `None` (default) — proxy them when the workspace `mago.toml`
+    ///   configures the linter (it carries a `[linter]` table).
+    /// - `true` / `false` — always / never, whatever `mago.toml` says.
+    pub lint: Option<bool>,
+    /// Whether to proxy `mago analyze` diagnostics.
+    ///
+    /// Same three states as [`lint`](Self::lint), keyed on an
+    /// `[analyzer]` table in `mago.toml` when unset.
+    pub analyze: Option<bool>,
     /// Maximum runtime in milliseconds before `mago lint` is killed.
     /// Defaults to 30 000 ms (30 seconds).
     #[serde(rename = "lint-timeout")]
@@ -487,11 +508,95 @@ pub struct IndexingConfig {
     ///   if present, still resolves on demand, but never falls back to
     ///   self-scan.
     pub strategy: Option<IndexingStrategy>,
+    /// Paths the workspace scanners must skip, in gitignore syntax
+    /// relative to the workspace root: a bare name matches at any
+    /// depth, a pattern containing `/` anchors to the root, a trailing
+    /// `/` restricts to directories, and a leading `!` re-includes.
+    ///
+    /// Excludes apply to background discovery and to the directories
+    /// `analyze` walks. A file the editor opens, or one named outright
+    /// on the `analyze` command line, is always served.
+    pub exclude: Option<Vec<String>>,
+    /// Extra file extensions (without the dot) treated as PHP source
+    /// during workspace discovery, e.g. `["module", "inc", "theme"]`
+    /// for Drupal. `.php` is always included. Drupal projects get the
+    /// Drupal extensions inside the detected web root automatically;
+    /// this setting extends discovery elsewhere.
+    pub extensions: Option<Vec<String>>,
 }
 
 impl IndexingConfig {
     pub fn strategy(&self) -> IndexingStrategy {
         self.strategy.unwrap_or_default()
+    }
+
+    pub fn exclude(&self) -> &[String] {
+        self.exclude.as_deref().unwrap_or_default()
+    }
+
+    pub fn extensions(&self) -> &[String] {
+        self.extensions.as_deref().unwrap_or_default()
+    }
+}
+
+/// File filters supplied by the editor rather than by `.phpantom.toml`.
+///
+/// An editor already knows which paths the user hides and which
+/// extensions they treat as PHP; mirroring that into `.phpantom.toml`
+/// by hand is duplicated work. A client passes the same two lists
+/// [`IndexingConfig`] accepts through `initializationOptions` (and
+/// again through `workspace/didChangeConfiguration` when the user
+/// edits their settings mid-session):
+///
+/// ```json
+/// { "indexing": { "exclude": ["generated"], "extensions": ["module"] } }
+/// ```
+///
+/// The shape is deliberately generic. It is a list of gitignore-style
+/// globs and a list of extensions, never an editor's own setting
+/// names, so every client can translate its native settings into it.
+/// This layer sits beside the config-file layer rather than replacing
+/// it: [`Backend::index_filters`](crate::Backend::index_filters)
+/// compiles the union, so a `.phpantom.toml` reload keeps the client's
+/// contribution and a client update keeps the file's.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ClientIndexingOptions {
+    /// Paths to skip, in the same gitignore syntax as
+    /// [`IndexingConfig::exclude`].
+    pub exclude: Vec<String>,
+    /// Extra file extensions treated as PHP source, as in
+    /// [`IndexingConfig::extensions`].
+    pub extensions: Vec<String>,
+}
+
+impl ClientIndexingOptions {
+    /// Read the `indexing` filters out of a client-supplied settings
+    /// blob, from either `initializationOptions` or the `settings` of a
+    /// `workspace/didChangeConfiguration` notification.
+    ///
+    /// Accepts the filters at the top level (`{"indexing": …}`, what an
+    /// extension passes as its own initialization options) or nested
+    /// under a `phpantom` key (`{"phpantom": {"indexing": …}}`, the
+    /// shape a client sends when it pushes its whole settings tree).
+    ///
+    /// Returns `None` when the blob carries no readable `indexing`
+    /// block, meaning "this notification is not about file filters"
+    /// rather than "the user cleared them". Clients re-push settings
+    /// for reasons of their own (VS Code's client sends the whole
+    /// `phpantom` section whenever any key in it changes), and reading
+    /// those as an empty filter set would silently discard what the
+    /// editor forwarded at startup. Clearing is still expressible: an
+    /// `indexing` block that is present but empty parses as no filters.
+    /// A malformed block is ignored for the same reason.
+    pub fn from_client_settings(settings: &serde_json::Value) -> Option<Self> {
+        let scoped = settings.get("phpantom").unwrap_or(settings);
+        serde_json::from_value(scoped.get("indexing")?.clone()).ok()
+    }
+
+    /// Whether the client supplied no filters at all.
+    pub fn is_empty(&self) -> bool {
+        self.exclude.is_empty() && self.extensions.is_empty()
     }
 }
 
@@ -586,8 +691,14 @@ pub const DEFAULT_CONFIG_CONTENT: &str = r#"#:schema https://github.com/PHPantom
 /// Return the path to the global config file, if the platform's config
 /// directory can be determined.
 ///
-/// On Linux this is typically `$XDG_CONFIG_HOME/phpantom/.phpantom.toml`
-/// (defaulting to `~/.config/phpantom_lsp/.phpantom.toml`).
+/// `$XDG_CONFIG_HOME/phpantom_lsp/.phpantom.toml`, defaulting to
+/// `~/.config/phpantom_lsp/.phpantom.toml`, on Linux and macOS alike, and
+/// `%APPDATA%\phpantom_lsp\.phpantom.toml` on Windows.  macOS deliberately
+/// follows the XDG path rather than `~/Library/Application Support`, which
+/// is where a command-line tool's config is expected to be; changing it
+/// would move every existing user's config out from under them, so
+/// `choose_base_strategy` is the intended call here rather than
+/// `choose_app_strategy`.
 pub fn global_config_path() -> Option<PathBuf> {
     etcetera::choose_base_strategy()
         .ok()
@@ -599,13 +710,36 @@ pub fn global_config_path() -> Option<PathBuf> {
 /// Returns `Ok(true)` if the file was created, `Ok(false)` if it
 /// already exists, or `Err` on I/O failure.
 pub fn create_default_config(workspace_root: &Path) -> Result<bool, ConfigError> {
-    let config_path = workspace_root.join(CONFIG_FILE_NAME);
+    write_default_config(&workspace_root.join(CONFIG_FILE_NAME))
+}
 
+/// Create a default `.phpantom.toml` in the user's global config
+/// directory, creating that directory when it does not exist yet.
+///
+/// Returns the path along with `true` if the file was created, or
+/// `false` if it already existed.
+pub fn create_global_config() -> Result<(bool, PathBuf), ConfigError> {
+    let config_path = global_config_path().ok_or(ConfigError::NoConfigDir)?;
+    let created = write_default_config(&config_path)?;
+    Ok((created, config_path))
+}
+
+/// Write the starter config to `config_path`, creating any missing
+/// parent directories.  Returns `false` without touching anything when
+/// the file is already there.
+fn write_default_config(config_path: &Path) -> Result<bool, ConfigError> {
     if config_path.exists() {
         return Ok(false);
     }
 
-    std::fs::write(&config_path, DEFAULT_CONFIG_CONTENT).map_err(|e| ConfigError::Io {
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| ConfigError::Io {
+            path: parent.display().to_string(),
+            source: e,
+        })?;
+    }
+
+    std::fs::write(config_path, DEFAULT_CONFIG_CONTENT).map_err(|e| ConfigError::Io {
         path: config_path.display().to_string(),
         source: e,
     })?;
@@ -631,16 +765,38 @@ fn load_toml_table(path: &Path) -> Result<Option<toml::Table>, ConfigError> {
     Ok(Some(table))
 }
 
-/// Load the project configuration, merging the global config (from the
-/// user's XDG config directory) with the project-level `.phpantom.toml`.
+/// Load the project configuration, merging the global config layer at
+/// `global_path` with the project-level `.phpantom.toml`.
 ///
 /// Project settings override global settings.  When neither file exists,
 /// returns `Config::default()`.
-pub fn load_config(workspace_root: &Path) -> Result<Config, ConfigError> {
-    let mut table = global_config_path()
-        .and_then(|p| load_toml_table(&p).transpose())
-        .transpose()?
-        .unwrap_or_default();
+///
+/// `global_path` of `None` skips the global layer entirely, leaving the
+/// project's own `.phpantom.toml` (or the built-in defaults) as the only
+/// source of settings.  The location is always passed in rather than
+/// read from [`global_config_path`] here, so that a test (or any other
+/// isolated run) cannot be steered by whatever happens to sit in the
+/// config directory of whoever is running it.
+pub fn load_config_from(
+    workspace_root: &Path,
+    global_path: Option<&Path>,
+) -> Result<Config, ConfigError> {
+    let mut table = match global_path {
+        Some(path) => load_toml_table(path)?.unwrap_or_default(),
+        None => toml::Table::new(),
+    };
+
+    // Deserialize the global layer on its own before merging, so a bad
+    // value in it is reported against the file it actually came from
+    // instead of against the project config it gets merged into.
+    if let Some(path) = global_path
+        && !table.is_empty()
+    {
+        let _: Config = table.clone().try_into().map_err(|e| ConfigError::Parse {
+            path: path.display().to_string(),
+            source: e,
+        })?;
+    }
 
     let project_path = workspace_root.join(CONFIG_FILE_NAME);
     if let Some(project) = load_toml_table(&project_path)? {
@@ -672,6 +828,9 @@ pub enum ConfigError {
         /// The underlying TOML parse error.
         source: toml::de::Error,
     },
+    /// The platform's user config directory could not be determined, so
+    /// the global config has no home.
+    NoConfigDir,
 }
 
 impl std::fmt::Display for ConfigError {
@@ -683,6 +842,9 @@ impl std::fmt::Display for ConfigError {
             ConfigError::Parse { path, source } => {
                 write!(f, "failed to parse {}: {}", path, source)
             }
+            ConfigError::NoConfigDir => {
+                write!(f, "cannot determine the user config directory")
+            }
         }
     }
 }
@@ -693,6 +855,15 @@ impl std::error::Error for ConfigError {}
 mod tests {
     use super::*;
     use std::io::Write;
+
+    /// Load a project config with the global layer switched off, so none
+    /// of the tests below picks up the real
+    /// `~/.config/phpantom_lsp/.phpantom.toml` of the machine running
+    /// them.  The global layer is covered by the tests that call
+    /// [`load_config_from`] with a temp path instead.
+    fn load_config(workspace_root: &Path) -> Result<Config, ConfigError> {
+        load_config_from(workspace_root, None)
+    }
 
     #[test]
     fn create_default_writes_file() {
@@ -745,6 +916,9 @@ mod tests {
         assert!(config.phpcs.timeout.is_none());
         assert_eq!(config.phpcs.timeout_ms(), 30_000);
         assert!(config.mago.command.is_none());
+        // Unset means "follow mago.toml", not on or off.
+        assert!(config.mago.lint.is_none());
+        assert!(config.mago.analyze.is_none());
         assert!(config.mago.lint_timeout.is_none());
         assert!(config.mago.analyze_timeout.is_none());
         assert_eq!(config.mago.lint_timeout_ms(), 30_000);
@@ -1031,6 +1205,8 @@ message = "^Call to deprecated function some_legacy_helper\\(\\)"
 
 [indexing]
 strategy = "self"
+exclude = ["generated", "web/sites/default/files"]
+extensions = ["module", "inc"]
 
 [semantic_tokens]
 mode = "full"
@@ -1052,6 +1228,8 @@ timeout = 15000
 
 [mago]
 command = "/usr/local/bin/mago"
+lint = true
+analyze = false
 lint-timeout = 15000
 analyze-timeout = 45000
 "#,
@@ -1072,6 +1250,17 @@ analyze-timeout = 45000
             Some("deprecated_usage")
         );
         assert_eq!(config.indexing.strategy, Some(IndexingStrategy::SelfScan));
+        assert_eq!(
+            config.indexing.exclude(),
+            &[
+                "generated".to_string(),
+                "web/sites/default/files".to_string()
+            ]
+        );
+        assert_eq!(
+            config.indexing.extensions(),
+            &["module".to_string(), "inc".to_string()]
+        );
         assert_eq!(config.semantic_tokens.mode, Some(SemanticTokensMode::Full));
         assert_eq!(config.formatting.php_cs_fixer.as_deref(), Some(""));
         assert_eq!(
@@ -1092,6 +1281,8 @@ analyze-timeout = 45000
         assert_eq!(config.phpcs.standard.as_deref(), Some("PSR12"));
         assert_eq!(config.phpcs.timeout_ms(), 15_000);
         assert_eq!(config.mago.command.as_deref(), Some("/usr/local/bin/mago"));
+        assert_eq!(config.mago.lint, Some(true));
+        assert_eq!(config.mago.analyze, Some(false));
         assert_eq!(config.mago.lint_timeout_ms(), 15_000);
         assert_eq!(config.mago.analyze_timeout_ms(), 45_000);
         assert!(!config.mago.is_disabled());
@@ -1332,6 +1523,119 @@ paths = ["database/schema", "extra/schema.sql"]
     }
 
     #[test]
+    fn workspace_diagnostics_default_to_off() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(CONFIG_FILE_NAME), "[diagnostics]\n").unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert!(!config.diagnostics.workspace_enabled());
+        // The external-tool run keeps its own default; it simply has
+        // nothing to chain onto until workspace diagnostics are on.
+        assert!(config.diagnostics.workspace_external_enabled());
+    }
+
+    #[test]
+    fn parses_workspace_diagnostics_toggle() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(CONFIG_FILE_NAME),
+            "[diagnostics]\nworkspace = true\nworkspace-external = false\n",
+        )
+        .unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert!(config.diagnostics.workspace_enabled());
+        assert!(!config.diagnostics.workspace_external_enabled());
+    }
+
+    #[test]
+    fn global_config_applies_when_project_has_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let global = dir.path().join("global").join(CONFIG_FILE_NAME);
+        std::fs::create_dir_all(global.parent().unwrap()).unwrap();
+        std::fs::write(
+            &global,
+            "[diagnostics]\nworkspace = true\n\n[semantic_tokens]\nmode = \"full\"\n",
+        )
+        .unwrap();
+
+        let project = dir.path().join("project");
+        std::fs::create_dir_all(&project).unwrap();
+
+        let config = load_config_from(&project, Some(&global)).unwrap();
+        assert!(config.diagnostics.workspace_enabled());
+        assert_eq!(config.semantic_tokens.mode(), SemanticTokensMode::Full);
+    }
+
+    #[test]
+    fn project_config_overrides_global_key_by_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let global = dir.path().join("global").join(CONFIG_FILE_NAME);
+        std::fs::create_dir_all(global.parent().unwrap()).unwrap();
+        std::fs::write(
+            &global,
+            "[diagnostics]\nworkspace = true\nextra-arguments = true\n\n[php]\nversion = \"8.1\"\n",
+        )
+        .unwrap();
+
+        let project = dir.path().join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(
+            project.join(CONFIG_FILE_NAME),
+            "[diagnostics]\nworkspace = false\n",
+        )
+        .unwrap();
+
+        let config = load_config_from(&project, Some(&global)).unwrap();
+        assert!(!config.diagnostics.workspace_enabled());
+        // Untouched global keys survive the project's override.
+        assert!(config.diagnostics.extra_arguments_enabled());
+        assert_eq!(config.php.version.as_deref(), Some("8.1"));
+    }
+
+    #[test]
+    fn missing_global_config_is_not_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let global = dir.path().join("nowhere").join(CONFIG_FILE_NAME);
+        std::fs::write(
+            dir.path().join(CONFIG_FILE_NAME),
+            "[php]\nversion = \"8.3\"\n",
+        )
+        .unwrap();
+        let config = load_config_from(dir.path(), Some(&global)).unwrap();
+        assert_eq!(config.php.version.as_deref(), Some("8.3"));
+    }
+
+    #[test]
+    fn bad_value_in_global_config_names_the_global_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let global = dir.path().join("global").join(CONFIG_FILE_NAME);
+        std::fs::create_dir_all(global.parent().unwrap()).unwrap();
+        std::fs::write(&global, "[indexing]\nstrategy = \"bogus\"\n").unwrap();
+
+        let project = dir.path().join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(project.join(CONFIG_FILE_NAME), "[php]\nversion = \"8.3\"\n").unwrap();
+
+        let err = load_config_from(&project, Some(&global)).unwrap_err();
+        let message = err.to_string();
+        assert!(
+            message.contains(&global.display().to_string()),
+            "error should name the global config, got: {message}"
+        );
+    }
+
+    #[test]
+    fn write_default_config_creates_missing_parents() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a").join("b").join(CONFIG_FILE_NAME);
+        assert!(write_default_config(&path).unwrap());
+        assert!(std::fs::read_to_string(&path).unwrap().contains("#:schema"));
+        assert!(
+            !write_default_config(&path).unwrap(),
+            "an existing file must not be rewritten"
+        );
+    }
+
+    #[test]
     fn merge_toml_overlay_wins() {
         let mut base: toml::Table = toml::from_str("[php]\nversion = \"8.2\"\n").unwrap();
         let overlay: toml::Table = toml::from_str("[php]\nversion = \"8.4\"\n").unwrap();
@@ -1395,5 +1699,77 @@ paths = ["database/schema", "extra/schema.sql"]
         merge_toml(&mut base, overlay);
         let config: Config = base.try_into().unwrap();
         assert_eq!(config.indexing.strategy, Some(IndexingStrategy::SelfScan));
+    }
+
+    #[test]
+    fn client_options_read_top_level_indexing() {
+        let settings = serde_json::json!({
+            "indexing": { "exclude": ["generated"], "extensions": ["module"] }
+        });
+        let options = ClientIndexingOptions::from_client_settings(&settings).unwrap();
+        assert_eq!(options.exclude, ["generated"]);
+        assert_eq!(options.extensions, ["module"]);
+    }
+
+    /// A client that pushes its whole settings tree namespaces the block
+    /// under the server's section name.
+    #[test]
+    fn client_options_read_a_phpantom_scoped_block() {
+        let settings = serde_json::json!({
+            "phpantom": { "indexing": { "exclude": ["build"] } },
+            "editor": { "tabSize": 4 }
+        });
+        let options = ClientIndexingOptions::from_client_settings(&settings).unwrap();
+        assert_eq!(options.exclude, ["build"]);
+        assert!(options.extensions.is_empty());
+    }
+
+    /// A settings blob with no readable `indexing` block means "not
+    /// about file filters", not "the user cleared them". VS Code's
+    /// client re-pushes the whole `phpantom` section whenever any key in
+    /// it changes, so reading those as an empty filter set would discard
+    /// what the extension forwarded at startup the first time someone
+    /// toggled an unrelated setting.
+    #[test]
+    fn client_options_ignore_settings_without_an_indexing_block() {
+        for settings in [
+            serde_json::json!({}),
+            serde_json::json!({ "unrelated": true }),
+            serde_json::json!({ "phpantom": { "trace": { "server": "verbose" } } }),
+            serde_json::json!({ "indexing": "not-an-object" }),
+            serde_json::json!({ "indexing": { "exclude": "not-a-list" } }),
+            serde_json::json!(null),
+        ] {
+            assert!(
+                ClientIndexingOptions::from_client_settings(&settings).is_none(),
+                "settings without a readable indexing block must be ignored: {settings}"
+            );
+        }
+    }
+
+    /// Clearing the filters again still has to be expressible, or a user
+    /// who removes their last exclude keeps it until they restart.
+    #[test]
+    fn an_empty_indexing_block_clears_the_filters() {
+        for settings in [
+            serde_json::json!({ "indexing": {} }),
+            serde_json::json!({ "indexing": { "exclude": [], "extensions": [] } }),
+        ] {
+            let options = ClientIndexingOptions::from_client_settings(&settings)
+                .expect("a present indexing block is a filter update");
+            assert!(options.is_empty());
+        }
+    }
+
+    /// The strategy key belongs to `.phpantom.toml` alone: an editor
+    /// forwards file filters, it does not get to switch the project's
+    /// indexing mode.
+    #[test]
+    fn client_options_carry_only_the_two_filter_lists() {
+        let settings = serde_json::json!({
+            "indexing": { "strategy": "none", "exclude": ["generated"] }
+        });
+        let options = ClientIndexingOptions::from_client_settings(&settings).unwrap();
+        assert_eq!(options.exclude, ["generated"]);
     }
 }

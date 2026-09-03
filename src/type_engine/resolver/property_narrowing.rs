@@ -1,12 +1,62 @@
 /// Property-path narrowing: applies instanceof / assert / guard-clause
 /// narrowing to a `$this->prop` (or `$obj->prop`) resolution result by
 /// walking the enclosing method body from its start down to the cursor.
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::types::ClassInfo;
 
 use super::{Loaders, ResolutionCtx, VarResolutionCtx};
+
+thread_local! {
+    /// The narrowing walks currently in progress on this thread, each
+    /// entry the identity of the source that walk covers.
+    ///
+    /// Guard-clause narrowing resolves method-call receivers to decide
+    /// whether a branch unconditionally exits.  Resolving a chained
+    /// call like `$h->getWork()` enters the call-key narrowing path
+    /// (`narrowed_call` in `variable/rhs_resolution/mod.rs`), which
+    /// calls back into [`apply_property_narrowing`] for the call key.
+    /// That nested walk covers the same body, re-encounters the other
+    /// guards in it, resolves *their* receivers, and re-enters again
+    /// under a different key each time, so a body holding n chained
+    /// calls fans out factorially in n.  Six of them measured 1.5 s and
+    /// eight never finished.
+    ///
+    /// A walk is therefore only started when no other walk is running
+    /// over the same source: the one already in progress covers the
+    /// whole body, and a nested one exists only to sharpen a receiver
+    /// type that is being read to answer "does this branch exit".
+    /// Blocking it leaves the declared type standing for that one
+    /// receiver, which costs a `never`-returning call inside a guard
+    /// body going unrecognised when recognising it depended on
+    /// narrowing a receiver from another guard in the same body.
+    ///
+    /// The source is what the entry holds because the same body is not
+    /// the only thing a walk can descend into: resolving a receiver
+    /// routinely crosses into another file, and a walk over that file
+    /// is new work rather than a repeat of the one that asked for it.
+    ///
+    /// Entries are pushed and popped in call order, so this is a stack
+    /// rather than a set: at realistic nesting depths a linear scan
+    /// beats hashing, and it keeps the walk down to one allocation.
+    static NARROWING_IN_PROGRESS: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
+}
+
+/// RAII guard that pops the entry [`apply_property_narrowing`] pushed
+/// onto [`NARROWING_IN_PROGRESS`], including on panic.  A leaked entry
+/// would silently disable narrowing for that subject for the rest of
+/// the thread's life.
+struct NarrowingGuard;
+
+impl Drop for NarrowingGuard {
+    fn drop(&mut self) {
+        NARROWING_IN_PROGRESS.with(|stack| {
+            stack.borrow_mut().pop();
+        });
+    }
+}
 
 /// Apply instanceof / assert narrowing for a property-access path.
 ///
@@ -26,6 +76,23 @@ pub(crate) fn apply_property_narrowing(
     results: &mut Vec<Arc<ClassInfo>>, // still operates on Arc<ClassInfo> — called from property chain
 ) -> bool {
     use crate::parser::with_parsed_program;
+
+    // Break the re-entry cycle described on `NARROWING_IN_PROGRESS`,
+    // leaving `results` as the caller passed them so the declared type
+    // stands.
+    let source = rctx.content.as_ptr() as usize;
+    let entered = NARROWING_IN_PROGRESS.with(|stack| {
+        let mut stack = stack.borrow_mut();
+        if stack.contains(&source) {
+            return false;
+        }
+        stack.push(source);
+        true
+    });
+    if !entered {
+        return false;
+    }
+    let _guard = NarrowingGuard;
 
     // The narrowing walk functions operate on Vec<ClassInfo>, so unwrap
     // the Arcs, run narrowing, then re-wrap.
@@ -51,6 +118,7 @@ pub(crate) fn apply_property_narrowing(
                 branch_aware: false,
                 match_arm_narrowing: HashMap::new(),
                 scope_var_resolver: None,
+                scope_proofs: None,
             };
             walk_property_narrowing_in_statements(
                 program.statements.iter(),
@@ -679,16 +747,17 @@ fn stale_narrowing_floor<'b>(
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<u32> {
     let subject = ctx.var_name;
-    // The root is what the rest of the path is read from.  A subject that
-    // is just a variable has no root to lose, and `$this` cannot be
-    // written to at all, so neither needs the walk.
+    // The root is what the rest of the path is read from.  A subject
+    // that is just a variable has no root to lose, so it needs no walk;
+    // a static property's root (`self`, `Foo`) is never a `$`-prefixed
+    // expression writes can target, so it needs none either.
     let root_len = subject
         .find("->")
         .into_iter()
         .chain(subject.find('['))
         .min()?;
     let root = &subject[..root_len];
-    if root == "$this" || !root.starts_with('$') {
+    if !root.starts_with('$') {
         return None;
     }
 
@@ -898,7 +967,11 @@ fn scan_expr_for_writes(
 }
 
 /// Keep `target`'s offset when writing to it replaces the value the
-/// subject path is read from.
+/// subject path is read from — either an ancestor of the subject, or
+/// the subject itself.  A self-write's own type is resolved elsewhere
+/// (the forward walker's scope), so this walk only needs to know that
+/// a check preceding the write no longer describes what the subject
+/// holds; it does not need the write's new type.
 fn note_write(
     target: &mago_syntax::cst::Expression<'_>,
     subject: &str,
@@ -928,14 +1001,13 @@ fn note_write(
     let Some(key) = crate::type_engine::types::narrowing::expr_to_subject_key(target) else {
         return;
     };
-    // Only an ancestor of the subject invalidates it.  Writing the
-    // subject itself gives it a new type rather than removing what the
-    // path is read from, and that type comes from the assignment, not
-    // from a check.
+    // An ancestor of the subject invalidates it (`$obj = …` stales
+    // `$obj->prop`), and so does a write to the exact subject
+    // (`$obj->prop = …` stales a check made about the old value).
     let Some(rest) = subject.strip_prefix(key.as_str()) else {
         return;
     };
-    if !rest.starts_with("->") && !rest.starts_with('[') {
+    if !rest.is_empty() && !rest.starts_with("->") && !rest.starts_with('[') {
         return;
     }
 

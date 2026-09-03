@@ -18,8 +18,11 @@
 
 use std::collections::HashSet;
 
+use mago_span::HasSpan;
 use mago_syntax::cst::*;
 use mago_syntax::walker::Walker;
+
+use crate::scope_collector::ScopeBody;
 
 /// Emit [`Walker`] overrides that stop traversal at nested variable
 /// scopes (closures, arrow functions, named function declarations) while
@@ -40,14 +43,11 @@ macro_rules! stop_at_inner_scopes {
 
 // ─── Dynamic variable / extract detection ───────────────────────────────────
 
-/// Returns `true` if the statements contain variable variables (`$$x` or
-/// `${expr}`) anywhere in the function body (excluding nested scopes).
-pub(super) fn has_dynamic_variables(statements: &[Statement<'_>]) -> bool {
-    let walker = DynamicVariableWalker;
+/// Returns `true` if the body contains variable variables (`$$x` or
+/// `${expr}`) anywhere in it (excluding nested scopes).
+pub(super) fn has_dynamic_variables(body: ScopeBody<'_, '_>) -> bool {
     let mut found = false;
-    for stmt in statements {
-        walker.walk_statement(stmt, &mut found);
-    }
+    body.walk_with(&DynamicVariableWalker, &mut found);
     found
 }
 
@@ -93,13 +93,10 @@ impl<'ast, 'arena> Walker<'ast, 'arena, bool> for DynamicVariableWalker {
     stop_at_inner_scopes!(bool);
 }
 
-/// Returns `true` if the statements contain a call to `extract()`.
-pub(super) fn has_extract_call(statements: &[Statement<'_>]) -> bool {
-    let walker = ExtractCallWalker;
+/// Returns `true` if the body contains a call to `extract()`.
+pub(super) fn has_extract_call(body: ScopeBody<'_, '_>) -> bool {
     let mut found = false;
-    for stmt in statements {
-        walker.walk_statement(stmt, &mut found);
-    }
+    body.walk_with(&ExtractCallWalker, &mut found);
     found
 }
 
@@ -120,12 +117,9 @@ impl<'ast, 'arena> Walker<'ast, 'arena, bool> for ExtractCallWalker {
 /// Collect variable names referenced by `compact('var1', 'var2', …)`
 /// calls.  These variables are used by string name and should be
 /// considered defined.
-pub(crate) fn collect_compact_vars(statements: &[Statement<'_>]) -> HashSet<String> {
-    let walker = CompactWalker;
+pub(crate) fn collect_compact_vars(body: ScopeBody<'_, '_>) -> HashSet<String> {
     let mut vars = HashSet::new();
-    for stmt in statements {
-        walker.walk_statement(stmt, &mut vars);
-    }
+    body.walk_with(&CompactWalker, &mut vars);
     vars
 }
 
@@ -204,16 +198,13 @@ fn collect_compact_name_from_elem(elem: &ArrayElement<'_>, vars: &mut HashSet<St
 
 // ─── get_defined_vars() detection ───────────────────────────────────────────
 
-/// Returns true if the statements contain a call to `get_defined_vars()`.
+/// Returns true if the body contains a call to `get_defined_vars()`.
 /// When present in a scope, all variables defined in that scope are
 /// considered used (e.g. for debug dumps), so unused-variable diagnostics
 /// should be suppressed for them.
-pub(crate) fn has_get_defined_vars(statements: &[Statement<'_>]) -> bool {
-    let walker = GetDefinedVarsWalker;
+pub(crate) fn has_get_defined_vars(body: ScopeBody<'_, '_>) -> bool {
     let mut found = false;
-    for stmt in statements {
-        walker.walk_statement(stmt, &mut found);
-    }
+    body.walk_with(&GetDefinedVarsWalker, &mut found);
     found
 }
 
@@ -227,6 +218,37 @@ impl<'ast, 'arena> Walker<'ast, 'arena, bool> for GetDefinedVarsWalker {
     }
 
     stop_at_inner_scopes!(bool);
+}
+
+// ─── include / require detection ────────────────────────────────────────────
+
+/// Collect the start offset of every `include`/`include_once`/`require`/
+/// `require_once` construct in the body, nested scopes included.
+///
+/// The included file's code runs in the *including* scope, so it can read
+/// any local there by name — a known idiom for handing a variable to
+/// dynamically included code (`(function () use ($container) { require
+/// $file; })()`). Since the target is resolved at runtime, no analysis can
+/// tell which names it reads, so the whole scope's variables have to count
+/// as used.
+///
+/// Offsets are collected rather than a single flag because the caller
+/// needs to know which frame's scope each import sits in, and unlike the
+/// other detectors here that means walking into nested scopes.
+pub(crate) fn collect_import_offsets(body: ScopeBody<'_, '_>) -> Vec<u32> {
+    let mut offsets = Vec::new();
+    body.walk_with(&ImportWalker, &mut offsets);
+    offsets
+}
+
+struct ImportWalker;
+
+impl<'ast, 'arena> Walker<'ast, 'arena, Vec<u32>> for ImportWalker {
+    fn walk_in_construct(&self, node: &'ast Construct<'arena>, context: &mut Vec<u32>) {
+        if node.is_import() {
+            context.push(node.span().start.offset);
+        }
+    }
 }
 
 // ─── Shared helpers ─────────────────────────────────────────────────────────

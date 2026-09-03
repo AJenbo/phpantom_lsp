@@ -634,6 +634,90 @@ accepts(new Boolean(), new Double(), new Resource());
     );
 }
 
+#[test]
+fn no_diagnostic_for_classes_named_scalar_and_numeric() {
+    // `scalar` and `numeric` are PHPDoc-only pseudo-types with no native
+    // spelling, so `Scalar` and `Numeric` are ordinary class names —
+    // nikic/php-parser ships a `PhpParser\Node\Scalar`. Folding either into
+    // the pseudo-type leaves the name unresolvable and every subtype check
+    // against it fails.
+    let php = r#"<?php
+namespace App;
+
+class Expr {}
+class Scalar extends Expr {}
+class Numeric extends Expr {}
+
+function takesExpr(Expr $e): void {}
+
+/**
+ * @param Scalar $s
+ * @param Numeric $n
+ */
+function accepts($s, $n): void {
+    takesExpr($s);
+    takesExpr($n);
+}
+
+function nativeParam(Scalar $s): void {
+    takesExpr($s);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "A `Scalar`/`Numeric` subclass passed to its parent's param must not be \
+         flagged, got: {diags:?}"
+    );
+}
+
+#[test]
+fn flags_wrong_type_to_scalar_class_param() {
+    // The `Scalar` class must still participate in genuine mismatch
+    // detection rather than being silently unresolvable.
+    let php = r#"<?php
+namespace App;
+
+class Scalar {}
+class Money {}
+
+function takesScalar(Scalar $s): void {}
+
+function test(): void {
+    takesScalar(new Money());
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "Passing Money to a Scalar param should be flagged, got: {diags:?}"
+    );
+}
+
+#[test]
+fn lowercase_scalar_and_numeric_stay_pseudo_types() {
+    // The lowercase spellings keep their PHPDoc meaning: `scalar` accepts an
+    // `int`, and an object does not satisfy it.
+    let php = r#"<?php
+namespace App;
+
+class Money {}
+
+/** @param scalar $s */
+function takesScalar($s): void {}
+
+function test(): void {
+    takesScalar(1);
+    takesScalar(new Money());
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        has_type_error(&diags),
+        "An object passed to a `@param scalar` must be flagged, got: {diags:?}"
+    );
+}
+
 // ─── No diagnostic: interface implementation ────────────────────────────────
 
 #[test]
@@ -1685,6 +1769,146 @@ function test(): void {
         has_type_error(&diags),
         "Should flag non-numeric string literal 'hello' passed to numeric-string param, got: {diags:?}"
     );
+}
+
+#[test]
+fn no_diagnostic_for_non_falsy_string_to_non_empty_string() {
+    // `non-falsy-string` (and its Psalm synonym `truthy-string`) excludes
+    // both `""` and `"0"`, so it is strictly narrower than
+    // `non-empty-string`, which excludes only `""`. Passing one where the
+    // other is expected is sound.
+    let php = r#"<?php
+/** @param non-empty-string $value */
+function takes_non_empty_string(string $value): void {}
+
+/** @param non-falsy-string $v */
+function probe(string $v): void {
+    takes_non_empty_string($v);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Should not flag non-falsy-string passed to non-empty-string param, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_diagnostic_for_truthy_string_to_non_empty_string() {
+    let php = r#"<?php
+/** @param non-empty-string $value */
+function takes_non_empty_string(string $value): void {}
+
+/** @param truthy-string $v */
+function probe(string $v): void {
+    takes_non_empty_string($v);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Should not flag truthy-string passed to non-empty-string param, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_diagnostic_for_truthy_string_to_non_falsy_string() {
+    // truthy-string and non-falsy-string are synonyms.
+    let php = r#"<?php
+/** @param non-falsy-string $value */
+function takes_non_falsy_string(string $value): void {}
+
+/** @param truthy-string $v */
+function probe(string $v): void {
+    takes_non_falsy_string($v);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "Should not flag truthy-string passed to non-falsy-string param, got: {diags:?}"
+    );
+}
+
+/// The `non-empty-…` refinements are all inhabited by the literal `"0"`,
+/// which is falsy, so each one stops at `non-empty-string` and none of them
+/// satisfies `non-falsy-string`.
+#[test]
+fn flags_non_empty_refinements_passed_to_non_falsy_string() {
+    for refinement in [
+        "non-empty-string",
+        "non-empty-literal-string",
+        "non-empty-lowercase-string",
+        "non-empty-uppercase-string",
+    ] {
+        let php = format!(
+            r#"<?php
+/** @param non-falsy-string $value */
+function takes_non_falsy_string(string $value): void {{}}
+
+/** @param non-empty-string $lenient */
+function takes_non_empty_string(string $lenient): void {{}}
+
+/** @param {refinement} $v */
+function probe(string $v): void {{
+    takes_non_empty_string($v);
+}}
+"#
+        );
+        let diags = collect(&php);
+        assert!(
+            !has_type_error(&diags),
+            "{refinement} is a non-empty-string, got: {diags:?}"
+        );
+
+        let php = php.replace("takes_non_empty_string($v);", "takes_non_falsy_string($v);");
+        let diags = collect(&php);
+        assert!(
+            has_type_error(&diags),
+            "{refinement} admits \"0\", so it is not a non-falsy-string, got: {diags:?}"
+        );
+    }
+}
+
+/// A bare `string` might satisfy any of the value-shape string refinements
+/// at runtime, so passing one where such a refinement is declared is a
+/// MAYBE and stays silent. Every member of the family has to be listed for
+/// that: one left out turns into a false positive on the first call site
+/// that uses it. `class-string` and `interface-string` are the deliberate
+/// exception, and are reported the way PHPStan reports them.
+#[test]
+fn no_diagnostic_for_bare_string_passed_to_any_string_refinement() {
+    for refinement in [
+        "non-empty-string",
+        "numeric-string",
+        "literal-string",
+        "non-empty-literal-string",
+        "lowercase-string",
+        "non-empty-lowercase-string",
+        "uppercase-string",
+        "non-empty-uppercase-string",
+        "truthy-string",
+        "non-falsy-string",
+        "callable-string",
+        "trait-string",
+        "enum-string",
+    ] {
+        let php = format!(
+            r#"<?php
+/** @param {refinement} $value */
+function takes(string $value): void {{}}
+
+function probe(string $v): void {{
+    takes($v);
+}}
+"#
+        );
+        let diags = collect(&php);
+        assert!(
+            !has_type_error(&diags),
+            "a bare string might be a {refinement} at runtime, got: {diags:?}"
+        );
+    }
 }
 
 #[test]
@@ -7481,6 +7705,171 @@ function test(Fac $f): void
     );
 }
 
+#[test]
+fn conditional_return_on_generic_class_uses_template_default() {
+    let php = r#"<?php
+/**
+ * @template TAsync of bool = false
+ */
+class PendingRequest
+{
+    /**
+     * @return Response|PromiseInterface
+     * @phpstan-return (TAsync is false ? Response : PromiseInterface)
+     */
+    public function get(string $url) {}
+}
+
+class Response {}
+interface PromiseInterface {}
+
+function takesResponse(Response $response): void {}
+function takesPromise(PromiseInterface $promise): void {}
+
+function test(PendingRequest $request): void
+{
+    $response = $request->get('/users');
+    takesResponse($response);
+}
+
+/** @param PendingRequest<true> $request */
+function testAsync(PendingRequest $request): void
+{
+    takesPromise($request->get('/users'));
+}
+
+/** @mixin PendingRequest */
+class HttpFactory {}
+
+/** @method static Response|PromiseInterface get(string $url) */
+class HttpFacade
+{
+    protected static function getFacadeAccessor()
+    {
+        return HttpFactory::class;
+    }
+}
+
+function testFacade(): void
+{
+    takesResponse(HttpFacade::get('/users'));
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "A generic class's default template argument must decide its method's conditional return: {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+#[test]
+fn selecting_a_non_default_template_argument_overrides_the_default() {
+    let php = r#"<?php
+/**
+ * @template TAsync of bool = false
+ */
+class PendingRequest
+{
+    /**
+     * @template T of bool = true
+     * @param T $async
+     * @return self<T>
+     */
+    public function async(bool $async = true) {}
+
+    /**
+     * @return Response|PromiseInterface
+     * @phpstan-return (TAsync is false ? Response : PromiseInterface)
+     */
+    public function get(string $url) {}
+}
+
+class Response {}
+interface PromiseInterface {}
+
+function takesPromise(PromiseInterface $promise): void {}
+
+function testDirect(PendingRequest $request): void
+{
+    takesPromise($request->async()->get('/users'));
+}
+
+/** @mixin PendingRequest */
+class HttpFactory {}
+
+/**
+ * @method static PendingRequest async(bool $async = true)
+ * @method static Response|PromiseInterface get(string $url)
+ */
+class HttpFacade
+{
+    protected static function getFacadeAccessor()
+    {
+        return HttpFactory::class;
+    }
+}
+
+function testFactory(HttpFactory $factory): void
+{
+    takesPromise($factory->async()->get('/users'));
+}
+
+function testFacade(): void
+{
+    takesPromise(HttpFacade::async()->get('/users'));
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "An explicitly selected template argument must beat the declared default, through a mixin and a facade as well as directly: {:?}",
+        type_error_messages(&diags)
+    );
+}
+
+#[test]
+fn a_conditional_keyed_on_a_method_template_is_decided_by_its_argument() {
+    let php = r#"<?php
+class Alpha {}
+class Beta {}
+
+class Picker
+{
+    /**
+     * @template T
+     * @param T $value
+     * @return (T is int ? Alpha : Beta)
+     */
+    public function pick($value) {}
+
+    /**
+     * @template T of string
+     * @param T $value
+     * @return (T is 'a' ? Alpha : Beta)
+     */
+    public function pickLiteral(string $value) {}
+}
+
+function takesAlpha(Alpha $a): void {}
+function takesBeta(Beta $b): void {}
+
+function test(Picker $picker): void
+{
+    takesAlpha($picker->pick(1));
+    takesBeta($picker->pick('x'));
+    takesAlpha($picker->pickLiteral('a'));
+    takesBeta($picker->pickLiteral('b'));
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "A conditional keyed on the method's own @template must be decided by the argument that binds it: {:?}",
+        type_error_messages(&diags)
+    );
+}
+
 // ─── class-string<T>|T union binds T to the class, not the class-string ─────
 
 #[test]
@@ -9978,6 +10367,70 @@ function test(): void {
     let messages = type_error_messages(&collect_with_full_stubs(php));
     assert!(messages.is_empty(), "got {messages:?}");
 }
+/// Rejoining after a branch says nothing about a value neither side
+/// touched, so the leniency has to survive the merge. It used to be
+/// dropped by the literal collapse the join runs every local through,
+/// which meant one unrelated `if` was enough to bring the `|false` back.
+#[test]
+fn a_benevolent_result_survives_a_branch_merge() {
+    let php = r#"<?php
+function takesString(string $path): void {}
+
+function afterIf(bool $flag): void {
+    $tmp = tempnam(sys_get_temp_dir(), 'x');
+    if ($flag) {
+        echo 'y';
+    }
+    takesString($tmp);
+}
+
+function afterIfElse(bool $flag): void {
+    $tmp = tempnam(sys_get_temp_dir(), 'x');
+    if ($flag) {
+        echo 'y';
+    } else {
+        echo 'z';
+    }
+    takesString($tmp);
+}
+
+function afterWhile(bool $flag): void {
+    $tmp = tempnam(sys_get_temp_dir(), 'x');
+    while ($flag) {
+        echo 'y';
+    }
+    takesString($tmp);
+}
+"#;
+    let messages = type_error_messages(&collect_with_full_stubs(php));
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// The merge carries the marker only while every side had it: a union the
+/// code spelled out itself is still enforced on the other side of an `if`.
+#[test]
+fn a_spelled_out_failure_branch_survives_a_branch_merge_too() {
+    let php = r#"<?php
+function takesString(string $path): void {}
+
+/** @return string|false */
+function mightFail() { return false; }
+
+function test(bool $flag): void {
+    $value = mightFail();
+    if ($flag) {
+        echo 'y';
+    }
+    takesString($value);
+}
+"#;
+    let messages = type_error_messages(&collect_with_full_stubs(php));
+    assert!(
+        messages.iter().any(|m| m.contains("false")),
+        "expected the `false` branch to still be reported, got {messages:?}"
+    );
+}
+
 /// `DOMNode::appendChild()` is benevolent *and* templated
 /// (`@return TNode|false`), so the marker has to survive both the template
 /// substitution and the union simplification that follow it.
@@ -10366,6 +10819,25 @@ function test(string $text): void {
 "#;
     let messages = type_error_messages(&collect_with_full_stubs(php));
     assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// The same conditional decides a direct `return`, not just an argument:
+/// a `string`-typed parameter fed straight into `str_replace()` and
+/// returned still satisfies a `string` return type.
+#[test]
+fn a_replace_on_a_string_subject_satisfies_a_string_return_type() {
+    let php = r#"<?php
+function relative(string $filename): string
+{
+    return str_replace('\\', '/', $filename);
+}
+"#;
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///test.php";
+    backend.update_ast(uri, php);
+    let mut out = Vec::new();
+    backend.collect_return_type_diagnostics(uri, php, &mut out);
+    assert!(out.is_empty(), "got {out:?}");
 }
 
 /// The array branch is still enforced: an array subject returns an array,
@@ -10984,4 +11456,536 @@ function render(Rule|string $rule): void {
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri, php, &mut diags);
     assert_eq!(type_error_messages(&diags), Vec::<String>::new());
+}
+
+/// A `@return static` method called on an intersection-typed receiver
+/// returns the whole intersection: late static binding names the runtime
+/// class, which satisfies every member of the intersection, not only the
+/// interface that happened to declare the method.
+#[test]
+fn static_return_keeps_the_receivers_whole_intersection() {
+    let php = r#"<?php
+interface IfaceA
+{
+    /** @return static */
+    public function filter(): self;
+}
+
+interface IfaceB
+{
+    public function ifaceBMethod(): void;
+}
+
+function needsBoth(IfaceA&IfaceB $x): void {}
+
+function test(IfaceA&IfaceB $scope): void
+{
+    $filtered = $scope->filter();
+    needsBoth($filtered);
+}
+"#;
+    let msgs = type_error_messages(&collect(php));
+    assert!(
+        msgs.is_empty(),
+        "static on an IfaceA&IfaceB receiver should stay IfaceA&IfaceB, got: {msgs:?}"
+    );
+}
+
+/// `new self(…)` names the enclosing class, and has to keep naming it when
+/// its short name is also a global class's: the constructor whose arguments
+/// get checked must be the namespaced class's, not `\Error`'s.
+#[test]
+fn new_self_checks_the_namespaced_classs_own_constructor() {
+    let php = r#"<?php
+namespace {
+    class Error
+    {
+        public function __construct(string $message = '', int $code = 0) {}
+    }
+}
+
+namespace App {
+    class Error
+    {
+        public function __construct(private string $message, private ?int $line = null) {}
+
+        public function changeLine(?int $line): self
+        {
+            return new self($this->message, $line);
+        }
+    }
+}
+"#;
+    let msgs = type_error_messages(&collect(php));
+    assert!(
+        msgs.is_empty(),
+        "new self() must check App\\Error::__construct, not \\Error's, got: {msgs:?}"
+    );
+}
+
+/// An unqualified class name in an inline `/** @var */` resolves against the
+/// current namespace first, exactly like the same name in a `@param` tag.  A
+/// name that also exists globally (`Error`, `Exception`, …) must not silently
+/// switch meaning between the two spellings.
+#[test]
+fn inline_var_resolves_an_unqualified_name_against_the_current_namespace() {
+    let php = r#"<?php
+namespace {
+    class Error {}
+}
+
+namespace App\Sub {
+    class Error {}
+
+    class Take
+    {
+        /** @param list<Error> $e */
+        public function take(array $e): void {}
+    }
+
+    class Probe
+    {
+        public function run(Take $t): void
+        {
+            /** @var list<Error> $errors */
+            $errors = [];
+            $t->take($errors);
+        }
+    }
+}
+"#;
+    let msgs = type_error_messages(&collect(php));
+    assert!(
+        msgs.is_empty(),
+        "inline @var list<Error> must mean App\\Sub\\Error, got: {msgs:?}"
+    );
+}
+
+/// The cross-file shape of the same thing, from `phpstan-src`: the
+/// namespace's own `Error` lives in another file and the colliding one is a
+/// stub, so neither is among the classes parsed out of the file being
+/// analysed.
+#[test]
+fn inline_var_prefers_the_namespaces_own_class_over_a_stub_of_that_name() {
+    use phpantom_lsp::Backend;
+    use std::collections::HashMap;
+
+    let files = [
+        (
+            "src/Analyser/Error.php",
+            r#"<?php
+namespace PHPStan\Analyser;
+
+class Error {}
+"#,
+        ),
+        (
+            "src/Analyser/Analyser.php",
+            r#"<?php
+namespace PHPStan\Analyser;
+
+class Analyser
+{
+    /** @param list<Error> $errors */
+    public function report(array $errors): void {}
+
+    public function run(): void
+    {
+        /** @var list<Error> $errors */
+        $errors = [];
+        $this->report($errors);
+    }
+}
+"#,
+        ),
+    ];
+
+    let dir = tempfile::tempdir().expect("failed to create temp dir");
+    std::fs::write(
+        dir.path().join("composer.json"),
+        r#"{"autoload":{"psr-4":{"PHPStan\\":"src/"}}}"#,
+    )
+    .expect("failed to write composer.json");
+    for (rel_path, content) in &files {
+        let full = dir.path().join(rel_path);
+        std::fs::create_dir_all(full.parent().unwrap()).expect("failed to create dirs");
+        std::fs::write(&full, content).expect("failed to write PHP file");
+    }
+
+    let mut stubs: HashMap<&'static str, &'static str> = HashMap::new();
+    stubs.insert("Error", "<?php\nclass Error {}\n");
+    let backend = Backend::new_test_with_stubs(stubs);
+    let (mappings, _vendor_dir) = phpantom_lsp::composer::parse_composer_json(dir.path());
+    *backend.workspace_root().write() = Some(dir.path().to_path_buf());
+    *backend.psr4_mappings().write() = mappings;
+
+    let uri = format!("file://{}/src/Analyser/Analyser.php", dir.path().display());
+    let content = files[1].1;
+    backend.update_ast(&uri, content);
+    let mut diags = Vec::new();
+    backend.collect_argument_type_diagnostics(&uri, content, &mut diags);
+    let msgs = type_error_messages(&diags);
+    assert!(
+        msgs.is_empty(),
+        "inline @var list<Error> must mean PHPStan\\Analyser\\Error, got: {msgs:?}"
+    );
+}
+
+// ─── PHP's implicit widenings and imprecise types ───────────────────────────
+
+#[test]
+fn a_bounded_int_satisfies_a_float_parameter() {
+    let php = r#"<?php
+function wantsFloat(float $n): void {}
+
+/** @param int<0, max> $count */
+function f(int $count): void {
+    wantsFloat($count);
+}
+"#;
+    assert!(
+        !has_type_error(&collect(php)),
+        "PHP widens an int to a float on the way in, bounds and all: {:?}",
+        type_error_messages(&collect(php))
+    );
+}
+
+#[test]
+fn a_class_string_satisfies_a_non_empty_string_parameter() {
+    let php = r#"<?php
+/** @param non-empty-string $s */
+function wantsNonEmpty(string $s): void {}
+
+/** @param class-string $c */
+function f(string $c): void {
+    wantsNonEmpty($c);
+}
+"#;
+    assert!(
+        !has_type_error(&collect(php)),
+        "A string that names a class always has content: {:?}",
+        type_error_messages(&collect(php))
+    );
+}
+
+#[test]
+fn an_array_key_satisfies_either_half_of_itself() {
+    let php = r#"<?php
+function wantsInt(int $i): void {}
+function wantsString(string $s): void {}
+
+/** @param array-key $k */
+function f($k): void {
+    wantsInt($k);
+    wantsString($k);
+}
+"#;
+    assert!(
+        !has_type_error(&collect(php)),
+        "`array-key` is the key type of an array nobody described, so one \
+         half fitting is the whole bargain: {:?}",
+        type_error_messages(&collect(php))
+    );
+}
+
+#[test]
+fn a_bitwise_op_on_untyped_operands_satisfies_a_string_return() {
+    let php = r#"<?php
+/** @param callable(mixed, mixed): string $cb */
+function wantsStringCallback(callable $cb): void {}
+
+function f(): void {
+    wantsStringCallback(static fn ($a, $b) => $a & $b);
+}
+"#;
+    assert!(
+        !has_type_error(&collect(php)),
+        "`&` over two strings produces a string, and neither operand rules \
+         that out: {:?}",
+        type_error_messages(&collect(php))
+    );
+}
+
+// ─── Arithmetic over a value nobody typed ───────────────────────────────────
+
+#[test]
+fn arithmetic_on_an_undescribed_array_element_satisfies_an_int_parameter() {
+    let php = r#"<?php declare(strict_types = 1);
+function wantsInt(int $i): void {}
+
+function f(array $placeholder): void {
+    wantsInt($placeholder['position'] - 1);
+}
+"#;
+    assert!(
+        !has_type_error(&collect(php)),
+        "`mixed - 1` is `int` or `float` depending on the value, and nothing \
+         about the element rules either out: {:?}",
+        type_error_messages(&collect(php))
+    );
+}
+
+#[test]
+fn arithmetic_chained_through_an_untyped_operand_stays_unenforced() {
+    let php = r#"<?php declare(strict_types = 1);
+/** @return mixed */
+function tagLine() { return null; }
+
+function wantsInt(int $i): void {}
+
+function f(string $s): void {
+    $line = tagLine();
+    if ($line !== null) {
+        wantsInt(strlen($s) + $line - 1);
+    }
+}
+"#;
+    assert!(
+        !has_type_error(&collect_with_full_stubs(php)),
+        "The addition already answered `int|float` for want of a typed \
+         operand; the subtraction must not turn that into a promise: {:?}",
+        type_error_messages(&collect_with_full_stubs(php))
+    );
+}
+
+#[test]
+fn arithmetic_on_a_string_operand_is_still_enforced() {
+    let php = r#"<?php declare(strict_types = 1);
+function wantsInt(int $i): void {}
+
+function f(string $s): void {
+    wantsInt($s * 2);
+}
+"#;
+    assert!(
+        has_type_error(&collect(php)),
+        "A `string` operand is something the code did say, and PHP's answer \
+         for it is not an int"
+    );
+}
+
+#[test]
+fn array_sum_over_an_undescribed_array_satisfies_an_int_parameter() {
+    let php = r#"<?php declare(strict_types = 1);
+function wantsInt(int $i): void {}
+
+function f(array $json): void {
+    $peaks = [];
+    foreach ($json as $entry) {
+        $peaks[] = $entry['memoryUsage'];
+    }
+    wantsInt(array_sum($peaks));
+}
+"#;
+    assert!(
+        !has_type_error(&collect_with_full_stubs(php)),
+        "Summing values nobody typed is `int` or `float` by the same rule \
+         adding two of them is: {:?}",
+        type_error_messages(&collect_with_full_stubs(php))
+    );
+}
+
+#[test]
+fn array_sum_over_a_float_array_is_still_enforced() {
+    let php = r#"<?php declare(strict_types = 1);
+function wantsInt(int $i): void {}
+
+/** @param list<float> $prices */
+function f(array $prices): void {
+    wantsInt(array_sum($prices));
+}
+"#;
+    assert!(
+        has_type_error(&collect_with_full_stubs(php)),
+        "Every element is a float, so the sum is one too"
+    );
+}
+
+// ─── A declared `mixed` against a body that disagrees with itself ───────────
+
+#[test]
+fn a_declared_mixed_stands_where_the_bodys_returns_disagree() {
+    let php = r#"<?php
+class Statement {}
+interface Schema {}
+
+class Factory
+{
+    public function build(Statement $statement): void
+    {
+        $this->process($this->processArgument($statement));
+    }
+
+    public function process(Schema $schema): void {}
+
+    /**
+     * @param mixed $argument
+     * @return mixed
+     */
+    private function processArgument($argument)
+    {
+        if ($argument instanceof Statement) {
+            return $this->makeSchema();
+        } elseif (is_array($argument)) {
+            return $argument;
+        }
+
+        return $argument;
+    }
+
+    private function makeSchema(): Schema
+    {
+        throw new \RuntimeException();
+    }
+}
+"#;
+    assert!(
+        !has_type_error(&collect(php)),
+        "The body can also hand back an array or its own `mixed` argument, \
+         so reading it as one of two classes states a narrower answer than \
+         the truth: {:?}",
+        type_error_messages(&collect(php))
+    );
+}
+
+// ─── By-reference out-parameters ────────────────────────────────────────────
+
+/// A file the by-reference passes can read a body out of.
+fn collect_with_body(php: &str) -> Vec<Diagnostic> {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    backend
+        .open_files()
+        .write()
+        .insert(uri.to_string(), std::sync::Arc::new(php.to_string()));
+    backend.update_ast(uri, php);
+    let mut out = Vec::new();
+    backend.collect_argument_type_diagnostics(uri, php, &mut out);
+    out
+}
+
+#[test]
+fn a_by_reference_parameter_the_callee_always_assigns_loses_the_null_it_declares() {
+    let php = r#"<?php
+class Ops
+{
+    public static function keyFor(object $node, ?string &$key): void
+    {
+        $key = self::nodeKey($node);
+    }
+
+    public static function nodeKey(object $node): string
+    {
+        return 'k';
+    }
+}
+
+class Caller
+{
+    public function run(object $node): string
+    {
+        Ops::keyFor($node, $key);
+
+        return $this->takesString($key);
+    }
+
+    private function takesString(string $s): string
+    {
+        return $s;
+    }
+}
+"#;
+    assert!(
+        !has_type_error(&collect_with_body(php)),
+        "`keyFor` assigns `$key` on every path, so the `?string` it declares \
+         is what may go in, not what comes back out: {:?}",
+        type_error_messages(&collect_with_body(php))
+    );
+}
+
+#[test]
+fn a_by_reference_parameter_only_one_branch_assigns_keeps_its_declared_null() {
+    let php = r#"<?php
+class Ops
+{
+    public static function keyFor(bool $flag, ?string &$key): void
+    {
+        if ($flag) {
+            $key = 'k';
+        }
+    }
+}
+
+class Caller
+{
+    public function run(bool $flag): string
+    {
+        Ops::keyFor($flag, $key);
+
+        return $this->takesString($key);
+    }
+
+    private function takesString(string $s): string
+    {
+        return $s;
+    }
+}
+"#;
+    assert!(
+        has_type_error(&collect_with_body(php)),
+        "The other branch leaves `$key` unwritten, so null still reaches the caller"
+    );
+}
+
+#[test]
+fn a_body_that_contradicts_the_declared_out_type_does_not_replace_it() {
+    let php = r#"<?php
+class Ops
+{
+    /** @param int &$count */
+    public static function count(&$count): void
+    {
+        $count = 'not an int';
+    }
+}
+
+class Caller
+{
+    public function run(): int
+    {
+        Ops::count($count);
+
+        return $this->takesInt($count);
+    }
+
+    private function takesInt(int $i): int
+    {
+        return $i;
+    }
+}
+"#;
+    assert!(
+        !has_type_error(&collect_with_body(php)),
+        "A reading of the body may sharpen the declaration, never overrule it: {:?}",
+        type_error_messages(&collect_with_body(php))
+    );
+}
+
+#[test]
+fn the_value_a_by_reference_out_parameter_already_holds_is_not_checked() {
+    let php = r#"<?php declare(strict_types = 1);
+function collectAll(string $text): void
+{
+    foreach ([1, 2] as $_) {
+        preg_match_all('~(\w+)~', $text, $matches, PREG_OFFSET_CAPTURE);
+    }
+}
+"#;
+    assert!(
+        !has_type_error(&collect_with_full_stubs(php)),
+        "On the second pass `$matches` still holds the offset-capture shape \
+         the first left behind, and the declared `?array` describes what \
+         `preg_match_all` writes, not what it accepts: {:?}",
+        type_error_messages(&collect_with_full_stubs(php))
+    );
 }

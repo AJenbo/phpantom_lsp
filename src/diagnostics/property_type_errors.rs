@@ -366,6 +366,7 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
         branch_aware: true,
         match_arm_narrowing: HashMap::new(),
         scope_var_resolver: None,
+        scope_proofs: None,
     };
 
     let rhs_type = resolve_expression_type(assign.rhs, &var_ctx).unwrap_or_else(PhpType::untyped);

@@ -62,11 +62,10 @@ impl Backend {
                     // When the resolved type has no generic annotation
                     // but the class declares template parameters (e.g.
                     // `$errors = new Collection()` without `<string>`),
-                    // fill in default type args from declared upper
-                    // bounds or `mixed`.  This follows PHPStan's
-                    // `resolveToBounds()` semantics and prevents raw
-                    // template names like `TValue` from leaking into
-                    // method parameter and return types.
+                    // fill in declared defaults, then upper bounds or
+                    // `mixed`. This prevents raw template names like
+                    // `TValue` from leaking into method parameter and
+                    // return types.
                     if !owner.template_params.is_empty() {
                         crate::inheritance::default_type_args(&owner)
                     } else {
@@ -273,7 +272,7 @@ impl Backend {
         // When the class has template params, try to substitute them with
         // concrete types. For `parent::` calls, use the child's @extends
         // generics to get the concrete type arguments. Otherwise fall back
-        // to upper bounds / `mixed`.
+        // to declared defaults, upper bounds, or `mixed`.
         let merged = if !owner.template_params.is_empty() {
             let type_args = if class.eq_ignore_ascii_case("parent") {
                 // Look up the child's extends_generics for the parent class
@@ -395,6 +394,7 @@ impl Backend {
             let subs = crate::type_engine::variable::rhs_resolution::build_function_template_subs(
                 func,
                 &split_args,
+                None,
                 rctx,
             );
             if !subs.is_empty() {

@@ -1,0 +1,21 @@
+// test: hover shows the body-inferred type, not a declared `@return mixed`
+// feature: hover
+// expect: MixedReturnItem
+// expect_absent: mixed
+---
+<?php
+
+class MixedReturnFactory {
+    /** @return mixed */
+    public function make() {
+        return new MixedReturnItem();
+    }
+}
+
+class MixedReturnItem {
+}
+
+function testMixedReturn(MixedReturnFactory $factory): void {
+    $item = $factory->make();
+    echo $i<>tem;
+}

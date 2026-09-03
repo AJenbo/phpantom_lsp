@@ -35,15 +35,11 @@
 //! full resolution pipeline including `resolve_variable_types` which
 //! re-parses the entire file via `with_parsed_program`.
 //!
-//! To avoid this, we cache the resolution outcome per unique
-//! `(subject_text, access_kind, scope_key)` tuple, where `scope_key`
-//! combines the innermost enclosing class (name + byte offset) with
-//! the innermost enclosing function/method/closure scope start offset.
-//! This means `$var->` accesses in different methods of the same class
-//! get independent cache entries even when the variable name is the
-//! same but has a different type in each method.  The cache lives for
-//! a single `collect_unknown_member_diagnostics` call and is not
-//! shared across files or invocations.
+//! To avoid this, we cache the resolution outcome per
+//! [`SubjectCacheKey`], the shared key that scopes a subject resolution
+//! to one function/method/closure body.  The cache lives for a single
+//! `collect_unknown_member_diagnostics` call and is not shared across
+//! files or invocations.
 //!
 //! ## Performance: narrowing re-resolution fallback
 //!
@@ -61,14 +57,16 @@
 //!    resolved classes, we're done — no diagnostic, no re-resolution.
 //!
 //! 2. **Narrowing fallback** (uncached, rare): when the member is
-//!    NOT found on the coarsely-resolved classes AND the subject is
-//!    a bare variable, re-resolve with the exact cursor position.
-//!    If the re-resolution finds the member (because ternary/`&&`
-//!    narrowing refined the type), suppress the diagnostic.
+//!    NOT found on the coarsely-resolved classes, re-resolve the
+//!    subject with the exact cursor position.  If the re-resolution
+//!    finds the member (because ternary/`&&` narrowing refined the
+//!    type), suppress the diagnostic.
 //!
 //! This makes the common case (member exists) O(1) per unique
 //! subject+scope, while preserving correctness for the rare case
-//! where expression-level narrowing matters.
+//! where expression-level narrowing matters.  The re-resolution runs
+//! only where a diagnostic would otherwise be reported, so a file
+//! with nothing wrong in it never pays for it.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -90,6 +88,7 @@ use super::helpers::{
     FileDiagnosticContext, compute_existence_guards, compute_isset_empty_argument_ranges,
     find_innermost_enclosing_class, is_offset_in_ranges, make_diagnostic,
 };
+use super::subject_cache::SubjectCacheKey;
 
 /// Diagnostic code used for unknown-member diagnostics so that code
 /// actions can match on it.
@@ -119,70 +118,6 @@ enum MemberCheckResult {
     MagicFallback,
 }
 
-/// Scope identifier for the subject resolution cache.
-///
-/// Two member accesses share the same scope when they are inside the
-/// same class body (identified by class name and byte offset of the
-/// opening brace) **and** the same function/method/closure body
-/// (identified by its start offset).  This prevents two methods in
-/// the same class from sharing a cache entry when a same-named
-/// variable has a different type in each method.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-enum ScopeKey {
-    /// Inside a class at the given byte offset, within a specific
-    /// function/method/closure scope.  `fn_scope_start` is the byte
-    /// offset of the enclosing function body (from
-    /// [`SymbolMap::find_enclosing_scope`]), or `0` for class-level
-    /// code outside any method.
-    Class {
-        name: String,
-        start_offset: u32,
-        fn_scope_start: u32,
-    },
-    /// Top-level code outside any class, within a specific
-    /// function scope (`0` when truly top-level).
-    TopLevel { fn_scope_start: u32 },
-}
-
-/// Cache key combining the subject text, access kind, and scope.
-///
-/// For variable-based subjects (starting with `$`, excluding `$this`),
-/// `var_def_offset` distinguishes accesses that fall under different
-/// definitions of the same variable.  Without this, the cache would
-/// return the parameter type for accesses after a reassignment.
-///
-/// The cache key intentionally omits per-access byte offsets.
-/// Expression-level narrowing (ternary branches, inline `&&` chains)
-/// is handled by a re-resolution fallback: when a member is not found
-/// on the coarsely-cached type, the subject is re-resolved at the
-/// exact cursor position to give narrowing a second chance.  See the
-/// module-level documentation for details.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-struct SubjectCacheKey {
-    subject_text: String,
-    access_kind: AccessKind,
-    scope: ScopeKey,
-    /// The `effective_from` offset of the active variable definition at
-    /// the point of access, or `0` for non-variable subjects.  This
-    /// ensures that accesses before and after a reassignment get
-    /// separate cache entries.
-    var_def_offset: u32,
-    /// The span start offset for variable subjects (excluding `$this`),
-    /// or `0` for non-variable subjects.  This ensures that accesses
-    /// inside different instanceof-narrowing contexts (e.g. different
-    /// if-bodies) get independent cache entries.  Without this, the
-    /// first access caches a narrowed type and subsequent accesses in
-    /// a different narrowing context reuse the wrong result.
-    narrowing_offset: u32,
-    /// The offset of the most recent `assert($var instanceof …)`
-    /// statement preceding this access, or `0` if there is none.
-    /// Assert-instanceof statements act as sequential narrowing
-    /// boundaries: they change the variable's resolved type without
-    /// creating a block scope, so accesses before and after the
-    /// assert must get separate cache entries.
-    assert_offset: u32,
-}
-
 /// Per-pass cache mapping subject keys to their resolution outcomes.
 type SubjectCache = HashMap<SubjectCacheKey, SubjectOutcome>;
 
@@ -210,19 +145,6 @@ fn subject_text_is_rooted_in_self(subject_text: &str) -> bool {
     }
 
     false
-}
-
-/// Build a [`ScopeKey`] from the innermost enclosing class (if any)
-/// and the enclosing function/method/closure scope start offset.
-fn scope_key_for(current_class: Option<&ClassInfo>, fn_scope_start: u32) -> ScopeKey {
-    match current_class {
-        Some(cc) => ScopeKey::Class {
-            name: cc.name.to_string(),
-            start_offset: cc.start_offset,
-            fn_scope_start,
-        },
-        None => ScopeKey::TopLevel { fn_scope_start },
-    }
 }
 
 impl Backend {
@@ -403,77 +325,21 @@ impl Backend {
                 continue;
             }
 
-            let fn_scope_start = symbol_map.find_enclosing_scope(span.start);
+            // Whether this subject could benefit from expression-level
+            // narrowing re-resolution.  Every subject rooted at a
+            // variable can: `$this->pair[0] instanceof Sub && !$this->pair[0]->flag()`
+            // refines the second occurrence with no block to key it on,
+            // and so does `$this instanceof Sub && $this->only()`.
+            let is_narrowable_subject = subject_text.starts_with('$');
 
             // ── Look up or populate the subject cache ───────────────────
-            // For variable subjects (excluding $this), compute the
-            // active definition offset so that accesses before and
-            // after a reassignment get separate cache entries.
-            let var_def_offset = if subject_text.starts_with('$')
-                && subject_text != "$this"
-                && !subject_text.starts_with("$this->")
-            {
-                // Extract the bare variable name (e.g. "$file" from
-                // "$file" or from a chain like "$file->foo()").
-                let var_name = subject_text
-                    .find("->")
-                    .map(|i| &subject_text[..i])
-                    .unwrap_or(subject_text);
-                symbol_map.active_var_def_offset(
-                    &var_name[1..], // strip leading '$'
-                    span.start,
-                )
-            } else {
-                0
-            };
-
-            // Use the innermost narrowing block (if/elseif/else body)
-            // as a cache discriminator so that accesses in different
-            // instanceof-narrowing contexts get independent entries.
-            // Accesses in the same block share a cache entry because
-            // they receive identical narrowing.
-            //
-            // This applies to regular variables ($var) AND property
-            // chains on $this ($this->prop), because instanceof
-            // checks and assert() calls can narrow property types
-            // just like local variables.  Bare $this is excluded
-            // because its type never changes within a method.
-            let needs_narrowing_discriminator =
-                subject_text.starts_with('$') && subject_text != "$this";
-            let narrowing_offset = if needs_narrowing_discriminator {
-                symbol_map.find_narrowing_block(span.start)
-            } else {
-                0
-            };
-
-            // Also check whether an `assert($var instanceof …)`
-            // precedes this access.  Assert-instanceof does not
-            // create a block scope, so without this discriminator
-            // accesses before and after the assert would share the
-            // same (stale) cache entry.
-            let assert_offset = if needs_narrowing_discriminator {
-                symbol_map.find_preceding_assert_offset(span.start)
-            } else {
-                0
-            };
-
-            // Whether this subject is a bare variable that could
-            // benefit from expression-level narrowing re-resolution.
-            // $this and $this->prop chains are excluded because their
-            // type is already fully determined by block-level
-            // narrowing (if/else) and assert narrowing.
-            let is_narrowable_variable = subject_text.starts_with('$')
-                && subject_text != "$this"
-                && !subject_text.starts_with("$this->");
-
-            let cache_key = SubjectCacheKey {
-                subject_text: subject_text.to_string(),
+            let cache_key = SubjectCacheKey::build(
+                symbol_map,
+                current_class,
+                subject_text,
                 access_kind,
-                scope: scope_key_for(current_class, fn_scope_start),
-                var_def_offset,
-                narrowing_offset,
-                assert_offset,
-            };
+                span.start,
+            );
 
             let outcome = subject_cache
                 .entry(cache_key)
@@ -578,12 +444,12 @@ impl Backend {
                     ));
                 }
 
-                SubjectOutcome::Untyped => {
+                SubjectOutcome::Mixed | SubjectOutcome::Untyped => {
                     // When the opt-in `unresolved-member-access` diagnostic
-                    // is enabled, report every member access where the
-                    // subject type could not be resolved — regardless of
-                    // whether the subject is a bare variable, a chain, an
-                    // array access, or a function call result.
+                    // is enabled, report every member access the subject
+                    // type cannot answer for — regardless of whether the
+                    // subject is a bare variable, a chain, an array access,
+                    // or a function call result.
                     if self.config().diagnostics.unresolved_member_access_enabled() {
                         let range = match self.offset_range_to_lsp_range(
                             uri,
@@ -596,10 +462,22 @@ impl Backend {
                         };
                         let subject_display = subject_text.trim();
                         let kind_label = if is_method_call { "method" } else { "property" };
-                        let message = format!(
-                            "Cannot verify {} '{}' — type of '{}' could not be resolved",
-                            kind_label, member_name, subject_display,
-                        );
+                        // A `mixed` subject is not a resolution failure:
+                        // the type engine answered, and the answer was the
+                        // type that admits every value. Saying so points at
+                        // the annotation that is missing from the codebase
+                        // instead of implying a gap in the type engine.
+                        let message = if matches!(outcome, SubjectOutcome::Mixed) {
+                            format!(
+                                "Cannot verify {} '{}' — type of '{}' is 'mixed'",
+                                kind_label, member_name, subject_display,
+                            )
+                        } else {
+                            format!(
+                                "Cannot verify {} '{}' — type of '{}' could not be resolved",
+                                kind_label, member_name, subject_display,
+                            )
+                        };
                         out.push(make_diagnostic(
                             range,
                             DiagnosticSeverity::HINT,
@@ -640,7 +518,7 @@ impl Backend {
                     // This is the rare path — most accesses find the
                     // member on the coarse type and never reach here.
                     let (result, diags) =
-                        if result != MemberCheckResult::Ok && is_narrowable_variable {
+                        if result != MemberCheckResult::Ok && is_narrowable_subject {
                             let rctx = ResolutionCtx {
                                 current_class,
                                 all_classes: local_classes,

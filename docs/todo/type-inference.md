@@ -34,18 +34,12 @@ The mago parser (v1.8) already produces `Property::Hooked` and
 `.variables()` methods mean hooked properties are extracted for basic
 completion. However:
 
-- **Hook bodies are never walked.** Variables and anonymous classes
-  inside `get`/`set` bodies are invisible to resolution.
-- **`$value` parameter** inside `set` hooks is not offered for
-  variable completion.
 - **Asymmetric visibility** (`public private(set) string $name`) is
   not recognised — the `set` visibility is ignored, so filtering
   may incorrectly allow setting a property that should be
   write-restricted.
 
-**Fix:** In `extract_class_like_members`, match `Property::Hooked`
-explicitly, walk hook bodies for anonymous classes and variable
-scopes, and parse the set-visibility modifier into a new
+**Fix:** Parse the set-visibility modifier into a new
 `set_visibility` field on `PropertyInfo`.
 
 ### Asymmetric visibility (also PHP 8.4 / 8.5)
@@ -659,7 +653,11 @@ writes.
 `closure_this_type`, and have `out_type()` prefer it over both the
 declared type and the null-default heuristic. Then the two write-back
 paths (`seed_pass_by_ref_primitives` and
-`try_apply_pass_by_reference_type`) pick it up with no further change.
+`try_apply_pass_by_reference_type`) pick it up with no further change,
+both going through `effective_out_type` in
+`type_engine/call_resolution/out_param.rs`. A declared tag is the
+author's word on what the callee writes, so it must also win over the
+reading that helper takes from the body.
 Once it is read, the pcre stub patches can declare `preg_match`'s and
 `preg_match_all`'s out types directly rather than inheriting
 phpstorm-stubs' `null|string[]`.

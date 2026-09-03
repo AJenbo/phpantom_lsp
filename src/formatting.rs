@@ -12,10 +12,14 @@
 //!    `.phpantom.toml`, use that tool.  If they set it to `""`, that
 //!    tool is disabled.
 //! 2. **Composer `require-dev` wins over built-in.**  If
-//!    `composer.json` lists `laravel/pint`,
-//!    `friendsofphp/php-cs-fixer`, or `squizlabs/php_codesniffer` in
-//!    `require-dev`, resolve the binary via Composer's bin-dir and run
-//!    it as a subprocess.
+//!    `composer.json` lists `laravel/pint` or `friendsofphp/php-cs-fixer`
+//!    in `require-dev`, resolve the binary via Composer's bin-dir and
+//!    run it as a subprocess.  `squizlabs/php_codesniffer` does the same,
+//!    or, if the project pulls it in only transitively (e.g. through
+//!    `slevomat/coding-standard`), a `phpcs.xml`/`.phpcs.xml` config file
+//!    at the workspace root certifies phpcbf just as well — except on a
+//!    project whose `mago.toml` has a `[formatter]` table, which lints
+//!    with PHPCS and formats with Mago.
 //! 3. **Otherwise, use mago-formatter.**  No subprocess, no temp files,
 //!    no external dependencies.  Uses PER-CS 2.0 defaults or if present `mago.toml`.
 //!
@@ -93,9 +97,14 @@ pub(crate) enum FormattingStrategy {
 /// - If `config.is_disabled()` (both tools set to `""`) → `Disabled`.
 /// - If either tool has an explicit non-empty path in config →
 ///   `External` with those tools.
-/// - If `composer_json` has `friendsofphp/php-cs-fixer` or
-///   `squizlabs/php_codesniffer` in `require-dev` → `External`,
-///   resolving paths via the Composer bin-dir.
+/// - If `composer_json` has `laravel/pint`, `friendsofphp/php-cs-fixer`,
+///   or `squizlabs/php_codesniffer` in `require-dev`, or the workspace
+///   root has a `phpcs.xml`/`.phpcs.xml`/`phpcs.xml.dist`/
+///   `.phpcs.xml.dist` config file (which certifies phpcbf even when
+///   PHP_CodeSniffer is pulled in only transitively) → `External`,
+///   resolving paths via the Composer bin-dir.  A `[formatter]` table in
+///   the workspace `mago.toml` takes phpcbf back out of that set: it says
+///   what the project formats with, where PHPCS says what it lints with.
 /// - Otherwise → `BuiltIn`.
 pub(crate) fn resolve_strategy(
     workspace_root: Option<&Path>,
@@ -143,8 +152,12 @@ pub(crate) fn resolve_strategy(
         return FormattingStrategy::External(tools);
     }
 
-    // No explicit config — check composer.json require-dev.
-    if let Some(package) = composer_json {
+    // No explicit config — check composer.json require-dev, or a
+    // hand-authored phpcs config file for phpcbf.
+    let has_phpcs_config = workspace_root.is_some_and(crate::phpcs::has_project_config);
+    let formats_with_mago = workspace_root.is_some_and(crate::mago::formats_with_mago);
+
+    if composer_json.is_some() || has_phpcs_config {
         let mut tools = Vec::new();
         let bin = bin_dir.unwrap_or("vendor/bin");
 
@@ -155,21 +168,39 @@ pub(crate) fn resolve_strategy(
         let pint_disabled = config.pint.as_deref() == Some("");
 
         if !pint_disabled
-            && crate::composer::has_require_dev(package, "laravel/pint")
+            && composer_json
+                .is_some_and(|package| crate::composer::has_require_dev(package, "laravel/pint"))
             && let Some(tool) = resolve_from_bin_dir("pint", workspace_root, bin)
         {
             tools.push(tool);
         }
 
         if !fixer_disabled
-            && crate::composer::has_require_dev(package, "friendsofphp/php-cs-fixer")
+            && composer_json.is_some_and(|package| {
+                crate::composer::has_require_dev(package, "friendsofphp/php-cs-fixer")
+            })
             && let Some(tool) = resolve_from_bin_dir("php-cs-fixer", workspace_root, bin)
         {
             tools.push(tool);
         }
 
+        // A phpcs config file certifies phpcbf on its own: a project
+        // that pulls squizlabs/php_codesniffer in only transitively
+        // (e.g. through slevomat/coding-standard) never lists it in
+        // require-dev directly, but a phpcs.xml is still deliberate
+        // evidence the project uses it.
+        //
+        // Unless the project also says what it formats with.  PHP_CodeSniffer
+        // is a linter that happens to ship a fixer, so its ruleset is
+        // evidence of linting first; a `[formatter]` table in `mago.toml` is
+        // evidence of nothing else.  A project carrying both lints with
+        // PHPCS and formats with Mago.
         if !phpcbf_disabled
-            && crate::composer::has_require_dev(package, "squizlabs/php_codesniffer")
+            && !formats_with_mago
+            && (has_phpcs_config
+                || composer_json.is_some_and(|package| {
+                    crate::composer::has_require_dev(package, "squizlabs/php_codesniffer")
+                }))
             && let Some(tool) = resolve_from_bin_dir("phpcbf", workspace_root, bin)
         {
             tools.push(tool);
@@ -872,6 +903,144 @@ mod tests {
                 assert_eq!(tools.len(), 1);
                 assert_eq!(tools[0].name, "phpcbf");
                 assert_eq!(tools[0].path, vendor_bin.join("phpcbf"));
+            }
+            other => panic!("Expected External, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn strategy_phpcs_config_file_without_composer_dependency() {
+        let dir = tempfile::tempdir().unwrap();
+        let vendor_bin = dir.path().join("vendor/bin");
+        std::fs::create_dir_all(&vendor_bin).unwrap();
+
+        let p = vendor_bin.join("phpcbf");
+        std::fs::write(&p, "#!/bin/sh\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        // squizlabs/php_codesniffer is pulled in only transitively (e.g.
+        // via slevomat/coding-standard), so it never appears in
+        // require-dev directly. A hand-authored phpcs.xml certifies
+        // phpcbf on its own, even with no composer.json at all.
+        std::fs::write(dir.path().join("phpcs.xml"), "").unwrap();
+
+        let config = FormattingConfig::default();
+        let strategy = resolve_strategy(Some(dir.path()), &config, None, None);
+        match &strategy {
+            FormattingStrategy::External(tools) => {
+                assert_eq!(tools.len(), 1);
+                assert_eq!(tools[0].name, "phpcbf");
+                assert_eq!(tools[0].path, vendor_bin.join("phpcbf"));
+            }
+            other => panic!("Expected External, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn strategy_phpcs_xml_dist_certifies_phpcbf_over_transitive_dependency() {
+        let dir = tempfile::tempdir().unwrap();
+        let vendor_bin = dir.path().join("vendor/bin");
+        std::fs::create_dir_all(&vendor_bin).unwrap();
+
+        let p = vendor_bin.join("phpcbf");
+        std::fs::write(&p, "#!/bin/sh\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        std::fs::write(dir.path().join("phpcs.xml.dist"), "").unwrap();
+
+        // Only a coding-standard package that pulls in squizlabs/php_codesniffer
+        // transitively; the direct dependency check alone would miss this.
+        let composer: crate::composer::ComposerPackage =
+            serde_json::from_value(serde_json::json!({
+                "require-dev": {
+                    "slevomat/coding-standard": "^8.0"
+                }
+            }))
+            .unwrap();
+
+        let config = FormattingConfig::default();
+        let strategy = resolve_strategy(Some(dir.path()), &config, Some(&composer), None);
+        match &strategy {
+            FormattingStrategy::External(tools) => {
+                assert_eq!(tools.len(), 1);
+                assert_eq!(tools[0].name, "phpcbf");
+            }
+            other => panic!("Expected External, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn strategy_mago_formatter_table_keeps_phpcbf_off_a_phpcs_project() {
+        let dir = tempfile::tempdir().unwrap();
+        let vendor_bin = dir.path().join("vendor/bin");
+        std::fs::create_dir_all(&vendor_bin).unwrap();
+
+        let p = vendor_bin.join("phpcbf");
+        std::fs::write(&p, "#!/bin/sh\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        // The project lints with PHPCS and formats with Mago; the phpcs
+        // ruleset must not take the formatter over.
+        std::fs::write(dir.path().join("phpcs.xml"), "").unwrap();
+        std::fs::write(
+            dir.path().join("mago.toml"),
+            "[formatter]\nprint-width = 100\n",
+        )
+        .unwrap();
+
+        let composer: crate::composer::ComposerPackage =
+            serde_json::from_value(serde_json::json!({
+                "require-dev": { "squizlabs/php_codesniffer": "^3.0" }
+            }))
+            .unwrap();
+
+        let config = FormattingConfig::default();
+        let strategy = resolve_strategy(Some(dir.path()), &config, Some(&composer), None);
+        match strategy {
+            FormattingStrategy::BuiltIn(path) => {
+                assert_eq!(path.unwrap(), dir.path().join("mago.toml"))
+            }
+            other => panic!("Expected BuiltIn with mago.toml, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn strategy_mago_toml_without_formatter_table_leaves_phpcbf_in_charge() {
+        let dir = tempfile::tempdir().unwrap();
+        let vendor_bin = dir.path().join("vendor/bin");
+        std::fs::create_dir_all(&vendor_bin).unwrap();
+
+        let p = vendor_bin.join("phpcbf");
+        std::fs::write(&p, "#!/bin/sh\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        // A mago.toml that only configures the linter says nothing about
+        // what the project formats with.
+        std::fs::write(dir.path().join("phpcs.xml"), "").unwrap();
+        std::fs::write(dir.path().join("mago.toml"), "[linter]\n").unwrap();
+
+        let config = FormattingConfig::default();
+        let strategy = resolve_strategy(Some(dir.path()), &config, None, None);
+        match &strategy {
+            FormattingStrategy::External(tools) => {
+                assert_eq!(tools.len(), 1);
+                assert_eq!(tools[0].name, "phpcbf");
             }
             other => panic!("Expected External, got {:?}", other),
         }

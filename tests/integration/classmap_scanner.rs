@@ -854,3 +854,51 @@ fn scan_realistic_laravel_like_structure() {
     assert!(classmap.contains_key("App\\Services\\AuthService"));
     assert!(classmap.contains_key("Database\\Seeders\\DatabaseSeeder"));
 }
+
+// ─── Composer's own bootstrap classes ──────────────────────────────────────
+
+/// `Composer\Autoload\ClassLoader` lives at `vendor/composer/ClassLoader.php`
+/// but no autoload map lists it: `autoload_real.php` `require`s it by hand
+/// before an autoloader exists.  It has to be indexed anyway, or code that
+/// introspects its own autoloader reports the class as unknown.
+#[test]
+fn composer_bootstrap_scan_finds_the_class_loader() {
+    let dir = tempfile::tempdir().unwrap();
+    let composer_dir = dir.path().join("vendor").join("composer");
+    std::fs::create_dir_all(&composer_dir).unwrap();
+
+    std::fs::write(
+        composer_dir.join("ClassLoader.php"),
+        "<?php\nnamespace Composer\\Autoload;\nclass ClassLoader {}",
+    )
+    .unwrap();
+    std::fs::write(
+        composer_dir.join("InstalledVersions.php"),
+        "<?php\nnamespace Composer;\nclass InstalledVersions {}",
+    )
+    .unwrap();
+    // Generated data, not a declaration — and its `'Foo' => …` entries must
+    // not be mistaken for one.
+    std::fs::write(
+        composer_dir.join("autoload_classmap.php"),
+        "<?php\nreturn array(\n    'Ghost' => $vendorDir . '/nope.php',\n);",
+    )
+    .unwrap();
+
+    let classmap = phpantom_lsp::composer::scan_composer_bootstrap_classes(dir.path(), "vendor");
+
+    assert_eq!(
+        classmap.get("Composer\\Autoload\\ClassLoader").cloned(),
+        Some(composer_dir.join("ClassLoader.php")),
+    );
+    assert!(classmap.contains_key("Composer\\InstalledVersions"));
+    assert!(!classmap.contains_key("Ghost"));
+}
+
+#[test]
+fn composer_bootstrap_scan_tolerates_a_missing_vendor_dir() {
+    let dir = tempfile::tempdir().unwrap();
+    assert!(
+        phpantom_lsp::composer::scan_composer_bootstrap_classes(dir.path(), "vendor").is_empty()
+    );
+}

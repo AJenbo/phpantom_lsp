@@ -343,6 +343,7 @@ mod tests {
     fn github_annotation_format() {
         let diag = FileDiagnostic {
             line: 15,
+            column: 0,
             message: "Call to undefined method Bar::baz().".to_string(),
             identifier: Some("unknown_member".to_string()),
             severity: DiagnosticSeverity::ERROR,

@@ -34,9 +34,17 @@ impl Backend {
     ) -> jsonrpc::Result<Option<Vec<InlayHint>>> {
         let uri = params.text_document.uri.to_string();
         let range = params.range;
-        let result = self.with_file_content("textDocument/inlayHint", &uri, None, |content, _| {
-            self.handle_inlay_hints(&uri, content, range)
-        });
+        // Building the hints resolves every callable called in the viewport,
+        // and the editor re-requests them on each scroll and each refresh a
+        // keystroke triggers, so the work runs off the request task.
+        let backend = self.clone_for_blocking();
+        let result = crate::server::run_blocking_cancel_safe("inlay_hint", move || {
+            backend.with_file_content("textDocument/inlayHint", &uri, None, |content, _| {
+                backend.handle_inlay_hints(&uri, content, range)
+            })
+        })
+        .await
+        .flatten();
 
         // Declarations whose reference count is missing or stale were
         // queued while the hints were built; they are counted off the
@@ -160,7 +168,7 @@ impl Backend {
             let class_fqn = class.fqn();
 
             if class.keyword_offset != 0 && offset_in_range(class.keyword_offset, range) {
-                let ref_count = self.ref_count(&ReferenceIndexKey::Class(class_fqn.to_string()));
+                let ref_count = self.ref_count(&ReferenceIndexKey::class(&class_fqn));
                 let mut label = reference_label(ref_count);
 
                 if class.kind == ClassLikeKind::Interface || class.is_abstract {
@@ -1109,6 +1117,40 @@ mod tests {
                     parts.iter().map(|part| part.value.as_str()).collect()
                 }
             })
+    }
+
+    #[test]
+    fn function_count_includes_unqualified_calls_from_a_namespaced_file() {
+        let backend = Backend::new_test();
+        backend.update_ast(
+            "file:///app/Service.php",
+            "<?php\nnamespace App;\nfunction run(): void {\n    helper();\n    helper();\n}\n",
+        );
+
+        let hints = declaration_hints(
+            &backend,
+            "file:///helpers.php",
+            "<?php\nfunction helper(): void {}\n",
+        );
+
+        assert_eq!(hint_on_line(&hints, 1).as_deref(), Some(" 2 references"));
+    }
+
+    #[test]
+    fn function_count_ignores_the_case_a_call_is_spelled_with() {
+        let backend = Backend::new_test();
+        backend.update_ast(
+            "file:///app/Service.php",
+            "<?php\nnamespace App;\nfunction run(): void {\n    HELPER();\n}\n",
+        );
+
+        let hints = declaration_hints(
+            &backend,
+            "file:///helpers.php",
+            "<?php\nfunction helper(): void {}\n",
+        );
+
+        assert_eq!(hint_on_line(&hints, 1).as_deref(), Some(" 1 reference"));
     }
 
     #[test]
