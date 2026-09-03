@@ -1556,6 +1556,23 @@ mod tests {
     }
 
     #[test]
+    fn detects_static_config_mutators_and_translation_queries() {
+        for method in ["prepend", "push"] {
+            let content = format!("<?php\nConfig::{method}('app.providers');\n");
+            let ctx = detect_at_end(&content, "app.providers")
+                .unwrap_or_else(|| panic!("should detect Config::{method}() context"));
+            assert_eq!(ctx.kind, LaravelStringKind::Config);
+        }
+
+        for method in ["get", "has", "hasForLocale", "choice"] {
+            let content = format!("<?php\nLang::{method}('messages.saved');\n");
+            let ctx = detect_at_end(&content, "messages.saved")
+                .unwrap_or_else(|| panic!("should detect Lang::{method}() context"));
+            assert_eq!(ctx.kind, LaravelStringKind::Trans);
+        }
+    }
+
+    #[test]
     fn storage_argument_scanning_preserves_existing_static_contexts() {
         for (expression, expected_kind, expected_prefix) in [
             (
