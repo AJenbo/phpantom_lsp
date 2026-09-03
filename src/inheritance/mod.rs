@@ -40,8 +40,9 @@ pub(crate) use generics::apply_substitution;
 pub(crate) use generics::{
     apply_generic_args, apply_substitution_to_conditional, apply_substitution_to_method,
     apply_substitution_to_property, bind_inherited_class_keywords, build_generic_subs,
-    build_substitution_map, default_type_args, method_has_inherited_class_keyword,
-    method_references_params, property_references_params,
+    build_substitution_map, class_scoped_template_values, default_type_args,
+    method_has_inherited_class_keyword, method_references_params, property_references_params,
+    template_values_with_defaults,
 };
 
 /// A borrow-or-owned handle to a `ClassInfo`, used to walk the parent
@@ -194,7 +195,9 @@ pub(crate) fn resolve_class_with_inheritance(
             break;
         }
 
-        let parent = if let Some(p) = class_loader(parent_name) {
+        let parent = if let Some(p) =
+            crate::class_lookup::load_ancestor(&current.fqn(), parent_name, class_loader)
+        {
             p
         } else {
             break;
@@ -454,14 +457,39 @@ pub(crate) fn resolve_class_with_inheritance(
     //    When a class overrides an interface method without a return type,
     //    propagate the interface method's return type (with template
     //    substitution from `@implements` generics).
+    let class_fqn = class.fqn();
     for iface_name in &class.interfaces {
-        let Some(iface) = class_loader(iface_name) else {
+        let Some(iface) = crate::class_lookup::load_ancestor(&class_fqn, iface_name, class_loader)
+        else {
             continue;
         };
 
         // Build substitution map from @implements/@template-implements generics.
-        let iface_subs =
+        //
+        // Any of the interface's own @template params this class doesn't
+        // bind explicitly (e.g. a plain `implements ArrayAccess` with no
+        // `@implements ArrayAccess<TKey, TValue>` at all) falls back to its
+        // declared bound (or `mixed`) here. Without this, a docblock return
+        // type like `ArrayAccess`'s own `@return TValue` would leak through
+        // `enrich_method_arc_from_ancestor` below as if "TValue" were a real,
+        // resolvable class, clobbering the class's own concrete override
+        // (e.g. `offsetGet(): Pen`). This fallback is local to interface
+        // enrichment; `build_substitution_map` itself must keep leaving an
+        // absent annotation unresolved, since other consumers (the `extends`
+        // chain walk, Laravel factory model detection) rely on that absence
+        // to fall through to their own convention-based resolution.
+        let mut iface_subs =
             build_substitution_map(&ClassRef::Borrowed(class), &iface, &HashMap::new());
+        for param_name in &iface.template_params {
+            if !iface_subs.contains_key(param_name.as_str()) {
+                let fallback = iface
+                    .template_param_bounds
+                    .get(param_name)
+                    .cloned()
+                    .unwrap_or_else(PhpType::mixed);
+                iface_subs.insert(param_name.to_string(), fallback);
+            }
+        }
         let iface_sub_keys: Vec<String> = iface_subs.keys().cloned().collect();
         let fp_iface = TransformFingerprint::new(Some(&iface_subs), None, 0);
 
@@ -565,17 +593,89 @@ pub(crate) fn resolve_class_with_inheritance(
     merged
 }
 
-/// Whether `class` declares no `@template` of its own but fixes exactly
-/// one ancestor's generics via `@extends`, with an arg count matching
-/// `new_arg_count` — the shape [`rebind_extends_only_generics`] needs.
-pub(crate) fn is_extends_only_generic_rebindable(class: &ClassInfo, new_arg_count: usize) -> bool {
-    class.template_params.is_empty()
-        && matches!(class.extends_generics.as_slice(), [(_, args)] if args.len() == new_arg_count)
+/// Whether `class` declares no `@template` of its own but still takes
+/// `new_arg_count` type arguments through its parent — the shape
+/// [`rebind_extends_only_generics`] needs.
+pub(crate) fn is_extends_only_generic_rebindable(
+    class: &ClassInfo,
+    new_arg_count: usize,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> bool {
+    rebindable_parent(class, new_arg_count, class_loader).is_some()
 }
 
-/// Re-derive `class` with its single `@extends` generic binding replaced
-/// by `new_args`, baking the override into every inherited member the
-/// same way the original binding was baked.
+/// The ancestor whose `@extends` binding [`rebind_extends_only_generics`]
+/// would override, together with the classes between it and the class
+/// being rebound.
+struct RebindTarget {
+    /// The generic ancestor whose template parameters the rebind fills.
+    ancestor: Atom,
+    /// The ancestors between the class and `ancestor`, nearest first.
+    /// Empty when `ancestor` is the direct parent.
+    intermediates: Vec<Atom>,
+}
+
+/// The ancestor whose `@extends` binding [`rebind_extends_only_generics`]
+/// would override, for a class that declares no `@template` of its own.
+///
+/// Two shapes qualify: the class fixes exactly one ancestor's generics
+/// via `@extends`, or it names no generics at all and simply extends a
+/// generic ancestor. The latter is how nearly every custom Eloquent
+/// builder is written (`class UserBuilder extends Builder {}`): PHP has
+/// no generics, so the subclass silently stands in for `Builder<TModel>`
+/// and a caller that knows the model (`UserBuilder<User>`) has to be
+/// able to bind it.
+///
+/// The generic ancestor need not be the direct parent: a project that
+/// gives its builders a shared base (`class AdminUserBuilder extends
+/// UserBuilder`, `class UserBuilder extends Builder`) stands in for
+/// `Builder<TModel>` just as much, so the walk carries on up through
+/// ancestors that declare neither templates nor a binding of their own.
+/// One that does declare a binding has already fixed the generics, and
+/// overriding it is not this function's business.
+fn rebindable_parent(
+    class: &ClassInfo,
+    new_arg_count: usize,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<RebindTarget> {
+    if !class.template_params.is_empty() {
+        return None;
+    }
+    match class.extends_generics.as_slice() {
+        [(parent, args)] if args.len() == new_arg_count => Some(RebindTarget {
+            ancestor: *parent,
+            intermediates: Vec::new(),
+        }),
+        [] => {
+            let mut intermediates: Vec<Atom> = Vec::new();
+            let mut ancestor = atom(class.parent_class.as_deref()?);
+            loop {
+                let parent = class_loader(&ancestor)?;
+                if parent.template_params.len() == new_arg_count {
+                    return Some(RebindTarget {
+                        ancestor,
+                        intermediates,
+                    });
+                }
+                if !parent.template_params.is_empty() || !parent.extends_generics.is_empty() {
+                    return None;
+                }
+                // A parent chain that loops back on itself is not valid PHP,
+                // but an editor sees it while it is being written.
+                if intermediates.contains(&ancestor) {
+                    return None;
+                }
+                intermediates.push(ancestor);
+                ancestor = atom(parent.parent_class.as_deref()?);
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Re-derive `class` with its `@extends` generic binding replaced by
+/// `new_args`, returning the overridden raw class alongside the class
+/// re-merged through the parent chain under that binding.
 ///
 /// A `static<TNewKey, TValue>` return type rebind (Laravel's
 /// `Collection::keyBy()`/`groupBy()`/`mapWithKeys()` and friends) names
@@ -583,19 +683,17 @@ pub(crate) fn is_extends_only_generic_rebindable(class: &ClassInfo, new_arg_coun
 /// its key/value types through `@extends` (`final class Sub extends
 /// Collection {}` with `@extends Collection<int, Item>`) has no
 /// `@template` of its own for [`apply_generic_args`] to substitute
-/// against. Overriding the `@extends` binding and re-running the parent
+/// against. Neither has a custom Eloquent builder, which usually names
+/// no generics at all. Overriding the binding and re-running the parent
 /// chain merge reproduces the same baking the original binding went
 /// through, just with the rebind's args in place of the old ones.
 ///
 /// Returns `None` when `class` is not shaped like [`is_extends_only_generic_rebindable`]
 /// describes.
 ///
-/// Only base inheritance merge runs (traits + parent chain) — no virtual
-/// member providers, interface merging, or Laravel patches, the same
-/// trade-off [`crate::virtual_members::resolve_class_base_cached`] makes.
-/// This covers a rebind through real declared methods; a macro registered
-/// on the base collection class after the rebind will not be visible on
-/// the result (see `docs/todo/laravel.md`).
+/// The caller is responsible for layering virtual members, interface
+/// members, and framework patches back on — that is what the returned
+/// raw class is for.
 ///
 /// `class` may be a raw (unmerged) or already fully-resolved `ClassInfo`
 /// — `extends_generics` passes through inheritance merge unchanged either
@@ -609,18 +707,39 @@ pub(crate) fn rebind_extends_only_generics(
     class: &ClassInfo,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     new_args: &[PhpType],
-) -> Option<ClassInfo> {
-    let [(parent_name, parent_args)] = class.extends_generics.as_slice() else {
-        return None;
-    };
-    if parent_args.len() != new_args.len() {
-        return None;
-    }
+) -> Option<(ClassInfo, ClassInfo)> {
+    let RebindTarget {
+        ancestor,
+        intermediates,
+    } = rebindable_parent(class, new_args.len(), class_loader)?;
     let fqn = class.fqn();
     let raw = class_loader(fqn.as_str()).filter(|raw| raw.fqn().eq_ignore_ascii_case(fqn.as_str()));
     let mut overridden = raw.as_deref().unwrap_or(class).clone();
-    overridden.extends_generics = vec![(*parent_name, new_args.to_vec())];
-    Some(resolve_class_with_inheritance(&overridden, class_loader))
+    overridden.extends_generics = vec![(ancestor, new_args.to_vec())];
+
+    let merged = if intermediates.is_empty() {
+        resolve_class_with_inheritance(&overridden, class_loader)
+    } else {
+        // The chain merge only reads the `@extends` binding of the class
+        // whose own parent it is loading, so a binding that names an
+        // ancestor further up is never seen at the level it belongs to.
+        // Each intermediate is loaded carrying the same binding, which is
+        // what the generic-free stand-in it is means anyway.
+        let carry_binding = |name: &str| -> Option<Arc<ClassInfo>> {
+            let loaded = class_loader(name)?;
+            if !intermediates
+                .iter()
+                .any(|between| between.eq_ignore_ascii_case(name))
+            {
+                return Some(loaded);
+            }
+            let mut carrying = (*loaded).clone();
+            carrying.extends_generics = vec![(ancestor, new_args.to_vec())];
+            Some(Arc::new(carrying))
+        };
+        resolve_class_with_inheritance(&overridden, &carry_binding)
+    };
+    Some((overridden, merged))
 }
 
 /// Look up a method's return type through the inheritance chain.
@@ -643,7 +762,15 @@ pub(crate) fn resolve_method_return_type(
     // with generic substitutions applied.  Falling through to the cache
     // would return the un-substituted base class (keyed by bare FQN),
     // losing template parameter substitutions like TModel → Product.
-    if let Some(m) = class.get_method(method_name) {
+    //
+    // A declaration that states no return type at all is not an answer,
+    // though: an override written `public function getFileName()` with
+    // `{@inheritDoc}` above it says nothing, and what it means is what the
+    // ancestor said.  That type lives on the merged class, so fall through
+    // to it rather than reporting the override's silence as "unknown".
+    if let Some(m) = class.get_method(method_name)
+        && m.return_type.is_some()
+    {
         return m.return_type.clone();
     }
     let cache = crate::virtual_members::active_resolved_class_cache();

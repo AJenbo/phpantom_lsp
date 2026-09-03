@@ -364,6 +364,23 @@ pub struct ConditionalType {
     pub then_type: PhpType,
     /// The type when the condition is false.
     pub else_type: PhpType,
+    /// Whether an undecidable condition answers with `else_type` rather
+    /// than the union of both branches.
+    ///
+    /// A conditional someone wrote in a docblock describes two outcomes
+    /// the call really can have, so an argument that settles neither
+    /// leaves both on the table. A conditional we synthesised to patch a
+    /// stub can be modelling something narrower: `pow()`'s `object`
+    /// branch exists only for the operator-overloading extensions (GMP,
+    /// BCMath), and an argument nobody gave a type is no reason to
+    /// believe one of those is in play. Setting this on such a
+    /// conditional keeps the ordinary answer instead of widening to a
+    /// union with a branch the call almost certainly does not take.
+    ///
+    /// Never set from parsed PHPDoc — [`PhpType::conditional`] leaves it
+    /// off, and only [`PhpType::conditional_defaulting_to_else`] turns
+    /// it on.
+    pub else_when_undecided: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -840,6 +857,28 @@ impl PhpType {
             condition,
             then_type,
             else_type,
+            else_when_undecided: false,
+        })
+    }
+
+    /// Conditional type whose `then` branch needs proof.
+    ///
+    /// See [`ConditionalType::else_when_undecided`] for when to reach
+    /// for this instead of [`PhpType::conditional`].
+    pub fn conditional_defaulting_to_else(
+        param: impl AsRef<str>,
+        negated: bool,
+        condition: PhpType,
+        then_type: PhpType,
+        else_type: PhpType,
+    ) -> PhpType {
+        PhpType::conditional_type(ConditionalType {
+            param: atom(param.as_ref()),
+            negated,
+            condition,
+            then_type,
+            else_type,
+            else_when_undecided: true,
         })
     }
 
@@ -1199,12 +1238,15 @@ impl PhpType {
         matches!(self.as_literal(), Some(LiteralValue::Int(_)))
     }
 
-    /// Whether this type is `string` or any PHPDoc string refinement (case-insensitive).
+    /// Whether this type is `string` or any PHPDoc string refinement
+    /// (case-insensitive), plus `ClassString(…)`, `InterfaceString(…)` and
+    /// string literals.
     ///
-    /// Returns `true` for `string`, `non-empty-string`, `numeric-string`,
-    /// `literal-string`, `truthy-string`, `callable-string`, `class-string`,
-    /// `interface-string`, `lowercase-string`, `non-falsy-string`,
-    /// `ClassString(…)`, `InterfaceString(…)`, and string literals.
+    /// The list below is the whole string family from
+    /// [`is_scalar_name`](crate::php_type::is_scalar_name_pub); leaving one
+    /// out makes that spelling look like a different kind of type, and
+    /// `is_compatible_refinement_typed` then discards it in favour of the
+    /// bare `string` a parameter declares natively.
     pub fn is_string_subtype(&self) -> bool {
         match self.kind() {
             TypeKind::Named(s) => matches!(
@@ -1213,11 +1255,17 @@ impl PhpType {
                     | "non-empty-string"
                     | "numeric-string"
                     | "literal-string"
+                    | "non-empty-literal-string"
                     | "truthy-string"
                     | "callable-string"
                     | "class-string"
                     | "interface-string"
+                    | "trait-string"
+                    | "enum-string"
                     | "lowercase-string"
+                    | "non-empty-lowercase-string"
+                    | "uppercase-string"
+                    | "non-empty-uppercase-string"
                     | "non-falsy-string"
             ),
             TypeKind::ClassString(_) | TypeKind::InterfaceString(_) => true,
@@ -1899,13 +1947,6 @@ impl PhpType {
                         Some(key) if key.contains("::") => {
                             PhpType::union(vec![PhpType::int(), PhpType::string()])
                         }
-                        // Shape keys retain escape spelling rather than a
-                        // decoded runtime value. An escaped string may decode
-                        // to a canonical decimal key (e.g. `"\x38"`), so both
-                        // legal PHP key domains must remain possible.
-                        Some(key) if key.contains('\\') => {
-                            PhpType::union(vec![PhpType::int(), PhpType::string()])
-                        }
                         Some(key) if is_decimal_int_array_key(key) => PhpType::int(),
                         Some(_) => PhpType::string(),
                     })
@@ -2155,7 +2196,16 @@ impl PhpType {
                 None
             }
             TypeKind::Nullable(inner) => inner.extract_shape_key_type(key),
-            TypeKind::Union(members) => members.iter().find_map(|m| m.extract_shape_key_type(key)),
+            TypeKind::Union(members) => {
+                // Every alternative contributes its own entry: reading
+                // offset 1 of `array{string, null}|array{string, Err}` is
+                // `null|Err`, not whichever alternative comes first.
+                let found: Vec<PhpType> = members
+                    .iter()
+                    .filter_map(|m| m.extract_shape_key_type(key))
+                    .collect();
+                (!found.is_empty()).then(|| PhpType::union(found))
+            }
             _ => None,
         }
     }
@@ -2561,8 +2611,56 @@ impl PhpType {
         }
     }
 
+    /// Return the part of a type that can be falsy.
+    ///
+    /// The mirror of [`Self::truthy_type`], for the branch an `if ($x)`
+    /// skips rather than the one it enters. Members that are *always*
+    /// truthy are dropped and `bool` keeps only its `false` half; `None`
+    /// comes back when nothing the type describes could have been falsy.
+    ///
+    /// As on the truthy side, refinements the test justifies but PHP has
+    /// no plain spelling for are left alone: `string` stays `string`
+    /// rather than becoming the pair of empty spellings that are falsy,
+    /// and `int` stays `int` rather than becoming `0`.
+    pub fn falsy_type(&self) -> Option<PhpType> {
+        let mut falsy = Vec::new();
+        self.push_falsy_members(&mut falsy);
+        match falsy.len() {
+            0 => None,
+            1 => falsy.pop(),
+            _ => Some(PhpType::union(falsy)),
+        }
+    }
+
+    /// Append this type's falsy members to `out`.
+    ///
+    /// The unions and nullables a type is built from are flattened on the
+    /// way, so [`Self::union`] is handed one list of atoms and can
+    /// deduplicate the `null` that every nullable member contributes:
+    /// `?int|?string` is falsy as `int|null|string`, not as a union with
+    /// the same `null` in it twice.
+    fn push_falsy_members(&self, out: &mut Vec<PhpType>) {
+        match self.kind() {
+            // `null` is falsy, so it survives whatever the inner type does.
+            TypeKind::Nullable(inner) => {
+                inner.push_falsy_members(out);
+                out.push(PhpType::null());
+            }
+            TypeKind::Union(members) => {
+                for member in members.iter() {
+                    member.push_falsy_members(out);
+                }
+            }
+            _ if self.truthiness() == Some(true) => {}
+            _ if self.is_bool() => out.push(PhpType::false_()),
+            _ => out.push(self.clone()),
+        }
+    }
+
     /// The non-empty counterpart of an array type: `array<K, V>` becomes
     /// `non-empty-array<K, V>` and `list<T>` becomes `non-empty-list<T>`.
+    /// The `T[]` slice spelling is sugar for `array<T>` and refines the
+    /// same way.
     ///
     /// Everything else comes back unchanged, including a shape (its own
     /// entries already say whether it can be empty) and a type that is
@@ -2576,6 +2674,9 @@ impl PhpType {
             }
             TypeKind::Generic(generic) if generic.name == "list" => {
                 PhpType::generic_atom(atom("non-empty-list"), generic.args.clone())
+            }
+            TypeKind::Array(element) => {
+                PhpType::generic_atom(atom("non-empty-array"), vec![element.clone()])
             }
             _ => self.clone(),
         }
@@ -2595,6 +2696,62 @@ impl PhpType {
                 .is_some_and(|entries| entries.iter().any(|entry| !entry.optional)),
             TypeKind::Union(members) => members.iter().all(PhpType::is_provably_non_empty),
             _ => false,
+        }
+    }
+
+    /// The type left behind after `unset($var[$key])` (or an element unset
+    /// off a nested array-access chain) removes one entry.
+    ///
+    /// `key` is the literal string key being removed, when known — `None`
+    /// for a dynamic key (`unset($arr[$i])`). A non-array-like type (an
+    /// `ArrayAccess` object routes through `offsetUnset` instead of real
+    /// array mutation) comes back unchanged.
+    ///
+    /// A shape drops the matching entry outright when the key is known,
+    /// since that key provably no longer exists. A dynamic key could have
+    /// removed any one of the shape's entries, so every entry becomes
+    /// optional instead — none of them is provably still there. Either way
+    /// a shape that loses its only required entries is no longer provably
+    /// non-empty, which is what lets a following `foreach` know its body
+    /// might not run. Losing an entry also breaks a list's sequential-key
+    /// promise, so a list shape is demoted to a plain array shape.
+    ///
+    /// A `non-empty-array`/`non-empty-list` (tracked by name, not by
+    /// entries) loses that promise unconditionally: removing any one
+    /// element could have emptied it out entirely.
+    pub fn after_element_unset(&self, key: Option<&str>) -> PhpType {
+        match self.kind() {
+            TypeKind::Nullable(inner) => PhpType::nullable(inner.after_element_unset(key)),
+            TypeKind::Union(members) => {
+                PhpType::union(members.iter().map(|m| m.after_element_unset(key)).collect())
+            }
+            TypeKind::Named(name) if name == "non-empty-array" => PhpType::named(atom("array")),
+            TypeKind::Named(name) if name == "non-empty-list" => PhpType::named(atom("list")),
+            TypeKind::Generic(generic) if generic.name == "non-empty-array" => {
+                PhpType::generic_atom(atom("array"), generic.args.clone())
+            }
+            TypeKind::Generic(generic) if generic.name == "non-empty-list" => {
+                PhpType::generic_atom(atom("list"), generic.args.clone())
+            }
+            TypeKind::ArrayShape(entries) => {
+                let updated: Vec<ShapeEntry> = match key {
+                    Some(key) => entries
+                        .iter()
+                        .filter(|entry| entry.key.as_deref() != Some(key))
+                        .cloned()
+                        .collect(),
+                    None => entries
+                        .iter()
+                        .cloned()
+                        .map(|mut entry| {
+                            entry.optional = true;
+                            entry
+                        })
+                        .collect(),
+                };
+                PhpType::array_shape(updated)
+            }
+            _ => self.clone(),
         }
     }
 
@@ -2854,6 +3011,24 @@ impl PhpType {
     /// Whether this type is `mixed` (top type).
     pub fn is_mixed(&self) -> bool {
         matches!(self.kind(), TypeKind::Named(s) if s.eq_ignore_ascii_case("mixed"))
+    }
+
+    /// Whether `mixed` reaches the top level of this type.
+    ///
+    /// `mixed` is the top type, so a union or nullable that holds it holds
+    /// every value: `mixed|Foo` and `?mixed` are both just `mixed`.
+    /// [`simplified`](Self::simplified) folds them, but a caller that only
+    /// needs the answer and not the folded type gets it here without
+    /// rebuilding every member on the way.
+    pub fn contains_mixed(&self) -> bool {
+        if self.is_mixed() {
+            return true;
+        }
+        match self.kind() {
+            TypeKind::Union(members) => members.iter().any(PhpType::contains_mixed),
+            TypeKind::Nullable(inner) => inner.contains_mixed(),
+            _ => false,
+        }
     }
 
     /// Whether this type is `void`.

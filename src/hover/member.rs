@@ -460,26 +460,35 @@ impl Backend {
         uri: &str,
         content: &str,
     ) -> Hover {
-        // When the method has no declared return type and no @return
-        // docblock, try to infer the return type from the method body.
-        // This mirrors what completion/hover resolution does, so the
-        // hover display matches the resolved type the user sees.
+        // When the method has no declared return type, or its only declared
+        // type is `mixed` (native or docblock — carries no information),
+        // try to infer the return type from the method body. This mirrors
+        // what completion/hover resolution does, so the hover display
+        // matches the resolved type the user sees.
         let inferred_return_type: Option<crate::php_type::PhpType> =
-            if method.return_type.is_none() && method.name_offset != 0 && !method.is_virtual {
+            if method.return_type.as_ref().is_none_or(|t| t.is_mixed())
+                && method.name_offset != 0
+                && !method.is_virtual
+            {
                 crate::type_engine::call_resolution::try_infer_body_return_type(
                     self,
                     &owner.fqn(),
                     method,
+                    // Hovering the declaration itself asks what the method
+                    // returns in general, not at one call site.
+                    &[],
                 )
                 .filter(|t| !t.is_mixed() && !t.is_void())
             } else {
                 None
             };
 
-        let effective_return = method
-            .return_type
+        // Inference only ever produces something when the declared type was
+        // absent or `mixed`, so preferring it here cannot shadow a real
+        // declared type — it only replaces an uninformative `mixed`.
+        let effective_return = inferred_return_type
             .as_ref()
-            .or(inferred_return_type.as_ref());
+            .or(method.return_type.as_ref());
 
         let visibility = format_visibility(method.visibility);
         let static_kw = if method.is_static { "static " } else { "" };

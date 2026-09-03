@@ -72,10 +72,22 @@ mod tests {
         \x20   public function renderEach($view, $data, $iterator, $empty = 'raw|') { return ''; }\n\
         }\n";
 
+    /// A notification's mail message, which names templates the same way a
+    /// mailable does while sharing no base class with one.
+    const MAIL_MESSAGE_STUB: &str = "<?php\nnamespace Illuminate\\Notifications\\Messages;\n\
+        class MailMessage {\n\
+        \x20   public function view($view, array $data = []): static { return $this; }\n\
+        \x20   public function markdown($view, array $data = []): static { return $this; }\n\
+        }\n";
+
     fn workspace(files: &[(&str, &str)]) -> (phpantom_lsp::Backend, tempfile::TempDir) {
         let mut all = vec![
             ("stubs/Illuminate/Mail/Mailable.php", MAILABLE_STUB),
             ("stubs/Illuminate/Mail/Mailables/Content.php", CONTENT_STUB),
+            (
+                "stubs/Illuminate/Notifications/Messages/MailMessage.php",
+                MAIL_MESSAGE_STUB,
+            ),
             (
                 "stubs/Illuminate/Contracts/View/Factory.php",
                 FACTORY_CONTRACT_STUB,
@@ -1109,6 +1121,38 @@ mod tests {
         assert!(
             !codes.iter().any(|code| code == "invalid_laravel_view"),
             "raw markup should not be read as a view name, got {codes:?}"
+        );
+    }
+
+    /// A notification's `toMail()` returns a mail message rather than a
+    /// mailable, and the `view()` / `markdown()` it sets name templates just
+    /// the same.
+    #[tokio::test]
+    async fn a_notification_mail_message_names_a_template() {
+        let notification = "<?php\nnamespace App;\n\
+            use Illuminate\\Notifications\\Messages\\MailMessage;\n\
+            class OrderShipped {\n\
+            \x20   public function toMail($notifiable): MailMessage {\n\
+            \x20       return (new MailMessage())->markdown('emails.shipped', ['title' => 'Hi']);\n\
+            \x20   }\n\
+            }\n";
+        let (backend, dir) = workspace(&[
+            ("resources/views/emails/shipped.blade.php", TITLED),
+            ("app/OrderShipped.php", notification),
+        ]);
+
+        let target = definition_file(&backend, &dir, "app/OrderShipped.php", "php", 5, 48).await;
+        assert!(
+            target
+                .as_deref()
+                .is_some_and(|uri| uri.ends_with("/resources/views/emails/shipped.blade.php")),
+            "a mail message's markdown() should reach the template, got {target:?}"
+        );
+
+        let diags = call_site_diagnostics(&backend, &dir, "app/OrderShipped.php", "php").await;
+        assert!(
+            diags.is_empty(),
+            "expected a clean call site, got {diags:?}"
         );
     }
 }

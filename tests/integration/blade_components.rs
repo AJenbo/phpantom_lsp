@@ -307,7 +307,7 @@ mod tests {
             .blade_virtual_php(uri.as_str())
             .expect("blade virtual content");
         assert!(
-            virtual_php.contains("blade_directive($name);"),
+            virtual_php.contains("blade_bound_attr_directive($name);"),
             "the target expression must still be parsed: {virtual_php}"
         );
         assert!(

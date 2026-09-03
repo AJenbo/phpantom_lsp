@@ -17,7 +17,65 @@ use crate::symbol_map::SymbolKind;
 use crate::text_position::{line_start_byte_offset, offset_to_position, ranges_overlap};
 use crate::util::{build_fqn, strip_fqn_prefix};
 
+use super::RenameOutcome;
+
 impl Backend {
+    /// Plan a class move without requiring an LSP cursor position.
+    pub(crate) fn plan_class_move(&self, old_fqn: &str, new_fqn: &str) -> RenameOutcome {
+        let old_fqn = strip_fqn_prefix(old_fqn);
+        let definition_uri = self
+            .symbols
+            .fqn_uri_index
+            .read()
+            .get(old_fqn)
+            .cloned()
+            .ok_or_else(|| format!("Class `{old_fqn}` was not found."))?;
+        // `textDocument/rename` refuses a symbol declared in a vendor
+        // package, and moving one headlessly is no safer: the edits would
+        // land in a tree the next `composer install` overwrites.
+        if self
+            .workspace
+            .vendor_uri_prefixes
+            .lock()
+            .iter()
+            .any(|prefix| definition_uri.starts_with(prefix.as_str()))
+        {
+            return Err(format!(
+                "`{old_fqn}` is declared in an installed package and cannot be moved."
+            ));
+        }
+        let content = self
+            .get_file_content(&definition_uri)
+            .ok_or_else(|| format!("Could not read the definition of `{old_fqn}`."))?;
+        let symbol_map = self
+            .symbol_maps
+            .read()
+            .get(&definition_uri)
+            .cloned()
+            .ok_or_else(|| format!("Could not index the definition of `{old_fqn}`."))?;
+        let span = symbol_map
+            .spans
+            .iter()
+            .find(|span| {
+                matches!(
+                    &span.kind,
+                    SymbolKind::ClassDeclaration { name }
+                        if name.eq_ignore_ascii_case(crate::util::short_name(old_fqn))
+                )
+            })
+            .ok_or_else(|| format!("Could not locate the declaration of `{old_fqn}`."))?;
+        let position = offset_to_position(&content, span.start as usize);
+        let locations = self
+            .find_references_for_rename(&definition_uri, &content, position, true)
+            .ok_or_else(|| format!("Could not find references to `{old_fqn}`."))?;
+        if !self.rename_locations_verified(&span.kind, &locations) {
+            return Err(format!(
+                "The workspace changed while `{old_fqn}` was being indexed; retry the move."
+            ));
+        }
+        self.build_class_move_edit(old_fqn, new_fqn, &locations)
+    }
+
     /// Resolve the fully-qualified class name for a class rename.
     ///
     /// Returns `Some(fqn)` when the symbol being renamed is a class
@@ -36,7 +94,7 @@ impl Backend {
                 } else {
                     ctx.resolve_name_at(name, offset)
                 };
-                Some(strip_fqn_prefix(&fqn).to_string())
+                Some(self.canonical_class_fqn(strip_fqn_prefix(&fqn)))
             }
             SymbolKind::ClassDeclaration { name } => {
                 let ctx = self.file_context(uri);
@@ -44,6 +102,24 @@ impl Backend {
             }
             _ => None,
         }
+    }
+
+    /// The spelling the class declares itself with.
+    ///
+    /// A reference may name a class in any casing (`new WIDGET()` reaches
+    /// `App\Widget`), but every later step of the rename reads the old
+    /// short name back out of this FQN: to decide whether an import is
+    /// aliased, whether the new name collides, and whether the file is
+    /// named after the class.  Answering those against the reference's
+    /// casing rather than the declaration's gets all three wrong, so the
+    /// name is canonicalized once here.
+    fn canonical_class_fqn(&self, fqn: &str) -> String {
+        self.symbols
+            .fqn_uri_index
+            .read()
+            .get_key_value(fqn)
+            .map(|(declared, _)| declared.to_string())
+            .unwrap_or_else(|| fqn.to_string())
     }
 
     /// Check whether renaming a class should also rename the file.
@@ -210,7 +286,7 @@ impl Backend {
             //   must use that alias.
             // - Otherwise, in-code refs switch from old short name to new short name.
             let (skip_alias_refs, in_code_replacement) = match &import_info {
-                Some(info) if info.alias != old_short_name => {
+                Some(info) if info.has_explicit_alias => {
                     // Explicit alias: in-code refs use the alias, leave them alone.
                     (true, info.alias.clone())
                 }
@@ -274,7 +350,11 @@ impl Backend {
                         range: loc.range,
                         new_text,
                     });
-                } else if skip_alias_refs && source_text == import_info.as_ref().unwrap().alias {
+                } else if skip_alias_refs
+                    && import_info
+                        .as_ref()
+                        .is_some_and(|info| source_text.eq_ignore_ascii_case(&info.alias))
+                {
                     // This reference uses the alias.  The alias is being
                     // preserved, so skip this edit entirely.
                     continue;
@@ -336,7 +416,7 @@ impl Backend {
         old_fqn: &str,
         new_fqn_raw: &str,
         locations: &[Location],
-    ) -> Option<WorkspaceEdit> {
+    ) -> RenameOutcome {
         let old_fqn_normalized = strip_fqn_prefix(old_fqn);
         let new_fqn_normalized = strip_fqn_prefix(new_fqn_raw).to_string();
         let old_short_name = crate::util::short_name(old_fqn_normalized);
@@ -353,7 +433,16 @@ impl Backend {
         let namespace_changed = old_ns != new_ns;
 
         if !class_name_changed && !namespace_changed {
-            return None;
+            return Ok(None);
+        }
+
+        // The destination has to be free before anything is emitted.
+        // Every edit below assumes the class ends up at the new FQN, in
+        // the file PSR-4 puts it in; letting it land on top of a class
+        // that is already there would either clobber that file or leave
+        // two declarations claiming one name.
+        if let Some(occupant) = self.class_move_conflict(old_fqn_normalized, &new_fqn_normalized) {
+            return Err(occupant);
         }
 
         let mut locations_by_file: HashMap<String, Vec<&Location>> = HashMap::new();
@@ -402,15 +491,45 @@ impl Backend {
                 && import_info.is_some()
                 && has_import_collision(&file_use_map, old_fqn_normalized, new_short_name);
 
+            let is_definition_file = def_uri_str.as_ref() == Some(file_uri_str);
+
+            let file_namespace = self.first_file_namespace(file_uri_str);
+
+            // A file with no import for the class reached it through its
+            // own namespace, so moving the class out of that namespace
+            // leaves every short-name reference dangling.  Such a file
+            // needs a `use` statement added.
+            let needs_new_import = namespace_changed
+                && import_info.is_none()
+                && !is_definition_file
+                && namespace_owns(file_namespace.as_deref(), old_fqn_normalized)
+                && !namespace_owns(file_namespace.as_deref(), &new_fqn_normalized);
+
+            // The short name may already be taken in this file by an
+            // unrelated import, in which case the added import has to be
+            // aliased and the references rewritten to that alias.
+            let new_import_alias = if needs_new_import
+                && has_import_collision(&file_use_map, old_fqn_normalized, new_short_name)
+            {
+                Some(pick_collision_alias(new_short_name, &file_use_map))
+            } else {
+                None
+            };
+
             let (skip_alias_refs, in_code_replacement) = match &import_info {
-                Some(info) if info.alias != old_short_name => (true, info.alias.clone()),
+                Some(info) if info.has_explicit_alias => (true, info.alias.clone()),
                 Some(_) if has_collision => {
                     let alias = pick_collision_alias(new_short_name, &file_use_map);
                     (false, alias)
                 }
-                _ if class_name_changed => (false, new_short_name.to_string()),
-                _ => (true, old_short_name.to_string()),
+                _ => match &new_import_alias {
+                    Some(alias) => (false, alias.clone()),
+                    None if class_name_changed => (false, new_short_name.to_string()),
+                    None => (true, old_short_name.to_string()),
+                },
             };
+
+            let rewrite_short_refs = class_name_changed || new_import_alias.is_some();
 
             let use_line_range = if import_info.is_some() {
                 find_use_line_range(&file_content, old_fqn_normalized)
@@ -419,8 +538,7 @@ impl Backend {
             };
 
             let mut file_edits: Vec<TextEdit> = Vec::new();
-
-            let is_definition_file = def_uri_str.as_ref() == Some(file_uri_str);
+            let mut has_short_name_ref = false;
 
             if is_definition_file
                 && namespace_changed
@@ -432,7 +550,7 @@ impl Backend {
                 // describe the file, and the span must still spell the
                 // namespace it claims to.
                 if !sm.matches_source(&file_content) {
-                    return None;
+                    return Ok(None);
                 }
 
                 if let Some((ns_span, ns_name)) = sm.spans.iter().find_map(|s| match &s.kind {
@@ -442,7 +560,7 @@ impl Backend {
                     if file_content.get(ns_span.start as usize..ns_span.end as usize)
                         != Some(ns_name.as_str())
                     {
-                        return None;
+                        return Ok(None);
                     }
                     let start = offset_to_position(&file_content, ns_span.start as usize);
                     let end = offset_to_position(&file_content, ns_span.end as usize);
@@ -501,14 +619,17 @@ impl Backend {
                 } else if skip_alias_refs
                     && import_info
                         .as_ref()
-                        .is_some_and(|info| source_text == info.alias)
+                        .is_some_and(|info| source_text.eq_ignore_ascii_case(&info.alias))
                 {
                     continue;
-                } else if class_name_changed {
-                    file_edits.push(TextEdit {
-                        range: loc.range,
-                        new_text: in_code_replacement.clone(),
-                    });
+                } else {
+                    has_short_name_ref = true;
+                    if rewrite_short_refs {
+                        file_edits.push(TextEdit {
+                            range: loc.range,
+                            new_text: in_code_replacement.clone(),
+                        });
+                    }
                 }
             }
 
@@ -528,13 +649,28 @@ impl Backend {
                 });
             }
 
+            // Only worth importing when the file actually spells the
+            // class by its short name; a file that only ever writes the
+            // FQN had its references rewritten in full above.
+            if needs_new_import && has_short_name_ref {
+                let use_block = crate::completion::use_edit::analyze_use_block(&file_content);
+                if let Some(import_edits) = crate::completion::use_edit::build_aliased_use_edit(
+                    &new_fqn_normalized,
+                    new_import_alias.as_deref(),
+                    &use_block,
+                    &file_namespace,
+                ) {
+                    file_edits.extend(import_edits);
+                }
+            }
+
             if !file_edits.is_empty() {
                 changes.entry(parsed_uri).or_default().extend(file_edits);
             }
         }
 
         if changes.is_empty() {
-            return None;
+            return Ok(None);
         }
 
         let file_move = self.compute_class_file_move(old_fqn_normalized, &new_fqn_normalized);
@@ -543,18 +679,18 @@ impl Backend {
             && self.supports_file_rename.load(Ordering::Acquire)
         {
             let doc_changes = Self::convert_to_document_changes(changes, &old_uri, &new_uri);
-            return Some(WorkspaceEdit {
+            return Ok(Some(WorkspaceEdit {
                 changes: None,
                 document_changes: Some(doc_changes),
                 change_annotations: None,
-            });
+            }));
         }
 
-        Some(WorkspaceEdit {
+        Ok(Some(WorkspaceEdit {
             changes: Some(changes),
             document_changes: None,
             change_annotations: None,
-        })
+        }))
     }
 
     /// Compute the file move for a class being moved to a new FQN.
@@ -582,8 +718,79 @@ impl Backend {
             return None;
         }
 
+        // A `RenameFile` onto a path that is already there is destructive
+        // in every editor that honours it. `build_class_move_edit`
+        // refuses the move before reaching this point, so a path that
+        // still exists here holds something PSR-4 does not account for.
+        if new_path.exists() {
+            return None;
+        }
+
         Some((old_url, new_url))
     }
+
+    /// Why a class cannot move to `new_fqn`, or `None` when the
+    /// destination is free.
+    ///
+    /// A class already declared under that name is the blocking case:
+    /// the move would leave two declarations claiming it, and every
+    /// reference the rename rewrites would then name whichever one the
+    /// autoloader reaches first. The PSR-4 destination file is checked
+    /// too, since a file can sit there without the index having a class
+    /// for it.
+    fn class_move_conflict(&self, old_fqn: &str, new_fqn: &str) -> Option<String> {
+        if let Some((declared, uri)) = self
+            .symbols
+            .fqn_uri_index
+            .read()
+            .get_key_value(new_fqn)
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            && !declared.eq_ignore_ascii_case(old_fqn)
+        {
+            return Some(format!(
+                "Cannot rename to `{}`: a class with that name is already declared in {}.",
+                declared,
+                display_uri(&uri)
+            ));
+        }
+
+        let workspace_root = self.workspace_root().read().clone()?;
+        let mappings = self.psr4_mappings().read().clone();
+        let new_ns = new_fqn.rfind('\\').map(|i| &new_fqn[..i]);
+        let new_path = compute_psr4_path(
+            &mappings,
+            &workspace_root,
+            new_ns,
+            crate::util::short_name(new_fqn),
+        )?;
+
+        let old_path = self
+            .symbols
+            .fqn_uri_index
+            .read()
+            .get(old_fqn)
+            .and_then(|u| Url::parse(u).ok())
+            .and_then(|u| u.to_file_path().ok());
+
+        if new_path.exists() && old_path.as_deref() != Some(new_path.as_path()) {
+            return Some(format!(
+                "Cannot rename to `{}`: {} already exists.",
+                new_fqn,
+                new_path.display()
+            ));
+        }
+
+        None
+    }
+}
+
+/// A file URI rendered as a plain path for a user-facing message.
+fn display_uri(uri: &str) -> String {
+    Url::parse(uri)
+        .ok()
+        .and_then(|u| u.to_file_path().ok())
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| uri.to_string())
 }
 
 // ─── Import analysis helpers ────────────────────────────────────────────────
@@ -622,6 +829,21 @@ fn find_import_for_fqn(use_map: &HashMap<String, String>, target_fqn: &str) -> O
     None
 }
 
+/// Whether a file declaring `file_namespace` resolves the short name of
+/// `fqn` to `fqn` without needing a `use` import.
+///
+/// PHP falls back to the current namespace for unqualified class names,
+/// so `namespace App\Support;` reaches `App\Support\Helper` as plain
+/// `Helper`.  Namespace names are case-insensitive.
+fn namespace_owns(file_namespace: Option<&str>, fqn: &str) -> bool {
+    let class_namespace = fqn.rfind('\\').map(|i| &fqn[..i]);
+    match (file_namespace, class_namespace) {
+        (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
+        (None, None) => true,
+        _ => false,
+    }
+}
+
 /// Check whether importing `new_short_name` would collide with an
 /// existing import in the file (other than the one being renamed).
 fn has_import_collision(
@@ -647,15 +869,23 @@ fn has_import_collision(
 
 /// Pick an alias name to avoid a collision.
 ///
-/// Tries `"{name}Alias"` first, then `"{name}Alias2"`, etc.
+/// Tries `"{name}Alias"` first, then `"{name}Alias2"`, etc.  An alias is
+/// a class name, so a candidate that differs from an existing import only
+/// in casing still collides.
 fn pick_collision_alias(base_name: &str, use_map: &HashMap<String, String>) -> String {
+    let is_free = |candidate: &str| {
+        !use_map
+            .keys()
+            .any(|alias| alias.eq_ignore_ascii_case(candidate))
+    };
+
     let candidate = format!("{}Alias", base_name);
-    if !use_map.contains_key(&candidate) {
+    if is_free(&candidate) {
         return candidate;
     }
     for i in 2..100 {
         let candidate = format!("{}Alias{}", base_name, i);
-        if !use_map.contains_key(&candidate) {
+        if is_free(&candidate) {
             return candidate;
         }
     }

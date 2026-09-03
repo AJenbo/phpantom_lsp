@@ -147,6 +147,40 @@ pub(crate) fn resolve_trans_definitions(backend: &Backend, key: &str) -> Vec<Loc
     results
 }
 
+/// The line a translation key resolves to inside the file that declares it.
+///
+/// The file is the one [`resolve_trans_definitions`] settled on, so hover
+/// quotes the string from the same locale it names, and a group (which has
+/// no single line) resolves to `None`.
+pub(crate) fn trans_line(backend: &Backend, key: &str, file_uri: &Url) -> Option<String> {
+    let path = file_uri.path();
+    if path.ends_with(".json") {
+        let content = std::fs::read_to_string(file_uri.to_file_path().ok()?).ok()?;
+        let map =
+            serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&content).ok()?;
+        return map.get(key)?.as_str().map(str::to_string);
+    }
+    let content = backend
+        .get_file_content(file_uri.as_str())
+        .or_else(|| std::fs::read_to_string(file_uri.to_file_path().ok()?).ok())?;
+    collect_trans_declarations(&content, &trans_file_prefix(key))
+        .into_iter()
+        .find(|decl| decl.key == key)?
+        .value
+}
+
+/// The prefix [`collect_trans_declarations`] flattens a file's keys under,
+/// derived from the key being looked up: the first dotted segment, or
+/// `namespace::file` for a package translation.
+fn trans_file_prefix(key: &str) -> String {
+    match key.split_once("::") {
+        Some((namespace, rest)) => {
+            format!("{namespace}::{}", rest.split('.').next().unwrap_or(rest))
+        }
+        None => key.split('.').next().unwrap_or(key).to_string(),
+    }
+}
+
 // ─── Declaration extractor (mirrors config_keys logic) ───────────────────────
 
 #[derive(Debug)]
@@ -156,6 +190,8 @@ pub(crate) struct TransKeyMatch {
     /// Whether the key's value is itself a nested array (a translation
     /// group) rather than a scalar string entry.
     pub is_group: bool,
+    /// The line itself, for a scalar entry written as a string literal.
+    pub value: Option<String>,
 }
 
 pub(crate) fn collect_trans_declarations(content: &str, file_stem: &str) -> Vec<TransKeyMatch> {
@@ -258,6 +294,8 @@ fn collect_array<'a>(
             key: dot_key,
             start: key_start,
             is_group: value_is_group(kv.value),
+            value: super::helpers::extract_string_literal(kv.value, content)
+                .map(|(text, _, _)| text.to_string()),
         });
 
         collect_expr(kv.value, content, prefix, &full_path, out);

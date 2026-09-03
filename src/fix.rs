@@ -63,6 +63,14 @@ pub struct FixOptions {
     pub with_phpstan: bool,
     /// Output format.
     pub output_format: OutputFormat,
+    /// The global `.phpantom.toml` to merge underneath the project's own,
+    /// or `None` to fix against the project config alone.
+    ///
+    /// The CLI passes [`crate::config::global_config_path`] so a
+    /// command-line run honours the same defaults the editor does. Tests
+    /// leave it `None` so the machine's config directory cannot change
+    /// what they assert.
+    pub global_config: Option<PathBuf>,
 }
 
 /// A single fix applied to a file.
@@ -224,7 +232,7 @@ pub async fn run(options: FixOptions) -> i32 {
     }
 
     // ── 1. Load config ──────────────────────────────────────────────
-    let cfg = match config::load_config(root) {
+    let cfg = match config::load_config_from(root, options.global_config.as_deref()) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("Warning: failed to load .phpantom.toml: {e}");
@@ -235,7 +243,7 @@ pub async fn run(options: FixOptions) -> i32 {
     // ── 2. Index project ────────────────────────────────────────────
     let backend = Backend::new_headless();
     *backend.workspace_root().write() = Some(root.to_path_buf());
-    *backend.workspace.config.lock() = cfg.clone();
+    backend.set_config(cfg.clone());
 
     let composer_package = composer::read_composer_package(root);
 
@@ -257,7 +265,7 @@ pub async fn run(options: FixOptions) -> i32 {
         .await;
 
     // ── 3. Discover files ───────────────────────────────────────────
-    let files = crate::analyse::discover_user_files(&backend, root, options.path_filter.as_deref());
+    let files = crate::analyse::discover_user_files(&backend, root, options.path_filter.as_slice());
 
     if files.is_empty() {
         eprintln!("No PHP files found.");

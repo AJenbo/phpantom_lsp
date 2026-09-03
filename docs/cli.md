@@ -13,10 +13,60 @@ and what CI reports.
 | `phpantom_lsp --tcp 9257`| Start the LSP server listening on a TCP port         |
 | `phpantom_lsp analyze`   | Report diagnostics across the project                |
 | `phpantom_lsp fix`       | Apply automated code fixes across the project        |
+| `phpantom_lsp move`      | Move classes or namespaces and update references     |
 | `phpantom_lsp init`      | Generate a default `.phpantom.toml` config file      |
 
 Running with no subcommand starts the language server. Editors launch
 this automatically.
+
+---
+
+## `move`
+
+Moves a class or namespace and updates its declarations, imports, and references
+across the project. Inputs can be fully-qualified names or PSR-4 paths:
+
+```sh
+phpantom_lsp move 'App\Old\Widget' 'App\Domain\Gadget'
+phpantom_lsp move src/Old/Widget.php src/Domain/Gadget.php
+phpantom_lsp move 'App\Old' 'App\Domain'
+phpantom_lsp move src/Old src/Domain
+phpantom_lsp move --dry-run --format json src/Old src/Domain
+```
+
+`FROM` decides what is being moved, and `TO` is read the same way: a class
+moves to a full destination name, so `move 'App\Old\Widget' 'App\Domain'`
+renames the class to `Domain`, and moving it into `App\Domain` under its own
+name is written out as `'App\Domain\Widget'`.
+
+Path forms require a Composer PSR-4 mapping. A file identifies one class and a
+directory identifies its namespace prefix. The command refuses occupied class
+destinations and namespace merges with clashing class names before writing any
+files.
+
+A destination no PSR-4 mapping covers rewrites the declarations and their
+references, but no file can follow them, which leaves the autoloader unable to
+find what moved. That is reported as a warning on stderr and in the `warnings`
+array of the JSON output, so a script can catch it. A destination under a
+*different* mapping is an ordinary move: the files follow it to that mapping's
+directory.
+
+### Options
+
+| Flag                   | Description                                                        |
+| ---------------------- | ------------------------------------------------------------------ |
+| `FROM`                 | Source class, namespace, PHP file, or PSR-4 directory.             |
+| `TO`                   | Destination name or path, of the same kind as `FROM`.              |
+| `--dry-run`            | Validate and report the move without changing the project.         |
+| `--project-root <DIR>` | Project root directory. Defaults to the current working directory. |
+| `--format <FORMAT>`    | Output format: `table` (default) or `json`.                         |
+
+### Exit codes
+
+| Code | Meaning                                      |
+| ---- | -------------------------------------------- |
+| 0    | Move applied, or valid dry-run completed     |
+| 1    | Invalid input, conflict, or filesystem error |
 
 ---
 
@@ -104,8 +154,9 @@ That makes it useful in a few situations:
   reports what it finds. No baselines, no ignore files, no level to
   choose. The only configuration worth knowing about is
   `unresolved-member-access`: enable it in `.phpantom.toml` to also
-  flag member access on variables whose type could not be resolved
-  (off by default because it is noisy on untyped codebases).
+  flag member access on variables that are `mixed`, or whose type could
+  not be worked out (off by default because it is noisy on untyped
+  codebases).
 
 > [!NOTE]
 > There are still occasional false positives, though they are getting
@@ -118,6 +169,7 @@ That makes it useful in a few situations:
 phpantom_lsp analyze                             # scan entire project
 phpantom_lsp analyze src/                        # scan a subdirectory
 phpantom_lsp analyze src/Foo.php                 # scan a single file
+phpantom_lsp analyze app/ lib/Helper.php         # scan several paths at once
 phpantom_lsp analyze --severity warning          # errors and warnings only
 phpantom_lsp analyze --severity error            # errors only
 phpantom_lsp analyze --project-root /path/to/app # explicit project root
@@ -129,7 +181,7 @@ phpantom_lsp analyze --debug -vv                 # trace file-by-file progress
 
 | Flag                       | Description                                                      |
 | -------------------------- | ---------------------------------------------------------------- |
-| `[PATH]`                   | File or directory to analyze. Defaults to the entire project.    |
+| `[PATH]...`                | Files or directories to analyze. Repeatable; the results are the union of every path given. Defaults to the entire project. |
 | `--severity <LEVEL>`       | Minimum severity: `all` (default), `warning`, or `error`.        |
 | `--project-root <DIR>`     | Project root directory. Defaults to the current working directory.|
 | `--no-colour`              | Disable ANSI colour output.                                      |
@@ -143,7 +195,7 @@ phpantom_lsp analyze --debug -vv                 # trace file-by-file progress
 | ---- | ------------------------------ |
 | 0    | No diagnostics found            |
 | 1    | Diagnostics were found          |
-| 2    | `PATH` argument does not exist  |
+| 2    | A `PATH` argument does not exist |
 
 ### Example output
 
@@ -275,7 +327,15 @@ not overwrite).
 
 ```sh
 phpantom_lsp init
+phpantom_lsp init --global   # user-wide defaults, inherited by every project
 ```
+
+`--global` writes to the platform config directory
+(`~/.config/phpantom_lsp/.phpantom.toml` on Linux and macOS) instead, creating it
+if needed. Every project reads that file first and merges its own
+`.phpantom.toml` over it key by key, so put the settings you want
+everywhere in the global file and keep project configs to the
+differences.
 
 See the [Configuration Reference](configuration.md) for details on
 available settings.

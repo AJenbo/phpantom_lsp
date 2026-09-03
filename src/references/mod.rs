@@ -164,6 +164,15 @@ pub(super) fn normalize_fqn(fqn: &str) -> String {
     strip_fqn_prefix(fqn).to_string()
 }
 
+/// [`normalize_fqn`] plus ASCII case folding, for the sets that decide
+/// whether two spellings name the same class.  PHP resolves class names
+/// case-insensitively, so `App\WIDGET` and `App\Widget` have to compare
+/// equal; only use this for membership tests, never for a name that is
+/// shown to the user or written back into source.
+pub(super) fn fold_class_fqn(fqn: &str) -> String {
+    strip_fqn_prefix(fqn).to_ascii_lowercase()
+}
+
 pub(super) fn static_call_root(
     expr: &crate::type_engine::subject_expr::SubjectExpr,
 ) -> Option<(&str, &str)> {
@@ -209,13 +218,15 @@ pub(super) fn is_constructor_name(name: &str) -> bool {
 /// Check whether a resolved class name matches the target FQN.
 ///
 /// Two names match if their fully-qualified forms are equal, or if both
-/// are unqualified and their short names match.
+/// are unqualified and their short names match.  PHP resolves class names
+/// case-insensitively, so `WIDGET` and `Widget` are the same class and all
+/// the comparisons here fold case.
 pub(super) fn class_names_match(resolved: &str, target: &str, target_short: &str) -> bool {
-    if resolved == target {
+    if resolved.eq_ignore_ascii_case(target) {
         return true;
     }
     if !resolved.contains('\\') && !target.contains('\\') {
-        return resolved == target_short;
+        return resolved.eq_ignore_ascii_case(target_short);
     }
     // When the resolved name is unqualified but the target is
     // namespace-qualified, the resolved name might be a short-name
@@ -229,7 +240,7 @@ pub(super) fn class_names_match(resolved: &str, target: &str, target_short: &str
     // `Helper`, so matching by short name alone would produce false
     // positives.
     if !resolved.contains('\\') && target.contains('\\') {
-        return resolved == target_short;
+        return resolved.eq_ignore_ascii_case(target_short);
     }
     false
 }
@@ -237,14 +248,14 @@ pub(super) fn class_names_match(resolved: &str, target: &str, target_short: &str
 pub(super) fn class_candidate_keys(target: &str, target_short: &str) -> Vec<ReferenceIndexKey> {
     symbol_candidate_names(target, target_short)
         .into_iter()
-        .map(ReferenceIndexKey::Class)
+        .map(ReferenceIndexKey::class_owned)
         .collect()
 }
 
 pub(super) fn function_candidate_keys(target: &str, target_short: &str) -> Vec<ReferenceIndexKey> {
     symbol_candidate_names(target, target_short)
         .into_iter()
-        .map(ReferenceIndexKey::Function)
+        .map(ReferenceIndexKey::function_owned)
         .collect()
 }
 
@@ -303,11 +314,13 @@ pub(super) fn member_candidate_keys(
 pub(crate) fn collect_php_files_gitignore(
     root: &Path,
     vendor_dir_paths: &[PathBuf],
+    filters: &std::sync::Arc<crate::classmap_scanner::IndexFilters>,
 ) -> Vec<PathBuf> {
     use ignore::WalkBuilder;
 
     let mut result = Vec::new();
     let vendor_paths_owned: Vec<PathBuf> = vendor_dir_paths.to_vec();
+    let filter_excludes = std::sync::Arc::clone(filters);
 
     let walker = WalkBuilder::new(root)
         // Respect .gitignore, .git/info/exclude, global gitignore
@@ -320,21 +333,20 @@ pub(crate) fn collect_php_files_gitignore(
         .parents(true)
         // Also respect .ignore files (ripgrep convention)
         .ignore(true)
-        // Always skip vendor directories, even if not gitignored
+        // Always skip vendor directories (even if not gitignored) and
+        // `[indexing] exclude` matches
         .filter_entry(move |entry| {
-            if entry.file_type().is_some_and(|ft| ft.is_dir()) {
-                let path = entry.path();
-                if vendor_paths_owned.iter().any(|vp| vp == path) {
-                    return false;
-                }
+            let is_dir = entry.file_type().is_some_and(|ft| ft.is_dir());
+            if is_dir && vendor_paths_owned.iter().any(|vp| vp == entry.path()) {
+                return false;
             }
-            true
+            !filter_excludes.is_excluded_entry(entry.path(), is_dir)
         })
         .build();
 
     for entry in walker.flatten() {
         let path = entry.path();
-        if path.is_file() && path.extension().is_some_and(|ext| ext == "php") {
+        if path.is_file() && filters.is_php_file(path) {
             result.push(path.to_path_buf());
         }
     }

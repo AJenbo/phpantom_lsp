@@ -186,8 +186,10 @@ function probe(array $names, array $users): void {
 }
 
 /// `array_filter` with no callback keeps exactly the truthy members, so the
-/// element type drops `null`. With a callback the surviving members are
-/// whatever it approves of, which says nothing about their type.
+/// element type drops `null`. A callback the analysis cannot read leaves the
+/// element type alone, since anything it approves of could be in there.
+/// Either way the surviving entries keep their original keys, so a filtered
+/// `list` comes back renumbered as `array<int, T>`.
 #[test]
 fn array_filter_without_a_callback_drops_falsy_members() {
     let content = r#"<?php
@@ -208,9 +210,48 @@ function probe(array $maybe, array $users, array $plain, callable $cb): void {
         content,
         &[
             ("$kept", "array<string, string>"),
-            ("$present", "list<User>"),
+            ("$present", "array<int, User>"),
             ("$chosen", "array<string, string|null>"),
-            ("$unchanged", "list<string>"),
+            ("$unchanged", "array<int, string>"),
+        ],
+    );
+}
+
+/// `array_filter` keeps the key of every entry it keeps, so filtering a `list`
+/// leaves gaps in the numbering and the result is no longer a `list`. The
+/// renumbering functions around it are the ones that rebuild the promise, and
+/// a filter may drop every entry, so a `non-empty-` refinement goes too.
+#[test]
+fn array_filter_drops_the_list_promise_its_input_carried() {
+    let content = r#"<?php
+/**
+ * @param list<int> $values
+ * @param non-empty-list<int> $some
+ * @param non-empty-array<string, int> $rows
+ * @param array<string, int> $keyed
+ */
+function probe(array $values, array $some, array $rows, array $keyed, callable $cb): void {
+    $filtered = array_filter($values, $cb);
+    $truthy = array_filter($values);
+    $from_non_empty = array_filter($some, $cb);
+    $mapped = array_filter($rows, $cb);
+    $unchanged = array_filter($keyed, $cb);
+    $shape = array_filter([1, 2, 3], $cb);
+    $renumbered = array_values(array_filter($values, $cb));
+    $preserved = array_unique($values);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$filtered", "array<int, int>"),
+            ("$truthy", "array<int, int>"),
+            ("$from_non_empty", "array<int, int>"),
+            ("$mapped", "array<string, int>"),
+            ("$unchanged", "array<string, int>"),
+            ("$shape", "array<int, 1|2|3>"),
+            ("$renumbered", "list<int>"),
+            ("$preserved", "list<int>"),
         ],
     );
 }
@@ -338,6 +379,149 @@ function probe(array $data): void {
     );
 }
 
+/// In the two modes that hand the callback the value, what its body asserts
+/// about it describes the result's element type — the whole point of
+/// `array_filter($items, fn ($i) => $i !== null)`.
+#[test]
+fn array_filter_narrows_the_element_type_from_its_callback() {
+    let content = r#"<?php
+class User {}
+class Admin extends User {}
+/**
+ * @param array<string, string|null> $maybe
+ * @param list<User|Admin> $users
+ * @param array<int|string> $mixed
+ */
+function probe(array $maybe, array $users, array $mixed): void {
+    $present = array_filter($maybe, fn ($v) => $v !== null);
+    $guarded = array_filter($maybe, fn ($v) => !is_null($v));
+    $named = array_filter($mixed, 'is_int');
+    $closure = array_filter($mixed, function ($v) { return is_string($v); });
+    $instances = array_filter($users, fn ($v) => $v instanceof Admin);
+    $both = array_filter($maybe, fn ($v, $k) => $v !== null, ARRAY_FILTER_USE_BOTH);
+    $inline = array_values(array_filter($maybe, fn ($v) => $v !== null));
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$present", "array<string, string>"),
+            ("$guarded", "array<string, string>"),
+            ("$named", "array<int>"),
+            ("$closure", "array<string>"),
+            ("$instances", "array<int, Admin>"),
+            ("$both", "array<string, string>"),
+            ("$inline", "list<string>"),
+        ],
+    );
+}
+
+/// `get_class($v) !== Foo::class` is not `!($v instanceof Foo)`: it rules out
+/// exactly one class, so a subclass, whose `get_class()` names the subclass,
+/// passes the comparison and survives the filter.
+#[test]
+fn array_filter_keeps_subclasses_past_a_negated_exact_class_check() {
+    let content = r#"<?php
+class Animal {}
+class Dog extends Animal {}
+class Puppy extends Dog {}
+class Cat extends Animal {}
+/**
+ * @param list<Dog|Puppy|Cat> $pets
+ */
+function probe(array $pets): void {
+    $not_exactly_a_dog = array_filter($pets, fn ($v) => get_class($v) !== Dog::class);
+    $not_a_dog_at_all = array_filter($pets, fn ($v) => !($v instanceof Dog));
+    $exactly_a_dog = array_filter($pets, fn ($v) => get_class($v) === Dog::class);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$not_exactly_a_dog", "array<int, Puppy|Cat>"),
+            ("$not_a_dog_at_all", "array<int, Cat>"),
+            ("$exactly_a_dog", "array<int, Dog>"),
+        ],
+    );
+}
+
+/// An `instanceof` check on a union member that already names the checked
+/// class keeps that member as it was written, type arguments included — the
+/// member is the more specific of the two, so replacing it with the bare
+/// class would throw away what the chain after the filter needs.
+#[test]
+fn array_filter_keeps_the_type_arguments_of_a_narrowed_union_member() {
+    let content = r#"<?php
+class User {}
+/**
+ * @template T
+ */
+class Collection {
+    /** @return T */
+    public function first() {}
+}
+/**
+ * @param list<Collection<User>|string> $items
+ */
+function probe(array $items): void {
+    $collections = array_filter($items, fn ($v) => $v instanceof Collection);
+}
+"#;
+    assert_assigned_types(content, &[("$collections", "array<int, Collection<User>>")]);
+}
+
+/// Only the strict comparison proves a value is null. `!($v != null)` is the
+/// loose `$v == null` spelled backwards, and that also admits `''`, `0` and
+/// `[]`, so it narrows nothing.
+#[test]
+fn array_filter_does_not_read_a_negated_loose_null_check_as_a_strict_one() {
+    let content = r#"<?php
+/**
+ * @param list<string|null> $xs
+ */
+function probe(array $xs): void {
+    $loose = array_filter($xs, fn ($v) => !($v != null));
+    $strict = array_filter($xs, fn ($v) => !($v !== null));
+    $present = array_filter($xs, fn ($v) => !($v === null));
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$loose", "array<int, string|null>"),
+            ("$strict", "array<int, null>"),
+            ("$present", "array<int, string>"),
+        ],
+    );
+}
+
+/// A callback handed only the key says nothing about the values, and a
+/// callback that admits every value it could receive leaves the element type
+/// as it found it.
+#[test]
+fn array_filter_keeps_the_element_type_a_callback_says_nothing_about() {
+    let content = r#"<?php
+/**
+ * @param array<string, string|null> $maybe
+ */
+function probe(array $maybe, callable $cb): void {
+    $key_mode = array_filter($maybe, fn ($k) => is_string($k), ARRAY_FILTER_USE_KEY);
+    $opaque = array_filter($maybe, $cb);
+    $unrelated = array_filter($maybe, fn ($v) => strlen((string) $v) > 2);
+    $every = array_filter($maybe, fn ($v) => is_string($v) || is_null($v));
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$key_mode", "array<string, string|null>"),
+            ("$opaque", "array<string, string|null>"),
+            ("$unrelated", "array<string, string|null>"),
+            ("$every", "array<string, string|null>"),
+        ],
+    );
+}
+
 /// A callback that proves nothing about the key it is handed leaves the
 /// key type alone, and so does one whose key never reaches it.
 #[test]
@@ -369,8 +553,8 @@ function probe(array $data): void {
 /// `array<T>` and `T[]` name a value type and leave the key domain open, so
 /// the callback narrows every key PHP permits — the same result the spelled
 /// out `array<string|int, T>` gets. A `list<T>` does promise `int` keys, so
-/// a callback asking for string keys has nothing to keep and the declared
-/// type stands.
+/// a callback asking for string keys has nothing to keep and the element
+/// type stands, over the `array<int, T>` a filtered list always decays to.
 #[test]
 fn array_filter_narrows_the_open_key_domain_of_a_shorthand_array() {
     let content = r#"<?php
@@ -390,7 +574,7 @@ function probe(array $shorthand, array $slice, array $sequential): void {
         &[
             ("$from_shorthand", "array<string, string>"),
             ("$from_slice", "array<string, string>"),
-            ("$from_list", "list<string>"),
+            ("$from_list", "array<int, string>"),
         ],
     );
 }
@@ -489,8 +673,8 @@ function probe(string $contents, int $start): void {
         content,
         &[
             ("$offsets", "array<int, string>"),
-            ("$doubled", "array<int, string>"),
-            ("$counted", "array<int, string>"),
+            ("$doubled", "non-empty-array<int, string>"),
+            ("$counted", "non-empty-array<int, string>"),
         ],
     );
 }
@@ -517,7 +701,7 @@ function probe(array $counts, array $users): void {
         &[
             ("$total", "int"),
             ("$last", "User"),
-            ("$kept", "list<User>"),
+            ("$kept", "array<int, User>"),
         ],
     );
 }
@@ -608,6 +792,160 @@ function probe(array $rows, array $byName, array $lines): void {
             ("$keyed", "array<string, int>"),
             ("$sequential", "list<int>"),
             ("$zipped", "list<string>"),
+        ],
+    );
+}
+
+/// The type reported for the variable right after a `/*NAME*/` marker.
+fn type_at_marker(backend: &Backend, uri: &str, content: &str, marker: &str) -> String {
+    let needle = format!("/*{marker}*/$");
+    let (line, character) = content
+        .lines()
+        .enumerate()
+        .find_map(|(i, l)| {
+            l.find(&needle)
+                .map(|c| (i as u32, (c + needle.len()) as u32))
+        })
+        .unwrap_or_else(|| panic!("marker {marker} not found in the fixture"));
+    let hover = backend
+        .handle_hover(uri, content, Position { line, character })
+        .unwrap_or_else(|| panic!("no hover at marker {marker}"));
+    let HoverContents::Markup(markup) = &hover.contents else {
+        panic!("Expected MarkupContent");
+    };
+    markup
+        .value
+        .lines()
+        .find_map(|l| l.split_once(" = ").map(|(_, ty)| ty.trim().to_string()))
+        .unwrap_or_else(|| panic!("no type in hover at marker {marker}: {}", markup.value))
+}
+
+/// A callback parameter is bound from one element of the array it is handed,
+/// including when the argument is a union of array shapes: a `@template`
+/// that cannot read an element out of a container binds nothing rather than
+/// binding the container itself.
+#[test]
+fn a_callback_parameter_binds_an_element_of_a_shape_union() {
+    let content = r#"<?php
+class Lexer {
+    public function getLabel(int $token): string { return ''; }
+}
+class RichParser {
+    private const TOKEN_A = 3;
+    private const TOKEN_B = 2;
+    private Lexer $lexer;
+
+    /** @param array<string, Lexer> $opaque */
+    public function probe(bool $cond, array $opaque): void
+    {
+        $expected = $cond ? [self::TOKEN_A] : [self::TOKEN_A, self::TOKEN_B];
+        array_map(fn ($token) => $this->lexer->getLabel(/*TOKEN*/$token), $expected);
+        array_map(fn ($lexer) => /*OPAQUE*/$lexer, $opaque);
+    }
+}
+"#;
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///array_func_generics_shape_union.php";
+    backend.update_ast(uri, content);
+    // Both arms are literal, so the element type is the values themselves
+    // rather than the `int` they widen to.
+    assert_eq!(type_at_marker(&backend, uri, content, "TOKEN"), "3|2");
+    assert_eq!(type_at_marker(&backend, uri, content, "OPAQUE"), "Lexer");
+}
+
+/// `array_merge` concatenates its arguments rather than rearranging one of
+/// them, so every argument contributes to the element type. Reading only the
+/// first is what left the accumulator idiom (`$out = []; … $out =
+/// array_merge($out, $more);`) permanently typed as the empty array it
+/// started as, which cost every read off it — `$out[$i]->m()` included — its
+/// type.
+#[test]
+fn array_merge_unions_every_argument() {
+    let content = r#"<?php
+class User {}
+class Order {}
+/**
+ * @param list<User> $users
+ * @param list<Order> $orders
+ * @param array<string, User> $byName
+ */
+function probe(array $users, array $orders, array $byName): void {
+    $seeded = array_merge([], $users);
+    $both = array_merge($users, $orders);
+    $three = array_merge($users, $orders, $byName);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$seeded", "list<User>"),
+            ("$both", "list<User|Order>"),
+            ("$three", "array<int|string, User|Order>"),
+        ],
+    );
+}
+
+/// The keys follow PHP's own two rules: an integer key is renumbered as the
+/// entry is appended, a string key is carried over. So an all-integer merge
+/// is a `list`, an all-string one keeps its `string` keys, and a mix carries
+/// both.
+///
+/// An argument that names only its value type (`array<T>`, `T[]`) promises
+/// nothing about its keys, and the result says just as little.
+#[test]
+fn array_merge_keys_follow_php_renumbering() {
+    let content = r#"<?php
+class User {}
+class Order {}
+/**
+ * @param list<User> $users
+ * @param array<string, User> $byName
+ * @param array<string, Order> $ordersByName
+ * @param array<User> $loose
+ * @param User[] $shorthand
+ */
+function probe(array $users, array $byName, array $ordersByName, array $loose, array $shorthand): void {
+    $strings = array_merge($byName, $ordersByName);
+    $mixed = array_merge($users, $byName);
+    $open = array_merge($loose, $users);
+    $shorthandOpen = array_merge($shorthand, $byName);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$strings", "array<string, User|Order>"),
+            ("$mixed", "array<int|string, User>"),
+            ("$open", "array<User>"),
+            ("$shorthandOpen", "array<User>"),
+        ],
+    );
+}
+
+/// An argument the rule cannot read could contribute anything, so it declines
+/// and leaves the stub's bare `array` standing rather than claim a union that
+/// is missing a member. A bare `array` names no element type, and a spread
+/// holds the arrays to merge rather than one of them.
+#[test]
+fn array_merge_declines_on_arguments_it_cannot_read() {
+    let content = r#"<?php
+class User {}
+/**
+ * @param list<User> $users
+ * @param list<list<User>> $groups
+ */
+function probe(array $users, array $groups, array $bare): void {
+    $withBare = array_merge($users, $bare);
+    $spread = array_merge(...$groups);
+    $empty = array_merge([], []);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$withBare", "array"),
+            ("$spread", "array"),
+            ("$empty", "array"),
         ],
     );
 }

@@ -42,6 +42,20 @@ async fn rename(
     character: u32,
     new_name: &str,
 ) -> Option<WorkspaceEdit> {
+    rename_result(backend, uri, line, character, new_name)
+        .await
+        .expect("rename was refused")
+}
+
+/// Like [`rename`] but keeps the refusal, so a test can assert on the
+/// message the user is shown.
+async fn rename_result(
+    backend: &Backend,
+    uri: &Url,
+    line: u32,
+    character: u32,
+    new_name: &str,
+) -> std::result::Result<Option<WorkspaceEdit>, String> {
     let params = RenameParams {
         text_document_position: TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri: uri.clone() },
@@ -51,7 +65,10 @@ async fn rename(
         work_done_progress_params: WorkDoneProgressParams::default(),
     };
 
-    backend.rename(params).await.unwrap()
+    backend
+        .rename(params)
+        .await
+        .map_err(|e| e.message.to_string())
 }
 
 fn seed_macro_index(backend: &Backend, uri: &Url, text: &str) {
@@ -1713,6 +1730,99 @@ async fn rename_class_same_file_no_use_statement() {
     assert!(
         !has_standalone_old_name,
         "Old standalone name should not remain; got:\n{}",
+        result
+    );
+}
+
+#[tokio::test]
+async fn rename_class_rewrites_differently_cased_references() {
+    // PHP resolves class names case-insensitively, so `new WIDGET()` is a
+    // reference to `Widget` and has to be rewritten with the rest.
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Widget {}\n",
+        "$a = new WIDGET();\n",
+        "$b = new Widget();\n",
+        "$c = new widget();\n",
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    let edit = rename(&backend, &uri, 1, 7, "Gadget").await;
+    assert!(edit.is_some(), "Expected a workspace edit");
+
+    let file_edits = edits_for_uri(&edit.unwrap(), &uri);
+    let result = apply_edits(text, &file_edits);
+
+    assert_eq!(
+        result.matches("Gadget").count(),
+        4,
+        "Every spelling of Widget should become Gadget; got:\n{}",
+        result
+    );
+    assert!(
+        !result.to_ascii_lowercase().contains("widget"),
+        "No spelling of the old name should remain; got:\n{}",
+        result
+    );
+}
+
+#[tokio::test]
+async fn rename_from_a_differently_cased_reference_uses_the_declared_name() {
+    // A same-namespace reference resolves to an FQN spelled the way the
+    // *reference* writes it, so starting the rename from `WIDGET` yields
+    // `Acme\Parts\WIDGET`.  Everything downstream reads the old short name
+    // back out of that FQN, and the file rename compares it to the file
+    // stem, so the name has to be canonicalized to the declaration first.
+    let backend = Backend::new_test();
+    backend
+        .supports_file_rename
+        .store(true, std::sync::atomic::Ordering::Release);
+
+    let uri_decl = Url::parse("file:///src/Widget.php").unwrap();
+    let uri_usage = Url::parse("file:///src/Usage.php").unwrap();
+
+    let text_decl = concat!(
+        "<?php\n",
+        "namespace Acme\\Parts;\n",
+        "\n",
+        "class Widget {}\n",
+    );
+
+    let text_usage = concat!(
+        "<?php\n",
+        "namespace Acme\\Parts;\n",
+        "\n",
+        "class Usage {\n",
+        "    public function make(): void {\n",
+        "        $w = new WIDGET();\n",
+        "    }\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri_decl, text_decl).await;
+    open_file(&backend, &uri_usage, text_usage).await;
+
+    // Line 5, col 21 is inside `WIDGET`.
+    let edit = rename(&backend, &uri_usage, 5, 21, "Gadget").await;
+    assert!(
+        edit.is_some(),
+        "Expected a workspace edit from the mis-cased reference site"
+    );
+
+    let ws = edit.unwrap();
+
+    let rf = extract_rename_file(&ws)
+        .expect("the declaration file is named after the class, so it should be renamed with it");
+    assert_eq!(rf.old_uri.to_string(), "file:///src/Widget.php");
+    assert_eq!(rf.new_uri.to_string(), "file:///src/Gadget.php");
+
+    let result = apply_edits(text_usage, &doc_change_edits_for_uri(&ws, &uri_usage));
+    assert!(
+        result.contains("new Gadget()"),
+        "The mis-cased reference should be rewritten; got:\n{}",
         result
     );
 }
@@ -4133,6 +4243,309 @@ async fn rename_class_move_updates_cross_file_usage() {
 }
 
 #[tokio::test]
+async fn rename_class_move_adds_import_to_former_namespace_sibling() {
+    // A sibling in the same namespace reached the class without any
+    // `use` import.  Moving the class out of that namespace has to add
+    // the import, or the sibling stops compiling.
+    let backend = Backend::new_test();
+
+    let uri_decl = Url::parse("file:///src/BuilderHelper.php").unwrap();
+    let uri_usage = Url::parse("file:///src/Builder.php").unwrap();
+
+    let text_decl = concat!(
+        "<?php\n",
+        "namespace App\\Support;\n",
+        "\n",
+        "class BuilderHelper {}\n",
+    );
+
+    let text_usage = concat!(
+        "<?php\n",
+        "namespace App\\Support;\n",
+        "\n",
+        "class Builder {\n",
+        "    public function helper(): BuilderHelper {\n",
+        "        return new BuilderHelper();\n",
+        "    }\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri_decl, text_decl).await;
+    open_file(&backend, &uri_usage, text_usage).await;
+
+    let edit = rename(
+        &backend,
+        &uri_decl,
+        3,
+        6,
+        "App\\Support\\Helpers\\BuilderHelper",
+    )
+    .await;
+    let ws = edit.expect("Expected a workspace edit for the class move");
+
+    let usage_edits = edits_for_uri(&ws, &uri_usage);
+    let result_usage = apply_edits(text_usage, &usage_edits);
+    assert!(
+        result_usage.contains("use App\\Support\\Helpers\\BuilderHelper;"),
+        "The sibling should gain an import for the moved class; got:\n{}",
+        result_usage
+    );
+    assert!(
+        result_usage.contains("new BuilderHelper()"),
+        "The short-name references should stay as-is; got:\n{}",
+        result_usage
+    );
+}
+
+#[tokio::test]
+async fn rename_class_move_adds_import_when_short_name_also_changes() {
+    let backend = Backend::new_test();
+
+    let uri_decl = Url::parse("file:///src/BuilderHelper.php").unwrap();
+    let uri_usage = Url::parse("file:///src/Builder.php").unwrap();
+
+    let text_decl = concat!(
+        "<?php\n",
+        "namespace App\\Support;\n",
+        "\n",
+        "class BuilderHelper {}\n",
+    );
+
+    let text_usage = concat!(
+        "<?php\n",
+        "namespace App\\Support;\n",
+        "\n",
+        "class Builder {\n",
+        "    public function helper(): BuilderHelper {\n",
+        "        return new BuilderHelper();\n",
+        "    }\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri_decl, text_decl).await;
+    open_file(&backend, &uri_usage, text_usage).await;
+
+    let edit = rename(&backend, &uri_decl, 3, 6, "App\\Helpers\\BuildAssistant").await;
+    let ws = edit.expect("Expected a workspace edit for the class move");
+
+    let result_usage = apply_edits(text_usage, &edits_for_uri(&ws, &uri_usage));
+    assert!(
+        result_usage.contains("use App\\Helpers\\BuildAssistant;"),
+        "got:\n{}",
+        result_usage
+    );
+    assert!(
+        result_usage.contains("new BuildAssistant()")
+            && result_usage.contains("helper(): BuildAssistant"),
+        "got:\n{}",
+        result_usage
+    );
+    assert!(
+        !result_usage.contains("BuilderHelper"),
+        "No stale references should remain; got:\n{}",
+        result_usage
+    );
+}
+
+#[tokio::test]
+async fn rename_class_move_aliases_added_import_on_short_name_collision() {
+    // The sibling already imports an unrelated class under the short
+    // name the moved class needs, so the added import must be aliased
+    // and the references rewritten to that alias.
+    let backend = Backend::new_test();
+
+    let uri_decl = Url::parse("file:///src/Helper.php").unwrap();
+    let uri_other = Url::parse("file:///src/Other/Widget.php").unwrap();
+    let uri_usage = Url::parse("file:///src/Builder.php").unwrap();
+
+    let text_decl = concat!(
+        "<?php\n",
+        "namespace App\\Support;\n",
+        "\n",
+        "class Helper {}\n",
+    );
+    let text_other = concat!("<?php\n", "namespace Other;\n", "\n", "class Widget {}\n",);
+
+    let text_usage = concat!(
+        "<?php\n",
+        "namespace App\\Support;\n",
+        "\n",
+        "use Other\\Widget;\n",
+        "\n",
+        "class Builder {\n",
+        "    public function run(): Widget {\n",
+        "        new Helper();\n",
+        "        return new Widget();\n",
+        "    }\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri_decl, text_decl).await;
+    open_file(&backend, &uri_other, text_other).await;
+    open_file(&backend, &uri_usage, text_usage).await;
+
+    let edit = rename(&backend, &uri_decl, 3, 6, "App\\Helpers\\Widget").await;
+    let ws = edit.expect("Expected a workspace edit for the class move");
+
+    let result_usage = apply_edits(text_usage, &edits_for_uri(&ws, &uri_usage));
+    assert!(
+        result_usage.contains("use Other\\Widget;"),
+        "The unrelated import must survive; got:\n{}",
+        result_usage
+    );
+    assert!(
+        result_usage.contains("use App\\Helpers\\Widget as WidgetAlias;"),
+        "The moved class must be imported under an alias; got:\n{}",
+        result_usage
+    );
+    assert!(
+        result_usage.contains("new WidgetAlias()"),
+        "The moved class's references must use the alias; got:\n{}",
+        result_usage
+    );
+    assert!(
+        result_usage.contains("return new Widget();"),
+        "The unrelated class's references must be left alone; got:\n{}",
+        result_usage
+    );
+}
+
+#[tokio::test]
+async fn rename_class_move_skips_import_for_fqn_only_reference() {
+    // A file that only ever writes the FQN has that FQN rewritten, so
+    // there is nothing for an import to fix.
+    let backend = Backend::new_test();
+
+    let uri_decl = Url::parse("file:///src/BuilderHelper.php").unwrap();
+    let uri_usage = Url::parse("file:///src/Builder.php").unwrap();
+
+    let text_decl = concat!(
+        "<?php\n",
+        "namespace App\\Support;\n",
+        "\n",
+        "class BuilderHelper {}\n",
+    );
+
+    let text_usage = concat!(
+        "<?php\n",
+        "namespace App\\Support;\n",
+        "\n",
+        "class Builder {\n",
+        "    public function helper() {\n",
+        "        return new \\App\\Support\\BuilderHelper();\n",
+        "    }\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri_decl, text_decl).await;
+    open_file(&backend, &uri_usage, text_usage).await;
+
+    let edit = rename(
+        &backend,
+        &uri_decl,
+        3,
+        6,
+        "App\\Support\\Helpers\\BuilderHelper",
+    )
+    .await;
+    let ws = edit.expect("Expected a workspace edit for the class move");
+
+    let result_usage = apply_edits(text_usage, &edits_for_uri(&ws, &uri_usage));
+    assert!(
+        result_usage.contains("new \\App\\Support\\Helpers\\BuilderHelper()"),
+        "got:\n{}",
+        result_usage
+    );
+    assert!(
+        !result_usage.contains("use "),
+        "No import is needed for an FQN-only reference; got:\n{}",
+        result_usage
+    );
+}
+
+#[tokio::test]
+async fn rename_class_move_into_referencing_files_namespace_adds_no_import() {
+    // The class lands in the referencing file's own namespace, so the
+    // short-name reference keeps resolving without an import.
+    let backend = Backend::new_test();
+
+    let uri_decl = Url::parse("file:///src/Support/BuilderHelper.php").unwrap();
+    let uri_usage = Url::parse("file:///src/Builder.php").unwrap();
+
+    let text_decl = concat!(
+        "<?php\n",
+        "namespace App\\Support;\n",
+        "\n",
+        "class BuilderHelper {}\n",
+    );
+
+    let text_usage = concat!(
+        "<?php\n",
+        "namespace App\\Support;\n",
+        "\n",
+        "class Builder {\n",
+        "    public function helper(): BuilderHelper {\n",
+        "        return new BuilderHelper();\n",
+        "    }\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri_decl, text_decl).await;
+    open_file(&backend, &uri_usage, text_usage).await;
+
+    // Same namespace, different short name: no move out of the namespace.
+    let edit = rename(&backend, &uri_decl, 3, 6, "App\\Support\\BuildAssistant").await;
+    let ws = edit.expect("Expected a workspace edit for the class rename");
+
+    let result_usage = apply_edits(text_usage, &edits_for_uri(&ws, &uri_usage));
+    assert!(
+        !result_usage.contains("use "),
+        "A same-namespace rename needs no import; got:\n{}",
+        result_usage
+    );
+    assert!(
+        result_usage.contains("new BuildAssistant()"),
+        "got:\n{}",
+        result_usage
+    );
+}
+
+#[tokio::test]
+async fn rename_class_move_from_global_namespace_adds_import() {
+    let backend = Backend::new_test();
+
+    let uri_decl = Url::parse("file:///src/Legacy.php").unwrap();
+    let uri_usage = Url::parse("file:///src/Caller.php").unwrap();
+
+    let text_decl = concat!("<?php\n", "\n", "class Legacy {}\n");
+    let text_usage = concat!(
+        "<?php\n",
+        "\n",
+        "function callIt() {\n",
+        "    return new Legacy();\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri_decl, text_decl).await;
+    open_file(&backend, &uri_usage, text_usage).await;
+
+    let edit = rename(&backend, &uri_decl, 2, 6, "App\\Legacy").await;
+    let ws = edit.expect("Expected a workspace edit for the class move");
+
+    let result_usage = apply_edits(text_usage, &edits_for_uri(&ws, &uri_usage));
+    assert!(
+        result_usage.contains("use App\\Legacy;"),
+        "got:\n{}",
+        result_usage
+    );
+    assert!(
+        result_usage.contains("new Legacy()"),
+        "got:\n{}",
+        result_usage
+    );
+}
+
+#[tokio::test]
 async fn rename_macro_registration_string_updates_call_sites() {
     let backend = Backend::new_test();
     let class_uri = Url::parse("file:///Widget.php").unwrap();
@@ -4700,6 +5113,108 @@ echo Holder::BAR;
 }
 
 #[tokio::test]
+async fn rename_namespaced_constant_leaves_a_sibling_namespace_constant_alone() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test/const_namespace_collision.php").unwrap();
+    let text = "<?php
+namespace A;
+
+const VERSION = '1';
+
+echo VERSION;
+
+namespace B;
+
+const VERSION = '2';
+
+echo VERSION;
+";
+
+    open_file(&backend, &uri, text).await;
+
+    let (line, character) = line_char_of(text, "const VERSION = '1';");
+    let edit = rename(&backend, &uri, line, character + 6, "RELEASE")
+        .await
+        .expect("a namespaced constant declaration should rename");
+    let result = apply_edits(text, &edits_for_uri(&edit, &uri));
+
+    assert!(
+        result.contains("namespace A;\n\nconst RELEASE = '1';"),
+        "the declaration in A takes the new name, got: {result}"
+    );
+    assert!(
+        result.contains("namespace B;\n\nconst VERSION = '2';"),
+        "the unrelated declaration in B must not rename, got: {result}"
+    );
+    assert!(
+        result.contains("echo VERSION;\n"),
+        "B's own unqualified use of its own VERSION must not rename, got: {result}"
+    );
+}
+
+#[tokio::test]
+async fn rename_namespaced_function_leaves_a_sibling_namespace_function_alone() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test/function_namespace_collision.php").unwrap();
+    let text = "<?php
+namespace A;
+
+function version(): string { return '1'; }
+
+namespace B;
+
+function version(): string { return '2'; }
+";
+
+    open_file(&backend, &uri, text).await;
+
+    let (line, character) = line_char_of(text, "function version(): string { return '1'; }");
+    let edit = rename(&backend, &uri, line, character + 9, "release")
+        .await
+        .expect("a namespaced function declaration should rename");
+    let result = apply_edits(text, &edits_for_uri(&edit, &uri));
+
+    assert!(
+        result.contains("namespace A;\n\nfunction release(): string { return '1'; }"),
+        "the declaration in A takes the new name, got: {result}"
+    );
+    assert!(
+        result.contains("namespace B;\n\nfunction version(): string { return '2'; }"),
+        "the unrelated declaration in B must not rename, got: {result}"
+    );
+}
+
+#[tokio::test]
+async fn rename_global_constant_reaches_an_unqualified_use_inside_a_namespace() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test/const_global_fallback.php").unwrap();
+    let text = "<?php
+const VERSION = '1';
+
+namespace App;
+
+echo VERSION;
+";
+
+    open_file(&backend, &uri, text).await;
+
+    let (line, character) = line_char_of(text, "const VERSION = '1';");
+    let edit = rename(&backend, &uri, line, character + 6, "RELEASE")
+        .await
+        .expect("a global constant declaration should rename");
+    let result = apply_edits(text, &edits_for_uri(&edit, &uri));
+
+    assert!(
+        result.contains("const RELEASE = '1';"),
+        "the global declaration takes the new name, got: {result}"
+    );
+    assert!(
+        result.contains("echo RELEASE;"),
+        "the unqualified use inside App falls back to the global constant, got: {result}"
+    );
+}
+
+#[tokio::test]
 async fn rename_constant_leaves_an_explicit_alias_alone() {
     let backend = Backend::new_test();
     let uri = Url::parse("file:///test/const_alias.php").unwrap();
@@ -4771,5 +5286,555 @@ echo BAR;
     assert!(
         from_use.is_some_and(|r| r.contains("const QUX = 1;")),
         "either starting point must reach the declaration"
+    );
+}
+
+#[tokio::test]
+async fn rename_from_a_use_rewrites_the_define_that_declares_the_constant() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test/define_use.php").unwrap();
+    let text = "<?php
+define('FOO', 1);
+
+echo FOO;
+";
+
+    open_file(&backend, &uri, text).await;
+
+    let (line, character) = line_char_of(text, "echo FOO;");
+    let edit = rename(&backend, &uri, line, character + 5, "BAR")
+        .await
+        .expect("a use of a define()-declared constant should rename");
+    let result = apply_edits(text, &edits_for_uri(&edit, &uri));
+
+    assert!(
+        result.contains("define('BAR', 1);"),
+        "the define() call must take the new name or the constant is left undefined, got: {result}"
+    );
+    assert!(
+        result.contains("echo BAR;"),
+        "the use takes the new name, got: {result}"
+    );
+}
+
+#[tokio::test]
+async fn rename_from_a_define_call_rewrites_the_constants_uses() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test/define_decl.php").unwrap();
+    let text = "<?php
+define('FOO', 1);
+
+echo FOO;
+echo 'FOO';
+";
+
+    open_file(&backend, &uri, text).await;
+
+    let (line, character) = line_char_of(text, "define('FOO', 1);");
+    let edit = rename(&backend, &uri, line, character + 8, "BAR")
+        .await
+        .expect("the name in a define() call should rename");
+    let result = apply_edits(text, &edits_for_uri(&edit, &uri));
+
+    assert!(
+        result.contains("define('BAR', 1);"),
+        "the declaration takes the new name, got: {result}"
+    );
+    assert!(
+        result.contains("echo BAR;"),
+        "a use of the constant takes the new name, got: {result}"
+    );
+    assert!(
+        result.contains("echo 'FOO';"),
+        "an unrelated string of the same text must not rename, got: {result}"
+    );
+}
+
+#[tokio::test]
+async fn rename_of_a_define_leaves_a_same_named_class_constant_alone() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test/define_collision.php").unwrap();
+    let text = "<?php
+define('FOO', 1);
+
+class Holder
+{
+    public const FOO = 2;
+}
+
+echo FOO;
+echo Holder::FOO;
+";
+
+    open_file(&backend, &uri, text).await;
+
+    let (line, character) = line_char_of(text, "define('FOO', 1);");
+    let edit = rename(&backend, &uri, line, character + 8, "BAR")
+        .await
+        .expect("the name in a define() call should rename");
+    let result = apply_edits(text, &edits_for_uri(&edit, &uri));
+
+    assert!(
+        result.contains("define('BAR', 1);"),
+        "the declaration takes the new name, got: {result}"
+    );
+    assert!(
+        result.contains("echo BAR;"),
+        "the global constant's use takes the new name, got: {result}"
+    );
+    assert!(
+        result.contains("public const FOO = 2;"),
+        "an unrelated class constant of the same short name must not rename, got: {result}"
+    );
+}
+
+#[tokio::test]
+async fn rename_of_a_constant_rewrites_defined_and_constant_calls() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test/defined_constant_calls.php").unwrap();
+    let text = "<?php
+define('FOO', 1);
+
+if (defined('FOO')) {
+    echo constant('FOO');
+}
+";
+
+    open_file(&backend, &uri, text).await;
+
+    let (line, character) = line_char_of(text, "define('FOO', 1);");
+    let edit = rename(&backend, &uri, line, character + 8, "BAR")
+        .await
+        .expect("the name in a define() call should rename");
+    let result = apply_edits(text, &edits_for_uri(&edit, &uri));
+
+    assert!(
+        result.contains("define('BAR', 1);"),
+        "the declaration takes the new name, got: {result}"
+    );
+    assert!(
+        result.contains("defined('BAR')"),
+        "the defined() guard takes the new name, got: {result}"
+    );
+    assert!(
+        result.contains("constant('BAR')"),
+        "the constant() read takes the new name, got: {result}"
+    );
+}
+
+#[tokio::test]
+async fn rename_function_rewrites_a_call_spelled_in_another_case() {
+    let backend = Backend::new_test();
+    let uri_a = Url::parse("file:///helpers.php").unwrap();
+    let uri_b = Url::parse("file:///main.php").unwrap();
+    let text_a = concat!(
+        "<?php\n",                      // L0
+        "function helper(): void {}\n", // L1
+    );
+    let text_b = concat!(
+        "<?php\n",                   // L0
+        "namespace App;\n",          // L1
+        "function demo(): void {\n", // L2
+        "    HELPER();\n",           // L3
+        "    helper();\n",           // L4
+        "}\n",                       // L5
+    );
+
+    open_file(&backend, &uri_a, text_a).await;
+    open_file(&backend, &uri_b, text_b).await;
+
+    let edit = rename(&backend, &uri_a, 1, 10, "utility")
+        .await
+        .expect("expected a workspace edit for the function rename");
+
+    // Leaving HELPER() behind would leave the file calling a function
+    // that no longer exists.
+    let updated = apply_edits(text_b, &edits_for_uri(&edit, &uri_b));
+    assert!(
+        !updated.contains("HELPER()") && updated.matches("utility()").count() == 2,
+        "both spellings should be rewritten:\n{updated}"
+    );
+}
+
+#[tokio::test]
+async fn rename_function_can_start_from_a_fully_qualified_call() {
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                     // L0
+        "namespace Support;\n",        // L1
+        "function shout(): void {}\n", // L2
+        "namespace App;\n",            // L3
+        "function demo(): void {\n",   // L4
+        "    \\Support\\shout();\n",   // L5
+        "}\n",                         // L6
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    let prepared = prepare_rename(&backend, &uri, 5, 15).await;
+    assert!(
+        prepared.is_some(),
+        "prepare-rename should accept a fully-qualified call site"
+    );
+
+    let edit = rename(&backend, &uri, 5, 15, "yell")
+        .await
+        .expect("expected a workspace edit from the fully-qualified call site");
+    let updated = apply_edits(text, &edits_for_uri(&edit, &uri));
+    assert!(
+        updated.contains("function yell(): void {}") && updated.contains("\\Support\\yell();"),
+        "the declaration and the qualified call should both move:\n{updated}"
+    );
+}
+
+// ─── Moves onto an already-occupied target ──────────────────────────────────
+
+/// A backend over a real on-disk PSR-4 workspace (`App\` → `src/`), with
+/// every file indexed and client file-rename support enabled.  The
+/// PSR-4 file-move logic stats the filesystem, so these cases cannot be
+/// exercised against synthetic `file:///` URIs.
+async fn psr4_move_workspace(files: &[(&str, &str)]) -> (Backend, tempfile::TempDir) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let backend = Backend::new_test();
+    backend.supports_file_rename.store(true, Ordering::Release);
+    *backend.workspace_root().write() = Some(dir.path().to_path_buf());
+    *backend.psr4_mappings().write() = vec![crate::composer::Psr4Mapping {
+        prefix: "App\\".to_string(),
+        base_path: "src".to_string(),
+    }];
+
+    for (rel, content) in files {
+        let full = dir.path().join(rel);
+        std::fs::create_dir_all(full.parent().expect("parent")).expect("mkdir");
+        std::fs::write(&full, content).expect("write");
+        let uri = Url::from_file_path(&full).expect("uri");
+        open_file(&backend, &uri, content).await;
+    }
+
+    (backend, dir)
+}
+
+fn ws_uri(dir: &tempfile::TempDir, rel: &str) -> Url {
+    Url::from_file_path(dir.path().join(rel)).expect("uri")
+}
+
+/// Every `(old, new)` file operation a workspace edit carries.
+fn file_moves(edit: &WorkspaceEdit) -> Vec<(String, String)> {
+    let Some(DocumentChanges::Operations(ops)) = &edit.document_changes else {
+        return Vec::new();
+    };
+    ops.iter()
+        .filter_map(|op| match op {
+            DocumentChangeOperation::Op(ResourceOp::Rename(r)) => {
+                Some((r.old_uri.to_string(), r.new_uri.to_string()))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// Every URI a workspace edit targets with text edits.
+fn edited_uris(edit: &WorkspaceEdit) -> Vec<String> {
+    match &edit.document_changes {
+        Some(DocumentChanges::Operations(ops)) => ops
+            .iter()
+            .filter_map(|op| match op {
+                DocumentChangeOperation::Edit(e) => Some(e.text_document.uri.to_string()),
+                _ => None,
+            })
+            .collect(),
+        _ => edit
+            .changes
+            .iter()
+            .flat_map(|c| c.keys())
+            .map(|u| u.to_string())
+            .collect(),
+    }
+}
+
+#[tokio::test]
+async fn class_move_onto_an_existing_class_is_refused_with_no_edits() {
+    // The destination namespace already declares the name, so the move
+    // would leave two classes claiming it.  Nothing is emitted.
+    let (backend, dir) = psr4_move_workspace(&[
+        (
+            "src/Internal/Helper.php",
+            "<?php\nnamespace App\\Internal;\n\nclass Helper {}\n",
+        ),
+        (
+            "src/Support/Helper.php",
+            "<?php\nnamespace App\\Support;\n\nclass Helper {}\n",
+        ),
+    ])
+    .await;
+
+    let uri = ws_uri(&dir, "src/Internal/Helper.php");
+    let result = rename_result(&backend, &uri, 3, 8, "App\\Support\\Helper").await;
+
+    let message = result.expect_err("the move should be refused");
+    assert!(
+        message.contains("App\\Support\\Helper") && message.contains("already"),
+        "the refusal should name the class in the way: {message}"
+    );
+    assert!(
+        std::fs::read_to_string(dir.path().join("src/Support/Helper.php"))
+            .expect("the existing file should be untouched")
+            .contains("namespace App\\Support;")
+    );
+}
+
+#[tokio::test]
+async fn class_move_onto_an_existing_file_is_refused() {
+    // Nothing declares `App\Support\Helper`, but PSR-4 puts it in a file
+    // that is already there, so the move would clobber it.
+    let (backend, dir) = psr4_move_workspace(&[(
+        "src/Internal/Helper.php",
+        "<?php\nnamespace App\\Internal;\n\nclass Helper {}\n",
+    )])
+    .await;
+
+    std::fs::create_dir_all(dir.path().join("src/Support")).expect("mkdir");
+    std::fs::write(
+        dir.path().join("src/Support/Helper.php"),
+        "<?php\n// notes\n",
+    )
+    .expect("write");
+
+    let uri = ws_uri(&dir, "src/Internal/Helper.php");
+    let result = rename_result(&backend, &uri, 3, 8, "App\\Support\\Helper").await;
+
+    let message = result.expect_err("the move should be refused");
+    assert!(
+        message.contains("already exists"),
+        "the refusal should say the file is in the way: {message}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("src/Support/Helper.php")).expect("read"),
+        "<?php\n// notes\n",
+    );
+}
+
+#[tokio::test]
+async fn class_move_to_a_free_name_still_works() {
+    let (backend, dir) = psr4_move_workspace(&[
+        (
+            "src/Internal/Helper.php",
+            "<?php\nnamespace App\\Internal;\n\nclass Helper {}\n",
+        ),
+        (
+            "src/Support/Existing.php",
+            "<?php\nnamespace App\\Support;\n\nclass Existing {}\n",
+        ),
+    ])
+    .await;
+
+    let uri = ws_uri(&dir, "src/Internal/Helper.php");
+    let ws = rename(&backend, &uri, 3, 8, "App\\Support\\Helper")
+        .await
+        .expect("expected an edit");
+
+    let moves = file_moves(&ws);
+    assert_eq!(moves.len(), 1, "expected one file move, got {moves:?}");
+    assert!(
+        moves[0].1.ends_with("/src/Support/Helper.php"),
+        "got {moves:?}"
+    );
+}
+
+#[tokio::test]
+async fn namespace_rename_into_an_existing_namespace_merges_file_by_file() {
+    // `App\Internal` merges into an `App\Support` that already exists.
+    // A directory rename would clobber or fail, so each file moves on
+    // its own and the files already there are left alone.
+    let (backend, dir) = psr4_move_workspace(&[
+        (
+            "src/Internal/Helper.php",
+            "<?php\nnamespace App\\Internal;\n\nclass Helper {}\n",
+        ),
+        (
+            "src/Internal/Nested/Deep.php",
+            "<?php\nnamespace App\\Internal\\Nested;\n\nclass Deep {}\n",
+        ),
+        (
+            "src/Support/Existing.php",
+            "<?php\nnamespace App\\Support;\n\nclass Existing {}\n",
+        ),
+    ])
+    .await;
+
+    let uri = ws_uri(&dir, "src/Internal/Helper.php");
+    let ws = rename(&backend, &uri, 1, 12, "App\\Support")
+        .await
+        .expect("expected an edit");
+
+    let moves = file_moves(&ws);
+    assert!(
+        !moves
+            .iter()
+            .any(|(old, _)| old.ends_with("/src/Internal") || old.ends_with("/src/Support")),
+        "the directory itself must not be renamed onto an existing one: {moves:?}"
+    );
+
+    let destinations: Vec<&str> = moves.iter().map(|(_, new)| new.as_str()).collect();
+    assert!(
+        destinations
+            .iter()
+            .any(|d| d.ends_with("/src/Support/Helper.php")),
+        "got {destinations:?}"
+    );
+    assert!(
+        destinations
+            .iter()
+            .any(|d| d.ends_with("/src/Support/Nested/Deep.php")),
+        "a nested file keeps its relative path: {destinations:?}"
+    );
+    assert!(
+        !destinations
+            .iter()
+            .any(|d| d.ends_with("/src/Support/Existing.php")),
+        "the file already there is not touched: {destinations:?}"
+    );
+
+    // Every edited file is one the move actually produces.
+    for edited in edited_uris(&ws) {
+        assert!(
+            !edited.contains("/src/Internal/"),
+            "an edit still targets the old location: {edited}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn namespace_rename_onto_a_clashing_name_is_refused_with_no_edits() {
+    let (backend, dir) = psr4_move_workspace(&[
+        (
+            "src/Internal/Helper.php",
+            "<?php\nnamespace App\\Internal;\n\nclass Helper {}\n",
+        ),
+        (
+            "src/Internal/Parser.php",
+            "<?php\nnamespace App\\Internal;\n\nclass Parser {}\n",
+        ),
+        (
+            "src/Support/Helper.php",
+            "<?php\nnamespace App\\Support;\n\nclass Helper {}\n",
+        ),
+    ])
+    .await;
+
+    let uri = ws_uri(&dir, "src/Internal/Helper.php");
+    let result = rename_result(&backend, &uri, 1, 12, "App\\Support").await;
+
+    let message = result.expect_err("the merge should be refused");
+    assert!(
+        message.contains("App\\Support\\Helper"),
+        "the refusal should name the clash: {message}"
+    );
+    assert!(
+        message.contains("App\\Internal") && message.contains("App\\Support"),
+        "the refusal should name both namespaces: {message}"
+    );
+}
+
+#[tokio::test]
+async fn namespace_rename_to_a_fresh_namespace_still_moves_the_directory() {
+    // Nothing exists at the destination, so the whole directory moves in
+    // one operation, as it did before merging was possible.
+    let (backend, dir) = psr4_move_workspace(&[(
+        "src/Internal/Helper.php",
+        "<?php\nnamespace App\\Internal;\n\nclass Helper {}\n",
+    )])
+    .await;
+
+    let uri = ws_uri(&dir, "src/Internal/Helper.php");
+    let ws = rename(&backend, &uri, 1, 12, "App\\Core")
+        .await
+        .expect("expected an edit");
+
+    let moves = file_moves(&ws);
+    assert_eq!(moves.len(), 1, "expected one directory move: {moves:?}");
+    assert!(moves[0].0.ends_with("/src/Internal"), "got {moves:?}");
+    assert!(moves[0].1.ends_with("/src/Core"), "got {moves:?}");
+}
+
+#[tokio::test]
+async fn namespace_rename_does_not_capture_a_sibling_directory_with_the_same_prefix() {
+    // `src/Internal` must not claim the edits of `src/InternalTools`.
+    let (backend, dir) = psr4_move_workspace(&[
+        (
+            "src/Internal/Helper.php",
+            "<?php\nnamespace App\\Internal;\n\nclass Helper {}\n",
+        ),
+        (
+            "src/InternalTools/Runner.php",
+            concat!(
+                "<?php\n",
+                "namespace App\\InternalTools;\n",
+                "\n",
+                "use App\\Internal\\Helper;\n",
+                "\n",
+                "class Runner {\n",
+                "    public function h(): Helper {\n",
+                "        return new Helper();\n",
+                "    }\n",
+                "}\n",
+            ),
+        ),
+    ])
+    .await;
+
+    let uri = ws_uri(&dir, "src/Internal/Helper.php");
+    let ws = rename(&backend, &uri, 1, 12, "App\\Core")
+        .await
+        .expect("expected an edit");
+
+    assert!(
+        edited_uris(&ws)
+            .iter()
+            .any(|u| u.ends_with("/src/InternalTools/Runner.php")),
+        "the sibling's edits must stay at its own path: {:?}",
+        edited_uris(&ws)
+    );
+}
+
+#[tokio::test]
+async fn rename_class_updates_phpstan_type_and_import_type_tags() {
+    // A class named inside a `@phpstan-type` definition or after a
+    // `@phpstan-import-type`'s `from` is a real reference to it, so a
+    // rename has to carry both along or the alias silently goes stale.
+    let backend = Backend::new_test();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                       // 0
+        "namespace App;\n",                              // 1
+        "\n",                                            // 2
+        "class User {}\n",                               // 3
+        "\n",                                            // 4
+        "/**\n",                                         // 5
+        " * @phpstan-type UserRow array{owner: User}\n", // 6
+        " * @phpstan-import-type Row from User\n",       // 7
+        " */\n",                                         // 8
+        "class Repo {}\n",                               // 9
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    let edit = rename(&backend, &uri, 3, 6, "Account")
+        .await
+        .expect("expected a workspace edit");
+    let result = apply_edits(text, &edits_for_uri(&edit, &uri));
+
+    assert!(
+        result.contains("@phpstan-type UserRow array{owner: Account}"),
+        "the alias definition should follow the rename:\n{result}"
+    );
+    assert!(
+        result.contains("@phpstan-import-type Row from Account"),
+        "the imported-from class should follow the rename:\n{result}"
+    );
+    assert!(
+        result.contains("UserRow"),
+        "the alias name is not the class and must not be rewritten:\n{result}"
     );
 }

@@ -539,6 +539,69 @@ function test(): void {
     assert!(diags.is_empty(), "Got: {:?}", diags);
 }
 
+#[test]
+fn by_reference_use_capture_declares_a_variable_new_to_the_outer_scope() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function test(): int {
+    $counter = function () use (&$total): void {
+        $total++;
+    };
+    $counter();
+    return (int) $total;
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "PHP auto-vivifies a by-reference capture as null. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn flags_a_by_value_use_capture_of_a_variable_new_to_the_outer_scope() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function test(): void {
+    $fn = function () use ($total): void {
+        echo $total;
+    };
+    $fn();
+}
+"#,
+    );
+    assert_eq!(
+        diags.len(),
+        1,
+        "A by-value capture reads the outer variable. Got: {:?}",
+        diags,
+    );
+    assert!(diags[0].message.contains("$total"));
+}
+
+#[test]
+fn flags_a_read_before_a_by_reference_use_capture() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function test(): void {
+    echo $total;
+    $fn = function () use (&$total): void {
+        $total = 1;
+    };
+    $fn();
+}
+"#,
+    );
+    assert_eq!(
+        diags.len(),
+        1,
+        "The capture declares the variable at the `use` site, not before it. Got: {:?}",
+        diags,
+    );
+    assert!(diags[0].message.contains("$total"));
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Arrow functions
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1208,6 +1271,117 @@ function test(): void {
     assert!(diags[0].message.contains("$y"));
 }
 
+#[test]
+fn isset_guard_covers_the_branch_body_when_the_write_is_a_loop_back_edge() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+/** @param list<int> $tokens */
+function test(array $tokens): void {
+    foreach ($tokens as $token) {
+        if (isset($tokenType) && $tokenType !== 5) {
+            echo $tokenType;
+        }
+        $tokenType = $token;
+    }
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "isset() proves $tokenType exists for the whole branch. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn isset_guard_covers_an_elseif_branch_body() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+/** @param list<int> $tokens */
+function test(array $tokens): void {
+    foreach ($tokens as $token) {
+        if ($token === 0) {
+            echo "zero";
+        } elseif (isset($previous)) {
+            echo $previous;
+        }
+        $previous = $token;
+    }
+}
+"#,
+    );
+    assert!(diags.is_empty(), "Got: {:?}", diags);
+}
+
+#[test]
+fn isset_guard_does_not_cover_the_statements_after_the_branch() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+/** @param list<int> $tokens */
+function test(array $tokens): void {
+    foreach ($tokens as $token) {
+        if (isset($tokenType)) {
+            echo $tokenType;
+        }
+        echo $tokenType;
+        $tokenType = $token;
+    }
+}
+"#,
+    );
+    assert_eq!(
+        diags.len(),
+        1,
+        "The read outside the guarded branch is still unproven. Got: {:?}",
+        diags,
+    );
+    assert!(diags[0].message.contains("$tokenType"));
+}
+
+#[test]
+fn isset_guard_does_not_cover_a_variable_never_written_in_the_scope() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+function test(): void {
+    if (isset($tpyo)) {
+        echo $tpyo;
+    }
+}
+"#,
+    );
+    assert_eq!(
+        diags.len(),
+        1,
+        "With no write anywhere the isset() can never hold. Got: {:?}",
+        diags,
+    );
+    assert!(diags[0].message.contains("$tpyo"));
+}
+
+#[test]
+fn isset_guard_in_an_or_chain_does_not_cover_the_branch_body() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+/** @param list<int> $tokens */
+function test(array $tokens): void {
+    foreach ($tokens as $token) {
+        if (isset($tokenType) || $token === 0) {
+            echo $tokenType;
+        }
+        $tokenType = $token;
+    }
+}
+"#,
+    );
+    assert_eq!(
+        diags.len(),
+        1,
+        "An `||` branch can be entered without the isset() holding. Got: {:?}",
+        diags,
+    );
+    assert!(diags[0].message.contains("$tokenType"));
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Nested closures and arrow functions
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1770,6 +1944,98 @@ function test(string $data): void {
 }
 
 #[test]
+fn no_diagnostic_for_self_static_method_byref_param() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+class Ops {
+    public static function fill(?string &$key): void {
+        $key = 'k';
+    }
+
+    public static function use(): string {
+        self::fill($key);
+        return $key;
+    }
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "self::method() with by-ref param should not flag $key. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn no_diagnostic_for_static_static_method_byref_param() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+class Ops {
+    public static function fill(?string &$key): void {
+        $key = 'k';
+    }
+
+    public static function use(): string {
+        static::fill($key);
+        return $key;
+    }
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "static::method() with by-ref param should not flag $key. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn no_diagnostic_for_parent_static_method_byref_param() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+class Base {
+    public static function fill(?string &$key): void {
+        $key = 'k';
+    }
+}
+class Ops extends Base {
+    public static function use(): string {
+        parent::fill($key);
+        return $key;
+    }
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "parent::method() with by-ref param should not flag $key. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn no_diagnostic_for_self_constructor_byref_param() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+class Parser {
+    public function __construct(string $input, array &$warnings) {
+        $warnings = [];
+    }
+
+    public static function make(string $src): self {
+        return new self($src, $warnings);
+    }
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "new self() with by-ref param should not flag $warnings. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
 fn no_diagnostic_for_constructor_byref_param() {
     let diags = undefined_var_diagnostics(
         r#"<?php
@@ -1960,4 +2226,166 @@ function test(): void {
         diags[0].message.contains("$undefined"),
         "Diagnostic should be for $undefined",
     );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Property hooks
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn flags_undefined_variable_in_block_property_hook() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+class Person {
+    private string $first = '';
+    public string $name {
+        get {
+            return $frist;
+        }
+    }
+}
+"#,
+    );
+    assert_eq!(
+        diags.len(),
+        1,
+        "A typo inside a block-bodied hook should be flagged. Got: {:?}",
+        diags,
+    );
+    assert!(diags[0].message.contains("$frist"));
+}
+
+#[test]
+fn flags_undefined_variable_in_arrow_property_hook() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+class Person {
+    private string $first = '';
+    public string $name {
+        get => $frist;
+    }
+}
+"#,
+    );
+    assert_eq!(
+        diags.len(),
+        1,
+        "A typo inside an arrow-bodied hook should be flagged. Got: {:?}",
+        diags,
+    );
+    assert!(diags[0].message.contains("$frist"));
+}
+
+#[test]
+fn flags_undefined_variable_in_promoted_property_hook() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+class Person {
+    public function __construct(
+        public string $name {
+            get => $frist;
+        },
+    ) {}
+}
+"#,
+    );
+    assert_eq!(
+        diags.len(),
+        1,
+        "A typo inside a promoted property's hook should be flagged. Got: {:?}",
+        diags,
+    );
+    assert!(diags[0].message.contains("$frist"));
+}
+
+#[test]
+fn no_diagnostic_for_implicit_set_hook_value() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+class Person {
+    private string $stored = '';
+    public string $name {
+        get => $this->stored;
+        set {
+            $this->stored = trim($value);
+        }
+    }
+    public string $nick {
+        set => $this->stored = strtolower($value);
+    }
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "A set hook's implicit $value is always defined. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn no_diagnostic_for_declared_set_hook_parameter() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+class Person {
+    private string $stored = '';
+    public string $name {
+        set (string $incoming) {
+            $this->stored = $incoming;
+        }
+    }
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "A set hook's declared parameter is defined. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn no_diagnostic_for_isset_guarded_read_in_arrow_hook() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+class Person {
+    public bool $known {
+        get => isset($maybe) && $maybe !== '';
+    }
+}
+"#,
+    );
+    assert!(
+        diags.is_empty(),
+        "An isset() guard inside an arrow-bodied hook suppresses the read. Got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn hook_body_does_not_leak_variables_into_a_sibling_hook() {
+    let diags = undefined_var_diagnostics(
+        r#"<?php
+class Person {
+    public string $name {
+        get {
+            $local = 'x';
+            return $local;
+        }
+    }
+    public string $other {
+        get {
+            return $local;
+        }
+    }
+}
+"#,
+    );
+    assert_eq!(
+        diags.len(),
+        1,
+        "Each hook is its own scope. Got: {:?}",
+        diags,
+    );
+    assert!(diags[0].message.contains("$local"));
 }

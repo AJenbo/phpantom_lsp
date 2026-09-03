@@ -75,12 +75,7 @@ impl Backend {
 
         // Path helpers: `base_path('routes/web.php')` and friends name a file
         // under a conventional directory of the project root.
-        if let Some(loc) = laravel::resolve_path_helper_definition(self, content, position) {
-            return vec![loc];
-        }
-
-        // env() fallback: not yet indexed in the symbol map.
-        laravel::resolve_env_definition(self, content, position)
+        laravel::resolve_path_helper_definition(self, content, position)
             .into_iter()
             .collect()
     }
@@ -354,24 +349,13 @@ impl Backend {
             }
 
             SymbolKind::ClassDeclaration { name } => {
-                // If this class extends a parent, jump to the parent
-                // class declaration.
-                let ctx = self.file_context(uri);
-                let current_class =
-                    crate::class_lookup::find_class_at_offset(&ctx.classes, cursor_offset);
-                if let Some(cls) = current_class
-                    && let Some(ref parent_name) = cls.parent_class
-                    && let Some(loc) = self.resolve_class_reference(
-                        uri,
-                        content,
-                        parent_name,
-                        parent_name.contains('\\'),
-                        cursor_offset,
-                    )
-                {
-                    return Some(vec![loc]);
-                }
-
+                // Answer with the declaration's own location even when the
+                // class extends a parent: editors read "definition == cursor
+                // position" as the cue to show usages instead (PHPStorm's
+                // CMD+B, VS Code's alternative-definition command).  Jumping
+                // to the parent here would make usages unreachable for any
+                // class with an `extends` clause; the `extends` clause itself
+                // is the place that navigates to the parent.
                 self.declaration_or_usages(uri, content, cursor_offset, name)
             }
 
@@ -931,7 +915,7 @@ impl Backend {
     /// declaration line.  Stub functions (with `phpantom-stub-fn://` URIs)
     /// are not navigable so they are skipped for go-to-definition but
     /// still loaded into the cache for return-type resolution.
-    fn resolve_function_definition(&self, candidates: &[String]) -> Option<Location> {
+    pub(crate) fn resolve_function_definition(&self, candidates: &[String]) -> Option<Location> {
         // ── Step 1: Check global_functions (user code + cached stubs) ──
         let found = {
             let fmap = self.symbols.global_functions.read();

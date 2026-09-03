@@ -191,6 +191,38 @@ pub(crate) fn resolve_php_type_names(
     ty.resolve_names(&|name| resolve_name_via_loader(name, class_loader))
 }
 
+/// [`resolve_php_type_names`] for a type written as source the reader
+/// resolves relative to where it stands: a docblock annotation inside a
+/// namespace.
+///
+/// The difference is which class an unqualified name lands on. PHP looks in
+/// the current namespace before the global one, so `@var list<Error>` inside
+/// `namespace App` means `App\Error` whenever that class exists, and only
+/// falls back to `\Error`. The loader-only [`resolve_php_type_names`] is
+/// global-first and would pick the stub, leaving the annotation naming a
+/// different class than the same spelling in a `@param` tag (which the parser
+/// resolves through the file's use-map and namespace).
+///
+/// A name that resolves to the class it already spells keeps the spelling it
+/// was written with, leading `\` included. That backslash is the only mark
+/// distinguishing an explicit global reference from a relative one, and a
+/// global class's FQN carries no namespace to encode it in, so dropping it
+/// would let a later lookup of the bare name land on a same-named class in
+/// another namespace of the file.
+pub(crate) fn resolve_source_php_type_names(
+    ty: &crate::php_type::PhpType,
+    namespace: Option<&str>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
+) -> crate::php_type::PhpType {
+    ty.resolve_names(&|name| {
+        let resolved = resolve_source_class_name(name, namespace, class_loader);
+        if resolved == name.trim_start_matches('\\') {
+            return name.to_string();
+        }
+        resolved
+    })
+}
+
 /// Run `f` inside [`panic::catch_unwind`], logging and swallowing any
 /// panic.
 ///
@@ -298,11 +330,16 @@ pub(crate) fn path_to_uri(path: &Path) -> String {
 ///
 /// Silently skips directories and files that cannot be read (e.g.
 /// permission errors, broken symlinks).
-pub(crate) fn collect_php_files(dir: &Path, vendor_dir_paths: &[PathBuf]) -> Vec<PathBuf> {
+pub(crate) fn collect_php_files(
+    dir: &Path,
+    vendor_dir_paths: &[PathBuf],
+    filters: &std::sync::Arc<crate::classmap_scanner::IndexFilters>,
+) -> Vec<PathBuf> {
     use ignore::WalkBuilder;
 
     let mut result = Vec::new();
     let vendor_paths: Vec<PathBuf> = vendor_dir_paths.to_vec();
+    let filter_excludes = std::sync::Arc::clone(filters);
 
     let walker = WalkBuilder::new(dir)
         .git_ignore(true)
@@ -312,19 +349,17 @@ pub(crate) fn collect_php_files(dir: &Path, vendor_dir_paths: &[PathBuf]) -> Vec
         .parents(true)
         .ignore(true)
         .filter_entry(move |entry| {
-            if entry.file_type().is_some_and(|ft| ft.is_dir()) {
-                let path = entry.path();
-                if vendor_paths.iter().any(|vp| vp == path) {
-                    return false;
-                }
+            let is_dir = entry.file_type().is_some_and(|ft| ft.is_dir());
+            if is_dir && vendor_paths.iter().any(|vp| vp == entry.path()) {
+                return false;
             }
-            true
+            !filter_excludes.is_excluded_entry(entry.path(), is_dir)
         })
         .build();
 
     for entry in walker.flatten() {
         let path = entry.path();
-        if path.is_file() && path.extension().is_some_and(|ext| ext == "php") {
+        if path.is_file() && filters.is_php_file(path) {
             result.push(path.to_path_buf());
         }
     }

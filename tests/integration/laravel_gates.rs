@@ -1166,13 +1166,15 @@ class Gate {
 
     phpantom_lsp::analyse::run(phpantom_lsp::analyse::AnalyseOptions {
         workspace_root: dir.path().to_path_buf(),
-        path_filter: Some(dir.path().join("src/Consumer.php")),
+        path_filters: vec![dir.path().join("src/Consumer.php")],
         severity_filter: phpantom_lsp::analyse::SeverityFilter::All,
         use_colour: false,
         output_format: phpantom_lsp::analyse::OutputFormat::Json,
         // Suppresses the progress bar, which has no terminal to draw on here.
         debug: true,
         verbosity: 0,
+        // Never the machine's own; the test asserts on the project alone.
+        global_config: None,
     })
     .await
 }

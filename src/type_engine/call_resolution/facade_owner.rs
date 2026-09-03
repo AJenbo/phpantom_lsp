@@ -36,7 +36,7 @@ pub(crate) fn facade_concrete_owner(
     // all, before paying for the resolution inside
     // `facade_accessor_concrete_owner` below.
     if owner.get_method_ci("getFacadeAccessor").is_none()
-        || method_has_conditional_return(owner, method_name, class_loader, cache)
+        || method_return_is_call_dependent(owner, method_name, class_loader, cache)
     {
         return None;
     }
@@ -44,11 +44,12 @@ pub(crate) fn facade_concrete_owner(
     // A facade's own method may come from an `@method` docblock tag that
     // flattens the concrete class's argument-dependent return (e.g.
     // `Container::make()`'s `class-string<T>`-aware conditional return
-    // becomes a bare `object|mixed` on the `App` facade's tag). Fall
-    // through to the concrete accessor only when it actually supplies a
-    // conditional return the facade's own tag does not.
+    // becomes a bare `object|mixed` on the `App` facade's tag, and
+    // `PendingRequest::async()`'s `self<T>` becomes a bare class name on
+    // `Http`'s). Fall through to the concrete accessor only when it
+    // actually supplies a return the facade's own tag could not express.
     facade_accessor_concrete_owner(owner, method_name, class_loader, cache, backend).filter(
-        |concrete| method_has_conditional_return(concrete, method_name, class_loader, cache),
+        |concrete| method_return_is_call_dependent(concrete, method_name, class_loader, cache),
     )
 }
 
@@ -66,7 +67,14 @@ fn class_has_method(
     merged.get_method_ci(method_name).is_some()
 }
 
-fn method_has_conditional_return(
+/// Whether a method's return type depends on the call rather than being
+/// fixed by the signature: a PHPStan conditional return, or a return that
+/// names one of the method's own `@template` parameters.
+///
+/// A facade's generated `@method` tag can express neither, so this is what
+/// distinguishes a tag that merely restates the concrete method from one
+/// that flattened it.
+fn method_return_is_call_dependent(
     class_info: &ClassInfo,
     method_name: &str,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
@@ -74,15 +82,52 @@ fn method_has_conditional_return(
 ) -> bool {
     if class_info
         .get_method_ci(method_name)
-        .is_some_and(|m| m.conditional_return.is_some())
+        .is_some_and(call_dependent_return)
     {
         return true;
     }
     let merged =
         crate::virtual_members::resolve_class_fully_maybe_cached(class_info, class_loader, cache);
-    merged
+    if merged
         .get_method_ci(method_name)
-        .is_some_and(|m| m.conditional_return.is_some())
+        .is_some_and(call_dependent_return)
+    {
+        return true;
+    }
+
+    // A generic mixin's conditional may already have been collapsed from
+    // its declared template default while being merged. Inspect the source
+    // mixin as well so a facade's generated broad `@method` union does not
+    // hide that more precise concrete-owner return type.
+    class_info
+        .mixins
+        .iter()
+        .chain(merged.mixins.iter())
+        .any(|mixin| {
+            class_loader(mixin.as_str()).is_some_and(|mixin_class| {
+                mixin_class
+                    .get_method_ci(method_name)
+                    .is_some_and(call_dependent_return)
+            })
+        })
+}
+
+fn call_dependent_return(method: &crate::types::MethodInfo) -> bool {
+    if method.conditional_return.is_some() {
+        return true;
+    }
+    if method.template_params.is_empty() {
+        return false;
+    }
+    let params: Vec<String> = method
+        .template_params
+        .iter()
+        .map(|p| p.to_string())
+        .collect();
+    method
+        .return_type
+        .as_ref()
+        .is_some_and(|ret| ret.references_any_template_param(&params))
 }
 
 fn facade_accessor_concrete_owner(
@@ -116,6 +161,9 @@ fn facade_accessor_concrete_owner(
             backend,
             &facade.fqn(),
             accessor,
+            // A facade accessor takes no arguments, so there is nothing
+            // a call site could decide about it.
+            &[],
         )
         && let Some(concrete_name) = facade_accessor_class_name(&inferred, Some(backend))
         && let Some(concrete) = class_loader(&concrete_name)

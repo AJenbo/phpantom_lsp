@@ -3145,6 +3145,86 @@ class Dto {
     );
 }
 
+// ─── Per-scope subject typing ───────────────────────────────────────────────
+
+#[test]
+fn same_named_parameter_in_two_methods_types_per_method() {
+    let backend = create_test_backend();
+    let uri = "file:///test_deprecated_same_param_name.php";
+    let text = r#"<?php
+class HttpRequest {
+    /** @deprecated Use input() instead */
+    public function get(string $key): mixed { return null; }
+    public function input(string $key): mixed { return null; }
+}
+
+class PendingRequest {
+    public function get(string $url): string { return ''; }
+}
+
+class Probe {
+    public function fromHttpRequest(HttpRequest $request): void {
+        $request->input('name');
+    }
+
+    public function fromHttpClient(PendingRequest $request): void {
+        $request->get('https://example.com');
+    }
+}
+"#;
+
+    let diags = deprecated_diagnostics(&backend, uri, text);
+    let deprecated: Vec<_> = diags.iter().filter(|d| has_deprecated_tag(d)).collect();
+
+    assert!(
+        deprecated.is_empty(),
+        "PendingRequest::get() is not deprecated; the HttpRequest-typed $request \
+         from the earlier method must not leak into fromHttpClient(), got: {:?}",
+        deprecated
+    );
+}
+
+#[test]
+fn same_named_parameter_still_flags_the_deprecated_one() {
+    let backend = create_test_backend();
+    let uri = "file:///test_deprecated_same_param_name_hit.php";
+    let text = r#"<?php
+class PendingRequest {
+    public function get(string $url): string { return ''; }
+}
+
+class HttpRequest {
+    /** @deprecated Use input() instead */
+    public function get(string $key): mixed { return null; }
+}
+
+class Probe {
+    public function fromHttpClient(PendingRequest $request): void {
+        $request->get('https://example.com');
+    }
+
+    public function fromHttpRequest(HttpRequest $request): void {
+        $request->get('name');
+    }
+}
+"#;
+
+    let diags = deprecated_diagnostics(&backend, uri, text);
+    let deprecated: Vec<_> = diags.iter().filter(|d| has_deprecated_tag(d)).collect();
+
+    assert_eq!(
+        deprecated.len(),
+        1,
+        "Only HttpRequest::get() is deprecated, got: {:?}",
+        deprecated
+    );
+    assert!(
+        deprecated[0].message.contains("HttpRequest::get"),
+        "Expected the diagnostic to name HttpRequest::get, got: {:?}",
+        deprecated[0]
+    );
+}
+
 // ─── Deprecated member reached through a chain subject ──────────────────────
 
 #[test]
@@ -3236,6 +3316,383 @@ makeHelper()->deprecatedMethod();
             .iter()
             .any(|d| d.message.contains("deprecatedMethod")),
         "Expected a deprecated diagnostic for deprecatedMethod() reached through makeHelper(), got: {:?}",
+        deprecated
+    );
+}
+
+#[test]
+fn nullsafe_chain_does_not_share_a_cache_entry_across_a_reassignment() {
+    let backend = create_test_backend();
+    let uri = "file:///nullsafe_reassign.php";
+    let diags = deprecated_diagnostics(
+        &backend,
+        uri,
+        r#"<?php
+class Fresh {
+    public function run(): void {}
+}
+
+class Legacy {
+    /** @deprecated Use Fresh::run() instead */
+    public function run(): void {}
+}
+
+function demo(): void {
+    $svc = new Fresh();
+    $svc?->run();
+    $svc = new Legacy();
+    $svc?->run();
+}
+"#,
+    );
+
+    assert_eq!(
+        diags.len(),
+        1,
+        "The call after the reassignment should be flagged. Got: {:?}",
+        diags,
+    );
+    assert_eq!(
+        diags[0].range.start.line, 14,
+        "The deprecation should land on the second call. Got: {:?}",
+        diags,
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Deprecated-scope exemption (mirrors PHPStan's DefaultDeprecatedScopeResolver)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ─── Interface delegation: overriding method inherits the deprecation ──────
+
+#[test]
+fn delegating_to_same_deprecated_interface_method_is_not_flagged() {
+    // Matches phpstan-src's `UnionType::hasProperty()`, which implements a
+    // deprecated interface method by delegating to the same deprecated
+    // method on other instances. PHPStan's own deprecation rule doesn't
+    // flag this because `Delegator::hasProperty()` has no docblock of its
+    // own and inherits the interface's `@deprecated` tag, which puts the
+    // call inside a deprecated scope.
+    let backend = create_test_backend();
+    let uri = "file:///test_delegate_interface.php";
+    let text = r#"<?php
+interface Shape {
+    /** @deprecated Use hasArea() instead */
+    public function hasProperty(string $name): bool;
+}
+
+class Delegator implements Shape {
+    /** @var Shape[] */
+    private array $shapes;
+
+    public function hasProperty(string $name): bool
+    {
+        foreach ($this->shapes as $shape) {
+            if ($shape->hasProperty($name)) {
+                return true;
+            }
+        }
+        return false;
+    }
+}
+"#;
+
+    let diags = deprecated_diagnostics(&backend, uri, text);
+    let deprecated: Vec<_> = diags.iter().filter(|d| has_deprecated_tag(d)).collect();
+
+    assert!(
+        deprecated.is_empty(),
+        "Delegating to the same deprecated interface method from inside the \
+         overriding method should not be flagged, got: {:?}",
+        deprecated
+    );
+}
+
+#[test]
+fn calling_deprecated_interface_method_outside_the_override_is_flagged() {
+    // The exemption is scoped to the method that itself implements the
+    // deprecated contract — a caller elsewhere still gets the diagnostic.
+    let backend = create_test_backend();
+    let uri = "file:///test_delegate_interface_external.php";
+    let text = r#"<?php
+interface Shape {
+    /** @deprecated Use hasArea() instead */
+    public function hasProperty(string $name): bool;
+}
+
+class Delegator implements Shape {
+    public function hasProperty(string $name): bool
+    {
+        return true;
+    }
+}
+
+function callDirectly(Shape $shape): bool
+{
+    return $shape->hasProperty('x');
+}
+"#;
+
+    let diags = deprecated_diagnostics(&backend, uri, text);
+    let deprecated: Vec<_> = diags.iter().filter(|d| has_deprecated_tag(d)).collect();
+
+    assert!(
+        deprecated.iter().any(|d| d.message.contains("hasProperty")),
+        "A call to the deprecated interface method from outside the \
+         overriding method should still be flagged, got: {:?}",
+        deprecated
+    );
+}
+
+// ─── Parent-class delegation ────────────────────────────────────────────────
+
+#[test]
+fn delegating_to_same_deprecated_parent_method_is_not_flagged() {
+    let backend = create_test_backend();
+    let uri = "file:///test_delegate_parent.php";
+    let text = r#"<?php
+class Base {
+    /** @deprecated Use newMethod() instead */
+    public function oldMethod(): bool
+    {
+        return true;
+    }
+}
+
+class Child extends Base {
+    public function oldMethod(): bool
+    {
+        $other = new Base();
+        return $other->oldMethod();
+    }
+}
+"#;
+
+    let diags = deprecated_diagnostics(&backend, uri, text);
+    let deprecated: Vec<_> = diags.iter().filter(|d| has_deprecated_tag(d)).collect();
+
+    assert!(
+        deprecated.is_empty(),
+        "Delegating to the same deprecated parent method from inside the \
+         overriding method should not be flagged, got: {:?}",
+        deprecated
+    );
+}
+
+// ─── Name coincidence alone does not exempt ─────────────────────────────────
+
+#[test]
+fn unrelated_method_with_same_name_is_not_exempted() {
+    // `Bar::oldMethod()` is unrelated to `Foo` (no extends/implements), so
+    // merely sharing a name with the deprecated method it calls must not
+    // exempt the call.
+    let backend = create_test_backend();
+    let uri = "file:///test_unrelated_same_name.php";
+    let text = r#"<?php
+class Foo {
+    /** @deprecated Use newMethod() instead */
+    public function oldMethod(): bool
+    {
+        return true;
+    }
+}
+
+class Bar {
+    public function oldMethod(): bool
+    {
+        $foo = new Foo();
+        return $foo->oldMethod();
+    }
+}
+"#;
+
+    let diags = deprecated_diagnostics(&backend, uri, text);
+    let deprecated: Vec<_> = diags.iter().filter(|d| has_deprecated_tag(d)).collect();
+
+    assert!(
+        deprecated.iter().any(|d| d.message.contains("oldMethod")),
+        "A same-named method on an unrelated class must still be flagged, got: {:?}",
+        deprecated
+    );
+}
+
+#[test]
+fn overriding_a_deprecated_method_does_not_exempt_sibling_methods() {
+    // Overriding `oldMethod()` elsewhere in `Child` must not exempt an
+    // unrelated method that happens to call the deprecated parent method.
+    let backend = create_test_backend();
+    let uri = "file:///test_sibling_not_exempted.php";
+    let text = r#"<?php
+class Base {
+    /** @deprecated Use newMethod() instead */
+    public function oldMethod(): bool
+    {
+        return true;
+    }
+}
+
+class Child extends Base {
+    public function oldMethod(): bool
+    {
+        return true;
+    }
+
+    public function unrelatedMethod(): bool
+    {
+        $other = new Base();
+        return $other->oldMethod();
+    }
+}
+"#;
+
+    let diags = deprecated_diagnostics(&backend, uri, text);
+    let deprecated: Vec<_> = diags.iter().filter(|d| has_deprecated_tag(d)).collect();
+
+    assert!(
+        deprecated.iter().any(|d| d.message.contains("oldMethod")),
+        "A sibling method must still be flagged even though the class \
+         overrides the deprecated method elsewhere, got: {:?}",
+        deprecated
+    );
+}
+
+// ─── Explicitly deprecated enclosing method/class ───────────────────────────
+
+#[test]
+fn call_inside_own_deprecated_method_is_not_flagged() {
+    let backend = create_test_backend();
+    let uri = "file:///test_own_deprecated_method.php";
+    let text = r#"<?php
+class Service {
+    /** @deprecated Use processV2() instead */
+    public function process(): void {}
+}
+
+class Legacy {
+    /** @deprecated This whole method is legacy */
+    public function run(): void {
+        $svc = new Service();
+        $svc->process();
+    }
+}
+"#;
+
+    let diags = deprecated_diagnostics(&backend, uri, text);
+    let deprecated: Vec<_> = diags.iter().filter(|d| has_deprecated_tag(d)).collect();
+
+    assert!(
+        deprecated.is_empty(),
+        "A deprecated call inside an already-deprecated method should not \
+         be flagged, got: {:?}",
+        deprecated
+    );
+}
+
+#[test]
+fn call_inside_own_deprecated_class_is_not_flagged() {
+    let backend = create_test_backend();
+    let uri = "file:///test_own_deprecated_class.php";
+    let text = r#"<?php
+class Service {
+    /** @deprecated Use processV2() instead */
+    public function process(): void {}
+}
+
+/** @deprecated This whole class is legacy */
+class Legacy {
+    public function run(): void {
+        $svc = new Service();
+        $svc->process();
+    }
+}
+"#;
+
+    let diags = deprecated_diagnostics(&backend, uri, text);
+    let deprecated: Vec<_> = diags.iter().filter(|d| has_deprecated_tag(d)).collect();
+
+    assert!(
+        deprecated.is_empty(),
+        "A deprecated call inside an already-deprecated class should not \
+         be flagged, got: {:?}",
+        deprecated
+    );
+}
+
+#[test]
+fn import_of_a_deprecated_class_is_not_flagged() {
+    let backend = create_test_backend();
+    let uri = "file:///test_deprecated_import.php";
+    let text = r#"<?php
+namespace App;
+
+/** @deprecated Use NewThing instead */
+class OldThing {
+    public function go(): void {}
+}
+
+namespace App\Consumer;
+
+use App\OldThing;
+
+class Consumer {
+    public function f(): void {
+        $t = new OldThing();
+        $t->go();
+    }
+}
+"#;
+
+    let diags = deprecated_diagnostics(&backend, uri, text);
+    let deprecated: Vec<_> = diags.iter().filter(|d| has_deprecated_tag(d)).collect();
+
+    assert_eq!(
+        deprecated.len(),
+        1,
+        "Only the instantiation is a usage; the `use` line just says which \
+         OldThing is meant. Got: {:?}",
+        deprecated
+    );
+    assert_eq!(
+        deprecated[0].range.start.line, 14,
+        "The one report should sit on `new OldThing()`, got: {:?}",
+        deprecated
+    );
+}
+
+#[test]
+fn trait_method_delegating_to_the_deprecated_method_it_implements_is_not_flagged() {
+    let backend = create_test_backend();
+    let uri = "file:///test_deprecated_trait_delegate.php";
+    let text = r#"<?php
+namespace App;
+
+interface Ty {
+    /** @deprecated Use getProperty() instead */
+    public function hasProperty(string $n): bool;
+
+    public function resolve(): Ty;
+}
+
+trait LateResolvableTypeTrait {
+    public function hasProperty(string $n): bool {
+        return $this->resolve()->hasProperty($n);
+    }
+}
+
+class LateType implements Ty {
+    use LateResolvableTypeTrait;
+
+    public function resolve(): Ty { return $this; }
+}
+"#;
+
+    let diags = deprecated_diagnostics(&backend, uri, text);
+    let deprecated: Vec<_> = diags.iter().filter(|d| has_deprecated_tag(d)).collect();
+
+    assert!(
+        deprecated.is_empty(),
+        "The trait method *is* the deprecated implementation once flattened \
+         into LateType, so delegating to it is not a fresh usage, got: {:?}",
         deprecated
     );
 }

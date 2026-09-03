@@ -850,6 +850,21 @@ fn collect_mixin_members(
                     method.return_type = Some(resolved);
                     method.conditional_return = None;
                 }
+                // A docblock's `self` names the class the docblock is written
+                // in, so `@return self<T>` on the mixin returns the *mixin*
+                // parameterised by `T`.  The consumer declares none of the
+                // mixin's template parameters and so cannot carry those
+                // arguments; leaving the keyword bare would read the return as
+                // the consumer itself and silently drop them.  Only a `self`
+                // that carries arguments is bound this way: a bare `self`,
+                // `$this`, or `static` continues to bind late, to the consumer,
+                // which is what keeps a fluent chain on the class it started on.
+                if let Some(ret) = method.return_type.as_ref()
+                    && returns_parameterised_self(ret)
+                {
+                    let bound = ret.replace_bare_self(&resolved_mixin_name);
+                    method.return_type = Some(bound);
+                }
                 // Decorated forward (ForwardsCalls / forwardDecoratedCallTo):
                 // when the target returns itself, the forwarder returns
                 // `$this`.  Self-like returns are left as `$this`/`self`/
@@ -987,6 +1002,15 @@ fn is_forwards_calls_trait(name: &str) -> bool {
     name == FORWARDS_CALLS_FQN
         || name == FORWARDS_CALLS_SHORT
         || short_name(name) == FORWARDS_CALLS_SHORT
+}
+
+/// Whether a return type is a `self` that carries generic arguments
+/// (`self<T>`), as opposed to a bare `self`, `$this`, or `static`.
+fn returns_parameterised_self(return_type: &PhpType) -> bool {
+    matches!(
+        return_type.kind(),
+        TypeKind::Generic(g) if !g.args.is_empty() && g.name.eq_ignore_ascii_case("self")
+    )
 }
 
 /// Apply `forwardDecoratedCallTo` return semantics to a mixed-in method.

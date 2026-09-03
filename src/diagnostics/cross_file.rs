@@ -157,7 +157,7 @@ fn affected_reference_keys(
     // Global functions and constants: names only, so any file that
     // declares them contributes them on every save.
     for name in baseline.functions.iter().chain(current.functions.iter()) {
-        push_name_keys(&mut keys, name, ReferenceIndexKey::Function);
+        push_name_keys(&mut keys, name, ReferenceIndexKey::function_owned);
     }
     for name in baseline.constants.iter().chain(current.constants.iter()) {
         push_name_keys(&mut keys, name, ReferenceIndexKey::Constant);
@@ -214,7 +214,7 @@ fn find_class<'a>(classes: &'a [Arc<ClassInfo>], fqn: &str) -> Option<&'a ClassI
 }
 
 fn push_class_keys(keys: &mut HashSet<ReferenceIndexKey>, fqn: &str) {
-    push_name_keys(keys, fqn, ReferenceIndexKey::Class);
+    push_name_keys(keys, fqn, ReferenceIndexKey::class_owned);
 }
 
 /// Push both the fully-qualified and the short spelling of `name`.
@@ -328,9 +328,15 @@ fn push_changed_member_keys(
 
 /// Push the members whose type comes from a method body, and which a
 /// signature comparison therefore cannot rule out as unchanged.
+///
+/// A `mixed` return (native or docblock) is treated the same as no
+/// declared type: both fall through to body inference, so a body-only
+/// edit to either can change the type callers see.
 fn push_body_inferred_member_keys(keys: &mut HashSet<ReferenceIndexKey>, class: &ClassInfo) {
     for method in class.methods.iter() {
-        if method.return_type.is_none() && !method.name.eq_ignore_ascii_case("__construct") {
+        if method.return_type.as_ref().is_none_or(|t| t.is_mixed())
+            && !method.name.eq_ignore_ascii_case("__construct")
+        {
             push_member_keys(keys, &method.name);
         }
     }

@@ -623,6 +623,53 @@ function show(): void
     ));
 }
 
+/// A ternary condition proves the same thing an `if` condition does, and
+/// its arms are where the repeated call is written: the
+/// "re-check-and-reuse" idiom for a function that signals failure with a
+/// value rather than an exception.
+#[test]
+fn a_ternary_condition_narrows_the_call_repeated_in_its_own_arm() {
+    assert_no_type_errors(&format!(
+        r#"{REPEATED_CALL_SCAFFOLD}
+function show(): void
+{{
+    $user = currentUser() !== null ? currentUser() : null;
+    if ($user !== null) {{
+        render($user);
+    }}
+}}
+"#
+    ));
+}
+
+/// The else arm carries the inverse proof, so the negated spelling of the
+/// same idiom narrows there instead.
+#[test]
+fn a_negated_ternary_condition_narrows_the_call_in_its_else_arm() {
+    assert_no_type_errors(&format!(
+        r#"{REPEATED_CALL_SCAFFOLD}
+function show(User $fallback): void
+{{
+    render(currentUser() === null ? $fallback : currentUser());
+}}
+"#
+    ));
+}
+
+/// Negative control for the ternary form: a check on one call leaves a
+/// different call in the arm alone.
+#[test]
+fn a_ternary_condition_on_one_call_leaves_another_alone() {
+    assert_type_error(&format!(
+        r#"{REPEATED_CALL_SCAFFOLD}
+function show(User $fallback): void
+{{
+    render(currentUser() !== null ? Session::current() : $fallback);
+}}
+"#
+    ));
+}
+
 // ─── A `continue` guard reaches the copy the loop body makes of it ──────────
 
 const CONTINUE_GUARD_SCAFFOLD: &str = r#"<?php
@@ -866,6 +913,93 @@ function f(Scope $scope): void
     ));
 }
 
+/// An unconditional `@phpstan-assert` can name a path through the
+/// receiver too, and then the call takes no arguments at all: the
+/// promise is entirely about the object it was made on. The subject is
+/// the tag's own path with `$this` replaced by the receiver.
+#[test]
+fn an_assert_tag_narrows_a_property_of_the_receiver() {
+    assert_no_type_errors(
+        r#"<?php
+namespace Repro;
+
+class Reflection
+{
+    private ?bool $isDeprecated = null;
+
+    public function isDeprecated(): bool
+    {
+        if ($this->isDeprecated === null) {
+            $this->resolveDeprecation();
+        }
+
+        return $this->isDeprecated;
+    }
+
+    /** @phpstan-assert bool $this->isDeprecated */
+    private function resolveDeprecation(): void
+    {
+        $this->isDeprecated = false;
+    }
+}
+"#,
+    );
+}
+
+/// The same tag read through a variable rather than `$this`: the
+/// receiver the call was written on is what the tag's `$this` stands
+/// for, so the narrowing lands on that object's property.
+#[test]
+fn an_assert_tag_on_a_receiver_property_follows_the_variable_it_was_called_on() {
+    assert_no_type_errors(
+        r#"<?php
+namespace Repro;
+
+class Loader
+{
+    public ?string $name = null;
+
+    /** @phpstan-assert string $this->name */
+    public function load(): void { $this->name = ''; }
+}
+
+function takesName(string $name): void {}
+
+function f(Loader $loader): void
+{
+    $loader->load();
+    takesName($loader->name);
+}
+"#,
+    );
+}
+
+/// Negative control: without the call the property is as nullable as it
+/// declares itself to be.
+#[test]
+fn a_receiver_property_keeps_its_null_without_the_asserting_call() {
+    assert_type_error(
+        r#"<?php
+namespace Repro;
+
+class Loader
+{
+    public ?string $name = null;
+
+    /** @phpstan-assert string $this->name */
+    public function load(): void { $this->name = ''; }
+}
+
+function takesName(string $name): void {}
+
+function f(Loader $loader): void
+{
+    takesName($loader->name);
+}
+"#,
+    );
+}
+
 /// A `!null` promise about a plain parameter narrows the same way — the
 /// tag names no class, so it goes through the type guards rather than the
 /// `instanceof` machinery.
@@ -892,6 +1026,178 @@ function f(Reader $reader, ?Row $row): void
     }
 }
 "#,
+    );
+}
+
+/// Laravel's `filled()` and `blank()`, copied tag for tag from the
+/// framework.  Between them they cover both halves of the pair: the tag
+/// naming the branch under test narrows it, and the tag naming the other
+/// branch must stay out of it.
+const LARAVEL_VALUE_HELPERS: &str = r#"<?php
+namespace Repro;
+
+/**
+ * @phpstan-assert-if-true !=null|'' $value
+ *
+ * @phpstan-assert-if-false !=numeric|bool $value
+ *
+ * @param  mixed  $value
+ */
+function filled($value): bool { return $value !== null && $value !== ''; }
+
+/**
+ * @phpstan-assert-if-false !=null|'' $value
+ *
+ * @phpstan-assert-if-true !=numeric|bool $value
+ *
+ * @param  mixed  $value
+ */
+function blank($value): bool { return $value === null || $value === ''; }
+
+function takesString(string $value): void {}
+"#;
+
+/// When the asserted type is a union (e.g. `!=null|''` from Laravel's
+/// `filled()`), each member must be excluded independently so that at
+/// least the `null` guard fires and strips the null from the subject.
+#[test]
+fn an_assert_if_true_with_union_asserted_type_strips_null() {
+    assert_no_type_errors(&format!(
+        r#"{LARAVEL_VALUE_HELPERS}
+function f(?string $search): void
+{{
+    if (filled($search)) {{
+        takesString($search);
+    }}
+}}
+"#
+    ));
+}
+
+/// The same promise read from the other side: an early return on the
+/// negated call leaves the rest of the body with the narrowed type.
+#[test]
+fn an_early_return_on_a_negated_assert_call_narrows_the_rest_of_the_body() {
+    assert_no_type_errors(&format!(
+        r#"{LARAVEL_VALUE_HELPERS}
+function f(?string $search): void
+{{
+    if (! filled($search)) {{
+        return;
+    }}
+    takesString($search);
+}}
+"#
+    ));
+}
+
+/// `blank()` carries the same pair with the branches swapped, so the
+/// `-if-false` tag is the one that has to narrow here.
+#[test]
+fn an_assert_if_false_with_union_asserted_type_narrows_the_else_branch() {
+    assert_no_type_errors(&format!(
+        r#"{LARAVEL_VALUE_HELPERS}
+function f(?string $search): void
+{{
+    if (blank($search)) {{
+        return;
+    }}
+    takesString($search);
+}}
+"#
+    ));
+}
+
+/// An `-if-true` / `-if-false` tag written in the equality form (`!=Type`)
+/// is a one-way implication: a failed comparison rules nothing out, so the
+/// tag must contribute nothing to the branch it does not name.  Laravel's
+/// `filled()` promises `!=numeric|bool` only when it returns *false*, and
+/// inverting that into the truthy branch typed every filled value as
+/// `numeric|bool` — reporting `takesString($search)` as `got bool`.
+#[test]
+fn an_equality_assertion_does_not_invert_into_the_branch_it_does_not_name() {
+    assert_no_type_errors(&format!(
+        r#"{LARAVEL_VALUE_HELPERS}
+function f(?string $search): void
+{{
+    if (filled($search)) {{
+        takesString($search);
+    }}
+
+    if (! blank($search)) {{
+        takesString($search);
+    }}
+}}
+"#
+    ));
+}
+
+/// The subtype form stays invertible, which is what makes the equality
+/// carve-out above a carve-out rather than a blanket rule: `!null` promised
+/// on true means the value *is* null when the call returns false.
+#[test]
+fn a_subtype_assertion_still_inverts_into_the_opposite_branch() {
+    let messages = type_diagnostics(
+        r#"<?php
+namespace Repro;
+
+/**
+ * @phpstan-assert-if-true !null $value
+ */
+function isReady(?string $value): bool { return $value !== null; }
+
+function takesString(string $value): void {}
+
+function f(?string $search): void
+{
+    if (isReady($search)) {
+        takesString($search);
+    } else {
+        takesString($search);
+    }
+}
+"#,
+    );
+    assert_eq!(
+        messages.len(),
+        1,
+        "the else branch should still know the value is null, got: {messages:?}"
+    );
+}
+
+/// A union that is asserted *into* the branch stays a union.  Only the
+/// negated form splits into its members, since ruling out `A|B` rules out
+/// both; narrowing to `A|B` one member at a time would leave the subject
+/// as `B` alone, and every `Cat` in the branch would look like a `Dog`.
+#[test]
+fn an_asserted_union_narrows_to_every_member_not_just_the_last() {
+    let messages = type_diagnostics(
+        r#"<?php
+namespace Repro;
+
+interface Pet {}
+class Cat implements Pet {}
+class Dog implements Pet {}
+
+/**
+ * @phpstan-assert-if-true Cat|Dog $value
+ */
+function isKnownPet(Pet $value): bool { return true; }
+
+function takesCat(Cat $value): void {}
+
+function f(Pet $pet): void
+{
+    if (isKnownPet($pet)) {
+        takesCat($pet);
+    }
+}
+"#,
+    );
+    assert_eq!(messages.len(), 1, "got: {messages:?}");
+    assert!(
+        messages[0].contains("Repro\\Cat|Repro\\Dog"),
+        "both members should survive the assertion, got: {messages:?}"
     );
 }
 
@@ -1086,4 +1392,986 @@ function floorStock(array $qtys): int
 }}
 "#
     ));
+}
+
+/// Unsetting the entry a `non-empty-array` guarantee relies on empties it
+/// out one element at a time, so the loop can no longer be assumed to run
+/// and the pre-loop sentinel survives.
+#[test]
+fn unsetting_an_element_drops_the_non_empty_array_guarantee() {
+    assert_type_error(&format!(
+        r#"{FLOOR_SCAFFOLD}
+/** @param non-empty-array<int, int> $qtys */
+function floorStock(array $qtys): int
+{{
+    unset($qtys[0]);
+    $max = null;
+    foreach ($qtys as $qty) {{
+        $max = $qty;
+    }}
+    return takesInt($max);
+}}
+"#
+    ));
+}
+
+/// Unsetting a shape's only required entry leaves only optional ones, so
+/// the shape no longer proves the loop body runs.
+#[test]
+fn unsetting_a_shapes_required_entry_drops_the_pre_loop_sentinel_proof() {
+    assert_type_error(&format!(
+        r#"{FLOOR_SCAFFOLD}
+/** @param array{{first: int, second?: int}} $qtys */
+function floorStock(array $qtys): int
+{{
+    unset($qtys['first']);
+    $max = null;
+    foreach ($qtys as $qty) {{
+        $max = $qty;
+    }}
+    return takesInt($max);
+}}
+"#
+    ));
+}
+
+/// Negative control: unsetting one required entry off a shape with two
+/// leaves the other required entry intact, so the loop still provably runs.
+#[test]
+fn unsetting_one_of_two_required_shape_entries_keeps_the_other_proof() {
+    assert_no_type_errors(&format!(
+        r#"{FLOOR_SCAFFOLD}
+/** @param array{{first: int, second: int}} $qtys */
+function floorStock(array $qtys): int
+{{
+    unset($qtys['first']);
+    $max = null;
+    foreach ($qtys as $qty) {{
+        $max = $qty;
+    }}
+    return takesInt($max);
+}}
+"#
+    ));
+}
+
+// ─── An assertion tag resolves its type where it was written ───────────────
+
+const VENDOR_ASSERT_SCAFFOLD: &str = r#"<?php
+namespace Vendor\Events;
+
+interface Test
+{
+    /** @phpstan-assert-if-true TestMethod $this */
+    public function isTestMethod(): bool;
+}
+
+final class TestMethod implements Test
+{
+    public function isTestMethod(): bool { return true; }
+
+    public function className(): string { return 'x'; }
+}
+"#;
+
+/// The unqualified `TestMethod` in the tag names
+/// `Vendor\Events\TestMethod`, the way PHP resolves every other
+/// unqualified name in the file that declares it.  The call site's own
+/// namespace has nothing to do with it.
+#[test]
+fn an_assertion_tag_resolves_its_type_against_the_declaring_namespace() {
+    let messages = type_diagnostics(&format!(
+        r#"{VENDOR_ASSERT_SCAFFOLD}
+namespace App;
+
+use Vendor\Events\Test;
+
+function takesString(string $s): void {{}}
+
+function f(Test $test): void
+{{
+    if (!$test->isTestMethod()) {{
+        return;
+    }}
+    takesString($test->className());
+}}
+"#
+    ));
+    assert!(
+        messages.is_empty(),
+        "the tag's type resolves in its own namespace, got: {messages:?}"
+    );
+}
+
+/// `is_a($s, C::class, true)` on a subject that can only hold a string
+/// proves a `class-string<C>`.  Adding `C` itself would put an object
+/// alternative into a value that is definitely a string.
+#[test]
+fn is_a_with_allow_string_on_a_string_subject_proves_only_a_class_string() {
+    let messages = type_diagnostics(
+        r#"<?php
+namespace Repro;
+
+class Base {}
+
+/** @param class-string<Base> $cls */
+function initialize(string $cls): void {}
+
+function f(string $name): void
+{
+    if (!is_a($name, Base::class, true)) {
+        return;
+    }
+    initialize($name);
+}
+"#,
+    );
+    assert!(
+        messages.is_empty(),
+        "the subject stays a string, got: {messages:?}"
+    );
+}
+
+const B228_SCAFFOLD: &str = r#"<?php
+namespace Repro;
+
+class ClassReflection { public function isFinal(): bool { return true; } }
+
+interface Invoker { public function invoke(): void; }
+
+interface Scope
+{
+    /** @phpstan-assert-if-true !null $this->getClassReflection() */
+    public function isInClass(): bool;
+
+    public function getClassReflection(): ?ClassReflection;
+}
+
+function useClass(ClassReflection $r): void {}
+"#;
+
+/// The receiver of the guard can be a property, not just a local: a
+/// scope held in a field is guarded exactly the same way.
+#[test]
+fn an_assert_tag_narrows_through_a_property_receiver() {
+    assert_no_type_errors(&format!(
+        r#"{B228_SCAFFOLD}
+class Holder {{
+    private Scope $scope;
+
+    public function __construct(Scope $s) {{ $this->scope = $s; }}
+
+    public function f(): void
+    {{
+        if (!$this->scope->isInClass()) {{
+            return;
+        }}
+        $reflection = $this->scope->getClassReflection();
+        useClass($reflection);
+    }}
+}}
+"#
+    ));
+}
+
+/// An intersection-typed receiver carries one entry per member, so the
+/// member that declares the tag has to be found among them rather than
+/// by looking up the joined `A&B` text as a class name.
+#[test]
+fn an_assert_tag_narrows_through_an_intersection_typed_receiver() {
+    assert_no_type_errors(&format!(
+        r#"{B228_SCAFFOLD}
+function f(Scope&Invoker $scope): void
+{{
+    if (!$scope->isInClass()) {{
+        return;
+    }}
+    $reflection = $scope->getClassReflection();
+    useClass($reflection);
+}}
+"#
+    ));
+}
+
+/// The proof holds for every later occurrence of the guarded call, not
+/// just the first.  Evaluating the call is what the proof is about, so
+/// it must not count as the event that invalidates it.
+#[test]
+fn a_guarded_call_stays_narrowed_across_repeated_uses() {
+    assert_no_type_errors(&format!(
+        r#"{B228_SCAFFOLD}
+function f(Scope $scope): void
+{{
+    if (!$scope->isInClass()) {{
+        return;
+    }}
+    useClass($scope->getClassReflection());
+    useClass($scope->getClassReflection());
+    useClass($scope->getClassReflection());
+}}
+"#
+    ));
+}
+
+/// The same across a branch boundary: a use inside a nested `if` and
+/// another after it.
+#[test]
+fn a_guarded_call_survives_a_nested_branch() {
+    assert_no_type_errors(&format!(
+        r#"{B228_SCAFFOLD}
+class Stmt2 {{ public ?string $type = null; }}
+
+function f(Scope $scope, Stmt2 $node): void
+{{
+    if (!$scope->isInClass()) {{
+        throw new \\RuntimeException('x');
+    }}
+    if ($node->type !== null) {{
+        useClass($scope->getClassReflection());
+    }}
+    useClass($scope->getClassReflection());
+}}
+"#
+    ));
+}
+
+/// A `foreach` whose body guards with `continue` keeps the proof for the
+/// rest of that iteration, including after an earlier `continue` guard
+/// and a statement before the jump.
+#[test]
+fn a_continue_guard_keeps_the_proof_for_the_rest_of_the_iteration() {
+    assert_no_type_errors(&format!(
+        r#"{B228_SCAFFOLD}
+/** @param list<int> $items */
+function f(Scope $scope, array $items): void
+{{
+    $errors = [];
+    foreach ($items as $item) {{
+        if ($item === 0) {{
+            continue;
+        }}
+        if (!$scope->isInClass()) {{
+            $errors[] = 'x';
+            continue;
+        }}
+        useClass($scope->getClassReflection());
+        useClass($scope->getClassReflection());
+    }}
+    echo count($errors);
+}}
+"#
+    ));
+}
+
+/// An impure call on the receiver still drops what it could have
+/// changed: the row `$stmt->fetch()` was checked on is not the row a
+/// later `$stmt->execute()` leaves behind.
+#[test]
+fn an_impure_call_on_the_receiver_still_drops_the_other_proofs() {
+    let messages = type_diagnostics(
+        r#"<?php
+namespace Repro;
+
+class Row {}
+
+class Stmt
+{
+    public function fetch(): ?Row { return null; }
+
+    public function execute(): void {}
+}
+
+function useRow(Row $row): void {}
+
+function f(Stmt $stmt): void
+{
+    if ($stmt->fetch() === null) {
+        return;
+    }
+    $stmt->execute();
+    useRow($stmt->fetch());
+}
+"#,
+    );
+    assert_eq!(
+        messages.len(),
+        1,
+        "execute() moved the statement past the checked row, got: {messages:?}"
+    );
+}
+
+/// A predicate that carries the tag can sit anywhere in an `&&` chain:
+/// the whole condition holding means every operand did.
+#[test]
+fn an_assert_tag_in_a_later_and_operand_narrows_the_branch() {
+    assert_no_type_errors(&format!(
+        r#"{B228_SCAFFOLD}
+function f(Scope $scope, string $name): void
+{{
+    if (
+        $name === 'static'
+        && $scope->isInClass()
+    ) {{
+        useClass($scope->getClassReflection());
+    }}
+}}
+"#
+    ));
+}
+
+/// The same in an `elseif`, which is how the check is usually written
+/// once there is more than one class keyword to handle.
+#[test]
+fn an_assert_tag_in_an_elseif_and_chain_narrows_the_branch() {
+    assert_no_type_errors(&format!(
+        r#"{B228_SCAFFOLD}
+function f(Scope $scope, string $name): void
+{{
+    if ($name === 'self') {{
+        echo 'self';
+    }} elseif ($name === 'static' && $scope->isInClass()) {{
+        useClass($scope->getClassReflection());
+    }}
+}}
+"#
+    ));
+}
+
+/// An `||` proves nothing: the branch can be entered without the
+/// predicate having held.
+#[test]
+fn an_assert_tag_in_an_or_chain_proves_nothing() {
+    let messages = type_diagnostics(&format!(
+        r#"{B228_SCAFFOLD}
+function f(Scope $scope, string $name): void
+{{
+    if ($name === 'static' || $scope->isInClass()) {{
+        useClass($scope->getClassReflection());
+    }}
+}}
+"#
+    ));
+    assert_eq!(
+        messages.len(),
+        1,
+        "an `||` branch can be entered without the predicate, got: {messages:?}"
+    );
+}
+
+/// A class that implements the predicate's interface without repeating
+/// its docblock inherits the contract's tags: `$this->isInClass()` inside
+/// the implementation proves what the interface promised.
+#[test]
+fn an_assert_tag_is_inherited_from_an_implemented_interface() {
+    assert_no_type_errors(&format!(
+        r#"{B228_SCAFFOLD}
+class MutatingScope implements Scope
+{{
+    private ?ClassReflection $reflection = null;
+
+    public function isInClass(): bool
+    {{
+        return $this->reflection !== null;
+    }}
+
+    public function getClassReflection(): ?ClassReflection
+    {{
+        return $this->reflection;
+    }}
+
+    public function resolve(): void
+    {{
+        if (!$this->isInClass()) {{
+            return;
+        }}
+        useClass($this->getClassReflection());
+    }}
+}}
+"#
+    ));
+}
+
+/// A sibling branch that tests the same predicate must not corrupt the
+/// fact for the branches after it: the inverse of `A && guard()` is an
+/// alternative, and the alternative where `A` failed says nothing about
+/// what `guard()` proves.
+#[test]
+fn a_sibling_branch_testing_the_same_predicate_does_not_corrupt_the_next() {
+    assert_no_type_errors(&format!(
+        r#"{B228_SCAFFOLD}
+function f(Scope $scope, string $name): void
+{{
+    if ($name === 'self' && $scope->isInClass()) {{
+        useClass($scope->getClassReflection());
+    }} elseif ($name === 'static' && $scope->isInClass()) {{
+        useClass($scope->getClassReflection());
+    }} elseif ($name === 'parent' && $scope->isInClass()) {{
+        useClass($scope->getClassReflection());
+    }}
+}}
+"#
+    ));
+}
+
+// ─── A loop that bails on a bad entry proves the whole collection ───────────
+
+const PRE_VALIDATION_SCAFFOLD: &str = r#"<?php
+namespace Repro;
+
+class Name {}
+class Expr
+{
+    public function name(): ?Name { return null; }
+}
+class ClassConstFetch extends Expr
+{
+    public function name(): Name { return new Name(); }
+}
+class Arm
+{
+    /** @var Expr[] */
+    public array $conds = [];
+}
+function useName(Name $name): void {}
+"#;
+
+/// The pre-validation idiom: one loop rejects the whole collection the
+/// moment an entry fails the check, so reaching the code after it means
+/// every entry passed.  A second loop over the same expression is what the
+/// idiom exists for, and it may read the proven member without checking
+/// again.
+#[test]
+fn a_loop_that_bails_out_past_itself_narrows_the_collection_it_iterated() {
+    assert_no_type_errors(&format!(
+        r#"{PRE_VALIDATION_SCAFFOLD}
+/** @param Arm[] $arms */
+function f(array $arms): void
+{{
+    foreach ($arms as $arm) {{
+        foreach ($arm->conds as $cond) {{
+            if (!$cond instanceof ClassConstFetch) {{
+                break 2;
+            }}
+        }}
+        foreach ($arm->conds as $other) {{
+            useName($other->name());
+        }}
+    }}
+}}
+"#
+    ));
+}
+
+/// A `return` guard proves it for the rest of the function the same way.
+#[test]
+fn a_loop_that_returns_on_a_bad_entry_narrows_the_collection_it_iterated() {
+    assert_no_type_errors(&format!(
+        r#"{PRE_VALIDATION_SCAFFOLD}
+function f(Arm $arm): void
+{{
+    foreach ($arm->conds as $cond) {{
+        if (!$cond instanceof ClassConstFetch) {{
+            return;
+        }}
+    }}
+    foreach ($arm->conds as $other) {{
+        useName($other->name());
+    }}
+}}
+"#
+    ));
+}
+
+/// Negative control: a plain `break` jumps to exactly the code the claim
+/// would be made about, so the entries after it were never checked.
+#[test]
+fn a_loop_that_only_breaks_itself_proves_nothing_about_the_collection() {
+    assert_type_error(&format!(
+        r#"{PRE_VALIDATION_SCAFFOLD}
+function f(Arm $arm): void
+{{
+    foreach ($arm->conds as $cond) {{
+        if (!$cond instanceof ClassConstFetch) {{
+            break;
+        }}
+    }}
+    foreach ($arm->conds as $other) {{
+        useName($other->name());
+    }}
+}}
+"#
+    ));
+}
+
+/// Negative control: `continue` skips the entry, not the rest of the
+/// program, so the collection still holds the entries it skipped.
+#[test]
+fn a_loop_that_continues_past_a_bad_entry_proves_nothing_about_the_collection() {
+    assert_type_error(&format!(
+        r#"{PRE_VALIDATION_SCAFFOLD}
+function f(Arm $arm): void
+{{
+    foreach ($arm->conds as $cond) {{
+        if (!$cond instanceof ClassConstFetch) {{
+            continue;
+        }}
+    }}
+    foreach ($arm->conds as $other) {{
+        useName($other->name());
+    }}
+}}
+"#
+    ));
+}
+
+/// Negative control: an `else` makes the `if` a branch rather than a
+/// guard, so falling out of its bottom says nothing about the condition.
+#[test]
+fn a_loop_whose_check_has_an_else_branch_proves_nothing_about_the_collection() {
+    assert_type_error(&format!(
+        r#"{PRE_VALIDATION_SCAFFOLD}
+function f(Arm $arm): void
+{{
+    foreach ($arm->conds as $cond) {{
+        if (!$cond instanceof ClassConstFetch) {{
+            return;
+        }} else {{
+            echo 'ok';
+        }}
+    }}
+    foreach ($arm->conds as $other) {{
+        useName($other->name());
+    }}
+}}
+"#
+    ));
+}
+
+/// The proof is about the collection, so writing to it afterwards drops it.
+#[test]
+fn writing_to_the_collection_drops_what_the_loop_proved_about_it() {
+    assert_type_error(&format!(
+        r#"{PRE_VALIDATION_SCAFFOLD}
+/** @param Expr[] $fresh */
+function f(Arm $arm, array $fresh): void
+{{
+    foreach ($arm->conds as $cond) {{
+        if (!$cond instanceof ClassConstFetch) {{
+            return;
+        }}
+    }}
+    $arm->conds = $fresh;
+    foreach ($arm->conds as $other) {{
+        useName($other->name());
+    }}
+}}
+"#
+    ));
+}
+
+// ─── Falling out of the bottom of an if/elseif chain ────────────────────────
+
+/// Every condition in the chain was false on the fall-through path, so
+/// each one's inverse holds there. An `elseif` used to make the leading
+/// condition's inverse go missing: the guard-clause pass declines to run
+/// once there is an `elseif`, and the implicit-else path never learned it.
+#[test]
+fn falling_past_an_elseif_chain_inverts_every_condition_in_it() {
+    assert_no_type_errors(
+        r#"<?php
+namespace Repro;
+
+class Tip
+{
+    public function text(): string { return ''; }
+}
+
+function useTip(Tip $tip): string { return $tip->text(); }
+
+function f(?Tip $a, ?Tip $b): int
+{
+    if ($a === null) {
+        return 1;
+    } elseif ($b === null) {
+        return -1;
+    }
+
+    return strcmp(useTip($a), useTip($b));
+}
+"#,
+    );
+}
+
+/// The same shape with the guard written on an array offset, which is how
+/// a comparison callback tests an optional tuple member.
+#[test]
+fn falling_past_an_elseif_chain_keeps_an_isset_proof_on_an_offset() {
+    assert_no_type_errors(
+        r#"<?php
+namespace Repro;
+
+class Tip
+{
+    public function text(): string { return ''; }
+}
+
+function useTip(Tip $tip): string { return $tip->text(); }
+
+/**
+ * @param array{0: string, 2?: Tip|null} $a
+ * @param array{0: string, 2?: Tip|null} $b
+ */
+function f(array $a, array $b): int
+{
+    if (!isset($a[2])) {
+        if (!isset($b[2])) {
+            return 0;
+        }
+
+        return 1;
+    } elseif (!isset($b[2])) {
+        return -1;
+    }
+
+    return strcmp(useTip($a[2]), useTip($b[2]));
+}
+"#,
+    );
+}
+
+/// Negative control: an `elseif` body that falls through instead of
+/// exiting reaches the bottom with its own condition *true*, so nothing
+/// downstream may assume the inverse.
+#[test]
+fn an_elseif_that_falls_through_does_not_prove_its_condition_false() {
+    assert_type_error(
+        r#"<?php
+namespace Repro;
+
+class Tip
+{
+    public function text(): string { return ''; }
+}
+
+function useTip(Tip $tip): string { return $tip->text(); }
+
+function f(?Tip $a, ?Tip $b): string
+{
+    if ($a === null) {
+        return 'first';
+    } elseif ($b === null) {
+        echo 'noted';
+    }
+
+    return useTip($b);
+}
+"#,
+    );
+}
+
+// ─── Reading an offset of a union of array shapes ───────────────────────────
+
+/// Every alternative contributes its own entry: offset 1 of
+/// `array{string, null}|array{string, Err}` is `null|Err`, so the guard
+/// that rules out `null` leaves `Err`. Taking only the first alternative's
+/// entry left the guard nothing to remove and the read reported `null`.
+#[test]
+fn an_offset_of_a_union_of_shapes_unions_every_alternatives_entry() {
+    assert_no_type_errors(
+        r#"<?php
+namespace Repro;
+
+class Err
+{
+    public function message(): string { return ''; }
+}
+
+function useMessage(string $m): void {}
+
+/** @param list<array{string, null}|array{string, Err}> $rows */
+function f(array $rows): void
+{
+    foreach ($rows as $row) {
+        if ($row[1] === null) {
+            continue;
+        }
+        useMessage($row[1]->message());
+    }
+}
+"#,
+    );
+}
+
+// ─── Guarding a call and reading it again ───────────────────────────────────
+
+/// A guard on a call's result describes every later occurrence of that
+/// call, and a parameterised array return type is no exception. Seeding the
+/// call's key was skipped for any type that resolved to no class, which
+/// took `list<int>|null` with it and left the guard nothing to narrow.
+#[test]
+fn a_guard_on_a_call_returning_a_parameterised_array_narrows_the_next_one() {
+    assert_no_type_errors(
+        r#"<?php
+namespace Repro;
+
+class Result
+{
+    /** @return array<string, array<string>>|null */
+    public function getDependencies(): ?array { return null; }
+}
+
+/** @param array<string, array<string>> $dependencies */
+function useDependencies(array $dependencies): void {}
+
+function f(Result $result): void
+{
+    if ($result->getDependencies() !== null) {
+        useDependencies($result->getDependencies());
+    }
+}
+"#,
+    );
+}
+
+/// An override that restates no return type says what its ancestor said,
+/// which is the whole point of the `{@inheritDoc}` it carries. Reading the
+/// override's silence as "no type known" left the guard on the call with
+/// nothing to narrow.
+#[test]
+fn a_guard_narrows_a_call_whose_return_type_is_only_declared_upstream() {
+    assert_no_type_errors(
+        r#"<?php
+namespace Repro;
+
+abstract class BaseReflection
+{
+    /** @return string|false */
+    public function getFileName() { return false; }
+}
+
+class ReflectionAdapter extends BaseReflection
+{
+    /**
+     * {@inheritDoc}
+     */
+    public function getFileName() { return false; }
+}
+
+function useFileName(?string $file): void {}
+
+function f(ReflectionAdapter $reflection): void
+{
+    if ($reflection->getFileName() !== false) {
+        useFileName($reflection->getFileName());
+    }
+}
+"#,
+    );
+}
+
+/// Reading a second accessor on the same object is not an event that
+/// unproves a guard on the first. Only a call that changes state behind the
+/// receiver is, which is what its return type (or an `@impure` tag) says.
+#[test]
+fn a_second_getter_on_the_receiver_leaves_the_first_ones_guard_standing() {
+    assert_no_type_errors(
+        r#"<?php
+namespace Repro;
+
+class Reflection
+{
+    /** @return string|false */
+    public function getFileName() { return false; }
+
+    /** @return string|false */
+    public function getDocComment() { return false; }
+}
+
+function useFileName(?string $file): void {}
+
+function f(Reflection $reflection): void
+{
+    if ($reflection->getFileName() !== false && $reflection->getDocComment() !== false) {
+        $doc = $reflection->getDocComment();
+        useFileName($reflection->getFileName());
+        useFileName($doc);
+    }
+}
+"#,
+    );
+}
+
+/// The same receiver, but the intervening call hands nothing back: it was
+/// made for its effect, so the guard on the earlier accessor no longer
+/// describes what the object holds.
+#[test]
+fn a_call_returning_nothing_does_drop_the_receivers_guard() {
+    assert_type_error(
+        r#"<?php
+namespace Repro;
+
+class Reflection
+{
+    /** @return string|false */
+    public function getFileName() { return false; }
+
+    public function reload(): void {}
+}
+
+function useFileName(?string $file): void {}
+
+function f(Reflection $reflection): void
+{
+    if ($reflection->getFileName() !== false) {
+        $reflection->reload();
+        useFileName($reflection->getFileName());
+    }
+}
+"#,
+    );
+}
+
+// ─── Seed-if-absent array writes ────────────────────────────────────────────
+
+const SEED_IF_ABSENT_SCAFFOLD: &str = r#"<?php
+namespace Repro;
+
+class Total {
+    public function add(int|self $v): self { return $this; }
+}
+
+function makeTotal(mixed $v): Total { return new Total(); }
+"#;
+
+/// `if (!isset($tmp[$key])) { $tmp[$key] = 0; }` proves the element
+/// present on both paths out of the guard: the then-branch just wrote it,
+/// and the fall-through only runs when `isset` already said it was there.
+/// The write goes through a variable key, so it must overwrite the
+/// synthetic scope entry the guard narrowed to null, or that stale null
+/// resurfaces once the branches rejoin.
+#[test]
+fn a_variable_keyed_write_after_a_true_isset_guard_leaves_no_null_behind() {
+    assert_no_type_errors(&format!(
+        r#"{SEED_IF_ABSENT_SCAFFOLD}
+/** @param array<string, mixed> $row */
+function totals(array $row): void
+{{
+    $tmp = [];
+    foreach ($row as $key => $value) {{
+        if (!isset($tmp[$key])) {{
+            $tmp[$key] = 0;
+        }}
+        $tmp[$key] = makeTotal($value)->add($tmp[$key]);
+    }}
+}}
+"#
+    ));
+}
+
+// ─── A closure captures the paths read through what it captures ─────────────
+
+const CAPTURE_SCAFFOLD: &str = r#"<?php
+namespace Repro;
+
+class Node {}
+
+class Param {
+    public ?Node $type = null;
+}
+
+function acceptNode(Node $n): void {}
+"#;
+
+/// The guard above the closure recorded its proof under `$param->type`,
+/// and `use ($param)` captures the value that path is read through — so
+/// the body sees the narrowed path, not the declaration.
+#[test]
+fn a_closure_keeps_the_narrowing_of_a_path_it_captures() {
+    assert_no_type_errors(&format!(
+        r#"{CAPTURE_SCAFFOLD}
+/** @param Param[] $params */
+function check(array $params): void
+{{
+    foreach ($params as $param) {{
+        if ($param->type === null) {{
+            continue;
+        }}
+        $run = static function () use ($param): void {{
+            acceptNode($param->type);
+        }};
+        $run();
+    }}
+}}
+"#
+    ));
+}
+
+/// The same for `$this`, which a closure captures without naming.
+#[test]
+fn a_closure_keeps_the_narrowing_of_a_path_read_through_this() {
+    assert_no_type_errors(&format!(
+        r#"{CAPTURE_SCAFFOLD}
+class Holder {{
+    public ?Node $node = null;
+
+    public function check(): void
+    {{
+        if ($this->node === null) {{
+            return;
+        }}
+        $run = function (): void {{
+            acceptNode($this->node);
+        }};
+        $run();
+    }}
+}}
+"#
+    ));
+}
+
+/// Nothing above the closure proved anything, so the captured path keeps
+/// the `null` its declaration allows.
+#[test]
+fn an_unguarded_capture_keeps_the_declared_null() {
+    assert_type_error(&format!(
+        r#"{CAPTURE_SCAFFOLD}
+function check(Param $param): void
+{{
+    $run = static function () use ($param): void {{
+        acceptNode($param->type);
+    }};
+    $run();
+}}
+"#
+    ));
+}
+
+// ─── A negated check on a path the same chain narrows the receiver of ───────
+
+/// `$expr->name` can only be looked up once `$expr instanceof FuncCall`
+/// has been applied, so the negated `instanceof` on it has to be read
+/// after the receiver's own narrowing rather than before it.
+#[test]
+fn a_negated_check_on_a_path_narrowed_by_an_earlier_conjunct_applies() {
+    assert_no_type_errors(
+        r#"<?php
+namespace Repro;
+
+class Name {}
+class Expr {}
+class FuncCall extends Expr {
+    /** @var Name|Expr */
+    public $name;
+}
+
+function acceptExpr(Expr $e): void {}
+
+function process(Expr $expr): void
+{
+    if ($expr instanceof FuncCall && !$expr->name instanceof Name) {
+        acceptExpr($expr->name);
+    }
+}
+"#,
+    );
 }

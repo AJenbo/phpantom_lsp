@@ -24,6 +24,24 @@ pub(super) fn resolve_rhs_property_access(
     access: &Access<'_>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
+    // A member named at runtime rather than spelled out — see
+    // `runtime_named_member_type`.  `Cls::$prop` writes its property name
+    // as a variable token, so only an indirect one (`Cls::${$name}`) is
+    // actually dynamic.
+    let named_at_runtime = match access {
+        Access::Property(pa) => !matches!(pa.property, ClassLikeMemberSelector::Identifier(_)),
+        Access::NullSafeProperty(pa) => {
+            !matches!(pa.property, ClassLikeMemberSelector::Identifier(_))
+        }
+        Access::StaticProperty(spa) => !matches!(spa.property, Variable::Direct(_)),
+        Access::ClassConstant(cca) => {
+            !matches!(cca.constant, ClassLikeConstantSelector::Identifier(_))
+        }
+    };
+    if named_at_runtime {
+        return super::runtime_named_member_type();
+    }
+
     let current_class_name: &str = &ctx.current_class.name;
     let all_classes = ctx.all_classes;
     let class_loader = ctx.class_loader;

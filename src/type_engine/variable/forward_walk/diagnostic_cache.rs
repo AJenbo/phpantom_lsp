@@ -43,6 +43,7 @@ impl Drop for DiagnosticScopeGuard {
             DIAGNOSTIC_SCOPE.with(|cell| {
                 *cell.borrow_mut() = None;
             });
+            end_unreachable_collection();
         }
     }
 }
@@ -66,6 +67,11 @@ pub(crate) fn is_building_scopes() -> bool {
 ///
 /// Returns a guard that clears the cache on drop.  If the cache is
 /// already active (nested call), the guard is a no-op.
+///
+/// The walk that populates the cache is also the walk that discovers
+/// which branches cannot run, so the collection of unreachable ranges
+/// shares this guard's lifetime: the ranges are still there when the
+/// collectors that ran against the cache hand back their diagnostics.
 pub(crate) fn with_diagnostic_scope_cache() -> DiagnosticScopeGuard {
     let already_active = DIAGNOSTIC_SCOPE.with(|cell| cell.borrow().is_some());
     if already_active {
@@ -74,6 +80,7 @@ pub(crate) fn with_diagnostic_scope_cache() -> DiagnosticScopeGuard {
     DIAGNOSTIC_SCOPE.with(|cell| {
         *cell.borrow_mut() = Some(BTreeMap::new());
     });
+    begin_unreachable_collection();
     DiagnosticScopeGuard { owns: true }
 }
 
@@ -101,6 +108,27 @@ pub(crate) fn lookup_diagnostic_scope(var_name: &str, offset: u32) -> Option<Vec
 /// Check whether the diagnostic scope cache is currently active.
 pub(crate) fn is_diagnostic_scope_active() -> bool {
     DIAGNOSTIC_SCOPE.with(|cell| cell.borrow().is_some())
+}
+
+/// Puts back the snapshots [`suspend_diagnostic_scope`] set aside.
+pub(crate) struct DiagnosticScopeSuspendGuard(Option<ScopeSnapshotMap>);
+
+impl Drop for DiagnosticScopeSuspendGuard {
+    fn drop(&mut self) {
+        DIAGNOSTIC_SCOPE.with(|cell| {
+            *cell.borrow_mut() = self.0.take();
+        });
+    }
+}
+
+/// Deactivate the diagnostic scope cache until the returned guard drops.
+///
+/// The snapshots describe each body as its own declarations define it.  A
+/// body being read for its return type with its parameters seeded from a
+/// call site is a different scope at the very same offsets, so serving it
+/// from the snapshots would answer the question that was not asked.
+pub(crate) fn suspend_diagnostic_scope() -> DiagnosticScopeSuspendGuard {
+    DiagnosticScopeSuspendGuard(DIAGNOSTIC_SCOPE.with(|cell| cell.borrow_mut().take()))
 }
 
 /// Insert a scope snapshot into the diagnostic scope cache at the given

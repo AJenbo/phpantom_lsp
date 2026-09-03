@@ -57,8 +57,9 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::parser::with_parsed_program;
 use crate::scope_collector::{
-    AccessKind, ByRefCallKind, ByRefResolver, FrameKind, ScopeMap,
+    AccessKind, ByRefCallKind, ByRefResolver, FrameKind, ScopeBody, ScopeMap,
     collect_function_scope_with_kind_and_resolver, collect_function_scope_with_resolver,
+    collect_hook_scope_with_resolver, hook_body_span,
 };
 
 use super::helpers::make_diagnostic;
@@ -66,10 +67,12 @@ use super::helpers::make_diagnostic;
 mod feature_guards;
 mod offset_guards;
 
-pub(crate) use feature_guards::{collect_compact_vars, has_get_defined_vars};
+pub(crate) use feature_guards::{
+    collect_compact_vars, collect_import_offsets, has_get_defined_vars,
+};
 use feature_guards::{has_dynamic_variables, has_extract_call};
 use offset_guards::{
-    collect_error_suppressed_offsets, collect_guarded_offsets,
+    collect_error_suppressed_offsets, collect_guarded_offsets, collect_isset_guarded_regions,
     collect_short_circuit_guarded_offsets, collect_var_annotations,
 };
 
@@ -114,9 +117,15 @@ impl Backend {
         // and method signatures.  This lets the scope collector mark
         // by-ref arguments as writes for user-defined functions, static
         // methods, and constructors — not just the hardcoded table.
-        let resolver: ByRefResolver<'_> = &|call_kind: &ByRefCallKind<'_>| {
-            self.resolve_by_ref_positions(call_kind, &file_use_map, &file_namespace)
-        };
+        let resolver: ByRefResolver<'_> =
+            &|call_kind: &ByRefCallKind<'_>, enclosing_class_name: Option<&str>| {
+                self.resolve_by_ref_positions(
+                    call_kind,
+                    enclosing_class_name,
+                    &file_use_map,
+                    &file_namespace,
+                )
+            };
 
         with_parsed_program(content, "unknown_variable", |program, content| {
             let mut ctx = DiagnosticCtx {
@@ -141,6 +150,7 @@ impl Backend {
     fn resolve_by_ref_positions(
         &self,
         call_kind: &ByRefCallKind<'_>,
+        enclosing_class_name: Option<&str>,
         file_use_map: &std::collections::HashMap<String, String>,
         file_namespace: &Option<String>,
     ) -> Option<Vec<usize>> {
@@ -164,10 +174,12 @@ impl Backend {
                 Some(positions)
             }
             ByRefCallKind::StaticMethod(class_name, method_name) => {
-                let fqn = crate::util::resolve_to_fqn(class_name, file_use_map, file_namespace);
-                let cls = self
-                    .find_or_load_class(&fqn)
-                    .or_else(|| self.find_or_load_class(class_name))?;
+                let cls = self.resolve_call_class(
+                    class_name,
+                    enclosing_class_name,
+                    file_use_map,
+                    file_namespace,
+                )?;
                 let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
                     &cls,
                     &|name| self.find_or_load_class(name),
@@ -184,10 +196,12 @@ impl Backend {
                 Some(positions)
             }
             ByRefCallKind::Constructor(class_name) => {
-                let fqn = crate::util::resolve_to_fqn(class_name, file_use_map, file_namespace);
-                let cls = self
-                    .find_or_load_class(&fqn)
-                    .or_else(|| self.find_or_load_class(class_name))?;
+                let cls = self.resolve_call_class(
+                    class_name,
+                    enclosing_class_name,
+                    file_use_map,
+                    file_namespace,
+                )?;
                 let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
                     &cls,
                     &|name| self.find_or_load_class(name),
@@ -225,6 +239,34 @@ impl Backend {
             }
         }
     }
+
+    /// Resolve a `Cls::method()`/`new Cls()` class name to its
+    /// [`ClassInfo`], handling the relative names `self`, `static`, and
+    /// `parent` by resolving them against the class enclosing the call
+    /// site rather than treating them as a literal class name.
+    fn resolve_call_class(
+        &self,
+        class_name: &str,
+        enclosing_class_name: Option<&str>,
+        file_use_map: &std::collections::HashMap<String, String>,
+        file_namespace: &Option<String>,
+    ) -> Option<std::sync::Arc<crate::types::ClassInfo>> {
+        if crate::class_lookup::is_class_keyword(class_name) {
+            let enclosing_name = enclosing_class_name?;
+            let enclosing_fqn =
+                crate::util::resolve_to_fqn(enclosing_name, file_use_map, file_namespace);
+            let enclosing_class = self
+                .find_or_load_class(&enclosing_fqn)
+                .or_else(|| self.find_or_load_class(enclosing_name))?;
+            let fqn =
+                crate::class_lookup::resolve_class_keyword(class_name, Some(&enclosing_class))?;
+            return self.find_or_load_class(&fqn);
+        }
+
+        let fqn = crate::util::resolve_to_fqn(class_name, file_use_map, file_namespace);
+        self.find_or_load_class(&fqn)
+            .or_else(|| self.find_or_load_class(class_name))
+    }
 }
 
 // ─── Internal context ───────────────────────────────────────────────────────
@@ -259,7 +301,7 @@ fn collect_from_statement(
             );
             check_scope(
                 &scope,
-                func.body.statements.as_slice(),
+                ScopeBody::Statements(func.body.statements.as_slice()),
                 ctx,
                 false, // not a method
             );
@@ -293,7 +335,7 @@ fn collect_from_statement(
     }
 }
 
-/// Walk class-like members to find method bodies.
+/// Walk class-like members to find method and property hook bodies.
 fn collect_from_class_members(
     members: &[ClassLikeMember<'_>],
     ctx: &mut DiagnosticCtx<'_>,
@@ -301,29 +343,75 @@ fn collect_from_class_members(
     class_name: Option<&str>,
 ) {
     for member in members.iter() {
-        if let ClassLikeMember::Method(method) = member
-            && let MethodBody::Concrete(block) = &method.body
-        {
-            let body_start = block.left_brace.start.offset;
-            let body_end = block.right_brace.end.offset;
+        match member {
+            ClassLikeMember::Method(method) => {
+                // A constructor-promoted property carries its hooks in
+                // the parameter list, so they need checking whether or
+                // not the constructor itself has a body.
+                for param in method.parameter_list.parameters.iter() {
+                    if let Some(hooks) = &param.hooks {
+                        check_property_hooks(hooks, ctx, resolver, class_name);
+                    }
+                }
 
-            let is_static = method
-                .modifiers
-                .iter()
-                .any(|m| matches!(m, Modifier::Static(_)));
+                let MethodBody::Concrete(block) = &method.body else {
+                    continue;
+                };
+                let body_start = block.left_brace.start.offset;
+                let body_end = block.right_brace.end.offset;
 
-            let scope = collect_function_scope_with_kind_and_resolver(
-                &method.parameter_list,
-                block.statements.as_slice(),
-                body_start,
-                body_end,
-                FrameKind::Method,
-                resolver,
-                class_name.map(|s| s.to_string()),
-            );
+                let is_static = method
+                    .modifiers
+                    .iter()
+                    .any(|m| matches!(m, Modifier::Static(_)));
 
-            check_scope(&scope, block.statements.as_slice(), ctx, !is_static);
+                let body = ScopeBody::Statements(block.statements.as_slice());
+                let scope = collect_function_scope_with_kind_and_resolver(
+                    &method.parameter_list,
+                    body,
+                    body_start,
+                    body_end,
+                    FrameKind::Method,
+                    resolver,
+                    class_name.map(|s| s.to_string()),
+                );
+
+                check_scope(&scope, body, ctx, !is_static);
+            }
+            ClassLikeMember::Property(Property::Hooked(hooked)) => {
+                check_property_hooks(&hooked.hook_list, ctx, resolver, class_name);
+            }
+            _ => {}
         }
+    }
+}
+
+/// Check each `get`/`set` body of a hooked property.
+///
+/// A hook body is a variable scope of its own, with `$this` always
+/// defined (a hook is never static) and, for a `set` hook, the assigned
+/// value as a parameter.
+fn check_property_hooks(
+    hooks: &PropertyHookList<'_>,
+    ctx: &mut DiagnosticCtx<'_>,
+    resolver: Option<ByRefResolver<'_>>,
+    class_name: Option<&str>,
+) {
+    for hook in hooks.hooks.iter() {
+        let Some((body_start, body_end, body)) = hook_body_span(hook) else {
+            continue;
+        };
+
+        let scope = collect_hook_scope_with_resolver(
+            hook,
+            body,
+            body_start,
+            body_end,
+            resolver,
+            class_name.map(|s| s.to_string()),
+        );
+
+        check_scope(&scope, body, ctx, true);
     }
 }
 
@@ -340,20 +428,20 @@ fn collect_from_class_members(
 /// positives from branch-dependent definitions.
 fn check_scope(
     scope: &ScopeMap,
-    statements: &[Statement<'_>],
+    body: ScopeBody<'_, '_>,
     ctx: &mut DiagnosticCtx<'_>,
     this_is_defined: bool,
 ) {
     // Bail out early if the function uses features that make static
     // analysis unsound.
-    if has_dynamic_variables(statements) || has_extract_call(statements) {
+    if has_dynamic_variables(body) || has_extract_call(body) {
         return;
     }
 
     // Collect variable names referenced by compact() calls — these
     // variables are used by string name and should be treated as
     // defined.
-    let compact_vars = collect_compact_vars(statements);
+    let compact_vars = collect_compact_vars(body);
 
     // Collect variable names annotated with `/** @var Type $var */`
     // inline docblocks, each with the byte offset of its `$` sigil so it
@@ -363,13 +451,18 @@ fn check_scope(
 
     // Collect byte offsets suppressed by the `@` error control
     // operator (e.g. `@$var`).
-    let error_suppressed_offsets = collect_error_suppressed_offsets(statements);
+    let error_suppressed_offsets = collect_error_suppressed_offsets(body);
 
     // Collect byte offsets of variables inside `isset()` and `empty()`,
     // plus reads guarded by an `isset()`/`!isset()` earlier in the same
     // short-circuiting `&&`/`||` chain.
-    let mut guarded_offsets = collect_guarded_offsets(statements);
-    guarded_offsets.extend(collect_short_circuit_guarded_offsets(statements));
+    let mut guarded_offsets = collect_guarded_offsets(body);
+    guarded_offsets.extend(collect_short_circuit_guarded_offsets(body));
+
+    // Collect the branch bodies a positive `isset()` check guards, so a
+    // read there is not reported just because the only write to the
+    // variable sits later in the source.
+    let isset_regions = collect_isset_guarded_regions(body);
 
     if scope.frames.is_empty() {
         return;
@@ -489,6 +582,21 @@ fn check_scope(
                 .any(|(name, off)| *name == access.name && *off < access.offset);
 
             if has_prior_write {
+                continue;
+            }
+
+            // A positive `isset()` in an enclosing branch condition
+            // proves the variable exists for that whole branch.  Require
+            // a write somewhere in the scope: with none at all the
+            // `isset()` can never be true, and the read is a genuine
+            // typo rather than a write this source-ordered pass missed.
+            let written_anywhere = || frame_writes.iter().any(|(name, _)| *name == access.name);
+            if isset_regions.iter().any(|region| {
+                access.offset >= region.start
+                    && access.offset <= region.end
+                    && region.names.iter().any(|name| name == &access.name)
+            }) && written_anywhere()
+            {
                 continue;
             }
 

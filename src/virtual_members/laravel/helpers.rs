@@ -207,17 +207,17 @@ pub(crate) fn accessor_method_candidates(property_name: &str) -> Vec<String> {
     ]
 }
 
-/// Extract a string-keyed option (e.g. `'as' => 'admin.'`) from a
+/// The value a string-keyed option (e.g. `'as' => 'admin.'`) is set to in a
 /// `Route::group([…], fn(){})` argument list.
 ///
 /// The array may be in any position; all non-array arguments are skipped.
-fn extract_group_option_from_args<'a>(
+fn group_option_expression<'a>(
     args: impl Iterator<Item = &'a Expression<'a>>,
     content: &str,
     option: &str,
-) -> String {
+) -> Option<&'a Expression<'a>> {
     for arg in args {
-        let elements: Vec<&ArrayElement<'_>> = match arg {
+        let elements: Vec<&'a ArrayElement<'a>> = match arg {
             Expression::Array(arr) => arr.elements.iter().collect(),
             Expression::LegacyArray(arr) => arr.elements.iter().collect(),
             _ => continue,
@@ -229,14 +229,25 @@ fn extract_group_option_from_args<'a>(
             let Some((key, _, _)) = extract_string_literal(kv.key, content) else {
                 continue;
             };
-            if key == option
-                && let Some((val, _, _)) = extract_string_literal(kv.value, content)
-            {
-                return val.to_string();
+            if key == option {
+                return Some(kv.value);
             }
         }
     }
-    String::new()
+    None
+}
+
+/// Extract a string-keyed option (e.g. `'as' => 'admin.'`) from a
+/// `Route::group([…], fn(){})` argument list.
+fn extract_group_option_from_args<'a>(
+    args: impl Iterator<Item = &'a Expression<'a>>,
+    content: &str,
+    option: &str,
+) -> String {
+    group_option_expression(args, content, option)
+        .and_then(|value| extract_string_literal(value, content))
+        .map(|(value, _, _)| value.to_string())
+        .unwrap_or_default()
 }
 
 /// Extract the `'as' => 'prefix.'` name prefix from a `Route::group([…], fn(){})` argument list.
@@ -245,6 +256,23 @@ pub(crate) fn extract_as_prefix_from_args<'a>(
     content: &str,
 ) -> String {
     extract_group_option_from_args(args, content, "as")
+}
+
+/// The statically-known head of an `'as' => …` group name that is not a plain
+/// string literal, as [`chain_dynamic_name_prefix`] gives for the fluent
+/// spelling of the same group.
+///
+/// `None` when the array names no prefix, or names one that is fully known.
+pub(crate) fn dynamic_as_prefix_from_args<'a>(
+    args: impl Iterator<Item = &'a Expression<'a>>,
+    content: &str,
+    scope: &Scope,
+) -> Option<String> {
+    let value = group_option_expression(args, content, "as")?;
+    if extract_string_literal(value, content).is_some() {
+        return None;
+    }
+    Some(const_string_prefix(value, content, scope))
 }
 
 /// Extract the `'prefix' => 'admin'` URI prefix from a `Route::group([…], fn(){})`
@@ -872,10 +900,77 @@ pub(crate) fn chain_name_prefix<'a>(expr: &Expression<'a>, content: &str) -> Str
     })
 }
 
+/// The statically-known head of the name prefix a call chain sets, when some
+/// `->name(…)` in it is not a plain string literal.
+///
+/// `Route::name('filament.' . $panelId . '.')->group(…)` yields
+/// `Some("filament.")`: the group's full prefix is incomplete, so the names it
+/// registers cannot be enumerated, but they all start with the part that was
+/// written out.  `None` means every `->name()` in the chain is a literal and
+/// [`chain_name_prefix`] has the whole of it.
+pub(crate) fn chain_dynamic_name_prefix(
+    expr: &Expression<'_>,
+    content: &str,
+    scope: &Scope,
+) -> Option<String> {
+    let (prefix, dynamic) = chain_name_prefix_head(expr, content, scope);
+    dynamic.then_some(prefix)
+}
+
+/// The chain's name prefix as far as it is known, and whether a non-literal
+/// `->name()` argument cut it short.  Everything the chain appends past that
+/// argument is dropped: an unknown run of characters sits in front of it.
+fn chain_name_prefix_head(expr: &Expression<'_>, content: &str, scope: &Scope) -> (String, bool) {
+    let (parent, arguments) = match expr {
+        Expression::Call(Call::Method(mc)) => {
+            let ClassLikeMemberSelector::Identifier(ident) = &mc.method else {
+                return chain_name_prefix_head(mc.object, content, scope);
+            };
+            let (parent, dynamic) = chain_name_prefix_head(mc.object, content, scope);
+            if dynamic || !ident.value.eq_ignore_ascii_case(b"name") {
+                return (parent, dynamic);
+            }
+            (parent, &mc.argument_list)
+        }
+        // Route::name('prefix.') — static entry point of the chain.
+        Expression::Call(Call::StaticMethod(sc)) => {
+            let ClassLikeMemberSelector::Identifier(ident) = &sc.method else {
+                return (String::new(), false);
+            };
+            if !ident.value.eq_ignore_ascii_case(b"name") {
+                return (String::new(), false);
+            }
+            (String::new(), &sc.argument_list)
+        }
+        _ => return (String::new(), false),
+    };
+
+    match first_string_arg(arguments, content) {
+        Some(literal) => (format!("{parent}{literal}"), false),
+        None => match arguments.arguments.iter().next() {
+            Some(argument) => (
+                format!(
+                    "{parent}{}",
+                    const_string_prefix(argument.value(), content, scope)
+                ),
+                true,
+            ),
+            None => (parent, false),
+        },
+    }
+}
+
 /// Collect all `->prefix('...')` URI segments from the call chain that
 /// precedes `->group()`, joined into a single prefix.
 pub(crate) fn chain_uri_prefix<'a>(expr: &Expression<'a>, content: &str) -> String {
     chain_modifier_value(expr, content, b"prefix", &join_uri_segments)
+}
+
+/// The `->uri('...')` value a Folio mount chain sets
+/// (`Folio::path(...)->uri('admin')`), joined the same way a route group's
+/// URI prefix is.
+pub(crate) fn chain_uri_modifier<'a>(expr: &Expression<'a>, content: &str) -> String {
+    chain_modifier_value(expr, content, b"uri", &join_uri_segments)
 }
 
 /// The route-name prefix a chain sets ahead of a `resource()` registration.
@@ -918,6 +1013,8 @@ use mago_allocator::LocalArena;
 use mago_database::file::FileId;
 use mago_span::{HasSpan, Span};
 use mago_syntax::cst::*;
+
+use super::const_eval::{Scope, const_string_prefix};
 
 /// Parse `content` as PHP and call `visitor` for every expression node
 /// (pre-order, depth-first).  Used by navigation modules to find specific

@@ -6,16 +6,28 @@
 //! the PSR-4 directory move.
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::atomic::Ordering;
 
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::composer;
 use crate::symbol_map::SymbolKind;
 use crate::text_position::{line_start_byte_offset, offset_to_position, ranges_overlap};
 use crate::util::strip_fqn_prefix;
 
+use super::RenameOutcome;
+
 impl Backend {
+    /// Plan a namespace-prefix move without requiring an LSP cursor position.
+    pub(crate) fn plan_namespace_move(&self, old_prefix: &str, new_prefix: &str) -> RenameOutcome {
+        self.build_namespace_prefix_rename_edit(
+            strip_fqn_prefix(old_prefix),
+            strip_fqn_prefix(new_prefix),
+        )
+    }
+
     /// Build a `WorkspaceEdit` for renaming a namespace segment.
     ///
     /// `full_ns` is the full namespace at the declaration site (e.g.
@@ -35,10 +47,10 @@ impl Backend {
         full_ns: &str,
         segment_idx: usize,
         new_segment: &str,
-    ) -> Option<WorkspaceEdit> {
+    ) -> RenameOutcome {
         let segments: Vec<&str> = full_ns.split('\\').collect();
         if segment_idx >= segments.len() {
-            return None;
+            return Ok(None);
         }
 
         // Build the old prefix up to and including the renamed segment.
@@ -56,7 +68,16 @@ impl Backend {
         &self,
         old_prefix: &str,
         new_prefix: &str,
-    ) -> Option<WorkspaceEdit> {
+    ) -> RenameOutcome {
+        // Renaming a namespace onto one that already exists is a merge,
+        // and a merge only works where the two sides declare no name
+        // twice.  Where they do, the rename is refused outright: moving
+        // the rest anyway would rewrite every reference to the clashing
+        // name so it points at the class that was already there.
+        if let Some(conflict) = self.namespace_merge_conflict(old_prefix, new_prefix) {
+            return Err(conflict);
+        }
+
         let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
 
         // Scan all known files. The live per-file maps only contain files
@@ -90,8 +111,11 @@ impl Backend {
             }
 
             if let Some(root) = workspace_root {
-                for path in crate::references::collect_php_files_gitignore(&root, &vendor_dir_paths)
-                {
+                for path in crate::references::collect_php_files_gitignore(
+                    &root,
+                    &vendor_dir_paths,
+                    &self.index_filters(),
+                ) {
                     if let Ok(uri) = Url::from_file_path(&path) {
                         uris.insert(uri.to_string());
                     }
@@ -149,7 +173,7 @@ impl Backend {
                 new_prefix,
                 &mut file_edits,
             ) {
-                return None;
+                return Ok(None);
             }
 
             if !file_edits.is_empty() {
@@ -169,7 +193,7 @@ impl Backend {
         }
 
         if changes.is_empty() {
-            return None;
+            return Ok(None);
         }
 
         // PSR-4 directory rename: if a mapping exists, emit RenameFile
@@ -195,16 +219,21 @@ impl Backend {
             // Convert text edits to document changes. Rewrite URIs
             // that fall inside a renamed directory.
             for (uri, edits) in changes {
+                // A directory operation carries every file beneath it,
+                // so its edits have to follow.  The remainder has to
+                // start at a path separator or `src/Internal` would also
+                // claim `src/InternalOther/Thing.php`.  A per-file
+                // operation matches outright and leaves the remainder
+                // empty; a file no operation names keeps its own URI,
+                // which is what leaves a skipped file edited in place.
                 let target_uri = ops
                     .iter()
                     .find_map(|(old_u, new_u)| {
-                        let old_str = old_u.as_str();
-                        let uri_str = uri.as_str();
-                        if let Some(rest) = uri_str.strip_prefix(old_str) {
-                            Url::parse(&format!("{}{}", new_u.as_str(), rest)).ok()
-                        } else {
-                            None
+                        let rest = uri.as_str().strip_prefix(old_u.as_str())?;
+                        if !rest.is_empty() && !rest.starts_with('/') {
+                            return None;
                         }
+                        Url::parse(&format!("{}{}", new_u.as_str(), rest)).ok()
                     })
                     .unwrap_or(uri);
 
@@ -218,18 +247,18 @@ impl Backend {
                 doc_ops.push(DocumentChangeOperation::Edit(text_doc_edit));
             }
 
-            return Some(WorkspaceEdit {
+            return Ok(Some(WorkspaceEdit {
                 changes: None,
                 document_changes: Some(DocumentChanges::Operations(doc_ops)),
                 change_annotations: None,
-            });
+            }));
         }
 
-        Some(WorkspaceEdit {
+        Ok(Some(WorkspaceEdit {
             changes: Some(changes),
             document_changes: None,
             change_annotations: None,
-        })
+        }))
     }
 
     /// Collect text edits for `namespace` declaration lines where the
@@ -474,10 +503,78 @@ impl Backend {
         true
     }
 
-    /// Determine PSR-4 directory rename operations for a namespace rename.
+    /// Why a namespace cannot be renamed onto `new_prefix`, or `None`
+    /// when every name it carries lands somewhere free.
     ///
-    /// Returns pairs of `(old_uri, new_uri)` for directories that should
-    /// be renamed, or `None` if no PSR-4 mapping applies.
+    /// Renaming `App\Internal` to an `App\Support` that already exists
+    /// is a merge, and the merge is only well-defined while the two
+    /// namespaces share no name.  Where they do, there is no answer the
+    /// rename can pick: moving the rest and leaving the clash behind
+    /// still rewrites every `App\Internal\Helper` reference to
+    /// `App\Support\Helper`, which is a different class.
+    fn namespace_merge_conflict(&self, old_prefix: &str, new_prefix: &str) -> Option<String> {
+        if old_prefix.eq_ignore_ascii_case(new_prefix) {
+            return None;
+        }
+
+        let mut clashes: Vec<String> = {
+            let index = self.symbols.fqn_uri_index.read();
+            index
+                .iter()
+                .filter_map(|(fqn, uri)| {
+                    // The tail of a name the rename carries over, e.g.
+                    // `Nested\Deep` of `App\Internal\Nested\Deep`.
+                    let tail = fqn
+                        .get(..old_prefix.len())
+                        .filter(|head| head.eq_ignore_ascii_case(old_prefix))
+                        .and_then(|_| fqn.get(old_prefix.len()..))
+                        .and_then(|rest| rest.strip_prefix('\\'))?;
+                    let (declared, at_uri) =
+                        index.get_key_value(&format!("{}\\{}", new_prefix, tail))?;
+                    // A name the move itself produces is not a clash.
+                    (at_uri != uri).then(|| declared.to_string())
+                })
+                .collect()
+        };
+        clashes.sort();
+        clashes.dedup();
+
+        if clashes.is_empty() {
+            return None;
+        }
+
+        let listed: Vec<&str> = clashes.iter().take(5).map(String::as_str).collect();
+        let extra = clashes.len().saturating_sub(listed.len());
+        let suffix = if extra > 0 {
+            format!(" (and {} more)", extra)
+        } else {
+            String::new()
+        };
+
+        Some(format!(
+            "Cannot rename `{}` to `{}`: {} already declares {}{}. \
+             Rename or move the clashing {} first, then retry.",
+            old_prefix,
+            new_prefix,
+            new_prefix,
+            listed.join(", "),
+            suffix,
+            if clashes.len() == 1 {
+                "class"
+            } else {
+                "classes"
+            },
+        ))
+    }
+
+    /// Determine PSR-4 file/directory rename operations for a namespace
+    /// rename.
+    ///
+    /// Returns pairs of `(old_uri, new_uri)`, or `None` if no PSR-4
+    /// mapping applies.  Where the destination directory does not exist
+    /// the whole directory is moved in one operation; where it does, the
+    /// move is a merge and each file is moved individually so the
+    /// contents already there survive.
     fn build_namespace_psr4_rename_ops(
         &self,
         old_prefix: &str,
@@ -486,44 +583,29 @@ impl Backend {
         let psr4 = self.workspace.psr4_mappings.read();
         let workspace_root = self.workspace.workspace_root.read().clone()?;
 
+        // The destination directory has to come from whichever mapping
+        // covers the *new* namespace, which need not be the one covering
+        // the old one: a namespace can move between mappings, or out of
+        // the autoload map entirely.  Deriving it from the old mapping
+        // instead builds a path around a prefix the new name never had.
+        // No mapping covers the destination means no file can be placed
+        // there, so nothing moves and the declarations are rewritten in
+        // place.
+        let new_dir = composer::psr4_directory_for_namespace(&psr4, &workspace_root, new_prefix)?;
+
         let mut ops: Vec<(Url, Url)> = Vec::new();
 
         for mapping in psr4.iter() {
-            let mapping_ns = mapping.prefix.trim_end_matches('\\');
-
-            // Check if old_prefix starts with this PSR-4 mapping's namespace.
-            let old_lower = old_prefix.to_lowercase();
-            let mapping_lower = mapping_ns.to_lowercase();
-
-            let relative_ns = if old_lower == mapping_lower {
-                ""
-            } else if old_lower.starts_with(&format!("{}\\", mapping_lower)) {
-                &old_prefix[mapping_ns.len() + 1..]
-            } else {
+            let Some(relative_ns) = composer::namespace_below_prefix(old_prefix, &mapping.prefix)
+            else {
                 continue;
-            };
-
-            let new_relative_ns = if old_prefix.len() == mapping_ns.len() {
-                // We're renaming at the PSR-4 root itself — new_prefix
-                // replaces the mapping prefix entirely in the path.
-                let new_without_mapping = &new_prefix[mapping_ns.len()..];
-                new_without_mapping.trim_start_matches('\\').to_string()
-            } else {
-                let suffix = &new_prefix[mapping_ns.len() + 1..];
-                suffix.to_string()
             };
 
             let base_dir = workspace_root.join(&mapping.base_path);
             let old_dir = if relative_ns.is_empty() {
-                base_dir.clone()
-            } else {
-                base_dir.join(relative_ns.replace('\\', std::path::MAIN_SEPARATOR_STR))
-            };
-
-            let new_dir = if new_relative_ns.is_empty() {
                 base_dir
             } else {
-                base_dir.join(new_relative_ns.replace('\\', std::path::MAIN_SEPARATOR_STR))
+                base_dir.join(relative_ns.replace('\\', std::path::MAIN_SEPARATOR_STR))
             };
 
             if old_dir == new_dir {
@@ -534,12 +616,52 @@ impl Backend {
                 continue;
             }
 
-            let old_url = Url::from_file_path(&old_dir).ok()?;
-            let new_url = Url::from_file_path(&new_dir).ok()?;
-            ops.push((old_url, new_url));
+            if new_dir.exists() {
+                collect_merge_move_ops(&old_dir, &old_dir, &new_dir, &mut ops);
+            } else {
+                let old_url = Url::from_file_path(&old_dir).ok()?;
+                let new_url = Url::from_file_path(&new_dir).ok()?;
+                ops.push((old_url, new_url));
+            }
         }
 
         if ops.is_empty() { None } else { Some(ops) }
+    }
+}
+
+/// Collect one move operation per file under `dir`, rebasing each onto
+/// `new_root` at the same relative path.
+///
+/// This is the merge case: `new_root` already exists, so moving the
+/// source directory on top of it would clobber or fail depending on the
+/// editor.  A destination that is already occupied is left out entirely
+/// — the file stays where it is rather than overwriting what is there.
+fn collect_merge_move_ops(dir: &Path, old_root: &Path, new_root: &Path, ops: &mut Vec<(Url, Url)>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_merge_move_ops(&path, old_root, new_root, ops);
+            continue;
+        }
+
+        let Ok(relative) = path.strip_prefix(old_root) else {
+            continue;
+        };
+        let destination = new_root.join(relative);
+        if destination.exists() {
+            continue;
+        }
+
+        if let (Ok(old_url), Ok(new_url)) = (
+            Url::from_file_path(&path),
+            Url::from_file_path(&destination),
+        ) {
+            ops.push((old_url, new_url));
+        }
     }
 }
 

@@ -444,7 +444,7 @@ function test(bool $flag): void {
 
     let pushed = hover_at(&backend, uri, content, 7, 42).expect("hover on $pushed");
     assert!(
-        hover_text(&pushed).contains("$pushed = list<string>"),
+        hover_text(&pushed).contains("$pushed = non-empty-list<string>"),
         "a push after construction should widen the stored values: {}",
         hover_text(&pushed)
     );
@@ -469,7 +469,7 @@ function test(array $words): void {
 
     let grouped = hover_at(&backend, uri, content, 9, 10).expect("hover on $grouped");
     assert!(
-        hover_text(&grouped).contains("$grouped = array<int, list<string>>"),
+        hover_text(&grouped).contains("$grouped = array<int, non-empty-list<string>>"),
         "an append below a dynamic key should refine the inner element type: {}",
         hover_text(&grouped)
     );
@@ -477,7 +477,7 @@ function test(array $words): void {
     // The key is optional because a zero-iteration loop never writes it.
     let by_letter = hover_at(&backend, uri, content, 9, 20).expect("hover on $byLetter");
     assert!(
-        hover_text(&by_letter).contains("$byLetter = array{all?: list<string>}"),
+        hover_text(&by_letter).contains("$byLetter = array{all?: non-empty-list<string>}"),
         "an append below a literal key should refine that shape entry: {}",
         hover_text(&by_letter)
     );
@@ -512,7 +512,7 @@ function test(string $key): void {
 
     let groups = hover_at(&backend, uri, content, 12, 16).expect("hover on $groups");
     assert!(
-        hover_text(&groups).contains("$groups = array{pens: list<Pen>}"),
+        hover_text(&groups).contains("$groups = array{pens: non-empty-list<Pen>}"),
         "an append below a key refines what that key holds instead of \
          leaving the literal it was initialised with: {}",
         hover_text(&groups)
@@ -520,7 +520,7 @@ function test(string $key): void {
 
     let slots = hover_at(&backend, uri, content, 12, 26).expect("hover on $slots");
     assert!(
-        hover_text(&slots).contains("$slots = array<string, int>"),
+        hover_text(&slots).contains("$slots = non-empty-array<string, int>"),
         "a dynamic key may land on any entry, so the shape widens: {}",
         hover_text(&slots)
     );
@@ -544,14 +544,14 @@ function test(array $counts, array $words): void {
 
     let counts = hover_at(&backend, uri, content, 8, 10).expect("hover on $counts");
     assert!(
-        hover_text(&counts).contains("$counts = array<string, int>"),
+        hover_text(&counts).contains("$counts = non-empty-array<string, int>"),
         "a write to one key says nothing about the keys already there: {}",
         hover_text(&counts)
     );
 
     let words = hover_at(&backend, uri, content, 8, 20).expect("hover on $words");
     assert!(
-        hover_text(&words).contains("$words = array<string, list<string>>"),
+        hover_text(&words).contains("$words = non-empty-array<string, list<string>>"),
         "an append below a key builds on the value type the array declares: {}",
         hover_text(&words)
     );
@@ -1334,6 +1334,41 @@ class Usage {
     assert!(text.contains("int"), "should show type: {}", text);
 }
 
+/// `Registry::$instance::get(…)` has the same token shape as the PHP 8.4
+/// property-hook invocation `parent::$prop::get()`, but only `parent` spells
+/// that: everywhere else it is a real static property holding a class name,
+/// followed by a real static call.  Reading it as a hook invocation dropped
+/// the call's own span and reported the property as an instance one.
+#[test]
+fn hover_static_property_holding_a_class_name_called_through() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Service {
+    public static function get(string $key): string { return $key; }
+}
+class Registry {
+    /** @var class-string<Service> */
+    public static string $instance = Service::class;
+}
+class Usage {
+    public function run(): void {
+        echo Registry::$instance::get('service');
+    }
+}
+"#;
+
+    // Hover on `$instance` in `Registry::$instance::get('service')` (line 10)
+    let hover = hover_at(&backend, uri, content, 10, 27).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("instance"),
+        "should contain property name: {}",
+        text
+    );
+    assert!(text.contains("static"), "should indicate static: {}", text);
+}
+
 // ─── Constant hover ─────────────────────────────────────────────────────────
 
 #[test]
@@ -1496,6 +1531,143 @@ namespace Illuminate\Contracts\Database\Eloquent {
     assert!(
         hover.is_none(),
         "should not show hover on class declaration site"
+    );
+}
+
+/// A member's own declaration site answers nothing, for the same reason
+/// a class declaration does: the signature is on the line under the
+/// cursor and the docblock is on the lines above it, so the popup would
+/// only repeat what is already on screen.  Where a member is declared
+/// relative to the one it overrides is a code lens (or an `#[Override]`
+/// attribute), not a hover.
+#[test]
+fn hover_member_declaration_sites_return_none() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Base {
+    public function run(): void {}
+}
+class Product extends Base {
+    /** The maximum quantity per order. */
+    public const MAX_QTY = 10;
+
+    /** The stock keeping unit. */
+    public string $sku = '';
+
+    /** Does the thing. */
+    public function run(): void {}
+}
+enum Status: string {
+    case Paid = 'paid';
+}
+"#;
+
+    for (what, line, character) in [
+        ("class constant", 6u32, 19u32),
+        ("property", 9, 20),
+        ("method", 12, 22),
+        ("enum case", 15, 10),
+    ] {
+        let hover = hover_at(&backend, uri, content, line, character);
+        assert!(
+            hover.is_none(),
+            "should not show hover on the {what} declaration site, got: {hover:?}"
+        );
+    }
+}
+
+/// A global function's own name, a top-level constant's own name, and a
+/// constructor-promoted parameter's own name all declare something whose
+/// full signature/value is already on screen — same rule as
+/// [`hover_member_declaration_sites_return_none`], applied to the three
+/// declaration sites that used to slip through it.
+#[test]
+fn hover_global_declaration_sites_return_none() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+/** Adds a shipping surcharge. */
+function helper(): int {
+    return 1;
+}
+
+const LIMIT = 5;
+
+class Product {
+    public function __construct(public string $sku) {}
+}
+"#;
+
+    for (what, line, character) in [
+        ("function", 2u32, 10u32),
+        ("top-level const", 6, 7),
+        ("promoted property parameter", 9, 48),
+    ] {
+        let hover = hover_at(&backend, uri, content, line, character);
+        assert!(
+            hover.is_none(),
+            "should not show hover on the {what} declaration site, got: {hover:?}"
+        );
+    }
+}
+
+/// A request can arrive before the file has ever been parsed: an editor
+/// fires hover the instant it opens a file, and a raw LSP client can ask
+/// about a file it never opened at all, ahead of background indexing.
+/// The answer must not depend on how far indexing has got.
+#[tokio::test]
+async fn hover_answers_a_file_that_was_never_opened_or_indexed() {
+    use tower_lsp::LanguageServer;
+
+    let (backend, dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[(
+            "src/Product.php",
+            r#"<?php
+
+namespace App;
+
+class Product
+{
+    /**
+     * The sale price in minor units.
+     */
+    public function saleMinor(): int
+    {
+        return 0;
+    }
+}
+
+$product = new Product();
+$product->saleMinor();
+"#,
+        )],
+    );
+
+    // Deliberately no `initialized()` and no `did_open`: the file exists
+    // only on disk, exactly as it does for a request that beats the
+    // index to it.
+    let uri = Url::from_file_path(dir.path().join("src/Product.php")).unwrap();
+    let hover = backend
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 16,
+                    character: 14,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .unwrap()
+        .expect("hover on a file the server has not parsed yet");
+
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("The sale price in minor units."),
+        "an unparsed file should be parsed on the spot, got: {text}"
     );
 }
 
@@ -1679,6 +1851,41 @@ class Legacy {
     assert!(
         !text.contains("🪦 **deprecated** "),
         "should not have trailing text after deprecated: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_shows_deprecation_inherited_from_interface_override() {
+    // An override with no docblock of its own inherits the interface
+    // method's `@deprecated` tag, the same way it already inherits a
+    // richer `@return` type from the interface.
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+interface Shape {
+    /** @deprecated Use hasArea() instead. */
+    public function hasProperty(string $name): bool;
+}
+
+class Delegator implements Shape {
+    public function hasProperty(string $name): bool
+    {
+        return true;
+    }
+
+    public function run(): void {
+        $this->hasProperty('x');
+    }
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 13, 16).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("🪦 **deprecated** Use hasArea() instead."),
+        "override with no own docblock should inherit the interface's \
+         deprecation message: {}",
         text
     );
 }
@@ -9992,11 +10199,22 @@ function run(array $items): void {
 
     let hover = hover_at(&backend, uri, content, 22, 5).expect("expected hover on $rows");
     let text = hover_text(&hover);
-    assert!(
-        text.contains("array<int, array{a: int}|array{b: int}|array{c: int}>"),
+    // One array type holding all three shapes, not one array per write.
+    // The shapes are matched individually rather than as one spelling:
+    // which order they come out in is down to the order the walk settles
+    // them, and it says nothing about whether the writes merged.
+    assert_eq!(
+        text.matches("array<int, ").count(),
+        1,
         "Sibling writes to the same key should merge into one array type, got: {}",
         text
     );
+    for shape in ["array{a: int}", "array{b: int}", "array{c: int}"] {
+        assert!(
+            text.contains(shape),
+            "expected {shape} among the merged element types, got: {text}"
+        );
+    }
 }
 
 /// A conditional keyed write starts from `array{}`, which the write's own
@@ -10394,6 +10612,27 @@ function test(string $x): void {
     assert!(
         text.contains("class-string<Extension>"),
         "is_a($x, Extension::class, true) should narrow string to class-string<Extension>, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_is_a_allow_string_keeps_string_alternative_on_object_or_string() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Extension {}
+function test(object|string $x): void {
+    if (is_a($x, Extension::class, true)) {
+        $x;
+    }
+}
+"#;
+    let hover = hover_at(&backend, uri, content, 4, 8).expect("expected hover");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Extension") && text.contains("class-string<Extension>"),
+        "is_a($x, Extension::class, true) on object|string should narrow to Extension|class-string<Extension>, got: {}",
         text
     );
 }
@@ -14760,4 +14999,61 @@ $outsideAnyClass = __CLASS__;
             hover_text(&hover)
         );
     }
+}
+
+// ─── `static` locals ────────────────────────────────────────────────────────
+
+/// A `static` local keeps its value between calls, so on the call that
+/// falls through to the second half of `info()` below, `$lastConfig` holds
+/// what the *other* branch stored on an earlier call.  Reading the body top
+/// to bottom sees no assignment at all — the only one sits behind a
+/// `return` — so the declaration is seeded from every assignment the body
+/// makes to the name, wherever it is.
+#[test]
+fn hover_static_local_seeded_from_assignment_in_unreached_branch() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Configuration {}
+
+function info(?Configuration $config = null): void
+{
+    static $lastConfig;
+
+    if ($config !== null) {
+        $lastConfig = $config;
+        return;
+    }
+
+    $held = $lastConfig;
+}
+"#;
+    let hover = hover_at(&backend, uri, content, 12, 5).expect("hover on $held");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Configuration"),
+        "a static local should carry the type assigned to it elsewhere in the body, got: {text}"
+    );
+}
+
+/// The seed is the union of every assignment, and an initialiser counts as
+/// one: `static $count = 0;` is an `int` before anything else touches it.
+#[test]
+fn hover_static_local_seeded_from_its_initialiser() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+function tick(): void
+{
+    static $count = 0;
+
+    $seen = $count;
+}
+"#;
+    let hover = hover_at(&backend, uri, content, 5, 5).expect("hover on $seen");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains('0'),
+        "a static local's initialiser should type it, got: {text}"
+    );
 }

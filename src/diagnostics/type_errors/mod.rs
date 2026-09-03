@@ -385,6 +385,7 @@ impl Backend {
                         branch_aware: true,
                         match_arm_narrowing: HashMap::new(),
                         scope_var_resolver: None,
+                        scope_proofs: None,
                     };
 
                     let mut resolved_args = Vec::with_capacity(exprs.len());
@@ -607,6 +608,22 @@ impl Backend {
                 // Comparing the argument to its own substitution is
                 // circular and can only produce false positives.
                 if resolved.self_bound_params.contains(&param.name) {
+                    continue;
+                }
+
+                // An out-parameter's declared type describes what the
+                // callee *writes* through the reference, not what the
+                // caller has to hand over. The value going in is whatever
+                // the variable happened to hold, and the standard library
+                // — where nearly every parameter of this shape comes from
+                // — does not check it: `preg_match_all(…, $matches,
+                // PREG_OFFSET_CAPTURE)` inside a loop is handed the
+                // previous iteration's shape, and PHP accepts a `$matches`
+                // holding a string just as readily as one that does not
+                // exist yet. There is nothing here for this check to
+                // compare against; what the *call* leaves behind is typed
+                // by the by-reference write-back instead.
+                if param.is_reference && param.defaults_to_null() {
                     continue;
                 }
 

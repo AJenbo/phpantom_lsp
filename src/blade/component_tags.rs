@@ -6,10 +6,11 @@
 //! the mago AST the way a `view()` call site can (see
 //! [`super::call_site_inference`]). The virtual PHP the preprocessor
 //! emits only carries a bound attribute's *expression* forward, as a
-//! `blade_directive(...)` call; the tag name and any plain string
-//! attribute never appear in it at all. This module scans the original
-//! Blade source directly instead.
+//! `blade_bound_attr_directive(...)` call; the tag name and any plain
+//! string attribute never appear in it at all. This module scans the
+//! original Blade source directly instead.
 
+use std::ops::Range;
 use std::path::PathBuf;
 
 use crate::Backend;
@@ -35,14 +36,18 @@ pub(crate) struct ComponentTagCall {
     /// text: `(camelCase name, type)`.
     pub(crate) literal: Vec<(String, PhpType)>,
     /// Bound attributes (`:name="expr"` / the `:$var` shorthand):
-    /// `(camelCase name, index into the file's `blade_directive(...)`
-    /// call sequence)`.
+    /// `(camelCase name, index into the file's
+    /// `blade_bound_attr_directive(...)` call sequence)`.
     ///
-    /// The preprocessor emits exactly one `blade_directive` call per
-    /// bound attribute, on every HTML tag in the file, in document
-    /// order — the same order this scan counts them in — so the index
-    /// correlates the two without needing to translate byte offsets
-    /// between the Blade source and the virtual PHP.
+    /// The preprocessor emits exactly one `blade_bound_attr_directive` call
+    /// per bound attribute that is not consumed as a component call's
+    /// argument, on every HTML tag in the file, in document order — the
+    /// same order this scan counts them in — so the index correlates the
+    /// two without needing to translate byte offsets between the Blade
+    /// source and the virtual PHP. That marker is exclusive to bound
+    /// attributes, so a `@class`/`@json`/other directive sharing the
+    /// generic `blade_directive` marker elsewhere in the file cannot shift
+    /// this sequence out of sync.
     pub(crate) bound: Vec<(String, usize)>,
 }
 
@@ -83,6 +88,27 @@ impl Backend {
             }
         }
         namespaces
+    }
+
+    /// The view an `<x-…>` tag with no class behind it renders: an
+    /// anonymous component is a template, so its name is the closest
+    /// thing it has to a class name.
+    ///
+    /// The first candidate the project ships wins, in the order
+    /// [`view_names_for_component_tag`] tries them.
+    ///
+    /// `anonymous` is passed in rather than read here because resolving
+    /// the registrations touches the filesystem, and a caller asking
+    /// about every tag in a file only has to do that once.
+    pub(crate) fn anonymous_component_view(
+        &self,
+        tag: &str,
+        anonymous: &[AnonymousNamespace],
+    ) -> Option<String> {
+        let discovery = self.blade_discovery();
+        view_names_for_component_tag(tag, anonymous)
+            .into_iter()
+            .find(|name| discovery.views.contains_key(name))
     }
 }
 
@@ -442,17 +468,18 @@ pub(crate) fn may_contain_component_tag(content: &str, needles: &[String]) -> bo
 /// prefix) is one of `tag_names`, and collect the attributes each passes.
 ///
 /// Every bound attribute on *any* tag in the file is counted — not just a
-/// matching one — because the preprocessor's `blade_directive` call
-/// sequence includes them all; skipping a non-matching tag's bound
+/// matching one — because the preprocessor's `blade_bound_attr_directive`
+/// call sequence includes them all; skipping a non-matching tag's bound
 /// attributes here would desynchronise this scan's count against that
 /// sequence.
 ///
 /// `arguments` is the same partition the preprocessor applied to this
 /// file: a bound attribute naming a parameter of the call its tag makes
-/// is that call's argument, not a `blade_directive` of its own, so it is
-/// not in the sequence to be counted. Both sides read the tag's target
-/// from one place (a template's [`crate::blade::call_site_inference::BladeScope`]),
-/// so the two cannot disagree about which attributes are arguments.
+/// is that call's argument, not a `blade_bound_attr_directive` of its own,
+/// so it is not in the sequence to be counted. Both sides read the tag's
+/// target from one place (a template's
+/// [`crate::blade::call_site_inference::BladeScope`]), so the two cannot
+/// disagree about which attributes are arguments.
 pub(crate) fn scan_component_tag_calls(
     content: &str,
     tag_names: &[String],
@@ -502,6 +529,133 @@ pub(crate) fn scan_component_tag_calls(
     results
 }
 
+/// One component tag written in a template.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TagSpan {
+    pub(crate) kind: TagKind,
+    /// The component the tag names, without the opening (`alert`,
+    /// `counter`).
+    pub(crate) name: String,
+    /// The name's own bytes in the raw Blade source.
+    pub(crate) name_span: Range<usize>,
+    /// The opening tag through its matching closing tag, or the opening
+    /// tag alone when it is self-closing or never closed.
+    pub(crate) span: Range<usize>,
+    /// Whether a matching closing tag was found, so [`Self::span`] covers
+    /// a body rather than the opening tag on its own.
+    pub(crate) closed: bool,
+}
+
+/// Every component tag in `content`, in document order:
+/// `<x-…>`…`</x-…>` and `<livewire:…>`…`</livewire:…>`, self-closing and
+/// unclosed ones included.
+///
+/// Mirrors [`super::balance::check`]'s tolerance for malformed input: a
+/// closing tag that does not match the innermost open tag is left alone
+/// rather than guessed at, so a crossed or unclosed tag is reported
+/// unclosed rather than paired with a closer that is not its own.
+pub(crate) fn tag_spans(content: &str) -> Vec<TagSpan> {
+    if !TAG_PREFIXES.iter().any(|prefix| content.contains(prefix)) {
+        return Vec::new();
+    }
+    let masked = mask_inert_regions(content, true);
+    let bytes = masked.as_bytes();
+
+    let mut out: Vec<TagSpan> = Vec::new();
+    let mut stack: Vec<TagSpan> = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != b'<' {
+            i += 1;
+            continue;
+        }
+
+        // Closing tag: `</x-…>` or `</livewire:…>`.
+        if bytes.get(i + 1) == Some(&b'/') {
+            let Some(prefix) = TAG_PREFIXES
+                .iter()
+                .find(|prefix| masked[i + 2..].starts_with(&prefix[1..]))
+            else {
+                i += 1;
+                continue;
+            };
+            let name_start = i + 2 + (prefix.len() - 1);
+            let mut j = name_start;
+            while j < bytes.len() && is_tag_name_char(bytes[j]) {
+                j += 1;
+            }
+            let Some(close) = find_byte(&masked, j, b'>') else {
+                break;
+            };
+            let name = &masked[name_start..j];
+            if stack.last().is_some_and(|open| open.name == name) {
+                let mut open = stack.pop().unwrap();
+                open.span.end = close + 1;
+                open.closed = true;
+                out.push(open);
+            } else if let Some(idx) = stack.iter().rposition(|open| open.name == name) {
+                // A closer for a tag further out means everything opened
+                // after it was never closed; those keep the opening tag as
+                // their extent.
+                out.extend(stack.drain(idx..));
+            }
+            i = close + 1;
+            continue;
+        }
+
+        // Opening tag: `<x-…>` or `<livewire:…>`.
+        let Some(prefix) = TAG_PREFIXES
+            .iter()
+            .find(|prefix| masked[i..].starts_with(**prefix))
+        else {
+            i += 1;
+            continue;
+        };
+        let name_start = i + prefix.len();
+        let mut j = name_start;
+        while j < bytes.len() && is_tag_name_char(bytes[j]) {
+            j += 1;
+        }
+        if j == name_start {
+            i += 1;
+            continue;
+        }
+        let mut bound_index = 0usize;
+        let (end, _) = scan_tag_attributes(&masked, j, &[], &mut bound_index);
+        // `scan_tag_attributes` only breaks on a standalone `/` right
+        // before `>`, so this is the same self-closing test it applies.
+        let self_closing = end >= 2 && bytes[end - 2] == b'/';
+        let tag = TagSpan {
+            kind: if *prefix == TagKind::Livewire.opening() {
+                TagKind::Livewire
+            } else {
+                TagKind::Blade
+            },
+            name: masked[name_start..j].to_string(),
+            name_span: name_start..j,
+            span: i..end,
+            closed: false,
+        };
+        if self_closing {
+            out.push(tag);
+        } else {
+            stack.push(tag);
+        }
+        i = end;
+    }
+
+    // Whatever is still open closed nothing, and stands for its opening
+    // tag alone.
+    out.append(&mut stack);
+    out.sort_by(|a, b| {
+        a.span
+            .start
+            .cmp(&b.span.start)
+            .then(b.span.end.cmp(&a.span.end))
+    });
+    out
+}
+
 fn find_byte(content: &str, from: usize, needle: u8) -> Option<usize> {
     content.as_bytes()[from..]
         .iter()
@@ -522,7 +676,7 @@ fn is_attr_name_char(b: u8) -> bool {
 /// offset just past the close, plus the literal and bound attributes
 /// found; `bound_index` is threaded through and bumped for every bound
 /// attribute encountered, matching or not, to stay in sync with the
-/// file-wide `blade_directive` call count.
+/// file-wide `blade_bound_attr_directive` call count.
 fn scan_tag_attributes(
     masked: &str,
     start: usize,
@@ -578,7 +732,7 @@ fn scan_tag_attributes(
                 let name = masked[name_start..j].to_string();
                 if is_argument(&name) {
                     // The tag's own call carries this one, so it is not in
-                    // the `blade_directive` sequence at all.
+                    // the `blade_bound_attr_directive` sequence at all.
                     i = j;
                     continue;
                 }
@@ -610,8 +764,9 @@ fn scan_tag_attributes(
         if bytes.get(i) != Some(&b'=') {
             // A bare attribute (`disabled`) is `true`. A bare *bound*
             // attribute (`:disabled`, no `=`) never reaches the
-            // preprocessor's `blade_directive` emission (it requires a
-            // quoted value), so there is nothing to correlate for it.
+            // preprocessor's `blade_bound_attr_directive` emission (it
+            // requires a quoted value), so there is nothing to correlate
+            // for it.
             if !is_bound {
                 literal.push((name, PhpType::bool()));
             }
@@ -639,7 +794,7 @@ fn scan_tag_attributes(
         if is_bound {
             // An unquoted bound value is never recognised by the
             // preprocessor either; only a quoted one produced a
-            // `blade_directive` call to correlate against.
+            // `blade_bound_attr_directive` call to correlate against.
             if quoted && !is_argument(&name) {
                 bound.push((name, *bound_index));
                 *bound_index += 1;
@@ -927,7 +1082,7 @@ mod tests {
         );
         // The `<div>` binding is index 0; `alert`'s own binding must
         // therefore be index 1, or the caller correlates it against the
-        // wrong `blade_directive` call.
+        // wrong `blade_bound_attr_directive` call.
         assert_eq!(calls[0].bound, vec![("message".to_string(), 1)]);
     }
 
@@ -1085,5 +1240,74 @@ mod tests {
     #[test]
     fn a_closing_tag_is_not_an_opening_one() {
         assert_eq!(context_at("<div></x-al|"), None);
+    }
+
+    /// The spans of the tags [`tag_spans`] found a body for, as
+    /// `(start, end)` pairs, for readable assertions.
+    fn tag_bodies(content: &str) -> Vec<(usize, usize)> {
+        tag_spans(content)
+            .into_iter()
+            .filter(|tag| tag.closed)
+            .map(|tag| (tag.span.start, tag.span.end))
+            .collect()
+    }
+
+    #[test]
+    fn a_component_tag_body_runs_from_open_to_close() {
+        let blade = "<x-alert>\n<p>hi</p>\n</x-alert>\n";
+        assert_eq!(tag_bodies(blade), [(0, blade.len() - 1)]);
+    }
+
+    #[test]
+    fn a_self_closing_tag_has_no_body() {
+        let blade = "<x-alert />\n<p>after</p>\n";
+        assert!(tag_bodies(blade).is_empty());
+        // It is still a tag, spanning itself alone.
+        let tags = tag_spans(blade);
+        assert_eq!(tags.len(), 1);
+        assert_eq!(&blade[tags[0].span.clone()], "<x-alert />");
+    }
+
+    #[test]
+    fn nested_component_tags_each_span_independently() {
+        let blade = "<x-card>\n<x-alert>\n<p>hi</p>\n</x-alert>\n</x-card>\n";
+        assert_eq!(tag_bodies(blade).len(), 2);
+    }
+
+    #[test]
+    fn a_mismatched_closing_tag_closes_nothing() {
+        assert!(tag_bodies("<x-alert>\n<p>hi</p>\n</x-card>\n").is_empty());
+    }
+
+    #[test]
+    fn an_unclosed_tag_spans_its_opening_tag_alone() {
+        let blade = "<x-alert>\n<p>hi</p>\n";
+        assert!(tag_bodies(blade).is_empty());
+        let tags = tag_spans(blade);
+        assert_eq!(tags.len(), 1);
+        assert_eq!(&blade[tags[0].span.clone()], "<x-alert>");
+    }
+
+    #[test]
+    fn a_livewire_tag_body_is_found() {
+        let blade = "<livewire:counter>\n<p>slot</p>\n</livewire:counter>\n";
+        assert_eq!(tag_bodies(blade), [(0, blade.len() - 1)]);
+        let tags = tag_spans(blade);
+        assert_eq!(tags[0].kind, TagKind::Livewire);
+        assert_eq!(tags[0].name, "counter");
+        assert_eq!(&blade[tags[0].name_span.clone()], "counter");
+    }
+
+    #[test]
+    fn a_bracket_in_an_attribute_value_does_not_close_the_opening_tag_early() {
+        let blade = "<x-alert :items=\"$a > $b\">\n<p>hi</p>\n</x-alert>\n";
+        assert_eq!(tag_bodies(blade), [(0, blade.len() - 1)]);
+    }
+
+    #[test]
+    fn tags_come_back_in_document_order() {
+        let blade = "<x-card>\n<x-alert />\n</x-card>\n<x-note />\n";
+        let names: Vec<String> = tag_spans(blade).into_iter().map(|tag| tag.name).collect();
+        assert_eq!(names, ["card", "alert", "note"]);
     }
 }

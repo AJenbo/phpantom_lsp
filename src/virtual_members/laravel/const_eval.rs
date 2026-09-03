@@ -173,6 +173,57 @@ pub(crate) fn const_string(expr: &Expression<'_>, content: &str, scope: &Scope) 
     }
 }
 
+/// The longest leading run of `expr` that is statically known.
+///
+/// `'filament.' . $panelId . '.'` folds to nothing as a whole, but every
+/// string it can produce starts with `filament.`, which is enough to say
+/// which route names a group naming itself that way could have registered.
+/// An expression that folds completely yields all of it, and one whose very
+/// first part is unknown yields the empty string.
+pub(crate) fn const_string_prefix(expr: &Expression<'_>, content: &str, scope: &Scope) -> String {
+    known_prefix(expr, content, scope).0
+}
+
+/// The known leading text of `expr`, and whether it is the whole value.
+fn known_prefix(expr: &Expression<'_>, content: &str, scope: &Scope) -> (String, bool) {
+    match expr {
+        Expression::Parenthesized(inner) => known_prefix(inner.expression, content, scope),
+        Expression::Binary(binary) if binary.operator.is_concatenation() => {
+            let (left, complete) = known_prefix(binary.lhs, content, scope);
+            if !complete {
+                return (left, false);
+            }
+            let (right, complete) = known_prefix(binary.rhs, content, scope);
+            (format!("{left}{right}"), complete)
+        }
+        Expression::CompositeString(string)
+            if !matches!(string, CompositeString::ShellExecute(_)) =>
+        {
+            let mut text = String::new();
+            for part in string.parts().iter() {
+                let expression = match part {
+                    StringPart::Literal(literal) => {
+                        text.push_str(bytes_to_str(literal.raw));
+                        continue;
+                    }
+                    StringPart::Expression(expression) => expression,
+                    StringPart::BracedExpression(braced) => braced.expression,
+                };
+                let (value, complete) = known_prefix(expression, content, scope);
+                text.push_str(&value);
+                if !complete {
+                    return (text, false);
+                }
+            }
+            (text, true)
+        }
+        _ => match const_value(expr, content, scope) {
+            ConstValue::Scalar(value) => (value, true),
+            _ => (String::new(), false),
+        },
+    }
+}
+
 /// Record `$name = <expression>` in `scope`.
 ///
 /// A right-hand side that is not statically known still binds, as

@@ -188,6 +188,10 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                 &cond.then_type,
                 &cond.else_type,
             );
+            // A conditional that asks for proof answers an undecided
+            // condition with its else branch instead of the union of
+            // both — see [`ConditionalType::else_when_undecided`].
+            let undecided: Option<&PhpType> = cond.else_when_undecided.then_some(else_type);
             // Check if the conditional subject is a template parameter
             // with a default value (not a method $parameter).
             let target = param.as_str();
@@ -485,6 +489,14 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                 // branches open rather than committing to one the call may
                 // not take.
                 let decided = match arg_text {
+                    // A variadic parameter has no single value to judge: it
+                    // holds every trailing argument, so the only question the
+                    // condition can be asking is whether any were passed. Its
+                    // first argument's own type says nothing about that, and
+                    // for the by-reference out-parameters this shape is used
+                    // for (`sscanf($s, $fmt, $a, $b)`) that type is usually
+                    // unresolvable anyway.
+                    _ if is_variadic => Some(arg_text_owned.is_none()),
                     None => Some(true),
                     Some(text) if text.trim().is_empty() => Some(true),
                     Some(text) => condition_result_from_text(condition, text).or_else(|| {
@@ -524,10 +536,13 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                                 tpl,
                             )
                         };
-                        return union_branch_types(
-                            resolve_branch(then_type),
-                            resolve_branch(else_type),
-                        );
+                        return match undecided {
+                            Some(branch) => resolve_branch(branch),
+                            None => union_branch_types(
+                                resolve_branch(then_type),
+                                resolve_branch(else_type),
+                            ),
+                        };
                     }
                 };
                 resolve_conditional_with_text_args_and_defaults(
@@ -577,10 +592,13 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                                 tpl,
                             )
                         };
-                        return union_branch_types(
-                            resolve_branch(then_type),
-                            resolve_branch(else_type),
-                        );
+                        return match undecided {
+                            Some(branch) => resolve_branch(branch),
+                            None => union_branch_types(
+                                resolve_branch(then_type),
+                                resolve_branch(else_type),
+                            ),
+                        };
                     }
                     None => else_type,
                 };
@@ -665,10 +683,13 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                                     tpl,
                                 )
                             };
-                            return union_branch_types(
-                                resolve_branch(then_type),
-                                resolve_branch(else_type),
-                            );
+                            return match undecided {
+                                Some(branch) => resolve_branch(branch),
+                                None => union_branch_types(
+                                    resolve_branch(then_type),
+                                    resolve_branch(else_type),
+                                ),
+                            };
                         }
                         else_type
                     }
@@ -964,6 +985,13 @@ fn condition_category(condition: &PhpType) -> Option<&'static str> {
         Some("null")
     } else if condition.is_array_like() {
         Some("array")
+    } else if condition.is_object() {
+        // The one category [`type_category`] reports that has no keyword of
+        // its own below: `is object` asks the same question it answers for
+        // every class instance, so a scalar argument refutes it outright
+        // rather than being handed to the class-hierarchy check, where the
+        // bare keyword resolves to no class at all and settles nothing.
+        Some("object")
     } else {
         None
     }

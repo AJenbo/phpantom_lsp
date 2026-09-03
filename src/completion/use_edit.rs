@@ -354,6 +354,19 @@ pub(crate) fn build_use_edit(
     use_block: &UseBlockInfo,
     file_namespace: &Option<String>,
 ) -> Option<Vec<TextEdit>> {
+    build_aliased_use_edit(fqn, None, use_block, file_namespace)
+}
+
+/// Like [`build_use_edit`] but emits `use Ns\Foo as Alias;` when `alias`
+/// is `Some`.  Used by the class-move rename, which has to import a
+/// moved class under an alias when its short name is already taken in
+/// the importing file.
+pub(crate) fn build_aliased_use_edit(
+    fqn: &str,
+    alias: Option<&str>,
+    use_block: &UseBlockInfo,
+    file_namespace: &Option<String>,
+) -> Option<Vec<TextEdit>> {
     // No namespace separator → this is a global class (e.g. `PDO`, `DateTime`).
     // Only needs an import when the current file declares a namespace;
     // otherwise we're already in the global namespace.
@@ -372,12 +385,17 @@ pub(crate) fn build_use_edit(
         ""
     };
 
+    let statement = match alias {
+        Some(alias) => format!("use {} as {};", fqn, alias),
+        None => format!("use {};", fqn),
+    };
+
     Some(vec![TextEdit {
         range: Range {
             start: insert_pos,
             end: insert_pos,
         },
-        new_text: format!("{}use {};\n", prefix, fqn),
+        new_text: format!("{}{}\n", prefix, statement),
     }])
 }
 

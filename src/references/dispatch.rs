@@ -275,7 +275,14 @@ impl Backend {
             SymbolKind::FunctionCall { name, .. } => {
                 let ctx = self.file_context(uri);
                 let fqn = ctx.resolve_name_at(name, span_start);
-                self.find_function_references(&fqn, name, include_declaration)
+                // The span text is qualified at a `use function Foo\bar;`
+                // import and at an FQN call site, and the short-name
+                // fallback compares against a short name.
+                self.find_function_references(
+                    &fqn,
+                    crate::util::short_name(name),
+                    include_declaration,
+                )
             }
             SymbolKind::ConstantReference { name, .. } => {
                 let fqn = self.constant_fqn_at(uri, span_start, name);

@@ -115,8 +115,12 @@ pub(super) fn span_spells_its_name(content: &str, span: &SymbolSpan) -> bool {
         return false;
     };
     // Property and static-property spans include the `$` sigil, the
-    // recorded name never does.
+    // recorded name never does.  A fully-qualified reference (`\Foo\bar()`)
+    // spans its leading `\` while the recorded name is normalised without
+    // one, so neither side may carry it into the comparison.
     let text = text.strip_prefix('$').unwrap_or(text);
+    let text = text.strip_prefix('\\').unwrap_or(text);
+    let name = name.strip_prefix('\\').unwrap_or(name);
     text.eq_ignore_ascii_case(name)
 }
 

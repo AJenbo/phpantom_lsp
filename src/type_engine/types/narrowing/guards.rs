@@ -635,6 +635,14 @@ pub(in crate::type_engine) fn apply_guard_clause_narrowing(
                 AssertionKind::IfFalse => !function_returned_true,
                 AssertionKind::Always => continue,
             };
+            // The equality form (`!=Type`) promises a comparison, and a
+            // comparison that fails rules nothing out, so it only speaks for
+            // the branch it names.  Inverting it the way the subtype form
+            // inverts would put Laravel's `filled()`/`blank()` promises in
+            // the wrong branch.
+            if !applies_positively && assertion.is_equality {
+                continue;
+            }
 
             if let Some(arg_var) = find_assertion_arg_variable(
                 info.argument_list,
@@ -870,8 +878,91 @@ fn narrow_by_condition_inner(
         _ => {}
     }
 
+    // `$v instanceof Foo` is the type test a filter callback is most often
+    // written with, and `$v !== null` the one `is_null()` is spelled as
+    // when nobody reaches for a function call.
+    if let Some(extraction) = super::try_extract_instanceof_with_negation(condition, var_name) {
+        return narrow_type_by_instanceof(ty, &extraction, class_loader);
+    }
+    if let Some(expects_null) = try_extract_null_comparison(condition, var_name) {
+        return filter_type_by_guard(ty, TypeGuardKind::Null, expects_null, class_loader);
+    }
+
     let (kind, negated) = try_extract_type_guard(condition, var_name)?;
     filter_type_by_guard(ty, kind, !negated, class_loader)
+}
+
+/// What a `null` comparison concludes about the value that passes it.
+struct NullComparison {
+    /// Whether passing the comparison proves the value *is* null.
+    expects_null: bool,
+    /// Whether the operator carrying that conclusion was the strict one.
+    strict: bool,
+}
+
+/// Whether `expr` compares `var_name` against `null`, and whether passing
+/// it proves the value *is* null.
+///
+/// Only the strict operators prove a value is null: `$v == null` is also
+/// true for `''`, `0` and `[]`, so reporting `null` for it would claim
+/// more than the comparison shows — and neither does the negated spelling
+/// of the same thing, `!($v != null)`. Proving a value is *not* null needs
+/// no such care, since anything that survives either `!==` or `!=` is
+/// non-null.
+fn try_extract_null_comparison(expr: &Expression<'_>, var_name: &str) -> Option<bool> {
+    let comparison = extract_null_comparison(expr, var_name)?;
+    (!comparison.expects_null || comparison.strict).then_some(comparison.expects_null)
+}
+
+/// The raw conclusion of a `null` comparison on `var_name`, before the
+/// loose operators are ruled out.
+///
+/// Strictness travels through the negations so that the caller can judge
+/// `!($v != null)` by the operator that actually appears in it.
+fn extract_null_comparison(expr: &Expression<'_>, var_name: &str) -> Option<NullComparison> {
+    match expr {
+        Expression::Parenthesized(inner) => extract_null_comparison(inner.expression, var_name),
+        Expression::UnaryPrefix(prefix) if prefix.operator.is_not() => {
+            extract_null_comparison(prefix.operand, var_name).map(|c| NullComparison {
+                expects_null: !c.expects_null,
+                strict: c.strict,
+            })
+        }
+        Expression::Binary(bin) => {
+            let (expects_null, strict) = match bin.operator {
+                BinaryOperator::Identical(_) => (true, true),
+                BinaryOperator::Equal(_) => (true, false),
+                BinaryOperator::NotIdentical(_) => (false, true),
+                BinaryOperator::NotEqual(_) => (false, false),
+                _ => return None,
+            };
+            let (subject, literal) = if is_null_literal(bin.rhs) {
+                (bin.lhs, bin.rhs)
+            } else {
+                (bin.rhs, bin.lhs)
+            };
+            if !is_null_literal(literal) || expr_to_subject_key(subject)? != var_name {
+                return None;
+            }
+            Some(NullComparison {
+                expects_null,
+                strict,
+            })
+        }
+        _ => None,
+    }
+}
+
+/// Whether `expr` is the `null` keyword.
+fn is_null_literal(expr: &Expression<'_>) -> bool {
+    match expr {
+        Expression::Parenthesized(inner) => is_null_literal(inner.expression),
+        Expression::Literal(Literal::Null(_)) => true,
+        Expression::ConstantAccess(access) => bytes_to_str(access.name.value())
+            .trim_start_matches('\\')
+            .eq_ignore_ascii_case("null"),
+        _ => false,
+    }
 }
 
 /// Try to extract a type-guard function call on a variable.

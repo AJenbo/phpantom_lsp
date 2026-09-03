@@ -2987,6 +2987,66 @@ namespace App {
 }
 
 #[test]
+fn mock_conditional_return_preserves_intersection_through_a_trait_this() {
+    // Same shape as `mock_conditional_return_preserves_interface_intersection`,
+    // but `mock()` is called from *inside a trait* rather than directly on
+    // the test class.  `$this` there stands for whatever uses the trait, so
+    // it resolves to several classes at once (the trait itself, the using
+    // class, and its ancestor chain, all tagged as one intersection) instead
+    // of the single owner the other test exercises.  A conditional return
+    // type carries no plain `return_type` at all (only `conditional_return`),
+    // so the first of those several owners whose merged method is found
+    // must not lock in an empty hint before a later owner gets a chance to
+    // resolve the conditional.
+    let php = r#"<?php
+namespace Mockery {
+    interface MockInterface {}
+}
+
+namespace App {
+    class Client {}
+
+    trait InteractsWithContainer
+    {
+        /**
+         * @template TInstance of object
+         *
+         * @param  string|class-string<TInstance>  $abstract
+         * @return ($abstract is class-string<TInstance> ? TInstance&\Mockery\MockInterface : \Mockery\MockInterface)
+         */
+        protected function mock($abstract) {}
+    }
+
+    class BaseTestCase
+    {
+        use InteractsWithContainer;
+    }
+
+    trait MocksClient
+    {
+        protected function mockClient(): Client&\Mockery\MockInterface
+        {
+            $clientMock = $this->mock(Client::class);
+
+            return $clientMock;
+        }
+    }
+
+    class MyTest extends BaseTestCase
+    {
+        use MocksClient;
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_return_error(&diags),
+        "$this->mock(Client::class) inside a trait should resolve to Client&MockInterface, got: {}",
+        return_error_messages(&diags).join("; ")
+    );
+}
+
+#[test]
 fn mock_helpers_survive_an_imprecise_method_tag_on_the_test_base() {
     // A test class that also carries `@method MockInterface mock()` in
     // its own docblock.  The tag is a lie: `mock()` exists for real on
@@ -4256,6 +4316,196 @@ function pow2(int $exp): int
     assert!(
         !has_return_error(&diags),
         "int**int returned as int should be allowed under strict_types, got: {:?}",
+        return_error_messages(&diags)
+    );
+}
+
+/// `new self(...)` must resolve through the enclosing class's *fully
+/// qualified* name.  A namespaced class whose short name collides with a
+/// global one (`App\Error` vs the built-in `\Error`) otherwise has every
+/// `new self(...)` misresolve to the global class.
+#[test]
+fn new_self_resolves_namespaced_class_over_same_named_global() {
+    let php = r#"<?php
+namespace {
+    class Error
+    {
+        public function __construct(string $message = '', int $code = 0) {}
+    }
+}
+
+namespace App {
+    class Error
+    {
+        public function __construct(private string $message, private ?int $line = null) {}
+
+        public function changeLine(?int $line): self
+        {
+            return new self($this->message, $line);
+        }
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_return_error(&diags),
+        "new self() inside App\\Error should resolve to App\\Error, got: {:?}",
+        return_error_messages(&diags)
+    );
+}
+
+/// `return $this;` inside a trait method whose declared return type is an
+/// interface the trait does not itself implement.  `$this` is the class the
+/// trait is mixed into, so the interface is satisfied there even though the
+/// trait declaration alone cannot prove it.
+#[test]
+fn trait_this_return_satisfies_using_class_interface() {
+    let php = r#"<?php
+interface Shape
+{
+    public function area(): float;
+}
+
+trait ShapeTrait
+{
+    public function self_(): Shape
+    {
+        return $this;
+    }
+}
+
+class Square implements Shape
+{
+    use ShapeTrait;
+
+    public function area(): float
+    {
+        return 1.0;
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_return_error(&diags),
+        "return $this in a trait should satisfy the using class's interface, got: {:?}",
+        return_error_messages(&diags)
+    );
+}
+
+/// `@phpstan-require-implements` states the same guarantee outright, and
+/// has to reach the forward walker's `$this` and not just the chain
+/// resolver's.
+#[test]
+fn trait_this_return_satisfies_require_implements_bound() {
+    let php = r#"<?php
+interface Shape
+{
+    public function area(): float;
+}
+
+/** @phpstan-require-implements Shape */
+trait ShapeTrait
+{
+    public function self_(): Shape
+    {
+        return $this;
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_return_error(&diags),
+        "@phpstan-require-implements should let `return $this` satisfy the interface, got: {:?}",
+        return_error_messages(&diags)
+    );
+}
+
+/// A trait no class uses says nothing about what `$this` is, and a trait
+/// whose users do not all satisfy the declared return type says the
+/// opposite of what the declaration claims.  Both stay flagged.
+#[test]
+fn trait_this_return_still_flagged_without_a_shared_bound() {
+    let unused = r#"<?php
+interface Shape
+{
+    public function area(): float;
+}
+
+trait ShapeTrait
+{
+    public function self_(): Shape
+    {
+        return $this;
+    }
+}
+"#;
+    assert!(
+        has_return_error(&collect(unused)),
+        "an unused trait offers no proof that $this is a Shape"
+    );
+
+    let mixed = unused.to_string()
+        + r#"
+class Square implements Shape
+{
+    use ShapeTrait;
+
+    public function area(): float
+    {
+        return 1.0;
+    }
+}
+
+class Loose
+{
+    use ShapeTrait;
+}
+"#;
+    assert!(
+        has_return_error(&collect(&mixed)),
+        "a user that is not a Shape means $this is not guaranteed to be one, got: {:?}",
+        return_error_messages(&collect(&mixed))
+    );
+}
+
+/// A trait's own members stay reachable on `$this` once the using
+/// classes' bounds are intersected in: the intersection adds to the
+/// trait, it does not replace it.
+#[test]
+fn trait_this_keeps_trait_members_alongside_the_bound() {
+    let php = r#"<?php
+interface Shape
+{
+    public function area(): float;
+}
+
+trait ShapeTrait
+{
+    public function scaled(): float
+    {
+        return $this->area() * $this->factor();
+    }
+
+    public function factor(): float
+    {
+        return 2.0;
+    }
+}
+
+class Square implements Shape
+{
+    use ShapeTrait;
+
+    public function area(): float
+    {
+        return 1.0;
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_return_error(&diags),
+        "trait and interface members should both resolve on $this, got: {:?}",
         return_error_messages(&diags)
     );
 }

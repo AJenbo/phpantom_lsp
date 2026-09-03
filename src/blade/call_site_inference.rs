@@ -178,6 +178,26 @@ fn join_call_site_types(types: Vec<PhpType>) -> PhpType {
     }
 }
 
+/// The canonical spelling of a template path, for comparing against a
+/// canonical view root.
+///
+/// A template that has just been deleted has no canonical form of its
+/// own, so its directory is canonicalized instead: the file still has to
+/// resolve to the view name it had, or the callers that render it are
+/// left holding a name nothing answers to.
+fn canonical_path_for_comparison(path: &std::path::Path) -> std::path::PathBuf {
+    if let Ok(canonical) = path.canonicalize() {
+        return canonical;
+    }
+    match (
+        path.parent().and_then(|parent| parent.canonicalize().ok()),
+        path.file_name(),
+    ) {
+        (Some(parent), Some(name)) => parent.join(name),
+        _ => path.to_path_buf(),
+    }
+}
+
 impl Backend {
     /// Compute the variables to inject into a Blade template's virtual
     /// PHP: the members of the class backing a component view (see
@@ -384,7 +404,7 @@ impl Backend {
                 // The same partition the caller's own virtual PHP was
                 // built with, so the scan agrees with it about which
                 // attributes became arguments of the tag's call and are
-                // therefore not `blade_directive` calls to count.
+                // therefore not `blade_bound_attr_directive` calls to count.
                 let caller_components = self
                     .blade_injected_vars
                     .read()
@@ -887,20 +907,9 @@ impl Backend {
         let Ok(url) = tower_lsp::lsp_types::Url::parse(uri) else {
             return Vec::new();
         };
-        let Ok(mut path) = url.to_file_path() else {
+        let Ok(path) = url.to_file_path() else {
             return Vec::new();
         };
-
-        // Roots are canonicalized below, so normalize the file side once as
-        // well. macOS exposes the same temporary directory through `/var`
-        // and `/private/var`; comparing only one canonical side makes every
-        // template under that alias appear to sit outside its view root.
-        path = path.canonicalize().unwrap_or_else(|_| {
-            path.parent()
-                .and_then(|parent| parent.canonicalize().ok())
-                .and_then(|parent| path.file_name().map(|name| parent.join(name)))
-                .unwrap_or(path)
-        });
 
         let mut names = Vec::new();
         let mut push_name = |rel: &std::path::Path, namespace: &str| {
@@ -918,21 +927,44 @@ impl Backend {
             }
         };
 
-        // `path` came from a file URI and is absolute; a view root can
-        // be relative when the workspace root was given relative (the
-        // analyse CLI passes `--project-root` through as-is), so
-        // canonicalize each root before comparing.
-        for root in self.laravel_view_roots() {
-            let root = root.canonicalize().unwrap_or(root);
-            if let Ok(rel) = path.strip_prefix(&root) {
-                push_name(rel, "");
+        // Each root is tried against the raw spelling first, so the common
+        // case costs no filesystem calls, and only falls back to canonical
+        // spellings when the raw ones do not line up.  Canonicalizing the
+        // template instead of trying it raw would lose one that is itself
+        // a symlink into a shared directory, since that resolves out of
+        // the view root it sits under.
+        let canonical = std::cell::OnceCell::new();
+        let mut match_root = |root: &std::path::Path, namespace: &str| {
+            if let Ok(rel) = path.strip_prefix(root) {
+                push_name(rel, namespace);
+                return;
             }
+            // A view root can be relative when the workspace root was
+            // given relative (the analyse CLI passes `--project-root`
+            // through as-is), while `path` came from a file URI and is
+            // always absolute.
+            let Ok(root) = root.canonicalize() else {
+                return;
+            };
+            if let Ok(rel) = path.strip_prefix(&root) {
+                push_name(rel, namespace);
+                return;
+            }
+            // The workspace itself can be reached under an alias: macOS
+            // exposes the same directory through both `/var` and
+            // `/private/var`, so a canonical root and a raw template path
+            // describe the same tree under two names.
+            let canonical = canonical.get_or_init(|| canonical_path_for_comparison(&path));
+            if let Ok(rel) = canonical.strip_prefix(&root) {
+                push_name(rel, namespace);
+            }
+        };
+
+        for root in self.laravel_view_roots() {
+            match_root(&root, "");
         }
         for res in &self.laravel_provider_resources.read().view_dirs {
-            let res_path = res.path.canonicalize().unwrap_or_else(|_| res.path.clone());
-            if let Ok(rel) = path.strip_prefix(&res_path) {
-                push_name(rel, &res.namespace);
-            }
+            match_root(&res.path, &res.namespace);
         }
         names
     }
@@ -994,6 +1026,7 @@ impl Backend {
                     branch_aware: false,
                     match_arm_narrowing: HashMap::new(),
                     scope_var_resolver: None,
+                    scope_proofs: None,
                 };
 
                 let mut vars: Vec<PassedVar> = Vec::new();
@@ -1137,11 +1170,14 @@ impl Backend {
     /// already found in its raw source.
     ///
     /// `virtual_php` is the caller's own preprocessed content: a bound
-    /// attribute on *any* HTML tag compiles down to a `blade_directive(EXPR)`
-    /// call, in document order, so an occurrence's
-    /// [`super::component_tags::ComponentTagCall::bound`] indices index
-    /// directly into that call sequence — no Blade-to-PHP offset
-    /// translation needed.
+    /// attribute on *any* HTML tag compiles down to a
+    /// `blade_bound_attr_directive(EXPR)` call, in document order, so an
+    /// occurrence's [`super::component_tags::ComponentTagCall::bound`]
+    /// indices index directly into that call sequence — no Blade-to-PHP
+    /// offset translation needed. That marker is exclusive to bound
+    /// attributes, unlike the generic `blade_directive` shared by `@class`,
+    /// `@json`, and other directives, so none of those can shift the
+    /// sequence out of sync with `scan_component_tag_calls`'s count.
     fn extract_component_call_site_vars(
         &self,
         uri: &str,
@@ -1193,6 +1229,7 @@ impl Backend {
                             branch_aware: false,
                             match_arm_narrowing: HashMap::new(),
                             scope_var_resolver: None,
+                            scope_proofs: None,
                         };
                         let ty = crate::type_engine::variable::foreach_resolution::resolve_expression_type(
                         expr, &var_ctx,
@@ -1212,11 +1249,15 @@ impl Backend {
 
 // ─── AST walking ────────────────────────────────────────────────────────────
 
-/// Collects every `blade_directive(EXPR)` call in a Blade file's virtual
-/// PHP, in document order. The preprocessor emits exactly one such call
-/// per bound HTML attribute (see `super::preprocessor`), so this order
-/// matches the order `super::component_tags::scan_component_tag_calls`
-/// counts bound attributes in.
+/// Collects every `blade_bound_attr_directive(EXPR)` call in a Blade file's
+/// virtual PHP, in document order. The preprocessor emits exactly one such
+/// call per bound HTML attribute that is not consumed as a component call's
+/// argument (see `super::preprocessor`), so this order matches the order
+/// `super::component_tags::scan_component_tag_calls` counts bound attributes
+/// in. That marker is exclusive to bound attributes — unlike the generic
+/// `blade_directive` shared by `@class`, `@json`, and other directives —
+/// so a directive appearing between two tags cannot shift this sequence out
+/// of sync with that count.
 struct BladeDirectiveCollectCtx<'ast, 'arena> {
     calls: Vec<&'ast Expression<'arena>>,
 }
@@ -1234,7 +1275,7 @@ impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, BladeDirectiveColle
         let Expression::Identifier(ident) = node.function else {
             return;
         };
-        if bytes_to_str(ident.value()) != "blade_directive" {
+        if bytes_to_str(ident.value()) != "blade_bound_attr_directive" {
             return;
         }
         if let Some(arg) = node.argument_list.arguments.iter().next() {
@@ -2201,5 +2242,28 @@ mod tests {
             backend.view_names_for_blade_uri(linked_uri.as_str()),
             vec!["shop"]
         );
+    }
+
+    /// A template that is itself a symlink into a shared directory is
+    /// still addressable by the name it has inside the view root.
+    #[cfg(unix)]
+    #[test]
+    fn view_name_resolution_keeps_symlinked_templates() {
+        let dir = tempfile::tempdir().expect("failed to create test workspace");
+        let root = dir.path().join("project");
+        let views = root.join("resources/views");
+        let shared = dir.path().join("shared");
+        std::fs::create_dir_all(&views).expect("failed to create view directory");
+        std::fs::create_dir_all(&shared).expect("failed to create shared directory");
+
+        let shared_template = shared.join("shop.blade.php");
+        std::fs::write(&shared_template, "").expect("failed to write view");
+        let template = views.join("shop.blade.php");
+        symlink(&shared_template, &template).expect("failed to link view into the root");
+
+        let uri = Url::from_file_path(&template).expect("view path should become a file URI");
+        let backend = Backend::new_test_with_workspace(root, Vec::new());
+
+        assert_eq!(backend.view_names_for_blade_uri(uri.as_str()), vec!["shop"]);
     }
 }

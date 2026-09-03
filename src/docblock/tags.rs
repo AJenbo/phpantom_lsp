@@ -132,6 +132,21 @@ pub fn declares_pure(info: &DocblockInfo) -> bool {
         .any(|t| matches!(t.name.as_ref(), "pure" | "phpstan-pure" | "psalm-pure"))
 }
 
+/// Whether a docblock declares the declaration to have side effects via
+/// `@impure`, `@phpstan-impure` or `@psalm-impure`.
+///
+/// The counterpart to [`declares_pure`]: it is how an author says that a
+/// call changes state even though it returns a value, which is the one
+/// case a return type cannot express.
+pub fn declares_impure(info: &DocblockInfo) -> bool {
+    info.tags.iter().any(|t| {
+        matches!(
+            t.name.as_ref(),
+            "impure" | "phpstan-impure" | "psalm-impure"
+        )
+    })
+}
+
 /// Extract the PHP version from a `@removed` PHPDoc tag.
 ///
 /// Handles the format `@removed X.Y` where `X.Y` is a PHP version
@@ -438,7 +453,7 @@ pub fn extract_type_assertions_from_info(info: &DocblockInfo) -> Vec<TypeAsserti
     let mut results = Vec::new();
 
     for tag in info.tags_by_kinds(ASSERT_KINDS) {
-        let Some((negated, type_str, subject)) = assert_parts(tag) else {
+        let Some((negated, is_equality, type_str, subject)) = assert_parts(tag) else {
             continue;
         };
 
@@ -447,25 +462,28 @@ pub fn extract_type_assertions_from_info(info: &DocblockInfo) -> Vec<TypeAsserti
             param_name: subject.into_owned(),
             asserted_type: PhpType::parse(&type_str),
             negated,
+            is_equality,
         });
     }
 
     results
 }
 
-/// Split an assertion tag into `(negated, asserted_type, subject)`.
+/// Split an assertion tag into `(negated, is_equality, asserted_type, subject)`.
 ///
-/// The grammar reports the negation flag, the pattern and the subject
-/// separately.  When it could not parse the tag (as with the modifier
-/// stacking in `@phpstan-assert =!Foo $x`, which it declines to model), the
-/// modifiers are peeled off by hand instead: `!` negates and `=` marks an
-/// exact-type assertion, which narrows the same way the default subtype
-/// form does and is therefore dropped.
-fn assert_parts(tag: &TagInfo) -> Option<(bool, Cow<'_, str>, Cow<'_, str>)> {
+/// The grammar reports the negation flag, the equality flag, the pattern and
+/// the subject separately.  When it could not parse the tag (as with the
+/// modifier stacking in `@phpstan-assert =!Foo $x`, which it declines to
+/// model), the modifiers are peeled off by hand instead: `!` negates and `=`
+/// marks an equality assertion.  The `=` form narrows the branch it belongs to
+/// exactly as the subtype form does, but it may not be inverted into the
+/// opposite branch, so the flag is carried rather than dropped.
+fn assert_parts(tag: &TagInfo) -> Option<(bool, bool, Cow<'_, str>, Cow<'_, str>)> {
     if let TagValueInfo::Assert(value) = &tag.value {
         let type_text = value.type_text.as_deref()?;
         return Some((
             value.negated,
+            value.is_equality,
             Cow::Borrowed(type_text),
             Cow::Borrowed(value.subject.as_str()),
         ));
@@ -473,11 +491,13 @@ fn assert_parts(tag: &TagInfo) -> Option<(bool, Cow<'_, str>, Cow<'_, str>)> {
 
     let mut rest = tag.description.trim();
     let mut negated = false;
+    let mut is_equality = false;
     loop {
         if let Some(r) = rest.strip_prefix('!') {
             negated = !negated;
             rest = r.trim_start();
         } else if let Some(r) = rest.strip_prefix('=') {
+            is_equality = true;
             rest = r.trim_start();
         } else {
             break;
@@ -494,7 +514,12 @@ fn assert_parts(tag: &TagInfo) -> Option<(bool, Cow<'_, str>, Cow<'_, str>)> {
         .next()
         .filter(|token| token.starts_with('$'))?;
 
-    Some((negated, Cow::Borrowed(type_str), Cow::Borrowed(subject)))
+    Some((
+        negated,
+        is_equality,
+        Cow::Borrowed(type_str),
+        Cow::Borrowed(subject),
+    ))
 }
 
 /// Extract the type from a `@var` PHPDoc tag.
@@ -588,6 +613,28 @@ fn strip_docblock_line_delimiters(trimmed: &str) -> &str {
     let inner = trimmed.strip_prefix("/**").unwrap_or(trimmed);
     let inner = inner.strip_suffix("*/").unwrap_or(inner);
     inner.trim().trim_start_matches('*').trim()
+}
+
+/// Pull the inner text out of a `/** ... */` docblock that shares its
+/// line with code on either side, e.g.
+/// `$x = /** @param T $y */ static function (T $y) {`.
+///
+/// [`strip_docblock_line_delimiters`] only strips `/**`/`*/` when they
+/// sit at the very start/end of the trimmed line, so a docblock preceded
+/// or followed by other code on the same line is left untouched and its
+/// tags never match. Returns `None` when the line has no `/** ... */`
+/// span, or when the span *is* the whole line (that case is already
+/// handled by `strip_docblock_line_delimiters`).
+fn split_inline_docblock(trimmed: &str) -> Option<&str> {
+    let open = trimmed.find("/**")?;
+    let after_open = &trimmed[open + 3..];
+    let close_rel = after_open.find("*/")?;
+    let before = trimmed[..open].trim();
+    let after = after_open[close_rel + 2..].trim();
+    if before.is_empty() && after.is_empty() {
+        return None;
+    }
+    Some(after_open[..close_rel].trim())
 }
 
 /// Search backward through `content` (up to `before_offset`) for any
@@ -1113,8 +1160,17 @@ pub fn find_iterable_raw_type_in_source(
         }
 
         // ── Named annotation: line mentions the variable name ───────
-        if trimmed.contains(var_name) {
-            let inner = strip_docblock_line_delimiters(trimmed);
+        // A docblock sharing its line with code (`$x = /** @param T $y
+        // */ function ($y) {`) is matched against its own inner text so
+        // the annotation is not swallowed by the surrounding code.
+        let inline_annotation = split_inline_docblock(trimmed);
+        let annotation_source = inline_annotation.unwrap_or(trimmed);
+        if annotation_source.contains(var_name) {
+            let inner = if inline_annotation.is_some() {
+                annotation_source
+            } else {
+                strip_docblock_line_delimiters(annotation_source)
+            };
 
             // Try @var first, then @param.
             let rest = if let Some(r) = inner.strip_prefix("@var") {
@@ -2286,6 +2342,7 @@ mod tests {
         assert_eq!(result[0].asserted_type.to_string(), "ExpectedType");
         assert_eq!(result[0].param_name, "$actual");
         assert!(!result[0].negated);
+        assert!(result[0].is_equality);
     }
 
     #[test]
@@ -2300,7 +2357,34 @@ mod tests {
             assert_eq!(result.len(), 1, "doc: {doc}");
             assert_eq!(result[0].asserted_type.to_string(), "Foobar", "doc: {doc}");
             assert!(result[0].negated, "doc: {doc}");
+            assert!(result[0].is_equality, "doc: {doc}");
         }
+    }
+
+    #[test]
+    fn assert_without_equals_is_not_an_equality_assertion() {
+        // The subtype form is the one that stays invertible into the
+        // branch the tag does not name, so the two must not be conflated.
+        for doc in [
+            "/** @phpstan-assert Foobar $actual */",
+            "/** @phpstan-assert !Foobar $actual */",
+        ] {
+            let result = extract_type_assertions(doc);
+            assert_eq!(result.len(), 1, "doc: {doc}");
+            assert!(!result[0].is_equality, "doc: {doc}");
+        }
+    }
+
+    #[test]
+    fn assert_equality_survives_a_union_asserted_type() {
+        // Laravel's `filled()` / `blank()` pair, which is where the
+        // equality form shows up in real code.
+        let doc = "/** @phpstan-assert-if-true !=null|'' $value */";
+        let result = extract_type_assertions(doc);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].kind, AssertionKind::IfTrue);
+        assert!(result[0].negated);
+        assert!(result[0].is_equality);
     }
 
     // ── strip_html_tags ──────────────────────────────────────────────

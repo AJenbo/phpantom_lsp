@@ -75,8 +75,14 @@ impl Backend {
                 None => continue,
             };
 
-            // Mago requires mago.toml to operate.
-            if !mago::has_mago_config(&workspace_root) {
+            let composer_pkg = crate::composer::read_composer_package(&workspace_root);
+            let laravel = composer_pkg
+                .as_ref()
+                .is_some_and(crate::composer::is_laravel_project);
+
+            // Mago requires mago.toml to operate, and its tables decide
+            // whether the project uses `mago lint` at all.
+            if !mago::enabled_services(&workspace_root, &config.mago, laravel).lint {
                 continue;
             }
 
@@ -85,20 +91,23 @@ impl Backend {
                 None => continue,
             };
 
-            let bin_dir: Option<String> = crate::composer::read_composer_package(&workspace_root)
-                .map(|pkg| crate::composer::get_bin_dir(&pkg));
+            let bin_dir: Option<String> = composer_pkg.as_ref().map(crate::composer::get_bin_dir);
 
-            let resolved =
-                match mago::resolve_mago(Some(&workspace_root), &config.mago, bin_dir.as_deref()) {
-                    Some(r) => r,
-                    None => continue,
-                };
+            let resolved = match mago::resolve_mago(
+                Some(&workspace_root),
+                &config.mago,
+                bin_dir.as_deref(),
+                composer_pkg.as_ref(),
+            ) {
+                Some(r) => r,
+                None => continue,
+            };
 
             // ── Step 4: run mago lint (the slow part) ───────────────
             let mago_config = config.mago.clone();
             let shutdown_flag = Arc::clone(&self.shutdown_flag);
             let mago_diags = {
-                let result = tokio::task::spawn_blocking(move || {
+                let result = crate::server::run_blocking_cancel_safe("mago lint", move || {
                     mago::run_mago_lint(
                         &resolved,
                         &content,
@@ -111,9 +120,8 @@ impl Backend {
                 .await;
 
                 match result {
-                    Ok(Ok(diags)) => diags,
-                    Ok(Err(_e)) => continue,
-                    Err(_join_err) => continue,
+                    Some(Ok(diags)) => diags,
+                    _ => continue,
                 }
             };
 
@@ -125,10 +133,7 @@ impl Backend {
                 }
             }
 
-            {
-                let mut cache = self.mago_lint_tool.last_diags.lock();
-                cache.insert(uri.clone(), mago_diags);
-            }
+            self.mago_lint_tool.store_file_result(&uri, mago_diags);
 
             // In pull mode this also tells the editor to re-pull, but
             // only when the run actually changed the file's diagnostics.
@@ -201,8 +206,14 @@ impl Backend {
                 None => continue,
             };
 
-            // Mago requires mago.toml to operate.
-            if !mago::has_mago_config(&workspace_root) {
+            let composer_pkg = crate::composer::read_composer_package(&workspace_root);
+            let laravel = composer_pkg
+                .as_ref()
+                .is_some_and(crate::composer::is_laravel_project);
+
+            // Mago requires mago.toml to operate, and its tables decide
+            // whether the project uses `mago analyze` at all.
+            if !mago::enabled_services(&workspace_root, &config.mago, laravel).analyze {
                 continue;
             }
 
@@ -211,20 +222,23 @@ impl Backend {
                 None => continue,
             };
 
-            let bin_dir: Option<String> = crate::composer::read_composer_package(&workspace_root)
-                .map(|pkg| crate::composer::get_bin_dir(&pkg));
+            let bin_dir: Option<String> = composer_pkg.as_ref().map(crate::composer::get_bin_dir);
 
-            let resolved =
-                match mago::resolve_mago(Some(&workspace_root), &config.mago, bin_dir.as_deref()) {
-                    Some(r) => r,
-                    None => continue,
-                };
+            let resolved = match mago::resolve_mago(
+                Some(&workspace_root),
+                &config.mago,
+                bin_dir.as_deref(),
+                composer_pkg.as_ref(),
+            ) {
+                Some(r) => r,
+                None => continue,
+            };
 
             // ── Step 4: run mago analyze (the slow part) ────────────
             let mago_config = config.mago.clone();
             let shutdown_flag = Arc::clone(&self.shutdown_flag);
             let mago_diags = {
-                let result = tokio::task::spawn_blocking(move || {
+                let result = crate::server::run_blocking_cancel_safe("mago analyze", move || {
                     mago::run_mago_analyze(
                         &resolved,
                         &content,
@@ -237,9 +251,8 @@ impl Backend {
                 .await;
 
                 match result {
-                    Ok(Ok(diags)) => diags,
-                    Ok(Err(_e)) => continue,
-                    Err(_join_err) => continue,
+                    Some(Ok(diags)) => diags,
+                    _ => continue,
                 }
             };
 
@@ -251,10 +264,7 @@ impl Backend {
                 }
             }
 
-            {
-                let mut cache = self.mago_analyze_tool.last_diags.lock();
-                cache.insert(uri.clone(), mago_diags);
-            }
+            self.mago_analyze_tool.store_file_result(&uri, mago_diags);
 
             // In pull mode this also tells the editor to re-pull, but
             // only when the run actually changed the file's diagnostics.

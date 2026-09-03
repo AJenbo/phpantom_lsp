@@ -51,7 +51,7 @@ impl Backend {
             // full matching loop, because the textual span name is the alias.
             let has_potential_match = symbol_map.spans.iter().any(|span| match &span.kind {
                 SymbolKind::ClassReference { name, .. } => {
-                    if crate::util::short_name(name) == target_short {
+                    if crate::util::short_name(name).eq_ignore_ascii_case(target_short) {
                         true
                     } else {
                         let resolved = if let Some(fqn) =
@@ -72,7 +72,7 @@ impl Backend {
                     }
                 }
                 SymbolKind::ClassDeclaration { name } => {
-                    include_declaration && name == target_short
+                    include_declaration && name.eq_ignore_ascii_case(target_short)
                 }
                 SymbolKind::SelfStaticParent(ssp_kind) => *ssp_kind != SelfStaticParentKind::This,
                 _ => false,
@@ -112,7 +112,7 @@ impl Backend {
                         class_names_match(strip_fqn_prefix(&resolved), target, target_short)
                     }
                     SymbolKind::ClassDeclaration { name } if include_declaration => {
-                        if name != target_short {
+                        if !name.eq_ignore_ascii_case(target_short) {
                             false
                         } else {
                             let fqn = build_fqn(name, file_namespace.as_deref());
@@ -252,7 +252,36 @@ impl Backend {
                             });
                             &Self::resolve_to_fqn(name, use_map, &file_namespace)
                         };
-                        scoped.contains(&normalize_fqn(strip_fqn_prefix(resolved)))
+                        scoped.contains(&fold_class_fqn(resolved))
+                    }
+                    // `new self()` / `new static()` / `new parent()` carry
+                    // `SelfStaticParent` spans rather than `ClassReference`,
+                    // so they need the same enclosing-class resolution as
+                    // `self::__construct()` below.  The same span kind is
+                    // also emitted for `parent::__construct()`'s subject
+                    // (handled by the `MemberAccess` arm below), so this
+                    // only fires when the keyword is actually the operand
+                    // of `new`.
+                    SymbolKind::SelfStaticParent(ssp_kind)
+                        if *ssp_kind != SelfStaticParentKind::This =>
+                    {
+                        if file_content.is_none() {
+                            file_content = self.reference_file_content_arc(file_uri);
+                        }
+                        match &file_content {
+                            Some(content) if is_new_operand(content, span.start) => {
+                                match self.resolve_keyword_to_fqn(
+                                    ssp_kind,
+                                    file_uri,
+                                    &file_namespace,
+                                    span.start,
+                                ) {
+                                    Some(fqn) => scoped.contains(&fold_class_fqn(&fqn)),
+                                    None => false,
+                                }
+                            }
+                            _ => false,
+                        }
                     }
                     // Explicit constructor delegation written as
                     // `parent::__construct()`, `self::__construct()`, or
@@ -279,7 +308,7 @@ impl Backend {
                                     content,
                                 )
                                 .iter()
-                                .any(|fqn| scoped.contains(&normalize_fqn(strip_fqn_prefix(fqn))))
+                                .any(|fqn| scoped.contains(&fold_class_fqn(fqn)))
                             }
                             None => false,
                         }
@@ -302,8 +331,7 @@ impl Backend {
             // Optionally include the constructor declaration site(s).
             if include_declaration && let Some(classes) = self.get_classes_for_uri(file_uri) {
                 for class in &classes {
-                    let class_fqn = normalize_fqn(&class.fqn()).to_string();
-                    if !scoped.contains(&class_fqn) {
+                    if !scoped.contains(&fold_class_fqn(&class.fqn())) {
                         continue;
                     }
 
@@ -344,6 +372,12 @@ impl Backend {
     /// include every descendant that does *not* declare its own
     /// constructor (those inherit the owner's), pruning the walk at any
     /// descendant that overrides it.
+    ///
+    /// The returned FQNs are case-folded: they are only ever membership-
+    /// tested against a call site's resolved class, and PHP lets that site
+    /// spell the name in any casing.  The walk itself stays on the declared
+    /// spelling, because the GTI index is keyed by the name each child
+    /// writes in its `extends`/`implements` clause.
     fn collect_constructor_hierarchy(&self, owner_fqns: &[String]) -> HashSet<String> {
         let class_loader = |name: &str| -> Option<Arc<ClassInfo>> { self.find_or_load_class(name) };
         let declares_ctor = |fqn: &str| -> bool {
@@ -353,18 +387,18 @@ impl Backend {
         };
 
         let owners: Vec<String> = owner_fqns.iter().map(|f| normalize_fqn(f)).collect();
-        let mut result: HashSet<String> = owners.iter().cloned().collect();
+        let mut result: HashSet<String> = owners.iter().map(|f| fold_class_fqn(f)).collect();
 
         // Walk down from each owner, including inheriting descendants and
         // pruning at overrides.
         let gti = self.symbols.gti_index.read();
         let mut queue: std::collections::VecDeque<String> = owners.iter().cloned().collect();
-        let mut seen: HashSet<String> = owners.iter().cloned().collect();
+        let mut seen: HashSet<String> = owners.iter().map(|f| fold_class_fqn(f)).collect();
         while let Some(fqn) = queue.pop_front() {
             if let Some(descendants) = gti.get(&fqn) {
                 for desc in descendants {
                     let normalized = normalize_fqn(desc).to_string();
-                    if !seen.insert(normalized.clone()) {
+                    if !seen.insert(fold_class_fqn(&normalized)) {
                         continue;
                     }
                     // A descendant that declares its own constructor uses a
@@ -373,7 +407,7 @@ impl Backend {
                     if declares_ctor(&normalized) {
                         continue;
                     }
-                    result.insert(normalized.clone());
+                    result.insert(fold_class_fqn(&normalized));
                     queue.push_back(normalized);
                 }
             }
@@ -407,4 +441,27 @@ impl Backend {
             }
         }
     }
+}
+
+/// Whether the `self`/`static`/`parent` keyword at `start` is the operand of
+/// `new` (`new self()`) rather than the subject of a static access
+/// (`self::__construct()`), which the same `SelfStaticParent` span kind is
+/// also used for.
+fn is_new_operand(content: &str, start: u32) -> bool {
+    let bytes = content.as_bytes();
+    let mut i = start as usize;
+    while i > 0 && bytes[i - 1].is_ascii_whitespace() {
+        i -= 1;
+    }
+    if i < 3 {
+        return false;
+    }
+    let word_start = i - 3;
+    if word_start > 0 {
+        let prev = bytes[word_start - 1];
+        if prev.is_ascii_alphanumeric() || prev == b'_' {
+            return false;
+        }
+    }
+    bytes[word_start..i].eq_ignore_ascii_case(b"new")
 }

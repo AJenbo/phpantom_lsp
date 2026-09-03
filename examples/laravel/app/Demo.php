@@ -14,10 +14,12 @@ use App\Http\Controllers\BakeryController;
 use App\Mail\OrderShipped;
 use App\Http\Requests\StoreBakeryRequest;
 use App\Http\Requests\UpdateBakeryRequest;
+use App\Models\Baker;
 use App\Models\Bakery;
 use App\Models\BlogAuthor;
 use App\Models\BlogPost;
 use App\Models\Customer;
+use App\Models\Loaf;
 use App\Models\PostCollection;
 use App\Models\Review;
 use App\Models\ReviewCollection;
@@ -25,20 +27,27 @@ use Database\Factories\AnnotatedPostFactory;
 use Database\Factories\BlogAuthorFactory;
 use Database\Factories\EditorialFactory;
 use Illuminate\Database\Eloquent\Relations\Relation;
+use Illuminate\Http\Client\Factory as HttpFactory;
+use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Request;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Env;
 use Illuminate\Support\Facades\App;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Lang;
+use Illuminate\Support\Facades\Redirect;
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Facades\Response;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schedule;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Facades\View;
 use Illuminate\View\Factory as ViewFactory;
 
@@ -151,6 +160,14 @@ class Demo
         // Conditionable when()/unless() chain continuation
         BlogAuthor::where('active', 1)->when(true, fn($q) => $q)->get();
         BlogAuthor::where('active', 1)->unless(false, fn($q) => $q)->first();
+
+        // Custom builders keep the model they were built for, whether or
+        // not the builder class declares generics. LoafBuilder declares
+        // none (see app/Models/LoafBuilder.php), BakerBuilder does.
+        Loaf::query()->stale()->where('crust', 'sourdough')->firstOrFail()->getWeight();
+        Loaf::query()->whereKey(1)->first()->getWeight();     // → Loaf|null
+        Loaf::query()->stale()->get();                        // → Collection<Loaf>
+        Baker::query()->active()->firstOrFail()->getName();   // → Baker
 
         // Paginators carry the model element type through foreach
         foreach (BlogAuthor::where('active', 1)->paginate() as $author) {
@@ -452,6 +469,10 @@ class Demo
      *  1. Ctrl+Click "app.name" to jump to config/app.php.
      *  2. Ctrl+Click "app.key" to jump to config/app.php, then Ctrl+Click env('APP_KEY') to .env.
      *  3. "Find All References" on "app.name" to see all usage sites (including Blade views).
+     *  4. "Find All References" on "DB_PASSWORD" to see every read of it,
+     *     including the one in config/database.php and the .env line itself.
+     *  5. Hover "APP_NAME" to see the value .env sets it to, and type inside
+     *     an empty env('') to complete every variable the project declares.
      */
     public function laravelConfigEnv(): void
     {
@@ -462,10 +483,23 @@ class Demo
         Config::get('app.name');
         Config::set('app.env', 'production');
 
+        // getMany() reads a list rather than a single key, in either of the
+        // two spellings: a bare entry names the key, and a key/value entry
+        // names it on the left with the default on the right.
+        Config::getMany(['app.name', 'app.env' => 'production']);
+
         // Config keys that use env() — Ctrl+Click jumps to the config file,
         // then Ctrl+Click the env() call there to jump to .env
         config('app.key');                // uses env('APP_KEY')
         config('database.connections.mysql.password'); // uses env('DB_PASSWORD')
+
+        // Environment variables are indexed wherever they are read, so
+        // Ctrl+Click, hover, completion, and Find All References work the
+        // same on both spellings of the read.
+        env('APP_NAME');                  // hover shows: PHPantom
+        env('DB_PASSWORD');               // a name that reads as a credential
+                                          // hovers as set, without the value
+        Env::get('APP_KEY');
     }
 
 
@@ -605,12 +639,30 @@ class Demo
         route('campaigns.black-friday.landing');
         route('campaigns.valentines.gifts');
 
+        // A route name is written at more than the route() helper: the
+        // signed-URL builders, the redirect facades, and the helper chains
+        // that reach the same objects all name one.
+        URL::signedRoute('bakeries.show', ['bakery' => 1]);
+        URL::temporarySignedRoute('bakeries.cancel', 60, ['bakery' => 1]);
+        Redirect::route('home');
+        Response::redirectToRoute('bakeries.index');
+        redirect()->route('admin.users.index');
+        response()->redirectToRoute('home');
+
+        // The "is the current route named …?" checks take a list of
+        // patterns, where * stands for any run of characters — so
+        // "campaigns.*" names every route the campaign loop registers.
+        Route::is('home', 'campaigns.*');
+        Route::currentRouteNamed('bakeries.index');
+        request()->routeIs('bakeries.*');
+
         // Translation Keys
         __('messages.welcome');
         trans('auth.failed');
         trans_choice('messages.notifications', 5);
         Lang::get('pagination.next');
         Lang::has('validation.required');
+        Lang::hasForLocale('validation.required', 'en');
 
         // The framework declares string|array|null for all three helpers,
         // because a key may name a whole group and the keyless form hands
@@ -900,6 +952,24 @@ class Demo
         $flour = Bakery::findOrFail($id)->flour;   // $fillable, no cast → mixed
         throw_unless(is_string($flour), \RuntimeException::class);
         strtoupper($flour);               // → string
+    }
+
+    // ── filled() and blank() rule out the empty values ──────────────────
+
+    public function valueHelpers(?string $search): void
+    {
+        // `filled()` promises the value is neither null nor empty, so the
+        // null is gone inside the branch and `strtoupper()` is happy with
+        // it. `blank()` is the same promise read from the other side.
+        if (filled($search)) {
+            strtoupper($search);          // → string, no longer ?string
+        }
+
+        if (blank($search)) {
+            return;
+        }
+
+        strtoupper($search);              // → string
     }
 
 
@@ -1294,5 +1364,24 @@ class Demo
 
         // Supplying a path returns the generated URL string.
         return url($path);                // → string
+    }
+
+    // ── HTTP client sync/async template default ────────────────────────────
+
+    public function httpClient(PendingRequest $pending, HttpFactory $factory): void
+    {
+        // PendingRequest is `@template TAsync of bool = false`, so a request
+        // that never selects async mode carries the default and its methods
+        // return the response itself rather than a promise.
+        Http::get('https://example.com')->json();          // → Response
+        Http::post('https://example.com')->status();       // → Response
+        $pending->get('https://example.com')->body();      // → Response
+        $factory->get('https://example.com')->ok();        // → Response
+
+        // async() binds TAsync to true, so the same call returns a promise
+        // whether it starts on the facade, the factory, or the request.
+        Http::async()->get('https://example.com');         // → PromiseInterface
+        $factory->async()->get('https://example.com');     // → PromiseInterface
+        $pending->async()->get('https://example.com');     // → PromiseInterface
     }
 }

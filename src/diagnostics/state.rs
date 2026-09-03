@@ -42,8 +42,14 @@ pub(crate) struct DiagnosticState {
     pub(crate) suppressed: Arc<Mutex<Vec<Diagnostic>>>,
     /// Diagnostics for files not open in the editor (background pass).
     pub(crate) workspace_diags: Arc<Mutex<WorkspaceDiagnostics>>,
-    /// Prevents duplicate background workspace diagnostics passes.
+    /// Whether the background workspace diagnostics pass is currently
+    /// active (started and not since switched off by a config reload).
+    /// Also prevents duplicate concurrent passes.
     pub(crate) workspace_diag_pass_started: Arc<AtomicBool>,
+    /// Set to stop a running native pass and its workers when a live
+    /// config reload switches `[diagnostics] workspace` off mid-pass.
+    /// Cleared again before a later pass starts.
+    pub(crate) workspace_diag_cancel: Arc<AtomicBool>,
     /// Whether the client has sent at least one `workspace/diagnostic`
     /// pull.  In pull mode the background workspace pass waits for this:
     /// its results are only deliverable through workspace pull responses,
@@ -56,6 +62,15 @@ pub(crate) struct DiagnosticState {
     /// to work out which other open files a save can affect.  See
     /// [`crate::diagnostics::cross_file`].
     pub(crate) decl_baselines: Arc<Mutex<crate::diagnostics::cross_file::DeclarationBaselines>>,
+    /// Per-URI locks serializing `assemble_and_push`'s read-merge-write
+    /// across the six per-source diagnostic caches.
+    ///
+    /// Each source cache is locked and released independently, so without
+    /// this, two calls completing around the same time (e.g. a fast-phase
+    /// native worker and an external tool) can each read a different
+    /// snapshot and the one that started reading first can still finish
+    /// writing last, clobbering a fresher merge with a stale one.
+    pub(crate) assemble_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
 }
 
 impl DiagnosticState {
@@ -72,9 +87,11 @@ impl DiagnosticState {
             suppressed: Arc::new(Mutex::new(Vec::new())),
             workspace_diags: Arc::new(Mutex::new(WorkspaceDiagnostics::default())),
             workspace_diag_pass_started: Arc::new(AtomicBool::new(false)),
+            workspace_diag_cancel: Arc::new(AtomicBool::new(false)),
             workspace_pull_seen: Arc::new(AtomicBool::new(false)),
             workspace_pull_notify: Arc::new(Notify::new()),
             decl_baselines: Arc::new(Mutex::new(HashMap::new())),
+            assemble_locks: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }

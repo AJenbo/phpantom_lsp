@@ -10,8 +10,8 @@
 //! - **Relationship properties.** Methods returning a known Eloquent
 //!   relationship type (e.g. `HasOne`, `HasMany`, `BelongsTo`) produce
 //!   a virtual property with the same name.  The property type is
-//!   inferred from the relationship's generic parameters (Larastan-style
-//!   `@return HasMany<Post, $this>` annotations) or, as a fallback,
+//!   inferred from the relationship's generic parameters (a generic
+//!   `@return HasMany<Post, $this>` annotation) or, as a fallback,
 //!   from the first `::class` argument in the method body text.
 //!
 //! - **Relationship count properties.** For each relationship method, a
@@ -115,6 +115,7 @@ mod env_vars;
 mod facade;
 mod factory;
 pub(crate) mod factory_count;
+mod folio;
 pub(crate) mod gates;
 mod helpers;
 mod higher_order_proxy;
@@ -153,7 +154,7 @@ pub(crate) use config_keys::{
     resolve_config_key_definition_fallback,
 };
 pub(crate) use const_eval::ClassContext;
-pub(crate) use env_vars::resolve_env_definition;
+pub(crate) use env_vars::{enumerate_env_keys, env_declaration, env_name_is_sensitive};
 pub(crate) use gates::{
     LaravelGateIndex, enumerate_gate_abilities, model_policy_abilities, scan_gate_registrations,
 };
@@ -176,12 +177,14 @@ pub(crate) use provider_resources::{
     extract_provider_resources,
 };
 pub(crate) use request_fields::{request_fields_at_position, resolve_request_field_definition};
-pub(crate) use route_names::{RouteEntry, enumerate_all_routes, route_uri_parameters};
+pub(crate) use route_names::{
+    RouteDiscovery, enumerate_all_routes, route_name_matches, route_uri_parameters,
+};
 pub(crate) use storage::{
     FILESYSTEM_MANAGER_FQN, LaravelStorageDriverIndex, StorageDriverRegistration,
     extract_storage_driver_registrations, patch_storage_disk_type,
 };
-pub(crate) use trans_keys::{collect_trans_declarations, unresolved_trans_type};
+pub(crate) use trans_keys::{collect_trans_declarations, trans_line, unresolved_trans_type};
 pub(crate) use validation_rules::{safe_call_receiver_variable, safe_source_variable};
 pub(crate) use view_data::{SharedViewVar, composer_class_vars};
 pub(crate) use view_names::canonical_view_name;
@@ -272,8 +275,9 @@ pub const VIEW_FQN: &str = "Illuminate\\View\\View";
 /// the factory always constructs the concrete `Illuminate\View\View`.
 /// Resolving to the contract loses that and reports a mismatch on the
 /// (correct) `render(): View` signature every Blade component writes.
-/// Mapping the named form to the concrete class mirrors Larastan's
-/// `view()` stub, which the ecosystem is written against.
+/// Mapping the named form to the concrete class mirrors the `view()` stub
+/// the Laravel PHPStan extensions ship, which the ecosystem is written
+/// against.
 pub(crate) fn view_helper_returns_view(func_name: &str, text_args: &str) -> bool {
     if func_name.trim_start_matches('\\') != "view" {
         return false;
@@ -388,8 +392,7 @@ fn find_class_in<'a>(all_classes: &'a [Arc<ClassInfo>], name: &str) -> Option<&'
 /// `TModel` alone leaves `Collection<int, Audience>` where the code
 /// (correctly) declares `AudienceCollection`.
 ///
-/// This mirrors Larastan's `CollectionHelper::replaceCollectionsInType()`:
-/// the model is read off the *last* generic argument, so a builder that
+/// The model is therefore read off the *last* generic argument, so a builder that
 /// returns some other model's collection resolves to that model's
 /// collection class rather than the receiver's.
 ///

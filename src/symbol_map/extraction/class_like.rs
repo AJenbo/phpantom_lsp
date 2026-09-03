@@ -1,5 +1,4 @@
 use mago_span::HasSpan;
-use mago_syntax::cst::*;
 
 use super::*;
 
@@ -334,6 +333,21 @@ pub(super) fn extract_from_attribute_lists<'a>(
                             );
                         }
                     }
+                }
+
+                // `#[RedirectToRoute('login')]` on a form request names the
+                // route a failed validation bounces back to.
+                if is_laravel_redirect_route_attr(
+                    class_name,
+                    &mut ctx.has_laravel_http_attrs,
+                    ctx.content,
+                ) {
+                    try_emit_laravel_string_span_partial(
+                        crate::symbol_map::LaravelStringKind::Route,
+                        arg_list,
+                        ctx.content,
+                        &mut ctx.spans,
+                    );
                 }
 
                 // PHPUnit coverage attributes: #[CoversMethod(Foo::class,
@@ -701,6 +715,14 @@ pub(super) fn extract_from_method<'a>(method: &'a Method<'a>, ctx: &mut Extracti
         if let Some(ref default) = param.default_value {
             extract_from_expression(default.value, ctx, method_scope_start);
         }
+        // A constructor-promoted property may declare hooks of its own,
+        // which read like any other hook body but live out here in the
+        // parameter list rather than in a `Property::Hooked` member.
+        if let Some(hooks) = &param.hooks {
+            for hook in hooks.hooks.iter() {
+                extract_from_hook(hook, ctx);
+            }
+        }
     }
 
     if let Some(ref return_type) = method.return_type_hint {
@@ -753,7 +775,7 @@ pub(super) fn extract_inline_docblock(
     }
 }
 
-pub(super) fn extract_from_property<'a>(property: &Property<'a>, ctx: &mut ExtractionCtx<'a>) {
+pub(super) fn extract_from_property<'a>(property: &'a Property<'a>, ctx: &mut ExtractionCtx<'a>) {
     match property {
         Property::Plain(plain) => extract_from_attribute_lists(&plain.attribute_lists, ctx, 0),
         Property::Hooked(hooked) => extract_from_attribute_lists(&hooked.attribute_lists, ctx, 0),
@@ -831,7 +853,96 @@ pub(super) fn extract_from_property<'a>(property: &Property<'a>, ctx: &mut Extra
             if let PropertyItem::Concrete(concrete) = &hooked.item {
                 extract_from_expression(concrete.value, ctx, 0);
             }
+            for hook in hooked.hook_list.hooks.iter() {
+                extract_from_hook(hook, ctx);
+            }
         }
+    }
+}
+
+/// Extract a single `get`/`set` hook.
+///
+/// A hook body is a method body: it has its own variable scope, `$this`
+/// is available inside it, and a `set` hook may declare the assigned
+/// value as a parameter.  Both body spellings (`{ … }` and `=> expr;`)
+/// carry all of that, so both are walked.
+fn extract_from_hook<'a>(hook: &'a PropertyHook<'a>, ctx: &mut ExtractionCtx<'a>) {
+    extract_from_attribute_lists(&hook.attribute_lists, ctx, 0);
+
+    let PropertyHookBody::Concrete(body) = &hook.body else {
+        return;
+    };
+
+    // A block hook scopes from its opening brace, an expression hook from
+    // its arrow — the same rule as a method body, whose scope starts at
+    // `{` and leaves the parameter list outside.
+    let (scope_start, scope_end) = match body {
+        PropertyHookConcreteBody::Block(block) => {
+            (block.left_brace.start.offset, block.right_brace.end.offset)
+        }
+        PropertyHookConcreteBody::Expression(expr_body) => {
+            (expr_body.arrow.start.offset, expr_body.semicolon.end.offset)
+        }
+    };
+    ctx.scopes.push((scope_start, scope_end));
+    // A property hook is never static, so `$this` is always in scope.
+    ctx.instance_method_scopes.push((scope_start, scope_end));
+
+    if let Some(params) = &hook.parameter_list {
+        for param in params.parameters.iter() {
+            extract_from_hook_parameter(param, ctx, scope_start);
+        }
+    }
+
+    match body {
+        PropertyHookConcreteBody::Block(block) => {
+            for stmt in block.statements.iter() {
+                extract_from_statement(stmt, ctx, scope_start);
+            }
+        }
+        PropertyHookConcreteBody::Expression(expr_body) => {
+            extract_from_expression(expr_body.expression, ctx, scope_start);
+        }
+    }
+}
+
+/// Extract the `$value` parameter a `set` hook declares, so it is
+/// navigable, renameable, and offered by variable completion inside the
+/// hook body.
+fn extract_from_hook_parameter<'a>(
+    param: &'a FunctionLikeParameter<'a>,
+    ctx: &mut ExtractionCtx<'a>,
+    scope_start: u32,
+) {
+    extract_from_attribute_lists(&param.attribute_lists, ctx, 0);
+    if let Some(ref hint) = param.hint {
+        extract_from_hint_ctx(hint, &mut ctx.spans, ClassRefContext::TypeHint);
+    }
+
+    let name = {
+        let s = bytes_to_str(param.variable.name);
+        s.strip_prefix('$').unwrap_or(s).to_string()
+    };
+    let offset = param.variable.span.start.offset;
+    ctx.spans.push(SymbolSpan {
+        start: offset,
+        end: param.variable.span.end.offset,
+        kind: SymbolKind::Variable {
+            name: crate::atom::atom(&name),
+        },
+    });
+    ctx.var_defs.push(VarDefSite {
+        offset,
+        name,
+        kind: VarDefKind::Parameter,
+        scope_start,
+        effective_from: offset,
+        nesting_depth: ctx.cond_nesting_depth,
+        block_end: ctx.cond_block_end_stack.last().copied().unwrap_or(u32::MAX),
+    });
+
+    if let Some(ref default) = param.default_value {
+        extract_from_expression(default.value, ctx, scope_start);
     }
 }
 

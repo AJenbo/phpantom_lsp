@@ -37,12 +37,12 @@
         },
         "workspace": {
           "type": "boolean",
-          "description": "Compute diagnostics for the whole workspace in the background after startup and the full index finish, so project-wide problems appear for files that are not open in the editor. Requires the default \"full\" indexing strategy.",
-          "default": true
+          "description": "Compute diagnostics for the whole workspace in the background after startup and the full index finish, so project-wide problems appear for files that are not open in the editor. Off by default: it costs a project-wide sweep every session. Requires the default \"full\" indexing strategy.",
+          "default": false
         },
         "workspace-external": {
           "type": "boolean",
-          "description": "Run configured external tools (PHPStan, PHPCS, Mago) once over the whole project after workspace diagnostics finish. Each tool only runs when it is enabled and has its own project-level configuration file (phpstan.neon, phpcs.xml, mago.toml).",
+          "description": "Run configured external tools (PHPStan, PHPCS, Mago) once over the whole project after workspace diagnostics finish. Only takes effect when \"workspace\" is enabled. Each tool only runs when it is enabled and has its own project-level configuration file (phpstan.neon, phpcs.xml, mago.toml).",
           "default": true
         },
         "ignore": {
@@ -83,6 +83,22 @@
             "none"
           ],
           "default": "full"
+        },
+        "exclude": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Paths the workspace scanners skip, in gitignore syntax relative to the workspace root: a bare name matches at any depth, a pattern containing / anchors to the root, a trailing / restricts to directories, and a leading ! re-includes. Applies to background discovery and to the directories analyze walks. A file you open in the editor, or name outright on the analyze command line, is always served.",
+          "default": []
+        },
+        "extensions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Extra file extensions (without the dot) treated as PHP source during workspace discovery, e.g. [\"module\", \"inc\", \"theme\"] for Drupal. .php is always included.",
+          "default": []
         }
       }
     },
@@ -219,6 +235,14 @@
         "command": {
           "type": "string",
           "description": "Command or path to run Mago. Unset: auto-detect via vendor/bin/mago then $PATH. Empty string: disable Mago integration. Any other value: use as the command."
+        },
+        "lint": {
+          "type": "boolean",
+          "description": "Proxy mago lint diagnostics. Unset: only when mago.toml has a [linter] table."
+        },
+        "analyze": {
+          "type": "boolean",
+          "description": "Proxy mago analyze diagnostics. Unset: only when mago.toml has an [analyzer] table, and on a Laravel project only when it also wires up an extension, since Mago's analyser cannot otherwise see through Eloquent or the facades."
         },
         "lint-timeout": {
           "type": "integer",

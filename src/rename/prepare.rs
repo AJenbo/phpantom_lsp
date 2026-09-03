@@ -15,6 +15,7 @@ use crate::symbol_map::SymbolKind;
 use crate::text_position::offset_to_position;
 use crate::util::build_fqn;
 
+use super::RenameOutcome;
 use super::namespace::find_namespace_segment_at_offset;
 use super::validate::span_spells_its_name;
 
@@ -135,31 +136,39 @@ impl Backend {
     ///
     /// Produces a `WorkspaceEdit` that renames every occurrence of the
     /// symbol under the cursor to `new_name`.
+    ///
+    /// `Ok(None)` is the "nothing to rename here" answer the editor
+    /// reports in its own words.  `Err(message)` is a refusal the user
+    /// needs to read: a move whose destination is already taken would
+    /// either clobber a file or leave two classes claiming one name, and
+    /// saying so beats emitting an edit the editor half-applies.
     pub(crate) fn handle_rename(
         &self,
         uri: &str,
         content: &str,
         position: Position,
         new_name: &str,
-    ) -> Option<WorkspaceEdit> {
-        let span = self.lookup_symbol_at_position(uri, content, position)?;
+    ) -> RenameOutcome {
+        let Some(span) = self.lookup_symbol_at_position(uri, content, position) else {
+            return Ok(None);
+        };
 
         // Every edit below is derived, directly or through find-references,
         // from this span.  If the map it came from predates the buffer the
         // whole response is nonsense, so drop it rather than rename the
         // wrong symbol.
         if !self.rename_map_matches(uri, content) || !span_spells_its_name(content, &span) {
-            return None;
+            return Ok(None);
         }
 
         // Reject non-renameable symbols (same logic as prepare_rename).
         if let SymbolKind::SelfStaticParent(_) = &span.kind {
             // self, static, parent, and $this are never renameable.
-            return None;
+            return Ok(None);
         }
 
         if self.is_vendor_symbol(uri, content, position) {
-            return None;
+            return Ok(None);
         }
 
         if let SymbolKind::NamespaceDeclaration { ref name } = span.kind {
@@ -167,26 +176,33 @@ impl Backend {
                 return self.build_namespace_prefix_rename_edit(name, new_name);
             }
             let cursor_byte = crate::text_position::position_to_byte_offset(content, position);
-            let (segment, _seg_start, _seg_end) =
-                find_namespace_segment_at_offset(name, span.start, cursor_byte as u32)?;
-            let segment_idx = name.split('\\').position(|s| s == segment)?;
+            let Some((segment, _seg_start, _seg_end)) =
+                find_namespace_segment_at_offset(name, span.start, cursor_byte as u32)
+            else {
+                return Ok(None);
+            };
+            let Some(segment_idx) = name.split('\\').position(|s| s == segment) else {
+                return Ok(None);
+            };
             return self.build_namespace_rename_edit(name, segment_idx, new_name);
         }
 
         let class_rename_fqn = self.resolve_class_rename_fqn(&span.kind, uri, span.start);
 
         // Find all references (including the declaration).
-        let locations = self.find_references_for_rename(uri, content, position, true)?;
+        let Some(locations) = self.find_references_for_rename(uri, content, position, true) else {
+            return Ok(None);
+        };
 
         if locations.is_empty() {
-            return None;
+            return Ok(None);
         }
 
         // The reference finders read one symbol map per file, so each
         // location has to be checked against *that* file's text, not the
         // buffer this request arrived on.
         if !self.rename_locations_verified(&span.kind, &locations) {
-            return None;
+            return Ok(None);
         }
 
         // A function is named three different ways across its references,
@@ -224,7 +240,7 @@ impl Backend {
             if new_name.contains('\\') {
                 return self.build_class_move_edit(fqn, new_name, &locations);
             }
-            return self.build_class_rename_edit(fqn, new_name, &locations);
+            return Ok(self.build_class_rename_edit(fqn, new_name, &locations));
         }
 
         // Build the workspace edit.  Group text edits by document URI.
@@ -312,11 +328,11 @@ impl Backend {
                 .push(text_edit);
         }
 
-        Some(WorkspaceEdit {
+        Ok(Some(WorkspaceEdit {
             changes: Some(changes),
             document_changes: None,
             change_annotations: None,
-        })
+        }))
     }
 
     /// Extract the renameable symbol name and its source range.

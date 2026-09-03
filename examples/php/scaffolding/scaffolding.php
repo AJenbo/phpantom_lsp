@@ -40,6 +40,17 @@ class ReflectedWidget
     public function label(): string { return 'widget'; }
 }
 
+/** Holds the widget privately, so only reflection can read it back. */
+class ReflectedHolder
+{
+    private ?ReflectedWidget $widget;
+
+    public function __construct(?ReflectedWidget $widget = null)
+    {
+        $this->widget = $widget;
+    }
+}
+
 // ── Promote Constructor Parameter scaffolding ───────────────────────────────
 // Targets both a property and a parameter, because PHP applies an attribute
 // written on a promoted parameter to both of them.
@@ -357,6 +368,11 @@ class ScaffoldingUntypedFactory
 {
     public function createPen() { return new Pen(); }
 
+    public static function createPenStatic() { return new Pen(); }
+
+    /** @return mixed */
+    public function createPenMixed() { return new Pen(); }
+
     public function createTool(bool $flag)
     {
         if ($flag) {
@@ -460,6 +476,18 @@ class ScaffoldingMotor
 class ScaffoldingSedan extends ScaffoldingMotor
 {
     public function cruise(): void {}
+}
+
+class ScaffoldingCoupe extends ScaffoldingMotor
+{
+    public function race(): string { return 'race'; }
+}
+
+// A subclass of a subclass, so a check on the middle class has something
+// below it to keep on the way in and rule out on the way out.
+class ScaffoldingSportSedan extends ScaffoldingSedan
+{
+    public function launch(): string { return 'launch'; }
 }
 
 abstract class ScaffoldingAbstractShape
@@ -743,6 +771,13 @@ class ScaffoldingIteration
 
     /** @return array<Pen, Pencil> */
     public function crossRef(): array { return []; }
+
+    /**
+     * Shorthand `Pen[]` names only the value type, so the keys stay open.
+     *
+     * @return Pen[]
+     */
+    public function openKeyed(): array { return ['blue' => new Pen('blue'), 7 => new Pen('red')]; }
 }
 
 class ScaffoldingArrayFunc
@@ -768,8 +803,14 @@ class ScaffoldingArrayFunc
     /** @return array<string|int, string> */
     public function mixedKeys(): array { return ['ink' => 'gel', 7 => 'nib']; }
 
+    /** @return list<Pen|Pencil> */
+    public function mixedWriters(): array { return [new Pen('blue'), new Pencil(), new Pen('red')]; }
+
     /** @return list<int> */
     public function weights(): array { return [2, 3, 4]; }
+
+    /** @return list<Marker> */
+    public function markers(): array { return [new Marker('wide'), new Marker('slim')]; }
 }
 
 class ScaffoldingException
@@ -1897,6 +1938,14 @@ class Banana
     public function weigh(): float { return 0.2; }
 }
 
+/** The printed tag a specimen on the shelf gets. */
+class SpecimenLabel
+{
+    public function __construct(private readonly string $text) {}
+
+    public function render(): string { return $this->text; }
+}
+
 final class TextTag
 {
     public string $tag = 'granite';
@@ -1957,6 +2006,12 @@ class SpecimenHolder
         return $name === 'rock' ? new Rock() : null;
     }
 
+    /** Prints a label for a specimen that is definitely on the shelf. */
+    public function labelFor(Rock|Banana $specimen): SpecimenLabel
+    {
+        return new SpecimenLabel($specimen->weigh() . 'kg');
+    }
+
     /** Restocks the shelf, so what `lookUp()` answers afterwards may differ. */
     public function restock(): void
     {
@@ -1967,6 +2022,26 @@ class SpecimenHolder
     public function shelfLabel(): string
     {
         return 'specimens';
+    }
+
+    /** Counts what is on the shelf without changing it, and says so only by
+     * handing a value back. */
+    public function shelfCount(): int
+    {
+        return 1;
+    }
+
+    /**
+     * Turns the shelf, which changes what `lookUp()` answers. The `bool`
+     * return says nothing about that, so the tag has to.
+     *
+     * @impure
+     */
+    public function rotate(): bool
+    {
+        $this->item = new Banana();
+
+        return true;
     }
 }
 
@@ -2034,6 +2109,59 @@ class Pencil
 class Marker extends Pen
 {
     public function highlight(): void {}
+}
+
+// ─── Loop Fold / Pre-Validation Support Classes ─────────────────────────────
+// A tally that folds together, and the branch ends a loop folds tallies out
+// of. The pre-validation classes below are the same shape a parser walks: a
+// base node, one subtype that carries the extra members, and a holder of a
+// list of them.
+
+class InkTally
+{
+    public function __construct(public int $strokes = 0) {}
+
+    public function mergeWith(InkTally $other): InkTally
+    {
+        return new InkTally($this->strokes + $other->strokes);
+    }
+
+    public function total(): int { return $this->strokes; }
+}
+
+class DrawingStep
+{
+    public function __construct(private readonly int $strokes = 1) {}
+
+    public function tally(): InkTally { return new InkTally($this->strokes); }
+}
+
+class SketchNode
+{
+    public function kind(): string { return 'node'; }
+}
+
+class LabelledSketchNode extends SketchNode
+{
+    public function __construct(public string $caption = 'untitled') {}
+
+    public function kind(): string { return 'labelled'; }
+
+    public function caption(): string { return $this->caption; }
+}
+
+class SketchGroup
+{
+    /** @param list<SketchNode> $nodes */
+    public function __construct(public array $nodes = []) {}
+
+    /** @param callable(SketchNode): void $visit */
+    public function walk(callable $visit): void
+    {
+        foreach ($this->nodes as $node) {
+            $visit($node);
+        }
+    }
 }
 
 // ─── Chaining Demo Support Classes ──────────────────────────────────────────
@@ -2270,6 +2398,18 @@ function crushOneRock(Rock $rock): string
     return $rock->crush();
 }
 
+/**
+ * A union that names no class at all, the shape a framework lookup
+ * returns when it may hand back either an object or the raw key it was
+ * asked for (Laravel's `Route::parameter()` is annotated this way).
+ *
+ * @return object|string
+ */
+function lookUpSpecimen(bool $found)
+{
+    return $found ? new Rock() : 'rock';
+}
+
 function pickTag(): TextTag|NumberTag
 {
     return new TextTag();
@@ -2374,6 +2514,20 @@ function isNotRock(mixed $value): bool
     return !$value instanceof Rock;
 }
 
+/**
+ * The shape Laravel's `filled()` helper is annotated with: the asserted
+ * type is a union, and it is written in the equality form (`!=`), which
+ * only speaks for the branch its tag names.
+ *
+ * @phpstan-assert-if-true !=null|'' $value
+ *
+ * @phpstan-assert-if-false !=numeric|bool $value
+ */
+function demoFilled(mixed $value): bool
+{
+    return $value !== null && $value !== '';
+}
+
 class StaticAssert
 {
     /** @phpstan-assert Rock $value */
@@ -2455,6 +2609,18 @@ function createPenFromString(string $input): Pen
 function initPen(?Pen &$pen): void
 {
     $pen = new Pen();
+}
+
+function initPenWhen(bool $write, ?Pen &$pen): void
+{
+    if ($write) {
+        $pen = new Pen();
+    }
+}
+
+function describePen(Pen $pen): string
+{
+    return $pen->color();
 }
 
 class PenFactory
@@ -2645,3 +2811,57 @@ readonly class ScaffoldingReadonlyPoint
     ) {}
 }
 
+
+// ── Reconstructed-proof scaffolding ─────────────────────────────────────────
+// A node whose key is optional and whose name may or may not be a string is
+// the shape guards are written around: the condition proves the pair together
+// and a later check picks which half of it applies.
+
+class ScaffoldingNameNode
+{
+    /** @var string|ScaffoldingNameNode */
+    public $name = '';
+}
+
+class ScaffoldingLoopNode
+{
+    public ScaffoldingNameNode $valueVar;
+
+    /** @var ScaffoldingNameNode|null */
+    public $keyVar = null;
+
+    public function __construct()
+    {
+        $this->valueVar = new ScaffoldingNameNode();
+    }
+}
+
+class ScaffoldingArgumentAcceptor
+{
+    /** @param string[] $args */
+    public function describe(array $args): string
+    {
+        return implode(', ', $args);
+    }
+}
+
+/** @param string[] $args */
+function scaffoldingSelectAcceptor(array $args): ScaffoldingArgumentAcceptor
+{
+    return new ScaffoldingArgumentAcceptor();
+}
+
+class ScaffoldingOptionalLabel
+{
+    public ?string $label = null;
+}
+
+/**
+ * A subclass is what makes an `instanceof` guard's two paths look alike:
+ * the path that failed the check keeps the parent, which spans the child,
+ * so the types alone do not say which one ran.
+ */
+class ScaffoldingQualifiedName extends ScaffoldingNameNode
+{
+    public string $namespacePrefix = '';
+}

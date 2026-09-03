@@ -103,6 +103,7 @@ impl Backend {
                         branch_aware: true,
                         match_arm_narrowing: HashMap::new(),
                         scope_var_resolver: None,
+                        scope_proofs: None,
                     };
 
                     let subject_type = match resolve_expression_type(match_data.subject, &var_ctx) {

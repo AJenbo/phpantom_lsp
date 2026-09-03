@@ -237,12 +237,17 @@ impl Backend {
                 .cloned()
                 .unwrap_or_default();
             let components = self.blade_component_resolver(&injected.components);
+            // Read under the guard rather than cloned: the set is small but
+            // this runs on every keystroke in a template, and nothing the
+            // preprocessor does can write it back.
+            let custom_directives = self.blade_custom_directives.read();
             let (virtual_php, source_map) = crate::blade::preprocessor::preprocess_with_vars(
                 content,
                 &injected.vars,
                 crate::blade::template_kind(uri, content),
                 injected.this_class.as_deref(),
                 Some(&components),
+                &custom_directives,
             );
             self.blade_source_maps
                 .write()
@@ -1064,16 +1069,31 @@ impl Backend {
                         func_info.name.to_string()
                     };
 
-                    // Skip polyfill functions when a native stub exists.
-                    // Libraries like Laravel wrap helpers such as
-                    // `str_contains` in `if (! function_exists('…'))` guards
-                    // and mark them `@deprecated`.  On the configured PHP
-                    // version the native function exists, so the guard is
-                    // never entered and the polyfill is dead code.  Letting
-                    // the stub win ensures the correct signature, return
-                    // type, and deprecation status are used everywhere
-                    // (hover, completion, diagnostics).
-                    if func_info.is_polyfill
+                    // Skip a declaration the embedded stubs already own, so
+                    // the stub's signature, return type, generics and
+                    // deprecation status are what hover, completion and
+                    // diagnostics see.
+                    //
+                    // Two shapes reach here.  A polyfill — Laravel and
+                    // friends wrap helpers such as `str_contains` in
+                    // `if (! function_exists('…'))` — is dead code on a PHP
+                    // version that ships the native function.  An
+                    // *unguarded* redeclaration of a global function the
+                    // stubs know is dead code on every version, because PHP
+                    // fatals on redeclaring an internal function: the file
+                    // is a signature stub written for tooling
+                    // (`phpstan/php-8-stubs` ships one PHP file per
+                    // builtin), and letting its bare `array` return type
+                    // win would strip `array_keys()` of the `@template TKey`
+                    // the whole key-type inference rests on.
+                    //
+                    // An unguarded declaration only loses out in the global
+                    // namespace, where a name the stubs carry is
+                    // necessarily a PHP internal.  A namespaced collision
+                    // (`Brotli\compress`) can be a real implementation, so
+                    // there it still takes a `function_exists` guard to
+                    // stand down.
+                    if (func_info.is_polyfill || !fqn.contains('\\'))
                         && self.stub_function_index.read().contains_key(fqn.as_str())
                     {
                         continue;
@@ -1680,6 +1700,30 @@ impl Backend {
                     let resolved = throw.resolve_names(method_resolver);
                     if resolved != *throw {
                         *throw = resolved;
+                    }
+                }
+                // `@psalm-if-this-is` and `@psalm-this-out` are matched
+                // against the receiver's type, and the method's own
+                // `@template T of Bound` bounds are matched against the
+                // concrete types filling them.  Both sides of those
+                // comparisons have to be spelled the same way, and the
+                // receiver arrives fully qualified.
+                if let Some(ref pattern) = method.if_this_is {
+                    let resolved = pattern.resolve_names(method_resolver);
+                    if resolved != *pattern {
+                        method.if_this_is = Some(resolved);
+                    }
+                }
+                if let Some(ref self_out) = method.self_out {
+                    let resolved = self_out.resolve_names(method_resolver);
+                    if resolved != *self_out {
+                        method.self_out = Some(resolved);
+                    }
+                }
+                for bound in method.template_param_bounds.values_mut() {
+                    let resolved = bound.resolve_names(method_resolver);
+                    if resolved != *bound {
+                        *bound = resolved;
                     }
                 }
             }

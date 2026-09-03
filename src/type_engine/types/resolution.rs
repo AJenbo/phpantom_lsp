@@ -392,13 +392,12 @@ fn resolve_named_type(
             // A type hint that names a generic class without arguments
             // (`@var ItemCollection $items`, a bare parameter or return
             // type) still has to answer member lookups.  Erase every
-            // unsupplied template parameter to the bound its `@template`
-            // declares (`@template TModel of Item` → `Item`), or `mixed`
-            // when it declares none, so a member typed `TModel` resolves
-            // to the widest type the declaration guarantees instead of to
-            // the parameter's own name.  This mirrors PHPStan's
-            // `resolveToBounds()` and the treatment `new ItemCollection()`
-            // already gets.
+            // unsupplied template parameter to its declared default, then
+            // to the bound its `@template` declares (`@template TModel of
+            // Item` → `Item`), or `mixed` when it declares neither. This
+            // keeps a member typed `TModel` concrete instead of leaking the
+            // parameter's own name, matching the treatment that
+            // `new ItemCollection()` already gets.
             //
             // A hint naming the enclosing class is left alone: inside its
             // own body a class's `@template` parameters are in scope, and
@@ -419,14 +418,16 @@ fn resolve_named_type(
 
             // Apply generic substitution if the type hint carried generic
             // arguments and the class has template parameters of its own
-            // to substitute, or (a `static<TNewKey, TValue>` rebind on a
-            // concrete collection subclass) fixes a single ancestor's
-            // generics via `@extends` instead.
+            // to substitute, or inherits them from a generic parent it
+            // never bound (a `static<TNewKey, TValue>` rebind on a
+            // concrete collection subclass, a custom Eloquent builder
+            // specialised to its model).
             if !generic_args.is_empty()
                 && (!cls.template_params.is_empty()
                     || crate::inheritance::is_extends_only_generic_rebindable(
                         &cls,
                         generic_args.len(),
+                        class_loader,
                     ))
             {
                 let generic_arg_strings: Vec<String> =

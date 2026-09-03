@@ -118,7 +118,7 @@ fn round_trip_generics() {
 
 #[test]
 fn parse_generic_with_covariant_this() {
-    // Laravel/Larastan uses `covariant $this` in generic args, e.g.
+    // Laravel's relation annotations use `covariant $this` in generic args, e.g.
     // `BelongsTo<Category, covariant $this>`.  The parser should
     // still extract the base class name (`BelongsTo`) so that
     // member lookup works on the relationship class.
@@ -661,13 +661,48 @@ fn iterable_key_type_normalizes_explicit_numeric_shape_keys() {
             .unwrap(),
         PhpType::string()
     );
+    // A quoted key is decoded the way PHP decodes the literal: `"\x38"` is
+    // the string `8`, which PHP stores as the integer key `8`, while the
+    // single-quoted spelling of the same characters decodes nothing and
+    // stays a string key.
     assert_eq!(
         PhpType::parse(r#"array{"\x38": User}"#)
             .iterable_key_type()
-            .unwrap()
-            .to_string(),
-        "int|string"
+            .unwrap(),
+        PhpType::int()
     );
+    assert_eq!(
+        PhpType::parse(r#"array{'\x38': User}"#)
+            .iterable_key_type()
+            .unwrap(),
+        PhpType::string()
+    );
+    assert_eq!(
+        PhpType::parse(r#"array{'~\n~': string, '~\r~': string}"#)
+            .iterable_key_type()
+            .unwrap(),
+        PhpType::string()
+    );
+}
+
+/// A quoted shape key survives being displayed and parsed again: the
+/// escapes the display writes are the ones PHP reads back.
+#[test]
+fn shape_keys_round_trip_through_their_display_form() {
+    for key in [r"~\n~", "a'b", "a\"b", "with space", "\n", "\t"] {
+        let shape = PhpType::array_shape(vec![ShapeEntry {
+            key: Some(key.to_string()),
+            value_type: PhpType::string(),
+            optional: false,
+        }]);
+        let reparsed = PhpType::parse(&shape.to_string());
+        assert_eq!(
+            reparsed.shape_entries().and_then(|e| e[0].key.as_deref()),
+            Some(key),
+            "{}",
+            shape
+        );
+    }
 }
 
 #[test]
@@ -2558,6 +2593,42 @@ mod subtype_tests {
     #[test]
     fn class_string_is_subtype_of_string() {
         assert!(PhpType::named(atom("class-string")).is_subtype_of(&PhpType::string()));
+    }
+
+    /// `non-falsy-string` excludes `"0"` on top of the `""` that
+    /// `non-empty-string` excludes, so the `non-empty-…` refinements, all of
+    /// which are inhabited by `"0"`, stop at `non-empty-string`. The string
+    /// kinds that name a PHP symbol carry on: a symbol name can never be
+    /// `"0"`.
+    #[test]
+    fn only_the_string_kinds_that_exclude_zero_are_non_falsy() {
+        for name in [
+            "non-empty-literal-string",
+            "non-empty-lowercase-string",
+            "non-empty-uppercase-string",
+            "non-empty-string",
+        ] {
+            let ty = PhpType::named(atom(name));
+            assert!(
+                ty.is_subtype_of(&PhpType::named(atom("non-empty-string"))),
+                "{name} should be a non-empty-string"
+            );
+            assert!(
+                !ty.is_subtype_of(&PhpType::named(atom("non-falsy-string"))),
+                "{name} admits \"0\", so it is not a non-falsy-string"
+            );
+            assert!(
+                !ty.is_subtype_of(&PhpType::named(atom("truthy-string"))),
+                "{name} admits \"0\", so it is not a truthy-string"
+            );
+        }
+
+        for name in ["class-string", "callable-string", "enum-string"] {
+            assert!(
+                PhpType::named(atom(name)).is_subtype_of(&PhpType::named(atom("non-falsy-string"))),
+                "{name} names a PHP symbol, which is never \"0\""
+            );
+        }
     }
 
     #[test]
@@ -4669,6 +4740,26 @@ fn unevaluated_operators_widen_to_their_bounds() {
 }
 
 #[test]
+fn mixed_is_found_wherever_it_reaches_the_top_level() {
+    // `mixed` is the top type, so a union or nullable holding it holds
+    // every value and reads as plain `mixed`.
+    assert!(PhpType::mixed().contains_mixed());
+    assert!(PhpType::parse("mixed|Foo").contains_mixed());
+    assert!(PhpType::parse("?mixed").contains_mixed());
+    assert!(PhpType::parse("int|mixed|string").contains_mixed());
+    assert_eq!(
+        PhpType::parse("mixed|Foo").contains_mixed(),
+        PhpType::parse("mixed|Foo").simplified().is_mixed(),
+        "the cheap answer must match the folded one"
+    );
+    // A `mixed` nested inside a type argument describes the members of a
+    // container, not the container, so it does not reach the top level.
+    assert!(!PhpType::parse("array<string, mixed>").contains_mixed());
+    assert!(!PhpType::parse("Foo|null").contains_mixed());
+    assert!(!PhpType::parse("int").contains_mixed());
+}
+
+#[test]
 fn benevolence_is_invisible_to_readers_and_matchers() {
     let ty = PhpType::parse("__benevolent<string|false>");
     assert!(ty.is_benevolent());
@@ -4811,4 +4902,51 @@ fn truthy_type_strips_null_from_every_nullable_union_member() {
     );
     // A union that is entirely falsy has no truthy half at all.
     assert_eq!(PhpType::parse("null|false").truthy_type(), None);
+}
+
+#[test]
+fn falsy_type_keeps_only_what_the_skipped_branch_could_hold() {
+    // The mirror of the truthy side: a `bool` keeps its `false` half and
+    // every nullable member keeps its `null`.
+    assert_eq!(
+        PhpType::parse("?int|?bool|?string|?DateTime")
+            .falsy_type()
+            .unwrap()
+            .to_string(),
+        "int|false|string|null"
+    );
+    // An object is truthy whatever it holds, so it is dropped outright.
+    assert_eq!(
+        PhpType::parse("DateTime|string")
+            .falsy_type()
+            .unwrap()
+            .to_string(),
+        "string"
+    );
+    // A union that is entirely truthy has no falsy half at all.
+    assert_eq!(PhpType::parse("true|DateTime").falsy_type(), None);
+    // Refinements PHP has no plain spelling for are left alone, exactly
+    // as the truthy side leaves `int` rather than excluding `0`.
+    assert_eq!(
+        PhpType::parse("int").falsy_type().unwrap().to_string(),
+        "int"
+    );
+}
+
+#[test]
+fn int_widens_to_float_for_compatibility_but_not_for_union_simplification() {
+    // `int` accepts wherever `float` is expected (PHP's silent int→float
+    // coercion), but the two remain distinct scalar domains: simplifying
+    // `int|float` must not collapse it down to `float` the way a genuine
+    // same-domain refinement (`positive-int|int` → `int`) does.
+    assert_eq!(
+        PhpType::parse("int|float").simplified().to_string(),
+        "int|float"
+    );
+    assert_eq!(
+        PhpType::parse("positive-int|float")
+            .simplified()
+            .to_string(),
+        "positive-int|float"
+    );
 }

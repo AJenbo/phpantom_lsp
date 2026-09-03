@@ -431,6 +431,52 @@ mod tests {
         );
     }
 
+    /// `@class(...)` compiles to the same generic marker call as a bound
+    /// attribute that names no parameter, so one written before a
+    /// component tag must not shift the index the tag's own bound
+    /// attribute is correlated against.
+    #[tokio::test]
+    async fn a_directive_before_the_tag_does_not_shift_the_bound_attribute_index() {
+        let (backend, _dir) = create_psr4_workspace(
+            COMPOSER,
+            &[
+                ("app/Item.php", ITEM_CLASS),
+                (
+                    "resources/views/page.blade.php",
+                    "<x-brand.boxes :hairAnalysis=\"$model\" />\n",
+                ),
+                (
+                    "resources/views/components/brand/boxes.blade.php",
+                    "{{ $hairAnalysis->name }}\n",
+                ),
+            ],
+        );
+
+        let root = backend.workspace_root().read().clone().unwrap();
+        let page_uri = Url::from_file_path(root.join("resources/views/page.blade.php")).unwrap();
+        let component_uri =
+            Url::from_file_path(root.join("resources/views/components/brand/boxes.blade.php"))
+                .unwrap();
+
+        let page_source = "@php\n/** @var \\App\\Item $model */\n@endphp\n@class(['featured' => true])\n<x-brand.boxes :hairAnalysis=\"$model\" />\n";
+        open(&backend, &page_uri, "blade", page_source).await;
+        open(
+            &backend,
+            &component_uri,
+            "blade",
+            &std::fs::read_to_string(root.join("resources/views/components/brand/boxes.blade.php"))
+                .unwrap(),
+        )
+        .await;
+
+        let hover = hover_type(&backend, &component_uri, 0, 4).await;
+        assert!(
+            hover.contains("Item"),
+            "@class(...) before the tag must not shift its bound attribute's index, got: {}",
+            hover
+        );
+    }
+
     /// The inline `@php(…)` directive closes with its own parenthesis and
     /// never writes `@endphp`, so a tag written after it is still a call
     /// site of the component it names.
