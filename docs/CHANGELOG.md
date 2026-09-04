@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Updated the bundled mago toolchain to 1.47.5.** The parser, docblock parser, formatter, and supporting crates are refreshed to the latest upstream release. Contributed by @nguyentranchung.
+
 ### Fixed
 
 - **Frontend interpolations escaped from Blade are no longer parsed as PHP.** Expressions such as `@{{ name }}` and `@{!! name !!}` are meant to reach Vue, Alpine, or another frontend template engine untouched, but PHPantom treated their contents as Blade echoes and reported PHP syntax errors for frontend-only expressions such as `@{{.Image}}`. Complete escaped interpolations are now treated as literal template text, including when they span lines. One the file never closes, which is what a half-typed escape looks like, ends at the end of its line, so the rest of the template is still read rather than being masked along with it. Contributed by @shuvroroy. Closes #419.
