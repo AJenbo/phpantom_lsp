@@ -43,7 +43,9 @@ class ImportClassDemo
 // ── Code Action: Import Qualified Name ─────────────────────────────────────
 // Place the cursor on either qualified name and trigger "Code Action".
 // The refactoring adds the appropriate import and replaces every equivalent
-// usage in this file with its short name.
+// usage in this file with its short name. The companion action alongside it,
+// "Import all qualified symbols and shorten usages", does the same for every
+// qualified class, function, and constant in this namespace at once.
 
 class ImportQualifiedNameDemo
 {

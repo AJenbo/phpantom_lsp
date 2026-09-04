@@ -16,6 +16,7 @@
 //!   kind (plain `use` / `use function` / `use const`).
 //! - **Import qualified symbol** — replace qualified class, function, or
 //!   constant usages with an import and short name, aliasing conflicts.
+//!   A bulk variant does every qualified symbol in the namespace at once.
 //! - **Implement missing methods** — when the cursor is inside a
 //!   concrete class that extends an abstract class or implements an
 //!   interface with unimplemented methods, offer to generate stubs.
