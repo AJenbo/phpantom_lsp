@@ -42,43 +42,7 @@ No outstanding items.
 
 ## Symbol resolution
 
-### B313. A namespace served by two PSR-4 roots moves both of them
-
-**Impact: Medium · Complexity: Medium-High**
-
-Composer allows an array of directories per PSR-4 prefix, and
-`collect_psr4_entries` records one mapping per directory. A namespace
-move then reads them inconsistently: `psr4_directory_for_namespace`
-takes the *first* mapping that covers the destination, while
-`build_namespace_psr4_rename_ops` sweeps *every* mapping that covers
-the source. Moving one of the two roots therefore plans a move of both
-onto the same destination:
-
-```jsonc
-"autoload-dev": { "psr-4": { "Tests\\": ["tests/", "shared/tests/"] } }
-```
-
-```
-$ phpantom_lsp move --dry-run 'shared/tests' 'tests/Shared'
-Error: failed to read …/tests/Unit/TokenTransferTest.php: No such file or directory
-```
-
-The directory the user named is resolved to the namespace `Tests`, and
-from there the second root is indistinguishable from the first. It
-fails loudly (`validate_moves` also rejects the duplicate destination),
-so the damage is blocked rather than silent, but the message names a
-file the user never mentioned and the move cannot be completed at all.
-
-Honouring the directory the user actually passed means moving only the
-classes declared beneath it, which the prefix-over-raw-text rewriter
-has no granularity for — the same limitation F22 documents. Until that
-exists, the move should refuse up front with a message naming both
-roots, rather than failing on a path it derived.
-
-**Where to look:** `src/rename/namespace.rs`
-(`build_namespace_psr4_rename_ops`), `src/composer.rs`
-(`psr4_directory_for_namespace`, `collect_psr4_entries`),
-`src/move_cli.rs` (`namespace_from_dir`, `validate_moves`).
+No outstanding items.
 
 ## Array types
 

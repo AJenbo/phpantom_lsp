@@ -790,6 +790,124 @@ mod tests {
         );
     }
 
+    /// A project whose `Tests\\` prefix is served by two directories,
+    /// which is what Composer's array form allows.
+    fn two_root_project(files: &[(&str, &str)]) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("composer.json"),
+            r#"{"autoload-dev":{"psr-4":{"Tests\\":["tests/","shared/tests/"]}}}"#,
+        )
+        .expect("composer");
+        for (relative, content) in files {
+            let path = dir.path().join(relative);
+            std::fs::create_dir_all(path.parent().expect("parent")).expect("dirs");
+            std::fs::write(path, content).expect("file");
+        }
+        dir
+    }
+
+    #[tokio::test]
+    async fn refuses_a_namespace_that_lives_in_two_psr4_roots() {
+        // Naming one root resolves to the namespace both of them serve,
+        // and from there the other root is indistinguishable.  Planning
+        // the move anyway carries the second root's files along, onto the
+        // same destination, so it is refused with both roots named.
+        let dir = two_root_project(&[
+            (
+                "tests/Unit/TokenTransferTest.php",
+                "<?php\nnamespace Tests\\Unit;\n\nclass TokenTransferTest {}\n",
+            ),
+            (
+                "shared/tests/Support/Helper.php",
+                "<?php\nnamespace Tests\\Support;\n\nclass Helper {}\n",
+            ),
+        ]);
+        let options = MoveOptions {
+            from: "shared/tests".into(),
+            to: "tests/Shared".into(),
+            workspace_root: dir.path().to_path_buf(),
+            dry_run: true,
+            use_colour: false,
+            output_format: OutputFormat::Table,
+            global_config: None,
+        };
+
+        let error = run_inner(&options).await.expect_err("refusal");
+        assert!(
+            error.contains("tests/") && error.contains("shared/tests/"),
+            "expected both roots named, got {error}"
+        );
+        assert!(
+            !error.contains("No such file"),
+            "expected a refusal, not a derived path failing to open: {error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_second_root_that_holds_nothing_does_not_block_the_move() {
+        // `shared/tests/` is mapped but was never created, so the moved
+        // namespace still sits in exactly one directory.
+        let dir = two_root_project(&[(
+            "tests/Unit/TokenTransferTest.php",
+            "<?php\nnamespace Tests\\Unit;\n\nclass TokenTransferTest {}\n",
+        )]);
+        let options = MoveOptions {
+            from: "Tests\\Unit".into(),
+            to: "Tests\\Feature".into(),
+            workspace_root: dir.path().to_path_buf(),
+            dry_run: false,
+            use_colour: false,
+            output_format: OutputFormat::Table,
+            global_config: None,
+        };
+
+        let summary = run_inner(&options).await.expect("move");
+        assert!(summary.warnings.is_empty(), "{:?}", summary.warnings);
+        assert!(
+            std::fs::read_to_string(dir.path().join("tests/Feature/TokenTransferTest.php"))
+                .expect("moved")
+                .contains("namespace Tests\\Feature;")
+        );
+    }
+
+    #[tokio::test]
+    async fn two_prefixes_naming_one_directory_are_one_root() {
+        // `Tests\\` at `tests/` and `Tests\\Unit\\` at `tests/Unit/` both
+        // place `Tests\\Unit` in the same directory, which is one place to
+        // move from, not two.
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("composer.json"),
+            r#"{"autoload-dev":{"psr-4":{"Tests\\":"tests/","Tests\\Unit\\":"tests/Unit/"}}}"#,
+        )
+        .expect("composer");
+        let path = dir.path().join("tests/Unit/TokenTransferTest.php");
+        std::fs::create_dir_all(path.parent().expect("parent")).expect("dirs");
+        std::fs::write(
+            &path,
+            "<?php\nnamespace Tests\\Unit;\n\nclass TokenTransferTest {}\n",
+        )
+        .expect("file");
+        let options = MoveOptions {
+            from: "Tests\\Unit".into(),
+            to: "Tests\\Feature".into(),
+            workspace_root: dir.path().to_path_buf(),
+            dry_run: false,
+            use_colour: false,
+            output_format: OutputFormat::Table,
+            global_config: None,
+        };
+
+        let summary = run_inner(&options).await.expect("move");
+        assert_eq!(summary.paths_moved, 1);
+        assert!(
+            std::fs::read_to_string(dir.path().join("tests/Feature/TokenTransferTest.php"))
+                .expect("moved")
+                .contains("namespace Tests\\Feature;")
+        );
+    }
+
     #[tokio::test]
     async fn refuses_occupied_class_destination_without_changes() {
         let old = "<?php\nnamespace App\\Old;\n\nclass Widget {}\n";
