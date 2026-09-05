@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788574108662,
+  "lastUpdate": 1788644889006,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -26519,6 +26519,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 78.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "7d2ff12e51b9cbf0f52ffe6bfaa449fe98a51f86",
+          "message": "The Blade lowering's own declarations stay out of the project's symbols",
+          "timestamp": "2026-09-05T23:32:10+02:00",
+          "tree_id": "4a12743789f21d9cbe936e291654dd9f7dcd3485",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/7d2ff12e51b9cbf0f52ffe6bfaa449fe98a51f86"
+        },
+        "date": 1788644883952,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 36.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 75,
             "unit": "MiB"
           }
         ]
