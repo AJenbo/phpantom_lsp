@@ -688,6 +688,18 @@ impl Backend {
                 Some(&func_doc_ctx),
             );
 
+            // Drop the declarations the Blade lowering wrote itself: the
+            // wrapper holding the template body and the prologue's marker
+            // functions.  Every template lowers to the same ones, so
+            // publishing them makes each template a redeclaration of the
+            // last and puts boilerplate no file wrote into
+            // workspace-symbol results.  They stay in the virtual PHP, so
+            // the calls the lowering emits still resolve against them
+            // within the template.
+            if self.is_blade_file(uri) {
+                functions.retain(|func| !crate::blade::is_synthetic_function(&func.name));
+            }
+
             // Apply stub patches when parsing embedded stub content
             // (e.g. a constant lookup routes its stub source through
             // `update_ast` under a `phpantom-stub://const/…` URI).  The

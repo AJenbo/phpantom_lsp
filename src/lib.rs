@@ -1115,9 +1115,9 @@ impl Backend {
             parsed_uris: Arc::new(RwLock::new(HashSet::new())),
             parse_inflight: Arc::new(resolution::ParseInflight::new()),
             stub_index: Arc::new(RwLock::new(CiMap::from(stubs::build_stub_class_index()))),
-            stub_function_index: Arc::new(RwLock::new(CiMap::from(
+            stub_function_index: Arc::new(RwLock::new(blade::with_marker_stubs(CiMap::from(
                 stubs::build_stub_function_index(),
-            ))),
+            )))),
             stub_constant_index: Arc::new(RwLock::new(stubs::build_stub_constant_index())),
             resolved_class_cache,
             auth_user_type_cache: Arc::new(RwLock::new(HashMap::new())),
@@ -1229,7 +1229,7 @@ impl Backend {
             parsed_uris: Arc::new(RwLock::new(HashSet::new())),
             parse_inflight: Arc::new(resolution::ParseInflight::new()),
             stub_index: Arc::new(RwLock::new(CiMap::new())),
-            stub_function_index: Arc::new(RwLock::new(CiMap::new())),
+            stub_function_index: Arc::new(RwLock::new(blade::with_marker_stubs(CiMap::new()))),
             stub_constant_index: Arc::new(RwLock::new(HashMap::new())),
             resolved_class_cache,
             auth_user_type_cache: Arc::new(RwLock::new(HashMap::new())),
@@ -1388,7 +1388,9 @@ impl Backend {
         virtual_members::phpdoc::clear_mixin_cache();
         let backend = Self {
             stub_index: Arc::new(RwLock::new(CiMap::from(stub_index))),
-            stub_function_index: Arc::new(RwLock::new(CiMap::from(stub_function_index))),
+            stub_function_index: Arc::new(RwLock::new(blade::with_marker_stubs(CiMap::from(
+                stub_function_index,
+            )))),
             stub_constant_index: Arc::new(RwLock::new(stub_constant_index)),
             ..Self::test_defaults()
         };
