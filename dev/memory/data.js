@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788459210600,
+  "lastUpdate": 1788567132065,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -26417,6 +26417,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 74.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "fff13f58619f86f770216102122fcfe03ae2cc5f",
+          "message": "Add back \"Import all FQCNs\"",
+          "timestamp": "2026-09-05T01:55:44+02:00",
+          "tree_id": "2438c2e1dac388ff53adfda64d80218fc547cc9a",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/fff13f58619f86f770216102122fcfe03ae2cc5f"
+        },
+        "date": 1788567122995,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 70.9,
             "unit": "MiB"
           }
         ]
