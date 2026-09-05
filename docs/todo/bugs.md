@@ -54,39 +54,25 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B314. Blade templates are invisible to renames and moves
+### B317. The Blade preprocessor's own declarations reach the global indexes
 
-**Impact: Medium-High · Complexity: Medium-High**
+**Impact: Low · Complexity: Low**
 
-A class reference inside a `.blade.php` template is never rewritten by
-`textDocument/rename` or `phpantom_lsp move`, and nothing reports that
-it was skipped, so `files_changed` reads as a complete count when it is
-not. In a Laravel codebase the templates carry FQCNs in `@var`
-doc-comments that Bladestan type-checks, and in `@php` blocks that are
-ordinary PHP; a move leaves every one of them naming a class that no
-longer exists.
+The virtual PHP a template lowers to opens with a prologue declaring
+`__blade_template` and the `blade_*_directive` marker functions the
+lowering calls. Those are published like any other declaration, so they
+appear in workspace-symbol search (ten entries a query for "blade"
+matches) and every template in the project contributes a duplicate
+declaration of each of them to `duplicate_functions`.
 
-Two separate things have to line up:
+Nothing reports them as a redeclaration and the memory is small (a few
+megabytes across a project with hundreds of templates), but they are
+boilerplate no file wrote and they should not be reachable as symbols.
+Keeping them out of the published indexes has to leave them resolvable
+from within a template, or every marker call the lowering emits becomes
+an unknown-function diagnostic; registering them once as stubs rather
+than per-template is the shape that gives both.
 
-- The workspace index parses templates as raw PHP.
-  `build_ast_index_update` (the parallel index path) runs the parser
-  over the file's own bytes, unlike `update_ast`, which preprocesses a
-  template into virtual PHP first. Everything Blade-specific is inline
-  HTML to the raw parse, so the template's symbol map holds no class
-  references to rewrite.
-- The rename reads raw file content. `find_references` already handles
-  templates by reading `blade_virtual_content` and translating
-  positions back through `blade_source_maps`
-  (`reference_file_content`); the namespace rewriter calls
-  `get_file_content` instead. Feeding it virtual content without the
-  translation would be worse than skipping — the offsets would land in
-  the wrong place in the real file. Note that a template that *does*
-  end up with a virtual-content symbol map trips the
-  `matches_source` length check, and that check abandons the entire
-  rename, so this needs the translation in place before the index
-  starts preprocessing.
-
-**Where to look:** `src/rename/namespace.rs`
-(`collect_fqn_reference_edits`, `build_namespace_prefix_rename_edit`),
-`src/parser/ast_update.rs` (`build_ast_index_update` vs `update_ast`),
-`src/references/mod.rs` (`reference_file_content`), `src/blade/source_map.rs`.
+**Where to look:** `src/blade/preprocessor.rs` (the prologue),
+`src/parser/ast_update.rs` (`build_ast_index_update`),
+`src/workspace_symbols.rs`.

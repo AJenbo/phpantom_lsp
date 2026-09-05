@@ -142,7 +142,12 @@ impl Backend {
                 continue;
             }
 
-            let content = match self.get_file_content(file_uri) {
+            // A template is planned against the virtual PHP it lowers to,
+            // because that is what its symbol map describes and what the
+            // `matches_source` check below compares against.  The edits
+            // are translated back to the template's own coordinates once
+            // they are collected.
+            let content = match self.reference_file_content(file_uri) {
                 Some(c) => c,
                 None => continue,
             };
@@ -181,6 +186,21 @@ impl Backend {
                 &mut file_edits,
             ) {
                 return Ok(None);
+            }
+
+            self.translate_template_edits(file_uri, &mut file_edits);
+
+            // 4. Update `@use` directives, which the three scans above
+            //    cannot see: the preprocessor hoists them into the
+            //    prologue, which translates back to no position at all.
+            if self.is_blade_file(file_uri)
+                && let Some(template) = self.get_file_content(file_uri)
+            {
+                super::blade::collect_use_directive_edits(
+                    &template,
+                    &|name| moved_name(name, old_prefix, new_prefix),
+                    &mut file_edits,
+                );
             }
 
             if !file_edits.is_empty() {

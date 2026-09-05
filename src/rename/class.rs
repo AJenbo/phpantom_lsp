@@ -248,8 +248,10 @@ impl Backend {
         let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
 
         for (file_uri_str, file_locations) in &locations_by_file {
-            let file_content = self.get_file_content(file_uri_str);
-            let file_content = match file_content {
+            // Reference locations in a template are recorded against the
+            // virtual PHP it lowers to, so the text behind them has to be
+            // read there too; the edits are translated back below.
+            let file_content = match self.reference_file_content(file_uri_str) {
                 Some(c) => c,
                 None => continue,
             };
@@ -378,6 +380,13 @@ impl Backend {
                 });
             }
 
+            self.rewrite_template_edits(
+                file_uri_str,
+                &new_fqn,
+                old_fqn_normalized,
+                &mut file_edits,
+            );
+
             if !file_edits.is_empty() {
                 changes.entry(parsed_uri).or_default().extend(file_edits);
             }
@@ -463,7 +472,10 @@ impl Backend {
             .cloned();
 
         for (file_uri_str, file_locations) in &locations_by_file {
-            let file_content = match self.get_file_content(file_uri_str) {
+            // Reference locations in a template are recorded against the
+            // virtual PHP it lowers to, so the text behind them has to be
+            // read there too; the edits are translated back below.
+            let file_content = match self.reference_file_content(file_uri_str) {
                 Some(c) => c,
                 None => continue,
             };
@@ -664,6 +676,13 @@ impl Backend {
                 }
             }
 
+            self.rewrite_template_edits(
+                file_uri_str,
+                &new_fqn_normalized,
+                old_fqn_normalized,
+                &mut file_edits,
+            );
+
             if !file_edits.is_empty() {
                 changes.entry(parsed_uri).or_default().extend(file_edits);
             }
@@ -691,6 +710,38 @@ impl Backend {
             document_changes: None,
             change_annotations: None,
         }))
+    }
+
+    /// Bring a template's edits into the template's own coordinates and
+    /// add the one edit its symbol map cannot describe.
+    ///
+    /// A no-op for every file that is not a template.  The edits collected
+    /// so far were planned against the virtual PHP the preprocessor lowers
+    /// the template to; a `@use` directive is hoisted into that file's
+    /// prologue, so the import it declares is rewritten from the
+    /// template's own text instead of from a reference location.
+    fn rewrite_template_edits(
+        &self,
+        uri: &str,
+        new_fqn: &str,
+        old_fqn: &str,
+        edits: &mut Vec<TextEdit>,
+    ) {
+        if !self.is_blade_file(uri) {
+            return;
+        }
+        self.translate_template_edits(uri, edits);
+        let Some(template) = self.get_file_content(uri) else {
+            return;
+        };
+        super::blade::collect_use_directive_edits(
+            &template,
+            &|name| {
+                name.eq_ignore_ascii_case(old_fqn)
+                    .then(|| new_fqn.to_string())
+            },
+            edits,
+        );
     }
 
     /// Compute the file move for a class being moved to a new FQN.

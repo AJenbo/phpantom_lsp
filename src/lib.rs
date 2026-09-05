@@ -2225,71 +2225,31 @@ impl Backend {
         Some(location)
     }
 
-    /// Translate every text edit in a workspace edit from virtual PHP
-    /// coordinates back to Blade, dropping the ones that target a template's
-    /// injected prologue.
+    /// Move a file's edits from the virtual PHP they were planned against
+    /// back into the file's own coordinates, dropping the ones that target
+    /// a template's injected prologue.
     ///
-    /// Covers both `changes` and `document_changes`; a class rename that also
-    /// renames its file uses the latter.
-    pub(crate) fn translate_workspace_edit(&self, edit: &mut tower_lsp::lsp_types::WorkspaceEdit) {
-        use tower_lsp::lsp_types::{DocumentChangeOperation, DocumentChanges};
-
-        if let Some(changes) = &mut edit.changes {
-            changes.retain(|uri, edits| {
-                let uri_str = uri.to_string();
-                if !self.is_blade_file(&uri_str) {
-                    return true;
-                }
-                edits.retain_mut(
-                    |e| match self.try_translate_blade_range(&uri_str, e.range) {
-                        Some(range) => {
-                            e.range = range;
-                            true
-                        }
-                        None => false,
-                    },
-                );
-                !edits.is_empty()
-            });
-        }
-
-        match &mut edit.document_changes {
-            Some(DocumentChanges::Edits(edits)) => {
-                edits.retain_mut(|e| self.translate_text_document_edit(e));
-            }
-            Some(DocumentChanges::Operations(ops)) => ops.retain_mut(|op| match op {
-                DocumentChangeOperation::Edit(e) => self.translate_text_document_edit(e),
-                DocumentChangeOperation::Op(_) => true,
-            }),
-            None => {}
-        }
-    }
-
-    /// Translate one document's edits back to Blade coordinates, returning
-    /// `false` when every edit it held targeted the prologue.
-    fn translate_text_document_edit(
+    /// A no-op for every file that is not a template.  A template is
+    /// planned against the virtual PHP it lowers to, because that is what
+    /// its symbol map describes, but the editor applies the edits to the
+    /// template; the prologue holds declarations no template line stands
+    /// behind, so an edit landing there has no position to be applied at.
+    pub(crate) fn translate_template_edits(
         &self,
-        edit: &mut tower_lsp::lsp_types::TextDocumentEdit,
-    ) -> bool {
-        use tower_lsp::lsp_types::OneOf;
-
-        let uri_str = edit.text_document.uri.to_string();
-        if !self.is_blade_file(&uri_str) {
-            return true;
+        uri: &str,
+        edits: &mut Vec<tower_lsp::lsp_types::TextEdit>,
+    ) {
+        if !self.is_blade_file(uri) {
+            return;
         }
-        edit.edits.retain_mut(|e| {
-            let range = match e {
-                OneOf::Left(e) => &mut e.range,
-                OneOf::Right(e) => &mut e.text_edit.range,
-            };
-            match self.try_translate_blade_range(&uri_str, *range) {
-                Some(translated) => {
-                    *range = translated;
+        edits.retain_mut(
+            |edit| match self.try_translate_blade_range(uri, edit.range) {
+                Some(range) => {
+                    edit.range = range;
                     true
                 }
                 None => false,
-            }
-        });
-        !edit.edits.is_empty()
+            },
+        );
     }
 }
