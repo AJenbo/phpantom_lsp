@@ -4,21 +4,15 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 
-use serde::Serialize;
 use tower_lsp::lsp_types::{
     DocumentChangeOperation, DocumentChanges, OneOf, ResourceOp, TextEdit, Url, WorkspaceEdit,
 };
 
+use crate::analyse::OutputFormat;
 use crate::{Backend, composer, config};
 
-/// Output format for the move command.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MoveOutputFormat {
-    /// Human-readable output.
-    Table,
-    /// Machine-readable JSON.
-    Json,
-}
+mod output;
+mod residual;
 
 /// Options for the move command.
 #[derive(Debug)]
@@ -31,13 +25,15 @@ pub struct MoveOptions {
     pub workspace_root: PathBuf,
     /// Preview the move without writing files.
     pub dry_run: bool,
-    /// Output format.
-    pub output_format: MoveOutputFormat,
+    /// Whether to output with ANSI colours.
+    pub use_colour: bool,
+    /// Output format, shared with `analyze` and `fix`.
+    pub output_format: OutputFormat,
     /// Global configuration path.
     pub global_config: Option<PathBuf>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug)]
 struct MoveSummary {
     dry_run: bool,
     kind: &'static str,
@@ -46,7 +42,21 @@ struct MoveSummary {
     files_changed: usize,
     paths_moved: usize,
     /// Conditions the caller needs to act on even though the move applied.
-    warnings: Vec<String>,
+    warnings: Vec<MoveWarning>,
+}
+
+/// Something the move left for the caller to deal with: a destination
+/// the autoloader cannot reach, or a mention of the old name or path
+/// the rewriter had no way to see.
+#[derive(Debug)]
+struct MoveWarning {
+    /// What went wrong, without the location, which is carried
+    /// separately so the JSON and GitHub formats can place it.
+    message: String,
+    /// The project-relative file the warning is about, after the move.
+    file: Option<String>,
+    /// The 1-based line within that file.
+    line: Option<usize>,
 }
 
 enum MoveTarget {
@@ -80,27 +90,16 @@ pub async fn run(options: MoveOptions) -> i32 {
     match run_inner(&options).await {
         Ok(summary) => {
             match options.output_format {
-                MoveOutputFormat::Table => {
-                    let verb = if summary.dry_run {
-                        "Would move"
-                    } else {
-                        "Moved"
-                    };
-                    println!(
-                        "{verb} {} `{}` to `{}` ({} file(s) changed, {} path(s) moved).",
-                        summary.kind,
-                        summary.from,
-                        summary.to,
-                        summary.files_changed,
-                        summary.paths_moved
-                    );
-                    for warning in &summary.warnings {
-                        eprintln!("Warning: {warning}");
+                OutputFormat::Table => {
+                    // Annotate in CI without giving up the readable
+                    // summary, the way `analyze` and `fix` do.
+                    if std::env::var("GITHUB_ACTIONS").is_ok() {
+                        output::print_github_annotations(&summary);
                     }
+                    output::print_table(&summary, options.use_colour);
                 }
-                MoveOutputFormat::Json => {
-                    println!("{}", serde_json::to_string(&summary).unwrap_or_default());
-                }
+                OutputFormat::Github => output::print_github_annotations(&summary),
+                OutputFormat::Json => output::print_json(&summary),
             }
             0
         }
@@ -143,26 +142,29 @@ async fn run_inner(options: &MoveOptions) -> Result<MoveSummary, String> {
 
     let from = resolve_source(&backend, &root, &options.from)?;
     let to = resolve_destination(&backend, &root, &options.to, &from)?;
+    // The pre-move location, kept so the residual scan can recognize it
+    // spelled as a path string rather than as a class name.
+    let old_path;
     let (kind, from_name, to_name, edit, risk) = match (from, to) {
         (MoveTarget::Class(from), MoveTarget::Class(to)) => {
             // Read before planning: the edit itself does not say which file
             // declared the class, and that is what the check below needs.
-            let risk = class_definition_path(&backend, &from)
-                .map_or(AutoloadRisk::None, AutoloadRisk::ClassFile);
+            let definition = class_definition_path(&backend, &from);
+            old_path = definition.clone();
+            let risk = definition.map_or(AutoloadRisk::None, AutoloadRisk::ClassFile);
             let edit = backend
                 .plan_class_move(&from, &to)?
                 .ok_or_else(|| "the requested move would not change anything".to_string())?;
             ("class", from, to, edit, risk)
         }
         (MoveTarget::Namespace(from), MoveTarget::Namespace(to)) => {
-            let risk = match composer::psr4_directory_for_namespace(
-                &backend.psr4_mappings().read(),
-                &root,
-                &to,
-            ) {
+            let mappings = backend.psr4_mappings().read();
+            let risk = match composer::psr4_directory_for_namespace(&mappings, &root, &to) {
                 Some(_) => AutoloadRisk::None,
                 None => AutoloadRisk::UnmappedNamespace,
             };
+            old_path = composer::psr4_directory_for_namespace(&mappings, &root, &from);
+            drop(mappings);
             let edit = backend
                 .plan_namespace_move(&from, &to)?
                 .ok_or_else(|| "the requested move would not change anything".to_string())?;
@@ -177,23 +179,34 @@ async fn run_inner(options: &MoveOptions) -> Result<MoveSummary, String> {
         AutoloadRisk::ClassFile(definition)
             if !plan.moves.iter().any(|(from, _)| from == &definition) =>
         {
-            warnings.push(format!(
-                "`{}` now declares `{to_name}`, but no PSR-4 mapping covers that name, \
-                 so the file was left where it is and the autoloader will not find the class.",
-                definition
-                    .strip_prefix(&root)
-                    .unwrap_or(&definition)
-                    .display()
-            ));
+            warnings.push(MoveWarning {
+                message: format!(
+                    "This file now declares `{to_name}`, but no PSR-4 mapping covers that name, \
+                     so it was left where it is and the autoloader will not find the class."
+                ),
+                file: Some(relative_display(&root, &definition)),
+                line: None,
+            });
         }
         AutoloadRisk::UnmappedNamespace => {
-            warnings.push(format!(
-                "No PSR-4 mapping covers `{to_name}`, so the files were left where they are \
-                 and the autoloader will not find the classes they now declare."
-            ));
+            warnings.push(MoveWarning {
+                message: format!(
+                    "No PSR-4 mapping covers `{to_name}`, so the files were left where they are \
+                     and the autoloader will not find the classes they now declare."
+                ),
+                file: None,
+                line: None,
+            });
         }
         AutoloadRisk::ClassFile(_) | AutoloadRisk::None => {}
     }
+    warnings.extend(residual::residual_warnings(
+        &backend,
+        &root,
+        &from_name,
+        old_path.as_deref(),
+        &plan,
+    ));
 
     let summary = MoveSummary {
         dry_run: options.dry_run,
@@ -208,6 +221,14 @@ async fn run_inner(options: &MoveOptions) -> Result<MoveSummary, String> {
         apply_plan(plan)?;
     }
     Ok(summary)
+}
+
+/// A path as the user typed it, relative to the project root.
+fn relative_display(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
 }
 
 /// The file a class is declared in, as far as the index knows.
@@ -500,7 +521,8 @@ mod tests {
             to: "App\\Domain\\Gadget".into(),
             workspace_root: dir.path().to_path_buf(),
             dry_run: false,
-            output_format: MoveOutputFormat::Table,
+            use_colour: false,
+            output_format: OutputFormat::Table,
             global_config: None,
         };
 
@@ -528,7 +550,8 @@ mod tests {
             to: "src/New/Widget.php".into(),
             workspace_root: dir.path().to_path_buf(),
             dry_run: false,
-            output_format: MoveOutputFormat::Table,
+            use_colour: false,
+            output_format: OutputFormat::Table,
             global_config: None,
         };
 
@@ -559,7 +582,8 @@ mod tests {
             to: "src/Domain".into(),
             workspace_root: dir.path().to_path_buf(),
             dry_run: false,
-            output_format: MoveOutputFormat::Table,
+            use_colour: false,
+            output_format: OutputFormat::Table,
             global_config: None,
         };
 
@@ -587,7 +611,8 @@ mod tests {
             to: "App\\New\\Widget".into(),
             workspace_root: dir.path().to_path_buf(),
             dry_run: true,
-            output_format: MoveOutputFormat::Json,
+            use_colour: false,
+            output_format: OutputFormat::Json,
             global_config: None,
         };
 
@@ -608,7 +633,8 @@ mod tests {
             to: "App\\New".into(),
             workspace_root: dir.path().to_path_buf(),
             dry_run: false,
-            output_format: MoveOutputFormat::Table,
+            use_colour: false,
+            output_format: OutputFormat::Table,
             global_config: None,
         };
 
@@ -632,17 +658,18 @@ mod tests {
             to: "Other\\Widget".into(),
             workspace_root: dir.path().to_path_buf(),
             dry_run: false,
-            output_format: MoveOutputFormat::Table,
+            use_colour: false,
+            output_format: OutputFormat::Table,
             global_config: None,
         };
 
         let summary = run_inner(&options).await.expect("move");
         assert_eq!(summary.paths_moved, 0);
         assert!(
-            summary
-                .warnings
-                .iter()
-                .any(|warning| warning.contains("Widget.php") && warning.contains("PSR-4")),
+            summary.warnings.iter().any(|warning| {
+                warning.file.as_deref() == Some("src/Old/Widget.php")
+                    && warning.message.contains("PSR-4")
+            }),
             "expected a PSR-4 warning, got {:?}",
             summary.warnings
         );
@@ -664,7 +691,8 @@ mod tests {
             to: "App\\Domain\\Gadget".into(),
             workspace_root: dir.path().to_path_buf(),
             dry_run: false,
-            output_format: MoveOutputFormat::Table,
+            use_colour: false,
+            output_format: OutputFormat::Table,
             global_config: None,
         };
 
@@ -687,17 +715,17 @@ mod tests {
             to: "Other\\Domain".into(),
             workspace_root: dir.path().to_path_buf(),
             dry_run: false,
-            output_format: MoveOutputFormat::Table,
+            use_colour: false,
+            output_format: OutputFormat::Table,
             global_config: None,
         };
 
         let summary = run_inner(&options).await.expect("move");
         assert_eq!(summary.paths_moved, 0);
         assert!(
-            summary
-                .warnings
-                .iter()
-                .any(|warning| warning.contains("Other\\Domain") && warning.contains("PSR-4")),
+            summary.warnings.iter().any(|warning| {
+                warning.message.contains("Other\\Domain") && warning.message.contains("PSR-4")
+            }),
             "expected a PSR-4 warning, got {:?}",
             summary.warnings
         );
@@ -721,7 +749,8 @@ mod tests {
             to: "Xy".into(),
             workspace_root: dir.path().to_path_buf(),
             dry_run: true,
-            output_format: MoveOutputFormat::Table,
+            use_colour: false,
+            output_format: OutputFormat::Table,
             global_config: None,
         };
 
@@ -746,7 +775,8 @@ mod tests {
             to: "Lib\\Domain".into(),
             workspace_root: dir.path().to_path_buf(),
             dry_run: false,
-            output_format: MoveOutputFormat::Table,
+            use_colour: false,
+            output_format: OutputFormat::Table,
             global_config: None,
         };
 
@@ -773,7 +803,8 @@ mod tests {
             to: "App\\New\\Widget".into(),
             workspace_root: dir.path().to_path_buf(),
             dry_run: false,
-            output_format: MoveOutputFormat::Table,
+            use_colour: false,
+            output_format: OutputFormat::Table,
             global_config: None,
         };
 
@@ -787,5 +818,122 @@ mod tests {
             std::fs::read_to_string(dir.path().join("src/New/Widget.php")).expect("existing"),
             existing
         );
+    }
+
+    #[tokio::test]
+    async fn reports_the_old_name_left_behind_in_a_template() {
+        // A Blade template names the class as a string the rewriter has
+        // no way to resolve, so the move cannot take it along.  Silently
+        // omitting it from `files_changed` would read as a complete
+        // rewrite.
+        let dir = project(&[
+            (
+                "src/Old/Widget.php",
+                "<?php\nnamespace App\\Old;\n\nclass Widget {}\n",
+            ),
+            (
+                "resources/views/panel.blade.php",
+                "@php\n$class = 'App\\Old\\Widget';\n@endphp\n",
+            ),
+        ]);
+        let options = MoveOptions {
+            from: "App\\Old\\Widget".into(),
+            to: "App\\Domain\\Widget".into(),
+            workspace_root: dir.path().to_path_buf(),
+            dry_run: true,
+            use_colour: false,
+            output_format: OutputFormat::Table,
+            global_config: None,
+        };
+
+        let summary = run_inner(&options).await.expect("plan");
+        let residual = summary
+            .warnings
+            .iter()
+            .find(|warning| warning.file.as_deref() == Some("resources/views/panel.blade.php"))
+            .unwrap_or_else(|| panic!("expected a template warning, got {:?}", summary.warnings));
+        assert_eq!(residual.line, Some(2));
+        assert!(residual.message.contains("App\\Old\\Widget"));
+    }
+
+    #[tokio::test]
+    async fn reports_the_old_directory_left_behind_in_a_path_string() {
+        // `app_path()`-relative and project-relative spellings of the
+        // moved directory both have to be reported: neither is a symbol
+        // reference, and both break the moment the directory moves.
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("composer.json"),
+            r#"{"autoload":{"psr-4":{"App\\":"app/"}}}"#,
+        )
+        .expect("composer");
+        for (relative, content) in [
+            (
+                "app/Elastic/Config/Mapping.php",
+                "<?php\nnamespace App\\Elastic\\Config;\n\nclass Mapping {}\n",
+            ),
+            (
+                "config/audit.php",
+                "<?php\nreturn [\n    'ilm' => app_path('Elastic/Config/ILM/'),\n    \
+                 'map' => base_path('app/Elastic/Config/Mappings.json'),\n];\n",
+            ),
+        ] {
+            let path = dir.path().join(relative);
+            std::fs::create_dir_all(path.parent().expect("parent")).expect("dirs");
+            std::fs::write(path, content).expect("file");
+        }
+        let options = MoveOptions {
+            from: "App\\Elastic\\Config".into(),
+            to: "App\\Search\\Config".into(),
+            workspace_root: dir.path().to_path_buf(),
+            dry_run: true,
+            use_colour: false,
+            output_format: OutputFormat::Table,
+            global_config: None,
+        };
+
+        let summary = run_inner(&options).await.expect("plan");
+        let lines: Vec<Option<usize>> = summary
+            .warnings
+            .iter()
+            .filter(|warning| warning.file.as_deref() == Some("config/audit.php"))
+            .map(|warning| warning.line)
+            .collect();
+        assert_eq!(
+            lines,
+            vec![Some(3), Some(4)],
+            "expected both path spellings, got {:?}",
+            summary.warnings
+        );
+    }
+
+    #[tokio::test]
+    async fn a_longer_name_that_merely_starts_the_same_is_not_reported() {
+        let dir = project(&[
+            (
+                "src/Old/Widget.php",
+                "<?php\nnamespace App\\Old;\n\nclass Widget {}\n",
+            ),
+            (
+                "src/Older/Gadget.php",
+                "<?php\nnamespace App\\Older;\n\nclass Gadget {}\n",
+            ),
+            (
+                "notes.md",
+                "The `App\\Older` namespace and the `src/Older` directory stay put.\n",
+            ),
+        ]);
+        let options = MoveOptions {
+            from: "App\\Old".into(),
+            to: "App\\Domain".into(),
+            workspace_root: dir.path().to_path_buf(),
+            dry_run: true,
+            use_colour: false,
+            output_format: OutputFormat::Table,
+            global_config: None,
+        };
+
+        let summary = run_inner(&options).await.expect("plan");
+        assert!(summary.warnings.is_empty(), "{:?}", summary.warnings);
     }
 }
