@@ -902,6 +902,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Symbol resolution">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b313-a-namespace-served-by-two-psr-4-roots-moves-both-of-them" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B313. A namespace served by two PSR-4 roots moves both of them
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -934,6 +951,23 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Miscellaneous">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b314-blade-templates-are-invisible-to-renames-and-moves" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B314. Blade templates are invisible to renames and moves
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1479,6 +1513,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Symbol resolution">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b313-a-namespace-served-by-two-psr-4-roots-moves-both-of-them" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B313. A namespace served by two PSR-4 roots moves both of them
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1511,6 +1562,23 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Miscellaneous">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b314-blade-templates-are-invisible-to-renames-and-moves" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B314. Blade templates are invisible to renames and moves
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1564,13 +1632,72 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="arithmetic">Arithmetic<a class="headerlink" href="#arithmetic" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b313-a-namespace-served-by-two-psr-4-roots-moves-both-of-them">B313. A namespace served by two PSR-4 roots moves both of them<a class="headerlink" href="#b313-a-namespace-served-by-two-psr-4-roots-moves-both-of-them" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
+<p>Composer allows an array of directories per PSR-4 prefix, and
+<code>collect_psr4_entries</code> records one mapping per directory. A namespace
+move then reads them inconsistently: <code>psr4_directory_for_namespace</code>
+takes the <em>first</em> mapping that covers the destination, while
+<code>build_namespace_psr4_rename_ops</code> sweeps <em>every</em> mapping that covers
+the source. Moving one of the two roots therefore plans a move of both
+onto the same destination:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>&quot;autoload-dev&quot;: { &quot;psr-4&quot;: { &quot;Tests\\&quot;: [&quot;tests/&quot;, &quot;shared/tests/&quot;] } }
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>$ phpantom_lsp move --dry-run &#39;shared/tests&#39; &#39;tests/Shared&#39;
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>Error: failed to read …/tests/Unit/TokenTransferTest.php: No such file or directory
+</code></pre></div>
+<p>The directory the user named is resolved to the namespace <code>Tests</code>, and
+from there the second root is indistinguishable from the first. It
+fails loudly (<code>validate_moves</code> also rejects the duplicate destination),
+so the damage is blocked rather than silent, but the message names a
+file the user never mentioned and the move cannot be completed at all.</p>
+<p>Honouring the directory the user actually passed means moving only the
+classes declared beneath it, which the prefix-over-raw-text rewriter
+has no granularity for — the same limitation F22 documents. Until that
+exists, the move should refuse up front with a message naming both
+roots, rather than failing on a path it derived.</p>
+<p><strong>Where to look:</strong> <code>src/rename/namespace.rs</code>
+(<code>build_namespace_psr4_rename_ops</code>), <code>src/composer.rs</code>
+(<code>psr4_directory_for_namespace</code>, <code>collect_psr4_entries</code>),
+<code>src/move_cli.rs</code> (<code>namespace_from_dir</code>, <code>validate_moves</code>).</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b314-blade-templates-are-invisible-to-renames-and-moves">B314. Blade templates are invisible to renames and moves<a class="headerlink" href="#b314-blade-templates-are-invisible-to-renames-and-moves" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium-High · Complexity: Medium-High</strong></p>
+<p>A class reference inside a <code>.blade.php</code> template is never rewritten by
+<code>textDocument/rename</code> or <code>phpantom_lsp move</code>, and nothing reports that
+it was skipped, so <code>files_changed</code> reads as a complete count when it is
+not. In a Laravel codebase the templates carry FQCNs in <code>@var</code>
+doc-comments that Bladestan type-checks, and in <code>@php</code> blocks that are
+ordinary PHP; a move leaves every one of them naming a class that no
+longer exists.</p>
+<p>Two separate things have to line up:</p>
+<ul>
+<li>The workspace index parses templates as raw PHP.
+  <code>build_ast_index_update</code> (the parallel index path) runs the parser
+  over the file's own bytes, unlike <code>update_ast</code>, which preprocesses a
+  template into virtual PHP first. Everything Blade-specific is inline
+  HTML to the raw parse, so the template's symbol map holds no class
+  references to rewrite.</li>
+<li>The rename reads raw file content. <code>find_references</code> already handles
+  templates by reading <code>blade_virtual_content</code> and translating
+  positions back through <code>blade_source_maps</code>
+  (<code>reference_file_content</code>); the namespace rewriter calls
+  <code>get_file_content</code> instead. Feeding it virtual content without the
+  translation would be worse than skipping — the offsets would land in
+  the wrong place in the real file. Note that a template that <em>does</em>
+  end up with a virtual-content symbol map trips the
+  <code>matches_source</code> length check, and that check abandons the entire
+  rename, so this needs the translation in place before the index
+  starts preprocessing.</li>
+</ul>
+<p><strong>Where to look:</strong> <code>src/rename/namespace.rs</code>
+(<code>collect_fqn_reference_edits</code>, <code>build_namespace_prefix_rename_edit</code>),
+<code>src/parser/ast_update.rs</code> (<code>build_ast_index_update</code> vs <code>update_ast</code>),
+<code>src/references/mod.rs</code> (<code>reference_file_content</code>), <code>src/blade/source_map.rs</code>.</p>
 
 
 
