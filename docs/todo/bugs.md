@@ -54,4 +54,32 @@ No outstanding items.
 
 ## Miscellaneous
 
-No outstanding items.
+### B318. Moving a class into the global namespace writes `namespace ;`
+
+**Impact: Medium · Complexity: Low**
+
+`phpantom_lsp move 'App\Old\Widget' 'Widget'` rewrites the declaration
+file's `namespace` name in place, and the destination has no name, so the
+replacement text is empty and the file is left holding `namespace ;`, a
+syntax error. The whole statement has to go instead, from the `namespace`
+keyword through the terminating `;` (or, for a brace-style namespace, the
+block it opens has to be unwrapped, which is a good reason to refuse that
+shape rather than mangle it).
+
+**Where to look:** `src/rename/class.rs`
+(`build_class_move_edit`, the `NamespaceDeclaration` span edit).
+
+### B319. A class leaving the global namespace is reported as left behind
+
+**Impact: Low · Complexity: Low**
+
+Moving a class out of the global namespace (`Widget` →
+`App\Casts\Widget`) reports `The old name \`Widget\` still appears here`
+against the moved file's own `class Widget` line. The old FQN of a global
+class is a bare short name, so the residual scan's needle matches the
+declaration the move deliberately leaves spelled the same way. A needle
+that is a bare name has to skip the declaration site of the class that
+moved.
+
+**Where to look:** `src/move_cli/residual.rs` (`build_needles`,
+`collect_hits`).

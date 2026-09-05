@@ -702,6 +702,96 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn imports_the_siblings_the_moved_class_reached_by_namespace() {
+        let dir = project(&[
+            (
+                "src/Old/Widget.php",
+                "<?php\nnamespace App\\Old;\n\nclass Widget\n{\n    public function make(Cog $cog): Gear\n    {\n        return new Gear($cog);\n    }\n}\n",
+            ),
+            (
+                "src/Old/Cog.php",
+                "<?php\nnamespace App\\Old;\n\nclass Cog {}\n",
+            ),
+            (
+                "src/Old/Gear.php",
+                "<?php\nnamespace App\\Old;\n\nclass Gear\n{\n    public function __construct(Cog $cog) {}\n}\n",
+            ),
+        ]);
+        let options = MoveOptions {
+            from: "App\\Old\\Widget".into(),
+            to: "App\\Domain\\Widget".into(),
+            workspace_root: dir.path().to_path_buf(),
+            dry_run: false,
+            use_colour: false,
+            output_format: OutputFormat::Table,
+            global_config: None,
+        };
+
+        run_inner(&options).await.expect("move");
+        let moved =
+            std::fs::read_to_string(dir.path().join("src/Domain/Widget.php")).expect("moved");
+        assert!(
+            moved.contains("use App\\Old\\Cog;") && moved.contains("use App\\Old\\Gear;"),
+            "{moved}"
+        );
+        // The references keep their short spelling; the imports are what
+        // makes them resolve again.
+        assert!(moved.contains("make(Cog $cog): Gear"), "{moved}");
+    }
+
+    #[tokio::test]
+    async fn imports_the_sibling_functions_and_constants_too() {
+        let dir = project(&[
+            (
+                "src/Old/Widget.php",
+                "<?php\nnamespace App\\Old;\n\nclass Widget\n{\n    public function make(): string\n    {\n        return spin(LIMIT);\n    }\n}\n",
+            ),
+            (
+                "src/Old/helpers.php",
+                "<?php\nnamespace App\\Old;\n\nconst LIMIT = 3;\n\nfunction spin(int $n): string\n{\n    return (string) $n;\n}\n",
+            ),
+        ]);
+        let options = MoveOptions {
+            from: "App\\Old\\Widget".into(),
+            to: "App\\Domain\\Widget".into(),
+            workspace_root: dir.path().to_path_buf(),
+            dry_run: false,
+            use_colour: false,
+            output_format: OutputFormat::Table,
+            global_config: None,
+        };
+
+        run_inner(&options).await.expect("move");
+        let moved =
+            std::fs::read_to_string(dir.path().join("src/Domain/Widget.php")).expect("moved");
+        assert!(moved.contains("use const App\\Old\\LIMIT;"), "{moved}");
+        assert!(moved.contains("use function App\\Old\\spin;"), "{moved}");
+    }
+
+    #[tokio::test]
+    async fn a_name_the_moved_file_declares_itself_is_not_imported() {
+        let dir = project(&[(
+            "src/Old/Widget.php",
+            "<?php\nnamespace App\\Old;\n\nclass Widget\n{\n    public function make(): Helper\n    {\n        return new Helper();\n    }\n}\n\nclass Helper {}\n",
+        )]);
+        let options = MoveOptions {
+            from: "App\\Old\\Widget".into(),
+            to: "App\\Domain\\Widget".into(),
+            workspace_root: dir.path().to_path_buf(),
+            dry_run: false,
+            use_colour: false,
+            output_format: OutputFormat::Table,
+            global_config: None,
+        };
+
+        run_inner(&options).await.expect("move");
+        let moved =
+            std::fs::read_to_string(dir.path().join("src/Domain/Widget.php")).expect("moved");
+        assert!(!moved.contains("use App\\Old\\Helper;"), "{moved}");
+        assert!(!moved.contains("use App\\Old\\Widget;"), "{moved}");
+    }
+
+    #[tokio::test]
     async fn warns_when_psr4_cannot_place_the_moved_namespace() {
         // `Other\` is outside the autoload map, so there is nowhere to put
         // the directory.  The declarations are still rewritten, which is
