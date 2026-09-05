@@ -935,23 +935,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b317-the-blade-preprocessors-own-declarations-reach-the-global-indexes" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B317. The Blade preprocessor's own declarations reach the global indexes
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1529,23 +1512,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b317-the-blade-preprocessors-own-declarations-reach-the-global-indexes" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B317. The Blade preprocessor's own declarations reach the global indexes
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1604,24 +1570,7 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b317-the-blade-preprocessors-own-declarations-reach-the-global-indexes">B317. The Blade preprocessor's own declarations reach the global indexes<a class="headerlink" href="#b317-the-blade-preprocessors-own-declarations-reach-the-global-indexes" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<p>The virtual PHP a template lowers to opens with a prologue declaring
-<code>__blade_template</code> and the <code>blade_*_directive</code> marker functions the
-lowering calls. Those are published like any other declaration, so they
-appear in workspace-symbol search (ten entries a query for "blade"
-matches) and every template in the project contributes a duplicate
-declaration of each of them to <code>duplicate_functions</code>.</p>
-<p>Nothing reports them as a redeclaration and the memory is small (a few
-megabytes across a project with hundreds of templates), but they are
-boilerplate no file wrote and they should not be reachable as symbols.
-Keeping them out of the published indexes has to leave them resolvable
-from within a template, or every marker call the lowering emits becomes
-an unknown-function diagnostic; registering them once as stubs rather
-than per-template is the shape that gives both.</p>
-<p><strong>Where to look:</strong> <code>src/blade/preprocessor.rs</code> (the prologue),
-<code>src/parser/ast_update.rs</code> (<code>build_ast_index_update</code>),
-<code>src/workspace_symbols.rs</code>.</p>
+<p>No outstanding items.</p>
 
 
 
