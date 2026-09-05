@@ -3863,6 +3863,147 @@ async fn rename_namespace_multiple_files_same_namespace() {
     );
 }
 
+#[tokio::test]
+async fn rename_namespace_keeps_a_rooted_reference_rooted() {
+    let backend = Backend::new_test();
+    let uri_a = Url::parse("file:///a.php").unwrap();
+    let uri_b = Url::parse("file:///b.php").unwrap();
+
+    let text_a = concat!("<?php\n", "namespace App\\Legacy;\n", "class Widget {}\n",);
+    let text_b = concat!(
+        "<?php\n",
+        "namespace App\\Providers;\n",
+        "class Provider {\n",
+        "    public array $map = ['page' => \\App\\Legacy\\Widget::class];\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri_a, text_a).await;
+    open_file(&backend, &uri_b, text_b).await;
+
+    let edit = rename(&backend, &uri_a, 1, 14, "Modern")
+        .await
+        .expect("Expected workspace edit");
+    let result_b = apply_edits(text_b, &edits_for_uri(&edit, &uri_b));
+
+    assert!(
+        result_b.contains("\\App\\Modern\\Widget::class"),
+        "Dropping the root would resolve the name against App\\Providers: {}",
+        result_b
+    );
+}
+
+#[tokio::test]
+async fn rename_namespace_rewrites_a_qualified_reference_in_a_file_with_no_namespace() {
+    let backend = Backend::new_test();
+    let uri_a = Url::parse("file:///a.php").unwrap();
+    let uri_config = Url::parse("file:///config.php").unwrap();
+
+    let text_a = concat!("<?php\n", "namespace App\\Legacy;\n", "class Widget {}\n",);
+    let text_config = concat!(
+        "<?php\n",
+        "return ['providers' => [App\\Legacy\\Widget::class]];\n",
+    );
+
+    open_file(&backend, &uri_a, text_a).await;
+    open_file(&backend, &uri_config, text_config).await;
+
+    let edit = rename(&backend, &uri_a, 1, 14, "Modern")
+        .await
+        .expect("Expected workspace edit");
+    let result_config = apply_edits(text_config, &edits_for_uri(&edit, &uri_config));
+
+    assert_eq!(
+        result_config,
+        concat!(
+            "<?php\n",
+            "return ['providers' => [App\\Modern\\Widget::class]];\n",
+        ),
+        "A file with no namespace resolves a qualified name against the \
+         global namespace, so the move has to carry it"
+    );
+}
+
+#[tokio::test]
+async fn rename_namespace_leaves_a_reference_relative_to_the_moved_namespace_alone() {
+    let backend = Backend::new_test();
+    let uri_a = Url::parse("file:///a.php").unwrap();
+    let uri_b = Url::parse("file:///b.php").unwrap();
+
+    let text_a = concat!(
+        "<?php\n",
+        "namespace App\\Legacy\\Sub;\n",
+        "class Gadget {}\n",
+    );
+    let text_b = concat!(
+        "<?php\n",
+        "namespace App\\Legacy;\n",
+        "class Holder {\n",
+        "    public function make(): Sub\\Gadget {}\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri_a, text_a).await;
+    open_file(&backend, &uri_b, text_b).await;
+
+    let edit = rename(&backend, &uri_b, 1, 14, "Modern")
+        .await
+        .expect("Expected workspace edit");
+    let result_b = apply_edits(text_b, &edits_for_uri(&edit, &uri_b));
+
+    assert_eq!(
+        result_b,
+        concat!(
+            "<?php\n",
+            "namespace App\\Modern;\n",
+            "class Holder {\n",
+            "    public function make(): Sub\\Gadget {}\n",
+            "}\n",
+        ),
+        "The rewritten namespace declaration carries the relative name with it"
+    );
+}
+
+#[tokio::test]
+async fn rename_namespace_respells_a_reference_its_import_no_longer_binds() {
+    let backend = Backend::new_test();
+    let uri_a = Url::parse("file:///a.php").unwrap();
+    let uri_b = Url::parse("file:///b.php").unwrap();
+
+    let text_a = concat!("<?php\n", "namespace App\\Legacy;\n", "class Widget {}\n",);
+    // `use App\Legacy;` binds `Legacy`, and the move renames that binding
+    // to `Modern` along with the statement.
+    let text_b = concat!(
+        "<?php\n",
+        "namespace App\\Site;\n",
+        "use App\\Legacy;\n",
+        "class Page {\n",
+        "    public function make(): Legacy\\Widget {}\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri_a, text_a).await;
+    open_file(&backend, &uri_b, text_b).await;
+
+    let edit = rename(&backend, &uri_a, 1, 14, "Modern")
+        .await
+        .expect("Expected workspace edit");
+    let result_b = apply_edits(text_b, &edits_for_uri(&edit, &uri_b));
+
+    assert_eq!(
+        result_b,
+        concat!(
+            "<?php\n",
+            "namespace App\\Site;\n",
+            "use App\\Modern;\n",
+            "class Page {\n",
+            "    public function make(): Modern\\Widget {}\n",
+            "}\n",
+        ),
+        "Leaving `Legacy\\Widget` behind would resolve it to App\\Site\\Legacy\\Widget"
+    );
+}
+
 // --- PHPDoc @property and @method rename tests ---
 
 #[tokio::test]

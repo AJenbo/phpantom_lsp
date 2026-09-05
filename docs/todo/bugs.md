@@ -42,68 +42,6 @@ No outstanding items.
 
 ## Symbol resolution
 
-### B312. A namespace move judges each reference by its recorded name, not by what the file actually spells
-
-**Impact: High · Complexity: Medium**
-
-`collect_fqn_reference_edits` in `src/rename/namespace.rs` decides both
-*whether* to rewrite a class reference and *how* to spell the
-replacement from the `ClassReference` span's recorded `name` and its
-`is_fqn` flag. Neither says what the source text holds: `class_ref_span`
-strips the leading `\` before storing the name, and records qualified
-spellings that are not rooted at the global namespace as `is_fqn:
-false`. Two defects fall out of the same mistake, and both hit
-`textDocument/rename` on a namespace segment as well as
-`phpantom_lsp move`.
-
-**A rooted reference loses its root.** The `name.starts_with('\\')`
-test that guards re-adding the backslash can never be true, so the span
-(which covers the `\`) is replaced with an unrooted name:
-
-```php
-// file declares `namespace App\Providers;`
-'page' => \App\Old\Widget::class,        // before
-'page' => App\New\Widget::class,         // after `move 'App\Old' 'App\New'`
-//         ^ now resolves to App\Providers\App\New\Widget
-```
-
-`::class` does not require the class to exist, so a morph map or a
-container binding built this way keeps running and stores a name that
-resolves to nothing. In type positions PHPStan catches it; in `::class`
-positions nothing does.
-
-**A reference written without the root is not rewritten at all.** Only
-`is_fqn: true` spans are considered, so a qualified name in a file with
-no `namespace` declaration — where PHP resolves it against the global
-namespace, making it exactly the FQN — is left pointing at the old
-name:
-
-```php
-// config/app.php, no namespace declaration
-'providers' => [
-    App\Old\Widget::class,               // untouched by the move
-],
-```
-
-Laravel's `config/` is full of these, and the class the entry names is
-loaded at boot, so the breakage surfaces as a boot failure rather than
-as a diagnostic.
-
-The fix is to resolve each `ClassReference` span through the file's own
-context (`file_context(uri).resolve_name_at(name, offset)`, as
-`resolve_class_rename_fqn` in `src/rename/class.rs` already does),
-compare *that* against the moved prefix, and derive the replacement's
-qualification from the span's source text rather than from the recorded
-name — re-resolving the new spelling in the same context to confirm it
-still names the moved class, and falling back to a rooted `\New\Name`
-when it does not. The class-move path in `src/rename/class.rs` already
-reads `source_text.starts_with('\\')` and is unaffected.
-
-**Where to look:** `src/rename/namespace.rs`
-(`collect_fqn_reference_edits`), `src/symbol_map/docblock.rs`
-(`class_ref_span`), `src/rename/class.rs` (`resolve_class_rename_fqn`,
-the qualification rule to mirror).
-
 ### B313. A namespace served by two PSR-4 roots moves both of them
 
 **Impact: Medium · Complexity: Medium-High**
