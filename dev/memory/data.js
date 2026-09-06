@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788725651029,
+  "lastUpdate": 1788738122184,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -26655,6 +26655,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 76.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "102437433+iz-ahmad@users.noreply.github.com",
+            "name": "Nafis Ahmad",
+            "username": "iz-ahmad"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c2cd2ce991f45001d17efed0e1c59cb97d6a2d49",
+          "message": "Add downgrade-nullable-argument-mismatch config option for nullability-only argument type mismatches (#426)",
+          "timestamp": "2026-09-07T01:24:41+02:00",
+          "tree_id": "634160ba9511e2a570001d8f80a4694e1361258e",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/c2cd2ce991f45001d17efed0e1c59cb97d6a2d49"
+        },
+        "date": 1788738114814,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 36.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 74,
             "unit": "MiB"
           }
         ]
