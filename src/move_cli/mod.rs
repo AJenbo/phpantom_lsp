@@ -1144,4 +1144,51 @@ mod tests {
         let summary = run_inner(&options).await.expect("plan");
         assert!(summary.warnings.is_empty(), "{:?}", summary.warnings);
     }
+
+    #[tokio::test]
+    async fn a_class_leaving_the_global_namespace_is_not_reported_as_left_behind() {
+        // The old FQN of a global class is a bare short name, and the
+        // move keeps the declaration spelled exactly that way.
+        let dir = project(&[
+            ("legacy/Widget.php", "<?php\n\nclass Widget {}\n"),
+            (
+                "src/Consumer.php",
+                "<?php\nnamespace App;\n\nnew \\Widget();\n",
+            ),
+        ]);
+        let options = MoveOptions {
+            from: "Widget".into(),
+            to: "App\\Casts\\Widget".into(),
+            workspace_root: dir.path().to_path_buf(),
+            dry_run: true,
+            use_colour: false,
+            output_format: OutputFormat::Table,
+            global_config: None,
+        };
+
+        let summary = run_inner(&options).await.expect("plan");
+        assert!(summary.warnings.is_empty(), "{:?}", summary.warnings);
+    }
+
+    #[tokio::test]
+    async fn a_class_moving_into_the_global_namespace_drops_its_namespace_statement() {
+        let dir = project(&[(
+            "src/Old/Widget.php",
+            "<?php\n\nnamespace App\\Old;\n\nclass Widget {}\n",
+        )]);
+        let options = MoveOptions {
+            from: "App\\Old\\Widget".into(),
+            to: "Widget".into(),
+            workspace_root: dir.path().to_path_buf(),
+            dry_run: false,
+            use_colour: false,
+            output_format: OutputFormat::Table,
+            global_config: None,
+        };
+
+        run_inner(&options).await.expect("move");
+        let declaration =
+            std::fs::read_to_string(dir.path().join("src/Old/Widget.php")).expect("declaration");
+        assert_eq!(declaration, "<?php\n\nclass Widget {}\n");
+    }
 }

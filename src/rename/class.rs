@@ -578,13 +578,71 @@ impl Backend {
                     {
                         return Ok(None);
                     }
-                    let start = offset_to_position(&file_content, ns_span.start as usize);
-                    let end = offset_to_position(&file_content, ns_span.end as usize);
-                    file_edits.push(TextEdit {
-                        range: Range { start, end },
-                        new_text: new_ns.unwrap_or("").to_string(),
-                    });
-                    file_edits.extend(build_sibling_import_edits(&file_content, &siblings));
+                    match new_ns {
+                        Some(ns) => {
+                            let start = offset_to_position(&file_content, ns_span.start as usize);
+                            let end = offset_to_position(&file_content, ns_span.end as usize);
+                            file_edits.push(TextEdit {
+                                range: Range { start, end },
+                                new_text: ns.to_string(),
+                            });
+                            file_edits.extend(build_sibling_import_edits(&file_content, &siblings));
+                        }
+                        // The destination has no namespace to write in
+                        // place of the old one, so the whole statement
+                        // goes rather than being left as `namespace ;`.
+                        None => match namespace_statement(
+                            &file_content,
+                            ns_span.start as usize,
+                            ns_span.end as usize,
+                        ) {
+                            NamespaceStatement::Statement {
+                                range,
+                                absorbed_blank_line,
+                            } => {
+                                let use_block =
+                                    crate::completion::use_edit::analyze_use_block(&file_content);
+                                // With no import block to sort into, a
+                                // sibling import lands on the line the
+                                // removal takes away.  Writing both as
+                                // one edit keeps them off each other.
+                                let inline_siblings =
+                                    use_block.existing.is_empty() && !siblings.is_empty();
+                                let mut new_text = String::new();
+                                if inline_siblings {
+                                    for import in &siblings {
+                                        new_text.push_str(&import.statement);
+                                        new_text.push('\n');
+                                    }
+                                    if absorbed_blank_line {
+                                        new_text.push('\n');
+                                    }
+                                }
+                                file_edits.push(TextEdit {
+                                    range: Range {
+                                        start: offset_to_position(&file_content, range.start),
+                                        end: offset_to_position(&file_content, range.end),
+                                    },
+                                    new_text,
+                                });
+                                if !inline_siblings {
+                                    file_edits.extend(build_sibling_import_edits(
+                                        &file_content,
+                                        &siblings,
+                                    ));
+                                }
+                            }
+                            NamespaceStatement::Block => {
+                                return Err(format!(
+                                    "Cannot move `{old_fqn_normalized}` into the global \
+                                     namespace: {} writes its namespace as a brace block, \
+                                     which the move would have to unwrap.",
+                                    display_uri(file_uri_str)
+                                ));
+                            }
+                            NamespaceStatement::Unrecognized => return Ok(None),
+                        },
+                    }
                 } else if let Some(ns) = new_ns {
                     // The `namespace` line and the first import would be
                     // inserted at the same offset, and two edits sharing
@@ -1351,4 +1409,107 @@ fn find_namespace_insert_line(content: &str) -> u32 {
         }
     }
     1
+}
+
+/// What the source around a `namespace` name turns out to be, once the
+/// move needs to take the whole declaration away rather than rewrite
+/// the name in place.
+enum NamespaceStatement {
+    /// A `namespace Foo;` statement occupying this byte range.
+    Statement {
+        range: std::ops::Range<usize>,
+        /// Whether the range swallowed the blank line that followed the
+        /// declaration, so anything written in its place has to supply
+        /// that separation itself.
+        absorbed_blank_line: bool,
+    },
+    /// `namespace Foo { … }`.  Removing the declaration means unwrapping
+    /// the block it opens, which the move does not do.
+    Block,
+    /// Neither shape: the source does not read the way the symbol map
+    /// says it does.
+    Unrecognized,
+}
+
+/// The `namespace` statement whose name occupies `name_start..name_end`.
+///
+/// The span the symbol map records covers the name alone, which is all
+/// a rename needs.  Removing the declaration takes the keyword before it
+/// and the `;` after it as well, plus the line they sit on so the file
+/// is not left with a stray blank.
+fn namespace_statement(content: &str, name_start: usize, name_end: usize) -> NamespaceStatement {
+    const KEYWORD: &str = "namespace";
+    let bytes = content.as_bytes();
+
+    let mut keyword_end = name_start;
+    while keyword_end > 0 && bytes[keyword_end - 1].is_ascii_whitespace() {
+        keyword_end -= 1;
+    }
+    let Some(keyword_start) = keyword_end.checked_sub(KEYWORD.len()) else {
+        return NamespaceStatement::Unrecognized;
+    };
+    if !content.is_char_boundary(keyword_start)
+        || !content[keyword_start..keyword_end].eq_ignore_ascii_case(KEYWORD)
+    {
+        return NamespaceStatement::Unrecognized;
+    }
+
+    let mut end = name_end;
+    while bytes.get(end).is_some_and(u8::is_ascii_whitespace) {
+        end += 1;
+    }
+    match bytes.get(end) {
+        Some(b';') => end += 1,
+        Some(b'{') => return NamespaceStatement::Block,
+        _ => return NamespaceStatement::Unrecognized,
+    }
+
+    let line_start = content[..keyword_start]
+        .rfind('\n')
+        .map_or(0, |index| index + 1);
+    let mut start = keyword_start;
+    while start > line_start && bytes[start - 1].is_ascii_whitespace() {
+        start -= 1;
+    }
+
+    let mut absorbed_blank_line = false;
+    if start == line_start {
+        let line_end = skip_blanks(bytes, end);
+        if bytes.get(line_end) == Some(&b'\n') {
+            end = line_end + 1;
+            // Removing the line would otherwise leave the blank above
+            // the declaration and the blank below it stacked.
+            let next_line_end = skip_blanks(bytes, end);
+            if ends_with_blank_line(&content[..start]) && bytes.get(next_line_end) == Some(&b'\n') {
+                end = next_line_end + 1;
+                absorbed_blank_line = true;
+            }
+        }
+    }
+
+    NamespaceStatement::Statement {
+        range: start..end,
+        absorbed_blank_line,
+    }
+}
+
+/// Whether `text` ends on a line that holds nothing, so appending to it
+/// would leave a blank line above.
+fn ends_with_blank_line(text: &str) -> bool {
+    let text = text.strip_suffix('\n').unwrap_or(text);
+    let text = text.strip_suffix('\r').unwrap_or(text);
+    text.ends_with('\n')
+}
+
+/// The offset of the first byte at or after `from` that is not
+/// horizontal whitespace.
+fn skip_blanks(bytes: &[u8], from: usize) -> usize {
+    let mut cursor = from;
+    while bytes
+        .get(cursor)
+        .is_some_and(|byte| matches!(byte, b' ' | b'\t' | b'\r'))
+    {
+        cursor += 1;
+    }
+    cursor
 }

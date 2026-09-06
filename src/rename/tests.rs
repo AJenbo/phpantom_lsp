@@ -4699,6 +4699,104 @@ async fn rename_class_move_from_global_namespace_adds_import() {
 }
 
 #[tokio::test]
+async fn rename_class_move_into_global_namespace_removes_the_namespace_statement() {
+    // The destination has no namespace to write in place of the old
+    // one, so leaving the statement behind would spell `namespace ;`.
+    let backend = Backend::new_test();
+
+    let uri = Url::parse("file:///src/Widget.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "\n",
+        "namespace App\\Old;\n",
+        "\n",
+        "class Widget {}\n",
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    let ws = backend
+        .plan_class_move("App\\Old\\Widget", "Widget")
+        .expect("the move should be planned")
+        .expect("Expected a workspace edit for the class move");
+
+    let result = apply_edits(text, &edits_for_uri(&ws, &uri));
+    assert_eq!(
+        result, "<?php\n\nclass Widget {}\n",
+        "The whole `namespace` statement should go; got:\n{result}"
+    );
+}
+
+#[tokio::test]
+async fn rename_class_move_into_global_namespace_writes_siblings_where_the_namespace_was() {
+    // The removed statement's line is also where the imports the move
+    // has to add would land, so both have to be one edit.
+    let backend = Backend::new_test();
+
+    let uri_decl = Url::parse("file:///src/Widget.php").unwrap();
+    let uri_sibling = Url::parse("file:///src/Helper.php").unwrap();
+
+    let text_decl = concat!(
+        "<?php\n",
+        "\n",
+        "namespace App\\Old;\n",
+        "\n",
+        "class Widget {\n",
+        "    public function helper(): Helper {\n",
+        "        return new Helper();\n",
+        "    }\n",
+        "}\n",
+    );
+    let text_sibling = concat!(
+        "<?php\n",
+        "\n",
+        "namespace App\\Old;\n",
+        "\n",
+        "class Helper {}\n",
+    );
+
+    open_file(&backend, &uri_decl, text_decl).await;
+    open_file(&backend, &uri_sibling, text_sibling).await;
+
+    let ws = backend
+        .plan_class_move("App\\Old\\Widget", "Widget")
+        .expect("the move should be planned")
+        .expect("Expected a workspace edit for the class move");
+
+    let result = apply_edits(text_decl, &edits_for_uri(&ws, &uri_decl));
+    assert!(
+        result.starts_with("<?php\n\nuse App\\Old\\Helper;\n\nclass Widget {\n"),
+        "The sibling import should take the namespace statement's place; got:\n{result}"
+    );
+}
+
+#[tokio::test]
+async fn rename_class_move_into_global_namespace_refuses_a_brace_namespace() {
+    // Removing a brace-style declaration means unwrapping the block it
+    // opens, so the move says so rather than mangling the file.
+    let backend = Backend::new_test();
+
+    let uri = Url::parse("file:///src/Widget.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "\n",
+        "namespace App\\Old {\n",
+        "    class Widget {}\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    let error = backend
+        .plan_class_move("App\\Old\\Widget", "Widget")
+        .expect_err("a brace-style namespace should be refused");
+    assert!(
+        error.contains("brace block"),
+        "The refusal should name the shape it cannot handle; got: {error}"
+    );
+}
+
+#[tokio::test]
 async fn rename_macro_registration_string_updates_call_sites() {
     let backend = Backend::new_test();
     let class_uri = Url::parse("file:///Widget.php").unwrap();

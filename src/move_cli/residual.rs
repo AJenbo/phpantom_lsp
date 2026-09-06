@@ -77,7 +77,12 @@ pub(super) fn residual_warnings(
         return Vec::new();
     }
 
-    let mut hits = collect_hits(backend, root, &needles, plan);
+    // Where the file that declared the source ends up, so a needle
+    // that is a bare name can leave the declaration it names alone.
+    let declaration =
+        old_path.map(|path| planned_path(path, &plan.moves).unwrap_or_else(|| path.to_path_buf()));
+
+    let mut hits = collect_hits(backend, root, &needles, declaration.as_deref(), plan);
     hits.sort_by(|a, b| {
         a.path
             .cmp(&b.path)
@@ -161,7 +166,13 @@ fn build_needles(
 
 /// Walk the project and search every file for every needle, reading the
 /// content the plan will leave behind rather than what is on disk now.
-fn collect_hits(backend: &Backend, root: &Path, needles: &[Needle], plan: &MovePlan) -> Vec<Hit> {
+fn collect_hits(
+    backend: &Backend,
+    root: &Path,
+    needles: &[Needle],
+    declaration: Option<&Path>,
+    plan: &MovePlan,
+) -> Vec<Hit> {
     use ignore::{WalkBuilder, WalkState};
 
     let written: std::collections::HashMap<&Path, &str> = plan
@@ -173,6 +184,16 @@ fn collect_hits(backend: &Backend, root: &Path, needles: &[Needle], plan: &MoveP
         .iter()
         .map(|needle| memmem::Finder::new(needle.text.as_bytes()))
         .collect();
+
+    // A class that was in the global namespace has a bare short name for
+    // an old FQN, and the move leaves the declaration spelled exactly
+    // that way on purpose, so such a needle cannot count its own
+    // declaration site as something left behind.
+    let bare_names: Vec<bool> = needles
+        .iter()
+        .map(|needle| needle.kind == NeedleKind::Name && !needle.text.contains('\\'))
+        .collect();
+    let bare_names = &bare_names;
 
     let vendor_dirs = backend.workspace.vendor_dir_paths.lock().clone();
     let filters = backend.index_filters();
@@ -252,6 +273,12 @@ fn collect_hits(backend: &Backend, root: &Path, needles: &[Needle], plan: &MoveP
                     if !is_bounded(bytes, offset, end, needles_kinds[index]) {
                         continue;
                     }
+                    if bare_names[index]
+                        && declaration == Some(target)
+                        && is_declaration_site(bytes, offset)
+                    {
+                        continue;
+                    }
                     let _ = tx.send(Hit {
                         path: target.to_path_buf(),
                         line: line_of(bytes, offset),
@@ -313,6 +340,30 @@ fn is_bounded(bytes: &[u8], start: usize, end: usize, kind: NeedleKind) -> bool 
     }
 }
 
+/// Whether the name starting at `offset` is the one a class-like
+/// declaration gives itself.
+///
+/// Only the keyword immediately before it decides this; `abstract` and
+/// `final` sit further left and change nothing about what follows.
+fn is_declaration_site(bytes: &[u8], offset: usize) -> bool {
+    const KEYWORDS: [&[u8]; 4] = [b"class", b"interface", b"trait", b"enum"];
+
+    let mut keyword_end = offset;
+    while keyword_end > 0 && bytes[keyword_end - 1].is_ascii_whitespace() {
+        keyword_end -= 1;
+    }
+    if keyword_end == offset {
+        return false;
+    }
+    let mut keyword_start = keyword_end;
+    while keyword_start > 0 && bytes[keyword_start - 1].is_ascii_alphabetic() {
+        keyword_start -= 1;
+    }
+    KEYWORDS
+        .iter()
+        .any(|keyword| bytes[keyword_start..keyword_end].eq_ignore_ascii_case(keyword))
+}
+
 /// The 1-based line the byte at `offset` falls on.
 fn line_of(bytes: &[u8], offset: usize) -> usize {
     memchr::memchr_iter(b'\n', &bytes[..offset]).count() + 1
@@ -352,6 +403,20 @@ mod tests {
         assert!(!is_bounded(haystack, 0, 10, NeedleKind::Path));
         let haystack = b"app/Config/x";
         assert!(is_bounded(haystack, 0, 10, NeedleKind::Path));
+    }
+
+    #[test]
+    fn a_class_declaration_is_a_declaration_site() {
+        let haystack = b"final class Widget\n{";
+        assert!(is_declaration_site(haystack, 12));
+    }
+
+    #[test]
+    fn a_reference_is_not_a_declaration_site() {
+        let haystack = b"return new Widget();";
+        assert!(!is_declaration_site(haystack, 11));
+        let haystack = b"'Widget'";
+        assert!(!is_declaration_site(haystack, 1));
     }
 
     #[test]
