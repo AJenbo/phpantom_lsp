@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788646680508,
+  "lastUpdate": 1788724503728,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -26587,6 +26587,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 76.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "9ed45bfe1c49f3d958f82057893fa7e8d09ba58a",
+          "message": "Moving a class into the global namespace removes its `namespace`\ndeclaration",
+          "timestamp": "2026-09-06T21:37:49+02:00",
+          "tree_id": "c99a5286d603eeef7d1a9858aa794b901d5fb18e",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/9ed45bfe1c49f3d958f82057893fa7e8d09ba58a"
+        },
+        "date": 1788724496581,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 76.8,
             "unit": "MiB"
           }
         ]
