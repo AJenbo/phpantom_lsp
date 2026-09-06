@@ -305,10 +305,10 @@ impl Backend {
             };
 
             // When the file has an import for the old class, find the
-            // use-statement line range so we can (a) skip the FQN
-            // reference that falls inside it (we replace the whole line
-            // instead) and (b) generate a proper whole-line edit that
-            // can add/remove aliases.
+            // use-statement range so we can (a) skip the FQN reference
+            // that falls inside it (we replace the whole statement
+            // instead) and (b) generate a proper whole-statement edit
+            // that can add/remove aliases.
             let use_line_range = if import_info.is_some() {
                 find_use_line_range(&file_content, old_fqn_normalized)
             } else {
@@ -1201,7 +1201,8 @@ fn build_sibling_import_edits(content: &str, imports: &[SiblingImport]) -> Vec<T
 
 // ─── Import analysis helpers ────────────────────────────────────────────────
 
-/// The line range of a `use` statement in a file.
+/// The range of a `use` statement in a file, from its `use` keyword to
+/// its terminating semicolon.
 struct UseLineRange {
     range: Range,
 }
@@ -1299,7 +1300,8 @@ fn pick_collision_alias(base_name: &str, use_map: &HashMap<String, String>) -> S
     format!("{}Alias99", base_name)
 }
 
-/// Find the LSP range of the `use` statement line that imports `old_fqn`.
+/// Find the LSP range of the `use` statement that imports `old_fqn`,
+/// excluding the indentation and any trailing whitespace around it.
 fn find_use_line_range(content: &str, old_fqn: &str) -> Option<UseLineRange> {
     let old_fqn_normalized = strip_fqn_prefix(old_fqn);
 
@@ -1322,11 +1324,15 @@ fn find_use_line_range(content: &str, old_fqn: &str) -> Option<UseLineRange> {
             continue;
         }
 
-        let line_start_byte = line_start_byte_offset(content, line_idx);
-        let line_end_byte = line_start_byte + line.len();
+        // The statement, not the line it sits on: an import written
+        // inside a braced `namespace {}` block or a Blade `@php` block is
+        // indented, and replacing from column zero would flatten it.
+        let indent = line.len() - line.trim_start().len();
+        let statement_start_byte = line_start_byte_offset(content, line_idx) + indent;
+        let statement_end_byte = statement_start_byte + trimmed.len();
 
-        let start_pos = offset_to_position(content, line_start_byte);
-        let end_pos = offset_to_position(content, line_end_byte);
+        let start_pos = offset_to_position(content, statement_start_byte);
+        let end_pos = offset_to_position(content, statement_end_byte);
 
         return Some(UseLineRange {
             range: Range {

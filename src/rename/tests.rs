@@ -817,6 +817,47 @@ async fn rename_class_cross_file() {
 }
 
 #[tokio::test]
+async fn a_rename_keeps_an_indented_imports_indentation() {
+    // A `use` inside a braced `namespace {}` block is indented, and the
+    // import is rewritten as a whole statement rather than name by name
+    // (an alias can appear or disappear).  Taking the whole line along
+    // with it flattened the import against the left margin.
+    let backend = Backend::new_test();
+    let uri_a = Url::parse("file:///a.php").unwrap();
+    let uri_b = Url::parse("file:///b.php").unwrap();
+
+    let text_a = concat!(
+        "<?php\n",
+        "namespace App\\Old {\n",
+        "    class Widget {}\n",
+        "}\n",
+    );
+
+    let text_b = concat!(
+        "<?php\n",
+        "namespace App\\Consumer {\n",
+        "    use App\\Old\\Widget;\n",
+        "\n",
+        "    function demo(): void { new Widget(); }\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri_a, text_a).await;
+    open_file(&backend, &uri_b, text_b).await;
+
+    let (line, character) = line_char_of(text_a, "Widget");
+    let edit = rename(&backend, &uri_a, line, character, "Gadget")
+        .await
+        .expect("expected an edit");
+
+    let result = apply_edits(text_b, &edits_for_uri(&edit, &uri_b));
+    assert!(
+        result.contains("    use App\\Old\\Gadget;"),
+        "the import has to keep its indentation:\n{result}"
+    );
+}
+
+#[tokio::test]
 async fn rename_method_cross_file() {
     let backend = Backend::new_test();
     let uri_a = Url::parse("file:///a.php").unwrap();
@@ -6347,8 +6388,8 @@ async fn a_namespace_move_rewrites_an_import_inside_a_php_block() {
     );
 
     assert!(
-        result.contains("use App\\Core\\Widget as Alias;"),
-        "the import has to follow the move:\n{result}"
+        result.contains("    use App\\Core\\Widget as Alias;"),
+        "the import has to follow the move, indentation and all:\n{result}"
     );
     assert!(
         result.contains("{{ Alias::label() }}"),

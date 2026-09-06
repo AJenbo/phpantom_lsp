@@ -1029,6 +1029,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_moved_class_keeps_its_imports_indentation_in_a_template() {
+        // A `use` inside an `@php` block is indented to the block, and
+        // the import is rewritten as a whole statement rather than name
+        // by name (an alias can appear or disappear).  Taking the whole
+        // line along with it flattened the import against the margin.
+        let template = concat!(
+            "<div>\n",
+            "@php\n",
+            "    use App\\Old\\Widget;\n",
+            "    $widget = new Widget();\n",
+            "@endphp\n",
+            "</div>\n",
+        );
+        let dir = project(&[
+            (
+                "src/Old/Widget.php",
+                "<?php\nnamespace App\\Old;\n\nclass Widget {}\n",
+            ),
+            ("resources/views/panel.blade.php", template),
+        ]);
+        let options = MoveOptions {
+            from: "App\\Old\\Widget".into(),
+            to: "App\\Domain\\Widget".into(),
+            workspace_root: dir.path().to_path_buf(),
+            dry_run: false,
+            use_colour: false,
+            output_format: OutputFormat::Table,
+            global_config: None,
+        };
+
+        run_inner(&options).await.expect("move");
+
+        let result = std::fs::read_to_string(dir.path().join("resources/views/panel.blade.php"))
+            .expect("template");
+        assert!(
+            result.contains("    use App\\Domain\\Widget;"),
+            "the import has to follow the move, indentation and all:\n{result}"
+        );
+    }
+
+    #[tokio::test]
     async fn reports_the_old_name_left_behind_in_a_template() {
         // A Blade template names the class as a string the rewriter has
         // no way to resolve, so the move cannot take it along.  Silently

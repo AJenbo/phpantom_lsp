@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A rewritten import keeps its indentation.** A rename or a `phpantom_lsp move` that carried a `use` statement to a new name replaced the whole line it sat on, so an import written inside a Blade `@php` block or a braced `namespace {}` block came back flattened against the left margin. Only the statement itself is rewritten now, and the whitespace around it is left where the file had it.
+
 - **Moving a class into the global namespace removes its `namespace` declaration.** `phpantom_lsp move 'App\Old\Widget' 'Widget'` rewrote the declaring file's namespace name in place, and since the destination has no name to write there, the file was left holding `namespace ;`, which is a syntax error. The whole statement now goes, along with the line it sits on, and the imports the move has to add for the namespace-siblings the class was reaching by short name are written where it was. A file that opens its namespace as a brace block is refused with a message saying so, rather than having the block it wraps mangled.
 
 - **A class leaving the global namespace is no longer reported as left behind.** Moving `Widget` to `App\Casts\Widget` ended with a warning that the old name still appears in the moved file, pointing at its own `class Widget` line. A global class's old fully-qualified name is a bare short name, and the move keeps the declaration spelled exactly that way on purpose, so the scan for leftover mentions now passes over the declaration it names.
