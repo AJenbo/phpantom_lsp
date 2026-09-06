@@ -2601,6 +2601,9 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
 <li>
+<p><strong>A rewritten import keeps its indentation.</strong> A rename or a <code>phpantom_lsp move</code> that carried a <code>use</code> statement to a new name replaced the whole line it sat on, so an import written inside a Blade <code>@php</code> block or a braced <code>namespace {}</code> block came back flattened against the left margin. Only the statement itself is rewritten now, and the whitespace around it is left where the file had it.</p>
+</li>
+<li>
 <p><strong>Moving a class into the global namespace removes its <code>namespace</code> declaration.</strong> <code>phpantom_lsp move 'App\Old\Widget' 'Widget'</code> rewrote the declaring file's namespace name in place, and since the destination has no name to write there, the file was left holding <code>namespace ;</code>, which is a syntax error. The whole statement now goes, along with the line it sits on, and the imports the move has to add for the namespace-siblings the class was reaching by short name are written where it was. A file that opens its namespace as a brace block is refused with a message saying so, rather than having the block it wraps mangled.</p>
 </li>
 <li>
