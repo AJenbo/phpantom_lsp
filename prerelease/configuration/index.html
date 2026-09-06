@@ -1864,6 +1864,12 @@ those still need a restart to fully apply.</p>
 <td>Report unknown property access on classes with <code>__get</code> when virtual properties are defined. Matches PHPStan's <code>reportMagicProperties</code>.</td>
 </tr>
 <tr>
+<td><code>downgrade-nullable-argument-mismatch</code></td>
+<td>bool</td>
+<td><code>false</code></td>
+<td>Downgrade <code>type_mismatch_argument</code> to a warning when the only reason an argument fails to satisfy the parameter is a stray <code>null</code> (every non-null member of the argument's type is already compatible).</td>
+</tr>
+<tr>
 <td><code>workspace</code></td>
 <td>bool</td>
 <td><code>false</code></td>
