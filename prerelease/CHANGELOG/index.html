@@ -2601,6 +2601,12 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
 <li>
+<p><strong>Moving a class into the global namespace removes its <code>namespace</code> declaration.</strong> <code>phpantom_lsp move 'App\Old\Widget' 'Widget'</code> rewrote the declaring file's namespace name in place, and since the destination has no name to write there, the file was left holding <code>namespace ;</code>, which is a syntax error. The whole statement now goes, along with the line it sits on, and the imports the move has to add for the namespace-siblings the class was reaching by short name are written where it was. A file that opens its namespace as a brace block is refused with a message saying so, rather than having the block it wraps mangled.</p>
+</li>
+<li>
+<p><strong>A class leaving the global namespace is no longer reported as left behind.</strong> Moving <code>Widget</code> to <code>App\Casts\Widget</code> ended with a warning that the old name still appears in the moved file, pointing at its own <code>class Widget</code> line. A global class's old fully-qualified name is a bare short name, and the move keeps the declaration spelled exactly that way on purpose, so the scan for leftover mentions now passes over the declaration it names.</p>
+</li>
+<li>
 <p><strong>The Blade lowering's own declarations stay out of the project's symbols.</strong> The PHP a template is read as opened with a prologue declaring the wrapper its body is lowered into and the marker functions its directives compile to. Those were published like a declaration a file had written, so a workspace-symbol search for "blade" answered with ten entries nobody wrote, completion offered them beside the project's own functions, and every template in the project registered another copy of each. The markers are now declared once for the whole project rather than by every template, and neither they nor the wrapper are offered as a symbol of it.</p>
 </li>
 <li>

@@ -935,34 +935,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b318-moving-a-class-into-the-global-namespace-writes-namespace" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B318. Moving a class into the global namespace writes <code>namespace ;</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b319-a-class-leaving-the-global-namespace-is-reported-as-left-behind" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B319. A class leaving the global namespace is reported as left behind
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1540,34 +1512,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b318-moving-a-class-into-the-global-namespace-writes-namespace" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B318. Moving a class into the global namespace writes <code>namespace ;</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b319-a-class-leaving-the-global-namespace-is-reported-as-left-behind" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B319. A class leaving the global namespace is reported as left behind
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1626,27 +1570,7 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b318-moving-a-class-into-the-global-namespace-writes-namespace">B318. Moving a class into the global namespace writes <code>namespace ;</code><a class="headerlink" href="#b318-moving-a-class-into-the-global-namespace-writes-namespace" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Low</strong></p>
-<p><code>phpantom_lsp move 'App\Old\Widget' 'Widget'</code> rewrites the declaration
-file's <code>namespace</code> name in place, and the destination has no name, so the
-replacement text is empty and the file is left holding <code>namespace ;</code>, a
-syntax error. The whole statement has to go instead, from the <code>namespace</code>
-keyword through the terminating <code>;</code> (or, for a brace-style namespace, the
-block it opens has to be unwrapped, which is a good reason to refuse that
-shape rather than mangle it).</p>
-<p><strong>Where to look:</strong> <code>src/rename/class.rs</code>
-(<code>build_class_move_edit</code>, the <code>NamespaceDeclaration</code> span edit).</p>
-<h3 id="b319-a-class-leaving-the-global-namespace-is-reported-as-left-behind">B319. A class leaving the global namespace is reported as left behind<a class="headerlink" href="#b319-a-class-leaving-the-global-namespace-is-reported-as-left-behind" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<p>Moving a class out of the global namespace (<code>Widget</code> →
-<code>App\Casts\Widget</code>) reports <code>The old name \</code>Widget` still appears here<code>against the moved file's own</code>class Widget` line. The old FQN of a global
-class is a bare short name, so the residual scan's needle matches the
-declaration the move deliberately leaves spelled the same way. A needle
-that is a bare name has to skip the declaration site of the class that
-moved.</p>
-<p><strong>Where to look:</strong> <code>src/move_cli/residual.rs</code> (<code>build_needles</code>,
-<code>collect_hits</code>).</p>
+<p>No outstanding items.</p>
 
 
 
