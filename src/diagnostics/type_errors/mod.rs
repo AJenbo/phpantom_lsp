@@ -843,8 +843,9 @@ impl Backend {
                 // Name the specific member(s) that broke a partially
                 // compatible union, rather than leaving the developer to
                 // work out which one out of the full union is at fault.
+                let mut severity = DiagnosticSeverity::ERROR;
                 if let TypeKind::Union(members) = arg_type.kind() {
-                    let unsatisfied: Vec<String> = members
+                    let unsatisfied: Vec<&PhpType> = members
                         .iter()
                         .filter(|m| {
                             !is_type_compatible(
@@ -854,20 +855,36 @@ impl Backend {
                                 strict_types,
                             )
                         })
-                        .map(|m| m.to_string())
                         .collect();
                     if !unsatisfied.is_empty() && unsatisfied.len() < members.len() {
                         message.push_str(&format!(
                             " ({} does not satisfy {})",
-                            unsatisfied.join("|"),
+                            unsatisfied
+                                .iter()
+                                .map(|m| m.to_string())
+                                .collect::<Vec<_>>()
+                                .join("|"),
                             effective_param_type.conditionals_as_branch_unions(),
                         ));
+                        // `null` alone failing means every non-null
+                        // possibility already satisfies the parameter —
+                        // a nullability gap rather than type gap. Users can
+                        // opt into treating that narrower case as a warning
+                        // (see `downgrade-nullable-argument-mismatch`)
+                        if unsatisfied.iter().all(|m| m.is_null())
+                            && self
+                                .config()
+                                .diagnostics
+                                .downgrade_nullable_argument_mismatch_enabled()
+                        {
+                            severity = DiagnosticSeverity::WARNING;
+                        }
                     }
                 }
 
                 out.push(make_diagnostic(
                     range,
-                    DiagnosticSeverity::ERROR,
+                    severity,
                     TYPE_MISMATCH_ARGUMENT_CODE,
                     message,
                 ));
