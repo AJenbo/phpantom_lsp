@@ -2603,6 +2603,9 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <li><strong>Custom Eloquent pivot accessors.</strong> A many-to-many relationship that renames its pivot with <code>-&gt;as('participation')</code> now exposes <code>$participation</code> on the related model instead of <code>$pivot</code>, with the configured pivot model preserved through completion, hover, and chaining. Literal accessor names carried by the relationship's fourth generic are understood too. Contributed by @shuvroroy (#381).</li>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Updated the bundled mago toolchain to 1.47.5.</strong> The parser, docblock parser, formatter, and supporting crates are refreshed to the latest upstream release. Contributed by @nguyentranchung.</li>
+</ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>Frontend interpolations escaped from Blade are no longer parsed as PHP.</strong> Expressions such as <code>@{{ name }}</code> and <code>@{!! name !!}</code> are meant to reach Vue, Alpine, or another frontend template engine untouched, but PHPantom treated their contents as Blade echoes and reported PHP syntax errors for frontend-only expressions such as <code>@{{.Image}}</code>. Complete escaped interpolations are now treated as literal template text, including when they span lines. One the file never closes, which is what a half-typed escape looks like, ends at the end of its line, so the rest of the template is still read rather than being masked along with it. Contributed by @shuvroroy. Closes #419.</li>
