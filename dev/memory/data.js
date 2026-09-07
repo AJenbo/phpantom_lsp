@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788771506978,
+  "lastUpdate": 1788774764136,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -26791,6 +26791,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 71.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "1242225+sidux@users.noreply.github.com",
+            "name": "sidux",
+            "username": "sidux"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f46ea5d80341ab251a7d16edcea445ddb97fa2a9",
+          "message": "feat(php): add scalable reference CodeLens (#392)",
+          "timestamp": "2026-09-07T11:35:16+02:00",
+          "tree_id": "2e3f188034d64d7ebc453eed0fe933a8c520123e",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/f46ea5d80341ab251a7d16edcea445ddb97fa2a9"
+        },
+        "date": 1788774755586,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 73.9,
             "unit": "MiB"
           }
         ]
