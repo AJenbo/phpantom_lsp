@@ -26,6 +26,7 @@ use App\Models\ReviewCollection;
 use Database\Factories\AnnotatedPostFactory;
 use Database\Factories\BlogAuthorFactory;
 use Database\Factories\EditorialFactory;
+use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Http\Client\PendingRequest;
@@ -1155,12 +1156,22 @@ class Demo
 
     // ── Storage::fake() resolves to the concrete adapter ────────────────
 
-    public function storageFake(): void
+    public function storageFake(
+        #[\Illuminate\Container\Attributes\Storage('avatars')] Filesystem $avatars,
+    ): void
     {
         // fake() declares the Filesystem contract but always builds a
         // FilesystemAdapter, so the adapter-only assertion helpers resolve.
+        // Disk names complete from config/filesystems.php, hover as their full
+        // config keys, and navigate back to their declarations — in the
+        // #[Storage] attribute above as much as in the calls below.
         Storage::fake('avatars')->assertExists('me.png');
-        Storage::persistentFake('logs')->assertMissing('old.log');
+        Storage::persistentFake(disk: 'logs')->assertMissing('old.log');
+
+        // forgetDisk() takes one name or a list of them, and tolerates a disk
+        // that was never configured, so an unknown name here is not flagged.
+        Storage::forgetDisk('avatars');
+        Storage::forgetDisk(['avatars', 'logs']);
     }
 
 
@@ -1169,10 +1180,11 @@ class Demo
     public function storageDisk(): void
     {
         // disk()/cloud() declare the Filesystem/Cloud contract, but every
-        // disk config/filesystems.php configures ('local', 's3') builds a
-        // FilesystemAdapter, so adapter-only methods like download()
+        // disk config/filesystems.php configures ('local', 's3', ...) builds
+        // a FilesystemAdapter, so adapter-only methods like download()
         // resolve on every configured disk, not just a faked one.
         Storage::disk('s3')->download('report.pdf');
+        Storage::disk(name: 'local')->exists('notes.txt');
         Storage::cloud()->assertExists('logo.png');
 
         // The 'pantry' disk uses a driver the framework does not ship.  Its
@@ -1180,6 +1192,16 @@ class Demo
         // FilesystemAdapter too, so a custom driver does not cost the rest of
         // the project its precise disk type.
         Storage::disk('pantry')->download('sourdough.pdf');
+
+        // A disk configured at runtime is configured all the same: nothing in
+        // config/filesystems.php declares 'ondemand' or 'scratch', and neither
+        // read below is flagged because the write above it establishes the
+        // disk.  Configuring one in a test's setUp() is the usual shape.
+        Config::set('filesystems.disks.ondemand', ['driver' => 'local']);
+        Storage::disk('ondemand')->exists('invoice.pdf');
+
+        Storage::fake('scratch');
+        Storage::disk('scratch')->exists('draft.txt');
     }
 
 

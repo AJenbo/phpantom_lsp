@@ -266,6 +266,12 @@ impl Backend {
         // files that mention neither `Gate` nor `$policies`.
         self.refresh_laravel_gates(uri, content);
 
+        // Keep the set of config keys the project declares at runtime
+        // coherent with edits to the files that write them.  Reads the spans
+        // the parse above just stored, so it runs after it rather than
+        // alongside the token-gated refreshes.
+        self.refresh_laravel_config_writes(uri);
+
         // Keep the container bindings, package config files, view and
         // translation directories, route files, and component namespaces
         // coherent with edits to the providers that register them.  Cheap
