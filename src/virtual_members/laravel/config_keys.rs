@@ -589,6 +589,44 @@ mod tests {
     }
 
     #[test]
+    fn vendor_runtime_writes_do_not_hide_application_writes_in_the_same_batch() {
+        let backend = Backend::new_test();
+        backend.resolved_class_cache.write().set_laravel(true);
+        backend
+            .workspace
+            .vendor_uri_prefixes
+            .lock()
+            .push("file:///project/vendor/".to_string());
+        let vendor_uri = "file:///project/vendor/package/Fixture.php";
+        let app_uri = "file:///project/app/Fixture.php";
+        let vendor = backend.parse_ast_index_update_for_index(
+            vendor_uri,
+            "<?php Config::set('filesystems.disks.vendor-only', []);",
+        );
+        let application = backend
+            .parse_ast_index_update_for_index(app_uri, "<?php Storage::fake('application-only');");
+
+        backend.apply_ast_index_parse_results_batch(vec![vendor, application]);
+
+        let maps = backend.symbol_maps.read();
+        assert_eq!(
+            config_write_keys(&maps[vendor_uri]),
+            ["filesystems.disks.vendor-only"],
+            "the vendor write was parsed, but must not declare application configuration"
+        );
+        assert_eq!(
+            backend.runtime_config_keys(),
+            std::collections::HashSet::from(["filesystems.disks.application-only".to_string()])
+        );
+        assert!(
+            !backend
+                .laravel_runtime_config_keys
+                .read()
+                .contains_key(vendor_uri)
+        );
+    }
+
+    #[test]
     fn config_prefix_from_uri_normal() {
         assert_eq!(
             laravel_config_prefix_from_uri("file:///project/config/app.php"),
