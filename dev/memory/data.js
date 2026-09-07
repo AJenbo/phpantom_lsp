@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788747534468,
+  "lastUpdate": 1788771506978,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -26757,6 +26757,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 72.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "shuvro.nsu.cse@gmail.com",
+            "name": "Shuvro Roy",
+            "username": "shuvroroy"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "fc644acf1343cb9c74f92b5a9f7e422ce0ee9bd8",
+          "message": "Support custom Eloquent pivot accessor names - #381",
+          "timestamp": "2026-09-07T10:40:43+02:00",
+          "tree_id": "b4f44c1f3c29dbaab8a0d441a190dd84e78d0b89",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/fc644acf1343cb9c74f92b5a9f7e422ce0ee9bd8"
+        },
+        "date": 1788771494466,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 36.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 71.4,
             "unit": "MiB"
           }
         ]
