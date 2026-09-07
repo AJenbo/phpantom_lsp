@@ -101,6 +101,28 @@ check(
     'Bakery::masterRecipe() exists',
     method_exists(\App\Models\Bakery::class, 'masterRecipe')
 );
+$masterRecipe = (new \App\Models\Bakery())->masterRecipe();
+check(
+    'Bakery::masterRecipe() keeps the default pivot accessor',
+    $masterRecipe->getPivotAccessor() === 'pivot'
+);
+check(
+    'Bakery::masterRecipe() uses RecipeIngredient as its pivot model',
+    $masterRecipe->getPivotClass() === \App\Models\RecipeIngredient::class
+);
+check(
+    'Bakery::seasonalRecipes() exists',
+    method_exists(\App\Models\Bakery::class, 'seasonalRecipes')
+);
+$seasonalRecipes = (new \App\Models\Bakery())->seasonalRecipes();
+check(
+    'Bakery::seasonalRecipes() renames the pivot accessor to ingredient',
+    $seasonalRecipes->getPivotAccessor() === 'ingredient'
+);
+check(
+    'Bakery::seasonalRecipes() uses RecipeIngredient as its pivot model',
+    $seasonalRecipes->getPivotClass() === \App\Models\RecipeIngredient::class
+);
 
 // ─── Accessor methods ───────────────────────────────────────────────────────
 
