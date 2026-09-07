@@ -1416,16 +1416,7 @@ impl LanguageServer for Backend {
         let uri_clone = uri.clone();
         let outcome = run_blocking_cancel_safe("rename", move || {
             backend.handle_with_position("rename", &uri_clone, position, |content, pos| {
-                Some(
-                    backend
-                        .handle_rename(&uri_clone, content, pos, &new_name)
-                        .map(|edit| {
-                            edit.map(|mut edit| {
-                                backend.translate_workspace_edit(&mut edit);
-                                edit
-                            })
-                        }),
-                )
+                Some(backend.handle_rename(&uri_clone, content, pos, &new_name))
             })
         })
         .await

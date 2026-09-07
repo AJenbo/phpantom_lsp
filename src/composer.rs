@@ -674,31 +674,48 @@ pub(crate) fn namespace_below_prefix<'a>(
     rest.strip_prefix('\\')
 }
 
+/// Every directory PSR-4 places `namespace` in, paired with the mapping
+/// that puts it there.
+///
+/// Composer accepts an array of directories per prefix, so one namespace
+/// can be spread over several roots and each of them holds part of it.
+/// `mappings` is assumed to be sorted longest-prefix-first, so the most
+/// specific mapping comes first and a root fallback comes last.
+pub(crate) fn psr4_directories_for_namespace<'a>(
+    mappings: &'a [Psr4Mapping],
+    workspace_root: &'a Path,
+    namespace: &'a str,
+) -> impl Iterator<Item = (&'a Psr4Mapping, PathBuf)> + 'a {
+    mappings.iter().filter_map(move |mapping| {
+        let relative = namespace_below_prefix(namespace, &mapping.prefix)?;
+        let base = workspace_root.join(&mapping.base_path);
+        Some((
+            mapping,
+            if relative.is_empty() {
+                base
+            } else {
+                base.join(relative.replace('\\', std::path::MAIN_SEPARATOR_STR))
+            },
+        ))
+    })
+}
+
 /// The directory PSR-4 places `namespace` in, or `None` when no mapping
 /// covers it.
 ///
 /// The counterpart of [`resolve_namespace_from_path`], and the namespace
 /// equivalent of [`resolve_class_path`]: it answers where a namespace's
-/// files have to live for the autoloader to find them. `mappings` is
-/// assumed to be sorted longest-prefix-first, so the most specific
-/// mapping wins and a root fallback is consulted last.
+/// files have to live for the autoloader to find them. Where several
+/// mappings cover the namespace the most specific one wins; use
+/// [`psr4_directories_for_namespace`] to see all of them.
 pub(crate) fn psr4_directory_for_namespace(
     mappings: &[Psr4Mapping],
     workspace_root: &Path,
     namespace: &str,
 ) -> Option<PathBuf> {
-    for mapping in mappings {
-        let Some(relative) = namespace_below_prefix(namespace, &mapping.prefix) else {
-            continue;
-        };
-        let base = workspace_root.join(&mapping.base_path);
-        return Some(if relative.is_empty() {
-            base
-        } else {
-            base.join(relative.replace('\\', std::path::MAIN_SEPARATOR_STR))
-        });
-    }
-    None
+    psr4_directories_for_namespace(mappings, workspace_root, namespace)
+        .next()
+        .map(|(_, directory)| directory)
 }
 
 /// Reverse of [`resolve_class_path`]: given a file path, compute the
@@ -1835,6 +1852,38 @@ mod tests {
                 Some("App\\Http\\Controllers\\Api\\V2".to_string()),
                 "UserController".to_string()
             ))
+        );
+    }
+
+    #[test]
+    fn a_prefix_with_several_roots_yields_every_directory() {
+        // Composer allows an array of directories per prefix, and each of
+        // them holds part of the same namespace.
+        let mappings = vec![
+            Psr4Mapping {
+                prefix: "Tests\\".to_string(),
+                base_path: "tests/".to_string(),
+            },
+            Psr4Mapping {
+                prefix: "Tests\\".to_string(),
+                base_path: "shared/tests/".to_string(),
+            },
+        ];
+        let root = Path::new("/project");
+        let directories: Vec<PathBuf> =
+            psr4_directories_for_namespace(&mappings, root, "Tests\\Unit")
+                .map(|(_, directory)| directory)
+                .collect();
+        assert_eq!(
+            directories,
+            vec![
+                PathBuf::from("/project/tests/Unit"),
+                PathBuf::from("/project/shared/tests/Unit"),
+            ]
+        );
+        assert_eq!(
+            psr4_directory_for_namespace(&mappings, root, "Tests\\Unit"),
+            Some(PathBuf::from("/project/tests/Unit"))
         );
     }
 

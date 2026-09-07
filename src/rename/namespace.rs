@@ -6,16 +6,17 @@
 //! the PSR-4 directory move.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::composer;
-use crate::symbol_map::SymbolKind;
+use crate::symbol_map::{ClassRefContext, SymbolKind};
 use crate::text_position::{line_start_byte_offset, offset_to_position, ranges_overlap};
-use crate::util::strip_fqn_prefix;
+use crate::types::FileContext;
+use crate::util::{resolve_to_fqn, short_name, strip_fqn_prefix};
 
 use super::RenameOutcome;
 
@@ -69,6 +70,12 @@ impl Backend {
         old_prefix: &str,
         new_prefix: &str,
     ) -> RenameOutcome {
+        // A namespace spread over several PSR-4 roots has no single
+        // directory to move, so refuse before planning anything.
+        if let Some(conflict) = self.namespace_psr4_root_conflict(old_prefix, new_prefix) {
+            return Err(conflict);
+        }
+
         // Renaming a namespace onto one that already exists is a merge,
         // and a merge only works where the two sides declare no name
         // twice.  Where they do, the rename is refused outright: moving
@@ -135,7 +142,12 @@ impl Backend {
                 continue;
             }
 
-            let content = match self.get_file_content(file_uri) {
+            // A template is planned against the virtual PHP it lowers to,
+            // because that is what its symbol map describes and what the
+            // `matches_source` check below compares against.  The edits
+            // are translated back to the template's own coordinates once
+            // they are collected.
+            let content = match self.reference_file_content(file_uri) {
                 Some(c) => c,
                 None => continue,
             };
@@ -174,6 +186,21 @@ impl Backend {
                 &mut file_edits,
             ) {
                 return Ok(None);
+            }
+
+            self.translate_template_edits(file_uri, &mut file_edits);
+
+            // 4. Update `@use` directives, which the three scans above
+            //    cannot see: the preprocessor hoists them into the
+            //    prologue, which translates back to no position at all.
+            if self.is_blade_file(file_uri)
+                && let Some(template) = self.get_file_content(file_uri)
+            {
+                super::blade::collect_use_directive_edits(
+                    &template,
+                    &|name| moved_name(name, old_prefix, new_prefix),
+                    &mut file_edits,
+                );
             }
 
             if !file_edits.is_empty() {
@@ -400,8 +427,8 @@ impl Backend {
         }
     }
 
-    /// Collect text edits for inline FQN references (e.g. `\App\Old\Foo`
-    /// in type hints or docblocks) that contain the old prefix.
+    /// Collect text edits for inline references (e.g. `\App\Old\Foo` in
+    /// type hints or docblocks) that name a class the move carries.
     ///
     /// Returns `false` when the file's symbol map cannot be trusted
     /// against its current text, in which case no edits are collected and
@@ -425,29 +452,38 @@ impl Backend {
             return false;
         }
 
-        let old_prefix_lower = old_prefix.to_lowercase();
+        // The file's own imports and namespace, plus what they will read
+        // once the two scans above have rewritten them.  Built on the
+        // first class reference so files without one pay nothing.
+        let mut resolution: Option<(FileContext, HashMap<String, String>)> = None;
 
         for span in &symbol_map.spans {
-            let name = match &span.kind {
-                SymbolKind::ClassReference {
-                    name, is_fqn: true, ..
-                } => name,
-                _ => continue,
+            let SymbolKind::ClassReference {
+                name,
+                is_fqn,
+                context: ref_context,
+            } = &span.kind
+            else {
+                continue;
             };
 
-            // Only process references that contain a backslash (FQN-style).
-            let name_normalized = strip_fqn_prefix(name);
-            let name_lower = name_normalized.to_lowercase();
+            let (ctx, moved_imports) = resolution.get_or_insert_with(|| {
+                let ctx = self.file_context(file_uri);
+                let moved = moved_use_map(&ctx.use_map, old_prefix, new_prefix);
+                (ctx, moved)
+            });
 
-            if name_lower != old_prefix_lower
-                && !name_lower.starts_with(&format!("{}\\", old_prefix_lower))
-            {
+            // Which class the reference names, which the recorded name
+            // does not say on its own: it is the source spelling with any
+            // leading `\` stripped, so a qualified name written without a
+            // root reads the same as one written with it.
+            let resolved = (!*is_fqn).then(|| ctx.resolve_name_at(name, span.start));
+            let fqn = strip_fqn_prefix(resolved.as_deref().unwrap_or(name.as_str()));
+
+            let Some(new_fqn) = moved_name(fqn, old_prefix, new_prefix) else {
                 continue;
-            }
+            };
 
-            // Check source text to see if this is an inline FQN reference
-            // (contains `\` in source).  Use-statement references are
-            // handled separately by collect_use_statement_edits.
             let source = content
                 .get(span.start as usize..span.end as usize)
                 .unwrap_or("");
@@ -471,23 +507,28 @@ impl Backend {
                 continue;
             }
 
-            let new_name = if name_normalized.len() == old_prefix.len() {
-                if name.starts_with('\\') {
-                    format!("\\{}", new_prefix)
-                } else {
-                    new_prefix.to_string()
-                }
+            let rooted = format!("\\{}", new_fqn);
+            let new_text = if source.starts_with('\\') {
+                rooted
+            } else if matches!(ref_context, ClassRefContext::UseImport) {
+                // A `use` statement names its target absolutely, so the
+                // moved name goes in as written, root or no root.
+                new_fqn
+            } else if !source.contains('\\') {
+                // An unqualified reference reaches the class through an
+                // import or through the file's own namespace, and the
+                // move rewrites both: the spelling stays right.
+                continue;
             } else {
-                let suffix = &name_normalized[old_prefix.len()..];
-                if name.starts_with('\\') {
-                    format!("\\{}{}", new_prefix, suffix)
-                } else {
-                    format!("{}{}", new_prefix, suffix)
-                }
+                let namespace = ctx
+                    .namespace_at(span.start)
+                    .as_ref()
+                    .map(|ns| moved_name(ns, old_prefix, new_prefix).unwrap_or_else(|| ns.clone()));
+                unrooted_spelling(&new_fqn, moved_imports, &namespace).unwrap_or(rooted)
             };
 
             // Only emit an edit if the text actually changes.
-            if source == new_name {
+            if source == new_text {
                 continue;
             }
 
@@ -496,7 +537,7 @@ impl Backend {
                     start: offset_to_position(content, span.start as usize),
                     end: offset_to_position(content, span.end as usize),
                 },
-                new_text: new_name,
+                new_text,
             });
         }
 
@@ -595,27 +636,7 @@ impl Backend {
 
         let mut ops: Vec<(Url, Url)> = Vec::new();
 
-        for mapping in psr4.iter() {
-            let Some(relative_ns) = composer::namespace_below_prefix(old_prefix, &mapping.prefix)
-            else {
-                continue;
-            };
-
-            let base_dir = workspace_root.join(&mapping.base_path);
-            let old_dir = if relative_ns.is_empty() {
-                base_dir
-            } else {
-                base_dir.join(relative_ns.replace('\\', std::path::MAIN_SEPARATOR_STR))
-            };
-
-            if old_dir == new_dir {
-                continue;
-            }
-
-            if !old_dir.is_dir() {
-                continue;
-            }
-
+        for (_, old_dir) in namespace_source_dirs(&psr4, &workspace_root, old_prefix, &new_dir) {
             if new_dir.exists() {
                 collect_merge_move_ops(&old_dir, &old_dir, &new_dir, &mut ops);
             } else {
@@ -627,6 +648,77 @@ impl Backend {
 
         if ops.is_empty() { None } else { Some(ops) }
     }
+
+    /// Why a namespace cannot be moved out of its PSR-4 roots, or `None`
+    /// when it has just the one to move.
+    ///
+    /// Composer accepts an array of directories per prefix, and every one
+    /// of them holds part of the same namespace.  There is no single
+    /// directory to move, and each root's files would land on the same
+    /// destination, so the plan would carry classes the caller never
+    /// named (and collide with itself doing so).  Moving only the root
+    /// the caller meant needs a rewriter that can split a namespace by
+    /// the directory its classes are declared in, which is not what this
+    /// one does, so the move is refused instead.
+    fn namespace_psr4_root_conflict(&self, old_prefix: &str, new_prefix: &str) -> Option<String> {
+        let psr4 = self.workspace.psr4_mappings.read();
+        let workspace_root = self.workspace.workspace_root.read().clone()?;
+        let new_dir = composer::psr4_directory_for_namespace(&psr4, &workspace_root, new_prefix)?;
+
+        let roots = namespace_source_dirs(&psr4, &workspace_root, old_prefix, &new_dir);
+        if roots.len() < 2 {
+            return None;
+        }
+
+        let listed: Vec<String> = roots
+            .iter()
+            .map(|(mapping, _)| format!("`{}`", mapping.base_path))
+            .collect();
+
+        Some(format!(
+            "Cannot move `{}` to `{}`: PSR-4 spreads `{}` over more than one root ({}), \
+             so there is no single directory to move and the classes under every root \
+             would move together. Give `{}` a single root in `composer.json`, or move \
+             the classes one at a time.",
+            old_prefix,
+            new_prefix,
+            old_prefix,
+            listed.join(", "),
+            old_prefix,
+        ))
+    }
+}
+
+/// The directories holding the files a namespace move takes along, each
+/// paired with the PSR-4 mapping that places it there.
+///
+/// A mapping Composer lists but the project never created holds nothing
+/// to move, and a directory that already is the destination is not a
+/// move at all, so both are left out. Nested prefixes can also name one
+/// directory twice (`Tests\` at `tests/` and `Tests\Unit\` at
+/// `tests/Unit/` both place `Tests\Unit` in `tests/Unit`), so each
+/// directory is kept once. What remains is what the move has to carry,
+/// which is also what tells the caller whether the namespace sits in
+/// more than one root.
+fn namespace_source_dirs<'a>(
+    psr4: &'a [composer::Psr4Mapping],
+    workspace_root: &'a Path,
+    old_prefix: &'a str,
+    new_dir: &Path,
+) -> Vec<(&'a composer::Psr4Mapping, PathBuf)> {
+    let mut dirs: Vec<(&composer::Psr4Mapping, PathBuf)> = Vec::new();
+    for (mapping, old_dir) in
+        composer::psr4_directories_for_namespace(psr4, workspace_root, old_prefix)
+    {
+        if old_dir == new_dir || !old_dir.is_dir() {
+            continue;
+        }
+        if dirs.iter().any(|(_, seen)| seen == &old_dir) {
+            continue;
+        }
+        dirs.push((mapping, old_dir));
+    }
+    dirs
 }
 
 /// Collect one move operation per file under `dir`, rebasing each onto
@@ -663,6 +755,63 @@ fn collect_merge_move_ops(dir: &Path, old_root: &Path, new_root: &Path, ops: &mu
             ops.push((old_url, new_url));
         }
     }
+}
+
+/// `name` with the moved namespace prefix substituted, or `None` when
+/// the move does not carry it.
+fn moved_name(name: &str, old_prefix: &str, new_prefix: &str) -> Option<String> {
+    let rest = name
+        .get(..old_prefix.len())
+        .filter(|head| head.eq_ignore_ascii_case(old_prefix))
+        .and_then(|_| name.get(old_prefix.len()..))?;
+    (rest.is_empty() || rest.starts_with('\\')).then(|| format!("{}{}", new_prefix, rest))
+}
+
+/// `use_map` as it will read once the move has rewritten the file's
+/// `use` statements.
+///
+/// An import with no `as` clause binds the last segment of the name it
+/// imports, so rewriting `use App\Old;` to `use App\New;` renames the
+/// alias along with it and a reference spelled `Old\Widget` stops
+/// resolving.  An explicit alias survives the rewrite untouched.
+fn moved_use_map(
+    use_map: &HashMap<String, String>,
+    old_prefix: &str,
+    new_prefix: &str,
+) -> HashMap<String, String> {
+    use_map
+        .iter()
+        .map(
+            |(alias, fqn)| match moved_name(fqn, old_prefix, new_prefix) {
+                Some(moved) if alias.eq_ignore_ascii_case(short_name(fqn)) => {
+                    (short_name(&moved).to_string(), moved)
+                }
+                Some(moved) => (alias.clone(), moved),
+                None => (alias.clone(), fqn.clone()),
+            },
+        )
+        .collect()
+}
+
+/// How `fqn` can be written without a root at a site whose imports are
+/// `use_map` and whose namespace is `namespace`, or `None` when no
+/// unrooted spelling names it there.
+///
+/// The candidates are the segment-aligned tails of `fqn`, longest first,
+/// so a reference that spelled the name in full keeps spelling it in
+/// full and one that leaned on the enclosing namespace keeps leaning on
+/// it.  Each is resolved back and kept only if it still names `fqn`,
+/// which is what rules out a tail that an import or the namespace would
+/// capture for a different class.
+fn unrooted_spelling(
+    fqn: &str,
+    use_map: &HashMap<String, String>,
+    namespace: &Option<String>,
+) -> Option<String> {
+    std::iter::once(fqn)
+        .chain(fqn.match_indices('\\').map(|(at, _)| &fqn[at + 1..]))
+        .find(|candidate| resolve_to_fqn(candidate, use_map, namespace).eq_ignore_ascii_case(fqn))
+        .map(str::to_string)
 }
 
 /// Whether `source` is text that can spell a reference recorded as `name`.

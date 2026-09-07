@@ -211,6 +211,15 @@ pub struct DiagnosticsConfig {
     #[serde(rename = "workspace-external")]
     pub workspace_external: Option<bool>,
 
+    /// Downgrade `type_mismatch_argument` to a warning when the only
+    /// reason an argument's type fails to satisfy its parameter is a stray
+    /// `null` (every non-null member of the argument's type is already
+    /// compatible).
+    ///
+    /// Off by default, matching current (error) behaviour.
+    #[serde(rename = "downgrade-nullable-argument-mismatch")]
+    pub downgrade_nullable_argument_mismatch: Option<bool>,
+
     /// Rules that suppress matching diagnostics, similar to PHPStan's
     /// `ignoreErrors`.
     ///
@@ -285,6 +294,12 @@ impl DiagnosticsConfig {
     /// has an effect when [`workspace`](Self::workspace) is enabled.
     pub fn workspace_external_enabled(&self) -> bool {
         self.workspace_external.unwrap_or(true)
+    }
+
+    /// Whether a nullability-only argument type mismatch is downgraded
+    /// to a warning.
+    pub fn downgrade_nullable_argument_mismatch_enabled(&self) -> bool {
+        self.downgrade_nullable_argument_mismatch.unwrap_or(false)
     }
 }
 
@@ -1012,6 +1027,36 @@ mod tests {
         std::fs::write(&path, "[diagnostics]\n").unwrap();
         let config = load_config(dir.path()).unwrap();
         assert!(!config.diagnostics.report_magic_properties_enabled());
+    }
+
+    #[test]
+    fn parses_downgrade_nullable_argument_mismatch() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE_NAME);
+        std::fs::write(
+            &path,
+            "[diagnostics]\ndowngrade-nullable-argument-mismatch = true\n",
+        )
+        .unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert!(
+            config
+                .diagnostics
+                .downgrade_nullable_argument_mismatch_enabled()
+        );
+    }
+
+    #[test]
+    fn downgrade_nullable_argument_mismatch_defaults_to_false() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE_NAME);
+        std::fs::write(&path, "[diagnostics]\n").unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert!(
+            !config
+                .diagnostics
+                .downgrade_nullable_argument_mismatch_enabled()
+        );
     }
 
     #[test]

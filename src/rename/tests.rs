@@ -94,11 +94,23 @@ fn line_char_of(haystack: &str, needle: &str) -> (u32, u32) {
 
 /// Collect all text edits for a given URI from a WorkspaceEdit.
 fn edits_for_uri(edit: &WorkspaceEdit, uri: &Url) -> Vec<TextEdit> {
-    edit.changes
-        .as_ref()
-        .and_then(|changes| changes.get(uri))
-        .cloned()
-        .unwrap_or_default()
+    if let Some(changes) = edit.changes.as_ref() {
+        return changes.get(uri).cloned().unwrap_or_default();
+    }
+    let Some(DocumentChanges::Operations(ops)) = &edit.document_changes else {
+        return Vec::new();
+    };
+    ops.iter()
+        .filter_map(|op| match op {
+            DocumentChangeOperation::Edit(e) if e.text_document.uri == *uri => Some(&e.edits),
+            _ => None,
+        })
+        .flatten()
+        .map(|e| match e {
+            OneOf::Left(e) => e.clone(),
+            OneOf::Right(e) => e.text_edit.clone(),
+        })
+        .collect()
 }
 
 /// Apply a set of text edits to source text and return the result.
@@ -802,6 +814,47 @@ async fn rename_class_cross_file() {
     for te in edits_a.iter().chain(edits_b.iter()) {
         assert_eq!(te.new_text, "Creature");
     }
+}
+
+#[tokio::test]
+async fn a_rename_keeps_an_indented_imports_indentation() {
+    // A `use` inside a braced `namespace {}` block is indented, and the
+    // import is rewritten as a whole statement rather than name by name
+    // (an alias can appear or disappear).  Taking the whole line along
+    // with it flattened the import against the left margin.
+    let backend = Backend::new_test();
+    let uri_a = Url::parse("file:///a.php").unwrap();
+    let uri_b = Url::parse("file:///b.php").unwrap();
+
+    let text_a = concat!(
+        "<?php\n",
+        "namespace App\\Old {\n",
+        "    class Widget {}\n",
+        "}\n",
+    );
+
+    let text_b = concat!(
+        "<?php\n",
+        "namespace App\\Consumer {\n",
+        "    use App\\Old\\Widget;\n",
+        "\n",
+        "    function demo(): void { new Widget(); }\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri_a, text_a).await;
+    open_file(&backend, &uri_b, text_b).await;
+
+    let (line, character) = line_char_of(text_a, "Widget");
+    let edit = rename(&backend, &uri_a, line, character, "Gadget")
+        .await
+        .expect("expected an edit");
+
+    let result = apply_edits(text_b, &edits_for_uri(&edit, &uri_b));
+    assert!(
+        result.contains("    use App\\Old\\Gadget;"),
+        "the import has to keep its indentation:\n{result}"
+    );
 }
 
 #[tokio::test]
@@ -3863,6 +3916,147 @@ async fn rename_namespace_multiple_files_same_namespace() {
     );
 }
 
+#[tokio::test]
+async fn rename_namespace_keeps_a_rooted_reference_rooted() {
+    let backend = Backend::new_test();
+    let uri_a = Url::parse("file:///a.php").unwrap();
+    let uri_b = Url::parse("file:///b.php").unwrap();
+
+    let text_a = concat!("<?php\n", "namespace App\\Legacy;\n", "class Widget {}\n",);
+    let text_b = concat!(
+        "<?php\n",
+        "namespace App\\Providers;\n",
+        "class Provider {\n",
+        "    public array $map = ['page' => \\App\\Legacy\\Widget::class];\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri_a, text_a).await;
+    open_file(&backend, &uri_b, text_b).await;
+
+    let edit = rename(&backend, &uri_a, 1, 14, "Modern")
+        .await
+        .expect("Expected workspace edit");
+    let result_b = apply_edits(text_b, &edits_for_uri(&edit, &uri_b));
+
+    assert!(
+        result_b.contains("\\App\\Modern\\Widget::class"),
+        "Dropping the root would resolve the name against App\\Providers: {}",
+        result_b
+    );
+}
+
+#[tokio::test]
+async fn rename_namespace_rewrites_a_qualified_reference_in_a_file_with_no_namespace() {
+    let backend = Backend::new_test();
+    let uri_a = Url::parse("file:///a.php").unwrap();
+    let uri_config = Url::parse("file:///config.php").unwrap();
+
+    let text_a = concat!("<?php\n", "namespace App\\Legacy;\n", "class Widget {}\n",);
+    let text_config = concat!(
+        "<?php\n",
+        "return ['providers' => [App\\Legacy\\Widget::class]];\n",
+    );
+
+    open_file(&backend, &uri_a, text_a).await;
+    open_file(&backend, &uri_config, text_config).await;
+
+    let edit = rename(&backend, &uri_a, 1, 14, "Modern")
+        .await
+        .expect("Expected workspace edit");
+    let result_config = apply_edits(text_config, &edits_for_uri(&edit, &uri_config));
+
+    assert_eq!(
+        result_config,
+        concat!(
+            "<?php\n",
+            "return ['providers' => [App\\Modern\\Widget::class]];\n",
+        ),
+        "A file with no namespace resolves a qualified name against the \
+         global namespace, so the move has to carry it"
+    );
+}
+
+#[tokio::test]
+async fn rename_namespace_leaves_a_reference_relative_to_the_moved_namespace_alone() {
+    let backend = Backend::new_test();
+    let uri_a = Url::parse("file:///a.php").unwrap();
+    let uri_b = Url::parse("file:///b.php").unwrap();
+
+    let text_a = concat!(
+        "<?php\n",
+        "namespace App\\Legacy\\Sub;\n",
+        "class Gadget {}\n",
+    );
+    let text_b = concat!(
+        "<?php\n",
+        "namespace App\\Legacy;\n",
+        "class Holder {\n",
+        "    public function make(): Sub\\Gadget {}\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri_a, text_a).await;
+    open_file(&backend, &uri_b, text_b).await;
+
+    let edit = rename(&backend, &uri_b, 1, 14, "Modern")
+        .await
+        .expect("Expected workspace edit");
+    let result_b = apply_edits(text_b, &edits_for_uri(&edit, &uri_b));
+
+    assert_eq!(
+        result_b,
+        concat!(
+            "<?php\n",
+            "namespace App\\Modern;\n",
+            "class Holder {\n",
+            "    public function make(): Sub\\Gadget {}\n",
+            "}\n",
+        ),
+        "The rewritten namespace declaration carries the relative name with it"
+    );
+}
+
+#[tokio::test]
+async fn rename_namespace_respells_a_reference_its_import_no_longer_binds() {
+    let backend = Backend::new_test();
+    let uri_a = Url::parse("file:///a.php").unwrap();
+    let uri_b = Url::parse("file:///b.php").unwrap();
+
+    let text_a = concat!("<?php\n", "namespace App\\Legacy;\n", "class Widget {}\n",);
+    // `use App\Legacy;` binds `Legacy`, and the move renames that binding
+    // to `Modern` along with the statement.
+    let text_b = concat!(
+        "<?php\n",
+        "namespace App\\Site;\n",
+        "use App\\Legacy;\n",
+        "class Page {\n",
+        "    public function make(): Legacy\\Widget {}\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri_a, text_a).await;
+    open_file(&backend, &uri_b, text_b).await;
+
+    let edit = rename(&backend, &uri_a, 1, 14, "Modern")
+        .await
+        .expect("Expected workspace edit");
+    let result_b = apply_edits(text_b, &edits_for_uri(&edit, &uri_b));
+
+    assert_eq!(
+        result_b,
+        concat!(
+            "<?php\n",
+            "namespace App\\Site;\n",
+            "use App\\Modern;\n",
+            "class Page {\n",
+            "    public function make(): Modern\\Widget {}\n",
+            "}\n",
+        ),
+        "Leaving `Legacy\\Widget` behind would resolve it to App\\Site\\Legacy\\Widget"
+    );
+}
+
 // --- PHPDoc @property and @method rename tests ---
 
 #[tokio::test]
@@ -4542,6 +4736,104 @@ async fn rename_class_move_from_global_namespace_adds_import() {
         result_usage.contains("new Legacy()"),
         "got:\n{}",
         result_usage
+    );
+}
+
+#[tokio::test]
+async fn rename_class_move_into_global_namespace_removes_the_namespace_statement() {
+    // The destination has no namespace to write in place of the old
+    // one, so leaving the statement behind would spell `namespace ;`.
+    let backend = Backend::new_test();
+
+    let uri = Url::parse("file:///src/Widget.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "\n",
+        "namespace App\\Old;\n",
+        "\n",
+        "class Widget {}\n",
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    let ws = backend
+        .plan_class_move("App\\Old\\Widget", "Widget")
+        .expect("the move should be planned")
+        .expect("Expected a workspace edit for the class move");
+
+    let result = apply_edits(text, &edits_for_uri(&ws, &uri));
+    assert_eq!(
+        result, "<?php\n\nclass Widget {}\n",
+        "The whole `namespace` statement should go; got:\n{result}"
+    );
+}
+
+#[tokio::test]
+async fn rename_class_move_into_global_namespace_writes_siblings_where_the_namespace_was() {
+    // The removed statement's line is also where the imports the move
+    // has to add would land, so both have to be one edit.
+    let backend = Backend::new_test();
+
+    let uri_decl = Url::parse("file:///src/Widget.php").unwrap();
+    let uri_sibling = Url::parse("file:///src/Helper.php").unwrap();
+
+    let text_decl = concat!(
+        "<?php\n",
+        "\n",
+        "namespace App\\Old;\n",
+        "\n",
+        "class Widget {\n",
+        "    public function helper(): Helper {\n",
+        "        return new Helper();\n",
+        "    }\n",
+        "}\n",
+    );
+    let text_sibling = concat!(
+        "<?php\n",
+        "\n",
+        "namespace App\\Old;\n",
+        "\n",
+        "class Helper {}\n",
+    );
+
+    open_file(&backend, &uri_decl, text_decl).await;
+    open_file(&backend, &uri_sibling, text_sibling).await;
+
+    let ws = backend
+        .plan_class_move("App\\Old\\Widget", "Widget")
+        .expect("the move should be planned")
+        .expect("Expected a workspace edit for the class move");
+
+    let result = apply_edits(text_decl, &edits_for_uri(&ws, &uri_decl));
+    assert!(
+        result.starts_with("<?php\n\nuse App\\Old\\Helper;\n\nclass Widget {\n"),
+        "The sibling import should take the namespace statement's place; got:\n{result}"
+    );
+}
+
+#[tokio::test]
+async fn rename_class_move_into_global_namespace_refuses_a_brace_namespace() {
+    // Removing a brace-style declaration means unwrapping the block it
+    // opens, so the move says so rather than mangling the file.
+    let backend = Backend::new_test();
+
+    let uri = Url::parse("file:///src/Widget.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "\n",
+        "namespace App\\Old {\n",
+        "    class Widget {}\n",
+        "}\n",
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    let error = backend
+        .plan_class_move("App\\Old\\Widget", "Widget")
+        .expect_err("a brace-style namespace should be refused");
+    assert!(
+        error.contains("brace block"),
+        "The refusal should name the shape it cannot handle; got: {error}"
     );
 }
 
@@ -5836,5 +6128,271 @@ async fn rename_class_updates_phpstan_type_and_import_type_tags() {
     assert!(
         result.contains("UserRow"),
         "the alias name is not the class and must not be rewritten:\n{result}"
+    );
+}
+
+/// A PSR-4 workspace whose Blade templates are opened as templates, so
+/// the preprocessor lowers them the way the editor would.
+async fn blade_move_workspace(files: &[(&str, &str)]) -> (Backend, tempfile::TempDir) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let backend = Backend::new_test();
+    backend.supports_file_rename.store(true, Ordering::Release);
+    *backend.workspace_root().write() = Some(dir.path().to_path_buf());
+    *backend.psr4_mappings().write() = vec![crate::composer::Psr4Mapping {
+        prefix: "App\\".to_string(),
+        base_path: "src".to_string(),
+    }];
+
+    for (rel, content) in files {
+        let full = dir.path().join(rel);
+        std::fs::create_dir_all(full.parent().expect("parent")).expect("mkdir");
+        std::fs::write(&full, content).expect("write");
+        let uri = Url::from_file_path(&full).expect("uri");
+        let language_id = if rel.ends_with(".blade.php") {
+            "blade"
+        } else {
+            "php"
+        };
+        backend
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri,
+                    language_id: language_id.to_string(),
+                    version: 1,
+                    text: content.to_string(),
+                },
+            })
+            .await;
+    }
+
+    (backend, dir)
+}
+
+/// Every way a template can name a class, in the shapes a real Laravel
+/// view uses them: the `@use` directive, an import and a docblock inside
+/// an `@php` block, an inline fully-qualified name, and one written
+/// inside a directive's argument.
+const TEMPLATE_NAMING_A_CLASS: &str = concat!(
+    "@use('App\\Internal\\Widget')\n",
+    "@php\n",
+    "    /** @var \\App\\Internal\\Widget $widget */\n",
+    "    $widget = new \\App\\Internal\\Widget();\n",
+    "@endphp\n",
+    "<p>{{ Widget::label() }}</p>\n",
+    "<script>value = @json(\\App\\Internal\\Widget::label());</script>\n",
+);
+
+/// The other spelling of an import a template can carry: a `use` written
+/// inside an `@php` block, which the preprocessor leaves where it stands
+/// rather than hoisting.
+const TEMPLATE_IMPORTING_IN_A_PHP_BLOCK: &str = concat!(
+    "@php\n",
+    "    use App\\Internal\\Widget as Alias;\n",
+    "@endphp\n",
+    "<p>{{ Alias::label() }}</p>\n",
+);
+
+#[tokio::test]
+async fn a_namespace_move_rewrites_every_name_a_template_spells() {
+    let (backend, dir) = blade_move_workspace(&[
+        (
+            "src/Internal/Widget.php",
+            "<?php\nnamespace App\\Internal;\n\nclass Widget {\n    public static function label(): string { return ''; }\n}\n",
+        ),
+        ("resources/views/panel.blade.php", TEMPLATE_NAMING_A_CLASS),
+    ])
+    .await;
+
+    let uri = ws_uri(&dir, "src/Internal/Widget.php");
+    let ws = rename(&backend, &uri, 1, 12, "App\\Core")
+        .await
+        .expect("expected an edit");
+
+    let view = ws_uri(&dir, "resources/views/panel.blade.php");
+    let result = apply_edits(TEMPLATE_NAMING_A_CLASS, &edits_for_uri(&ws, &view));
+
+    assert!(
+        !result.contains("App\\Internal"),
+        "the template must not still name the namespace it moved out of:\n{result}"
+    );
+    for expected in [
+        "@use('App\\Core\\Widget')",
+        "@var \\App\\Core\\Widget $widget",
+        "new \\App\\Core\\Widget()",
+        "@json(\\App\\Core\\Widget::label())",
+    ] {
+        assert!(
+            result.contains(expected),
+            "expected {expected:?} in:\n{result}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn an_open_template_no_longer_abandons_the_whole_rename() {
+    // The template's symbol map describes the virtual PHP it lowers to,
+    // which is longer than the file on disk.  Checking it against the
+    // template's own bytes made the length guard fire and dropped every
+    // file's edits, so even the moved namespace's own declaration was
+    // left alone.
+    let (backend, dir) = blade_move_workspace(&[
+        (
+            "src/Internal/Widget.php",
+            "<?php\nnamespace App\\Internal;\n\nclass Widget {}\n",
+        ),
+        (
+            "resources/views/panel.blade.php",
+            "<p>nothing to do with the move</p>\n",
+        ),
+    ])
+    .await;
+
+    let uri = ws_uri(&dir, "src/Internal/Widget.php");
+    let ws = rename(&backend, &uri, 1, 12, "App\\Core")
+        .await
+        .expect("expected an edit");
+
+    // The declaration moves with the namespace, so its edits target the
+    // path the file lands on rather than the one it left.
+    let declaration = apply_edits(
+        "<?php\nnamespace App\\Internal;\n\nclass Widget {}\n",
+        &edits_for_uri(&ws, &ws_uri(&dir, "src/Core/Widget.php")),
+    );
+    assert!(
+        declaration.contains("namespace App\\Core;"),
+        "the declaration itself has to be rewritten:\n{declaration}"
+    );
+}
+
+#[tokio::test]
+async fn a_class_rename_carries_a_templates_use_directive_with_it() {
+    // The preprocessor hoists `@use` into the prologue, which translates
+    // back to no position in the template.  Rewriting the short names the
+    // import binds without rewriting the import leaves the template
+    // naming a class that no longer exists.
+    let (backend, dir) = blade_move_workspace(&[
+        (
+            "src/Internal/Widget.php",
+            "<?php\nnamespace App\\Internal;\n\nclass Widget {\n    public static function label(): string { return ''; }\n}\n",
+        ),
+        ("resources/views/panel.blade.php", TEMPLATE_NAMING_A_CLASS),
+    ])
+    .await;
+
+    let uri = ws_uri(&dir, "src/Internal/Widget.php");
+    let ws = rename(&backend, &uri, 3, 8, "Gadget")
+        .await
+        .expect("expected an edit");
+
+    let view = ws_uri(&dir, "resources/views/panel.blade.php");
+    let result = apply_edits(TEMPLATE_NAMING_A_CLASS, &edits_for_uri(&ws, &view));
+
+    assert!(
+        !result.contains("Widget"),
+        "the old name must not survive anywhere in the template:\n{result}"
+    );
+    assert!(
+        result.contains("@use('App\\Internal\\Gadget')"),
+        "the import has to follow the rename:\n{result}"
+    );
+    assert!(
+        result.contains("{{ Gadget::label() }}"),
+        "the short name the import binds has to follow it:\n{result}"
+    );
+}
+
+#[tokio::test]
+async fn a_class_move_carries_a_templates_names_to_the_new_namespace() {
+    let (backend, dir) = blade_move_workspace(&[
+        (
+            "src/Internal/Widget.php",
+            "<?php\nnamespace App\\Internal;\n\nclass Widget {\n    public static function label(): string { return ''; }\n}\n",
+        ),
+        ("resources/views/panel.blade.php", TEMPLATE_NAMING_A_CLASS),
+    ])
+    .await;
+
+    let uri = ws_uri(&dir, "src/Internal/Widget.php");
+    let ws = rename(&backend, &uri, 3, 8, "App\\Core\\Widget")
+        .await
+        .expect("expected an edit");
+
+    let view = ws_uri(&dir, "resources/views/panel.blade.php");
+    let result = apply_edits(TEMPLATE_NAMING_A_CLASS, &edits_for_uri(&ws, &view));
+
+    assert!(
+        !result.contains("App\\Internal"),
+        "the template must not still name the old namespace:\n{result}"
+    );
+    assert!(
+        result.contains("@use('App\\Core\\Widget')"),
+        "the import has to follow the move:\n{result}"
+    );
+}
+
+#[tokio::test]
+async fn a_member_rename_lands_on_the_templates_own_line() {
+    // A method renamed from a template's call site has to come back
+    // through the source map: the offsets the reference finder produces
+    // index the virtual PHP, whose prologue the template never wrote.
+    let (backend, dir) = blade_move_workspace(&[
+        (
+            "src/Internal/Widget.php",
+            "<?php\nnamespace App\\Internal;\n\nclass Widget {\n    public static function label(): string { return ''; }\n}\n",
+        ),
+        ("resources/views/panel.blade.php", TEMPLATE_NAMING_A_CLASS),
+    ])
+    .await;
+
+    let uri = ws_uri(&dir, "src/Internal/Widget.php");
+    let ws = rename(&backend, &uri, 4, 28, "caption")
+        .await
+        .expect("expected an edit");
+
+    let view = ws_uri(&dir, "resources/views/panel.blade.php");
+    let result = apply_edits(TEMPLATE_NAMING_A_CLASS, &edits_for_uri(&ws, &view));
+
+    assert!(
+        result.contains("{{ Widget::caption() }}"),
+        "the call in the template has to be rewritten in place:\n{result}"
+    );
+    assert!(
+        result.contains("@json(\\App\\Internal\\Widget::caption())"),
+        "so does the one inside a directive's argument:\n{result}"
+    );
+}
+
+#[tokio::test]
+async fn a_namespace_move_rewrites_an_import_inside_a_php_block() {
+    let (backend, dir) = blade_move_workspace(&[
+        (
+            "src/Internal/Widget.php",
+            "<?php\nnamespace App\\Internal;\n\nclass Widget {\n    public static function label(): string { return \'\'; }\n}\n",
+        ),
+        (
+            "resources/views/panel.blade.php",
+            TEMPLATE_IMPORTING_IN_A_PHP_BLOCK,
+        ),
+    ])
+    .await;
+
+    let uri = ws_uri(&dir, "src/Internal/Widget.php");
+    let ws = rename(&backend, &uri, 1, 12, "App\\Core")
+        .await
+        .expect("expected an edit");
+
+    let view = ws_uri(&dir, "resources/views/panel.blade.php");
+    let result = apply_edits(
+        TEMPLATE_IMPORTING_IN_A_PHP_BLOCK,
+        &edits_for_uri(&ws, &view),
+    );
+
+    assert!(
+        result.contains("    use App\\Core\\Widget as Alias;"),
+        "the import has to follow the move, indentation and all:\n{result}"
+    );
+    assert!(
+        result.contains("{{ Alias::label() }}"),
+        "the alias names the same class and must be left alone:\n{result}"
     );
 }
