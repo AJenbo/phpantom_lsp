@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788774764136,
+  "lastUpdate": 1788819563873,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -26825,6 +26825,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 73.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "shuvro.nsu.cse@gmail.com",
+            "name": "Shuvro Roy",
+            "username": "shuvroroy"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "93860a7cb0cf63c0a357838ef3225be3391ddb9e",
+          "message": "fix(blade): ignore escaped frontend interpolations\n\nTreat @{{ ... }} and @{!! ... !!} as literal template text so\nfrontend-only expressions never reach the PHP parser.\n\nCloses #419",
+          "timestamp": "2026-09-08T00:02:03+02:00",
+          "tree_id": "6d9865bf34152f05a3b1532925dbe1acb3c3492e",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/93860a7cb0cf63c0a357838ef3225be3391ddb9e"
+        },
+        "date": 1788819556682,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 38,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 74.7,
             "unit": "MiB"
           }
         ]
