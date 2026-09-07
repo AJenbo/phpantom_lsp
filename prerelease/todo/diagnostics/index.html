@@ -1064,6 +1064,61 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#d19-invalid_member_access-cannot-tell-a-property-read-from-a-write" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D19. <code>invalid_member_access</code> cannot tell a property read from a write
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d20-foobar-and-foobar-are-the-same-span" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D20. <code>Foo::$bar</code> and <code>Foo::bar</code> are the same span
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d21-a-union-of-an-unreachable-and-a-missing-member-is-reported-by-neither-check" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D21. A union of an unreachable and a missing member is reported by neither check
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d22-member-provenance-is-recomputed-instead-of-recorded" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D22. Member provenance is recomputed instead of recorded
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d23-a-rebound-closures-scope-is-added-to-the-lexical-one-rather-than-replacing-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D23. A rebound closure's scope is added to the lexical one rather than replacing it
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1660,6 +1715,61 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#d19-invalid_member_access-cannot-tell-a-property-read-from-a-write" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D19. <code>invalid_member_access</code> cannot tell a property read from a write
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d20-foobar-and-foobar-are-the-same-span" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D20. <code>Foo::$bar</code> and <code>Foo::bar</code> are the same span
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d21-a-union-of-an-unreachable-and-a-missing-member-is-reported-by-neither-check" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D21. A union of an unreachable and a missing member is reported by neither check
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d22-member-provenance-is-recomputed-instead-of-recorded" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D22. Member provenance is recomputed instead of recorded
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d23-a-rebound-closures-scope-is-added-to-the-lexical-one-rather-than-replacing-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D23. A rebound closure's scope is added to the lexical one rather than replacing it
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1932,6 +2042,129 @@ places, so retiring it wants the resolver to answer <code>list&lt;X&gt;</code> f
 shapes that genuinely are lists (literal arrays, <code>array_values()</code>,
 appended-to locals) first. Pay for it with resolver precision, the same
 way the supertype-where-subtype hatch was retired.</p>
+<hr />
+<h2 id="d19-invalid_member_access-cannot-tell-a-property-read-from-a-write">D19. <code>invalid_member_access</code> cannot tell a property read from a write<a class="headerlink" href="#d19-invalid_member_access-cannot-tell-a-property-read-from-a-write" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>PHP dispatches an unreachable property to a different magic method
+depending on what is being done to it: <code>__get</code> for a read, <code>__set</code> for a
+write, <code>__isset</code> for <code>isset()</code>, and <code>__unset</code> for <code>unset()</code>. The span the
+visibility check runs on records only that a property was accessed, so
+the check cannot pick the handler that actually applies and treats the
+presence of any of the four as reason enough to stand down.</p>
+<p>The result is a missed report rather than a wrong one. A class that
+declares <code>__set</code> but no <code>__get</code> silences a read it would in fact fatal
+on, and the same holds for every other mismatched pairing.</p>
+<p><strong>Fix:</strong> Carry the operation on the <code>MemberAccess</code> span — read, write,
+<code>isset</code>, <code>unset</code> — the way <code>readonly_writes.rs</code> recovers write targets
+from the AST, and require the handler that matches it. The same
+information would let the readonly check drop its own separate walk.</p>
+<hr />
+<h2 id="d20-foobar-and-foobar-are-the-same-span">D20. <code>Foo::$bar</code> and <code>Foo::bar</code> are the same span<a class="headerlink" href="#d20-foobar-and-foobar-are-the-same-span" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<p>Symbol extraction strips the <code>$</code> from a static property access
+(<code>member_access.rs</code>) and records only a name plus <code>is_static</code>, so a
+static property and a class constant of the same name are
+indistinguishable downstream. Every consumer has to guess a precedence;
+the visibility check tries the constant first.</p>
+<p>Two classes of mistake follow, both needing a class that declares a
+constant and a static property under one name:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">class Collision {</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    private const token = &#39;constant&#39;;</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">    public static string $token = &#39;property&#39;;</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">}</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">echo Collision::$token;   // reported as a private constant</span>
+</code></pre></div>
+<p>and the reverse pairing, where a genuinely unreachable static property
+is passed off as a public constant and nothing is reported.</p>
+<p><strong>Fix:</strong> Record the member kind the syntax actually names — instance
+property, static property, constant, or method — rather than a name and
+a static flag.</p>
+<hr />
+<h2 id="d21-a-union-of-an-unreachable-and-a-missing-member-is-reported-by-neither-check">D21. A union of an unreachable and a missing member is reported by neither check<a class="headerlink" href="#d21-a-union-of-an-unreachable-and-a-missing-member-is-reported-by-neither-check" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Medium-High</strong></p>
+<p><code>Known|Other</code> where <code>Known::$x</code> is private and <code>Other</code> has no <code>$x</code> at all
+fails on every runtime branch, and nothing reports it. Both checks are
+conservative in the same direction and each assumes the other covers what
+it declines to judge: the unknown-member check stays silent because the
+member exists on one branch, and the visibility check stays silent
+because it does not exist on the other.</p>
+<p>A related gap sits one layer earlier: the resolver hands the diagnostics
+only the branches it could load and drops the rest, so neither check can
+see that a union had a branch it failed to resolve. Any verdict that
+wants to distinguish "no branch permits this" from "we could not read
+one of the branches" needs that information preserved.</p>
+<p><strong>Fix:</strong> Give the branches of a resolved union a verdict of their own —
+accessible, inaccessible, missing, unresolved — instead of collapsing
+them to a list of loaded classes, and decide the union once from those.</p>
+<hr />
+<h2 id="d22-member-provenance-is-recomputed-instead-of-recorded">D22. Member provenance is recomputed instead of recorded<a class="headerlink" href="#d22-member-provenance-is-recomputed-instead-of-recorded" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
+<p>The inheritance merge knows which class each member it folds in came
+from — <code>merge_traits_into()</code> is handed the host FQN — and drops that on
+the floor. <code>MethodInfo</code>, <code>PropertyInfo</code>, and <code>ConstantInfo</code> have no field
+for it, so the assembled class says what a class <em>has</em> and never who
+declared it.</p>
+<p>Every check that needs the declaring class therefore recomputes it by
+walking the raw hierarchy, and every such walk is a partial
+reimplementation of the merge's own rules. <code>invalid_member_access</code> has
+one, and it is already known to be incomplete: it does not apply
+<code>trait_aliases</code>, so a member a <code>use</code> clause renamed is untraceable and
+the access goes unreported.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">trait Opens { public function open(): void {} }</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">class Vault { use Opens { open as private hidden; } }</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">class Intruder {</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">    public function probe(Vault $vault): void</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">    {</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="x">        $vault-&gt;hidden();   // fatal at runtime, reported by nothing</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="x">    }</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="x">}</span>
+</code></pre></div>
+<p>The access has to be written inside a class to show the gap. From
+outside every class the check reports anyway, because no scope can reach
+a non-public member whoever declared it, and it falls back to naming the
+receiver when the declaration cannot be traced.</p>
+<p><strong>Fix:</strong> Record the declaring class during the merge and let the checks
+read it, rather than each one re-deriving the merge's rules. The cost is
+a field on every member across the whole index, so it wants measuring
+against the memory the index already uses before it is committed to.</p>
+<hr />
+<h2 id="d23-a-rebound-closures-scope-is-added-to-the-lexical-one-rather-than-replacing-it">D23. A rebound closure's scope is added to the lexical one rather than replacing it<a class="headerlink" href="#d23-a-rebound-closures-scope-is-added-to-the-lexical-one-rather-than-replacing-it" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>A closure can run with a different class as its scope than the one it is
+written in — Laravel's <code>Macroable</code>, anything through <code>Closure::bind</code>, and
+anything a <code>@param-closure-this</code> tag describes. The resolver already
+works this out. The visibility check does not read it; it infers from the
+subject text that <code>$this</code>, <code>self</code>, or <code>static</code> names a binding and adds
+the receiver as an <em>additional</em> scope, keeping the enclosing class as
+well.</p>
+<p>Adding rather than replacing is safe in the direction that matters — it
+cannot invent a report — but it hides one:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">class Owner {</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">    private static function hidden(): void {}</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">    public function boot(): void</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">    {</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">        Target::macro(&#39;x&#39;, function (): void {</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="x">            self::hidden();      // fatal: the closure&#39;s scope is Target</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="x">        });</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="x">    }</span>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="x">}</span>
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="x">class Target extends Owner {</span>
+<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a><span class="x">    /** @param-closure-this static $macro */</span>
+<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a><span class="x">    public static function macro(string $name, callable $macro): void {}</span>
+<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a><span class="x">}</span>
+</code></pre></div>
+<p>The closure is written inside <code>Owner</code>, so the enclosing class permits the
+call, while at runtime the scope is <code>Target</code> and a parent's private
+member is out of reach.</p>
+<p><strong>Fix:</strong> Take the bound class from the resolver, which already computes
+it, and let it replace the enclosing class rather than joining it.
+Inferring a binding from the spelling of the subject is guessing at
+something the type engine has already decided.</p>
 
 
 
