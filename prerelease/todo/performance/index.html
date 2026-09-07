@@ -3131,6 +3131,61 @@ through a separate flag, so the cached value has to carry both.</p>
 <code>type_engine/resolver/mod.rs</code> (<code>SubjectExpr::CallExpr</code> and the property
 path) and <code>narrowed_by_rewalk</code> in
 <code>type_engine/variable/rhs_resolution/mod.rs</code>.</p>
+<hr />
+<h2 id="p55-every-edit-re-reads-every-member-reference-candidate-file">P55. Every edit re-reads every member-reference candidate file<a class="headerlink" href="#p55-every-edit-re-reads-every-member-reference-candidate-file" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium-High · Complexity: Medium-High</strong></p>
+<p><code>reindex_references_for_symbol_maps_batch</code> and
+<code>evict_reference_index_uri</code> both call
+<code>MemberRefCounts::invalidate_locations_all</code>, so any reparse marks the
+exact locations of <em>every</em> cached member declaration stale, not just the
+ones the edited file contributed to. The count side is invalidated far
+more selectively: <code>member_contributions</code> compares each file's old and
+new per-member contribution and only the members whose contribution
+actually changed become <code>count_stale</code>, which is what lets an edit that
+touches no access recompute nothing.</p>
+<p>Locations are blanket-invalidated because a receiver's type can change
+without changing any indexed member name or count (the
+<code>Order $value</code> → <code>Buyer $value</code> case), and a clickable lens must never
+point at a range the edit moved. But the consequence is that the
+declaration CodeLens path re-queues every public member of the open file
+on every keystroke, and <code>member_declaration_references_batch</code> then calls
+<code>reference_file_content_arc</code> for each candidate file. That falls through
+to <code>get_file_content_arc</code>, which is an uncached
+<code>std::fs::read_to_string</code> for any file not open in the editor. On a
+large application a common member name (<code>handle</code>, <code>get</code>, <code>name</code>) is a
+candidate in thousands of files, so a typing pause costs thousands of
+file reads even though the expensive part, the per-file
+<code>ResolvedMemberFile</code> semantic layer, is still warm and reused.</p>
+<h3 id="fix_3">Fix<a class="headerlink" href="#fix_3" title="Permanent link">&para;</a></h3>
+<p>Two independent halves, either of which helps on its own:</p>
+<ol>
+<li>
+<p><strong>Narrow the invalidation.</strong> Split the blanket call into the two
+   causes it currently conflates. Offsets only shift in the files that
+   were reparsed, so a location cache entry needs invalidating when one
+   of its own locations names a rebuilt URI. The receiver-type case
+   belongs where the type change is already detected: <code>update_ast</code>
+   clears <code>resolved_members</code> when <code>any_signature_changed ||
+   any_function_changed</code>, and the location cache should be invalidated
+   from the same branch. Check what that flag covers before relying on
+   it — a docblock-only <code>@return</code> edit changes receiver types too, and
+   serving a stale clickable location is worse than the current cost.</p>
+</li>
+<li>
+<p><strong>Make the warm semantic layer self-sufficient.</strong> <code>ResolvedMemberFile</code>
+   already packs the resolved receiver atoms per symbol-span index; it
+   does not carry the LSP <code>Range</code> for the access, which is the only
+   other thing <code>scan_file</code> needs the file's text for. Storing the range
+   alongside the targets (16 bytes per access) would let a warm
+   candidate file be filtered without reading it at all.</p>
+</li>
+</ol>
+<p><strong>Where to look:</strong> <code>invalidate_locations_all</code> and
+<code>member_declaration_references</code> in <code>reference_counts.rs</code>,
+<code>reindex_references_for_symbol_maps_batch</code> and <code>ResolvedMemberFile</code> in
+<code>reference_index.rs</code>, <code>member_declaration_references_batch</code> in
+<code>references/members.rs</code>, and <code>get_file_content_arc</code> in
+<code>backend/file_access.rs</code>.</p>
 
 
 
