@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788738122184,
+  "lastUpdate": 1788742555020,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -26689,6 +26689,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 74,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "shuvro.nsu.cse@gmail.com",
+            "name": "Shuvro Roy",
+            "username": "shuvroroy"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "20650a906a4feae1f03eab9b4b25461c1c30ea85",
+          "message": "Add Laravel storage disk name intelligence (#371)",
+          "timestamp": "2026-09-07T02:38:58+02:00",
+          "tree_id": "ac1493f62d8a423cad2dfadd9ee63ea65daef080",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/20650a906a4feae1f03eab9b4b25461c1c30ea85"
+        },
+        "date": 1788742549242,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 73.1,
             "unit": "MiB"
           }
         ]
