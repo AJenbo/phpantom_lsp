@@ -151,7 +151,7 @@ pub(crate) use config_keys::find_config_references;
 pub(crate) use config_keys::{
     collect_laravel_config_declarations, find_all_config_references,
     laravel_config_prefix_from_uri, resolve_config_key_declaration,
-    resolve_config_key_definition_fallback,
+    resolve_config_key_declaration_exact, resolve_config_key_definition_fallback,
 };
 pub(crate) use const_eval::ClassContext;
 pub(crate) use env_vars::{enumerate_env_keys, env_declaration, env_name_is_sensitive};
@@ -172,6 +172,8 @@ pub(crate) use patches::STORAGE_FACADE_FQN;
 pub(crate) use path_helpers::{
     collect_path_helper_links, is_path_helper, path_helper_base, resolve_path_helper_definition,
 };
+#[cfg(test)]
+pub(crate) use provider_resources::ProviderResource;
 pub(crate) use provider_resources::{
     ProviderIdentity, ProviderOrigin, ProviderResources, ProviderScan, ProviderScans,
     extract_provider_resources,
@@ -182,8 +184,7 @@ pub(crate) use route_names::{
 };
 pub(crate) use storage::{
     FILESYSTEM_MANAGER_FQN, LaravelStorageDriverIndex, StorageDriverRegistration,
-    extract_storage_driver_registrations, is_storage_facade_name, patch_storage_disk_type,
-    storage_facade_local_names,
+    extract_storage_driver_registrations, patch_storage_disk_type,
 };
 pub(crate) use trans_keys::{collect_trans_declarations, trans_line, unresolved_trans_type};
 pub(crate) use validation_rules::{safe_call_receiver_variable, safe_source_variable};

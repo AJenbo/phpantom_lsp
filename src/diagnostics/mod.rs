@@ -282,6 +282,7 @@ pub(crate) type SlowDiagnosticObserver<'a> =
 enum CheckedStringKind {
     Route,
     Config,
+    ConfigResource(crate::symbol_map::LaravelConfigResource),
     View,
     Trans,
     Command,
@@ -677,85 +678,87 @@ impl Backend {
         // that write is attempted would deadlock.
         let mut has_route = false;
         let mut has_config = false;
+        let mut has_config_resource = false;
         let mut has_view = false;
         let mut has_trans = false;
         let mut has_command = false;
         let mut has_morph_alias = false;
         let mut has_gate_ability = false;
-        let key_spans: Vec<(CheckedStringKind, String, u32, u32)> = {
-            let Some(symbol_map) = self.symbol_maps.read().get(uri).cloned() else {
-                return;
-            };
-            let extra = self.typed_receiver_view_spans_for(uri, &symbol_map);
-            symbol_map
-                .spans
-                .iter()
-                .chain(extra.iter())
-                .filter_map(|span| {
-                    if let SymbolKind::LaravelStringKey {
-                        kind,
-                        key,
-                        is_write,
-                        is_optional,
-                    } = &span.kind
-                    {
-                        // A write declares the key it names, so there is
-                        // nothing to check it against, and an optional key
-                        // is one the call is written to do without: an
-                        // `@includeFirst` candidate that names nothing is
-                        // why the directive takes a list at all.
-                        if *is_write || *is_optional {
-                            return None;
-                        }
-                        let checked = match kind {
-                            LaravelStringKind::Route => {
-                                has_route = true;
-                                CheckedStringKind::Route
-                            }
-                            LaravelStringKind::Config => {
-                                has_config = true;
-                                CheckedStringKind::Config
-                            }
-                            LaravelStringKind::View => {
-                                has_view = true;
-                                CheckedStringKind::View
-                            }
-                            LaravelStringKind::Trans => {
-                                has_trans = true;
-                                CheckedStringKind::Trans
-                            }
-                            LaravelStringKind::Command => {
-                                has_command = true;
-                                CheckedStringKind::Command
-                            }
-                            LaravelStringKind::MorphAlias => {
-                                has_morph_alias = true;
-                                CheckedStringKind::MorphAlias
-                            }
-                            LaravelStringKind::GateAbility => {
-                                has_gate_ability = true;
-                                CheckedStringKind::GateAbility
-                            }
-                            // A section or stack name is judged against the
-                            // templates that render the one it is written
-                            // in, which the Blade pass below has and this
-                            // one does not.  And anything at all can be bound
-                            // at runtime, so an unrecognised container key
-                            // proves nothing — nor does an environment
-                            // variable absent from `.env`, since the
-                            // environment a process runs with is not on disk.
-                            LaravelStringKind::Section
-                            | LaravelStringKind::Stack
-                            | LaravelStringKind::ContainerBinding
-                            | LaravelStringKind::Env => return None,
-                        };
-                        Some((checked, key.clone(), span.start, span.end))
-                    } else {
-                        None
-                    }
-                })
-                .collect()
+        let Some(symbol_map) = self.symbol_maps.read().get(uri).cloned() else {
+            return;
         };
+        let extra = self.typed_receiver_view_spans_for(uri, &symbol_map);
+        let key_spans: Vec<(CheckedStringKind, &str, u32, u32)> = symbol_map
+            .spans
+            .iter()
+            .chain(extra.iter())
+            .filter_map(|span| {
+                if let SymbolKind::LaravelStringKey {
+                    kind,
+                    key,
+                    is_write,
+                    is_optional,
+                } = &span.kind
+                {
+                    // A write declares the key it names, so there is
+                    // nothing to check it against, and an optional key
+                    // is one the call is written to do without: an
+                    // `@includeFirst` candidate that names nothing is
+                    // why the directive takes a list at all.
+                    if *is_write || *is_optional {
+                        return None;
+                    }
+                    let checked = match kind {
+                        LaravelStringKind::Route => {
+                            has_route = true;
+                            CheckedStringKind::Route
+                        }
+                        LaravelStringKind::Config => {
+                            has_config = true;
+                            CheckedStringKind::Config
+                        }
+                        LaravelStringKind::ConfigResource(resource) => {
+                            has_config = true;
+                            has_config_resource = true;
+                            CheckedStringKind::ConfigResource(*resource)
+                        }
+                        LaravelStringKind::View => {
+                            has_view = true;
+                            CheckedStringKind::View
+                        }
+                        LaravelStringKind::Trans => {
+                            has_trans = true;
+                            CheckedStringKind::Trans
+                        }
+                        LaravelStringKind::Command => {
+                            has_command = true;
+                            CheckedStringKind::Command
+                        }
+                        LaravelStringKind::MorphAlias => {
+                            has_morph_alias = true;
+                            CheckedStringKind::MorphAlias
+                        }
+                        LaravelStringKind::GateAbility => {
+                            has_gate_ability = true;
+                            CheckedStringKind::GateAbility
+                        }
+                        // A section or stack name is judged against the
+                        // templates that render the one it is written
+                        // in, which the Blade pass below has and this
+                        // one does not.  And anything at all can be bound
+                        // at runtime, so an unrecognised container key
+                        // proves nothing.
+                        LaravelStringKind::Section
+                        | LaravelStringKind::Stack
+                        | LaravelStringKind::ContainerBinding
+                        | LaravelStringKind::Env => return None,
+                    };
+                    Some((checked, key.as_str(), span.start, span.end))
+                } else {
+                    None
+                }
+            })
+            .collect();
 
         if !has_route
             && !has_config
@@ -796,11 +799,8 @@ impl Backend {
         // see, so none of its keys can be judged.  Only an application owns
         // the whole of its configuration.
         let has_config = has_config && self.is_application_project();
-        let declared_config_keys: Vec<String> = if has_config {
-            self.cached_config_keys()
-        } else {
-            Vec::new()
-        };
+        let cached_config_keys = has_config.then(|| self.cached_config_keys());
+        let declared_config_keys = cached_config_keys.as_deref().map_or(&[][..], Vec::as_slice);
         // A key that `Config::set()` or the array form of the `config()`
         // helper establishes is as real as one a `config/` file declares; a
         // test that configures a disk in `setUp()` before exercising it is
@@ -809,6 +809,17 @@ impl Backend {
             self.runtime_config_keys()
         } else {
             HashSet::new()
+        };
+        // A runtime write establishes its ancestors while leaving the value
+        // and all descendants opaque. Match whole segments in either direction.
+        let config_paths_overlap = |left: &str, right: &str| {
+            left == right
+                || left
+                    .strip_prefix(right)
+                    .is_some_and(|rest| rest.starts_with('.'))
+                || right
+                    .strip_prefix(left)
+                    .is_some_and(|rest| rest.starts_with('.'))
         };
         // The config files we managed to enumerate keys from, by name.  A
         // key whose root segment names none of them lives in a file we
@@ -820,11 +831,14 @@ impl Backend {
             .iter()
             .map(|key| key.split('.').next().unwrap_or(key.as_str()))
             .collect();
-        let config_keys: HashSet<&str> = declared_config_keys
-            .iter()
-            .chain(written_config_keys.iter())
-            .map(String::as_str)
-            .collect();
+        let config_resource_mask = if has_config_resource {
+            declared_config_keys.iter().fold(0, |mask, key| {
+                crate::symbol_map::laravel_resources::resource_from_config_key(key)
+                    .map_or(mask, |(resource, _)| mask | resource.bit())
+            })
+        } else {
+            0
+        };
         let view_keys: HashSet<String> = if has_view {
             self.cached_view_names().into_iter().collect()
         } else {
@@ -887,7 +901,7 @@ impl Backend {
             HashSet::new()
         };
 
-        for (kind, key, start, end) in &key_spans {
+        for &(kind, key, start, end) in &key_spans {
             let (valid, label, code) = match kind {
                 // An ability is judged against the model the check names, so
                 // it reports which model rather than the shared
@@ -896,12 +910,12 @@ impl Backend {
                     if !gate_ability_space_is_open
                         && !gate_abilities.is_empty()
                         && let Some(message) =
-                            self.gate_ability_problem(uri, content, key, *start, &gate_abilities)
+                            self.gate_ability_problem(uri, content, key, start, &gate_abilities)
                         && let Some(range) = self.offset_range_to_lsp_range(
                             uri,
                             content,
-                            *start as usize,
-                            *end as usize,
+                            start as usize,
+                            end as usize,
                         )
                     {
                         out.push(helpers::make_diagnostic(
@@ -957,23 +971,61 @@ impl Backend {
                     // An unknown root means the file never reached us, so
                     // the key cannot be wrong as far as we can tell, while
                     // a typo inside a file we did read is still caught.
-                    if !config_roots.contains(key.split('.').next().unwrap_or(key.as_str())) {
+                    if !config_roots.contains(key.split('.').next().unwrap_or(key)) {
                         continue;
                     }
                     // Config keys may be partial prefixes (e.g. `config('app')`)
-                    // which are valid even without a direct match.  The other
-                    // direction holds for a key written at runtime: the value
-                    // it stored is opaque to us, so every path under it is
-                    // beyond judging as well.
-                    let valid = config_keys.contains(key.as_str())
-                        || config_keys
-                            .iter()
-                            .any(|k| k.starts_with(&format!("{}.", key)))
-                        || written_config_keys.iter().any(|written| {
-                            key.strip_prefix(written.as_str())
-                                .is_some_and(|rest| rest.starts_with('.'))
-                        });
+                    // which are valid even without a direct match. Runtime
+                    // writes also make their opaque descendants unjudgeable.
+                    let candidate = declared_config_keys.get(
+                        declared_config_keys.partition_point(|candidate| candidate.as_str() < key),
+                    );
+                    let valid = candidate.is_some_and(|candidate| {
+                        candidate == key
+                            || candidate
+                                .strip_prefix(key)
+                                .is_some_and(|suffix| suffix.starts_with('.'))
+                    }) || written_config_keys
+                        .iter()
+                        .any(|written| config_paths_overlap(key, written));
                     (valid, "config key", "invalid_laravel_config")
+                }
+                CheckedStringKind::ConfigResource(resource) => {
+                    let descriptor = crate::symbol_map::laravel_resources::descriptor(resource);
+                    if crate::symbol_map::laravel_resources::is_implicit_resource_name(
+                        resource, key,
+                    ) {
+                        continue;
+                    }
+                    // An undiscovered subtree is an unknown vocabulary, not
+                    // proof that every runtime-provided name is invalid.
+                    if config_resource_mask & resource.bit() == 0 {
+                        continue;
+                    }
+                    let prefix = descriptor.config_prefix;
+                    let first = declared_config_keys
+                        .partition_point(|candidate| candidate.as_str() < prefix);
+                    let child =
+                        crate::symbol_map::laravel_resources::configured_child_name(resource, key);
+                    let valid = declared_config_keys[first..]
+                        .iter()
+                        .take_while(|candidate| candidate.starts_with(prefix))
+                        .any(|candidate| {
+                            crate::symbol_map::laravel_resources::matches_config_key(
+                                resource, key, candidate,
+                            )
+                        })
+                        || written_config_keys.iter().any(|written| {
+                            written.strip_prefix(prefix).map_or_else(
+                                || {
+                                    prefix
+                                        .strip_prefix(written.as_str())
+                                        .is_some_and(|rest| rest.starts_with('.'))
+                                },
+                                |written_child| config_paths_overlap(child, written_child),
+                            )
+                        });
+                    (valid, descriptor.label, descriptor.diagnostic_code)
                 }
                 CheckedStringKind::View => {
                     (view_keys.contains(key), "view", "invalid_laravel_view")
@@ -987,9 +1039,11 @@ impl Backend {
                         continue;
                     }
                     let valid = trans_keys.contains(key)
-                        || trans_keys
-                            .iter()
-                            .any(|k| k.starts_with(&format!("{}.", key)));
+                        || trans_keys.iter().any(|candidate| {
+                            candidate
+                                .strip_prefix(key)
+                                .is_some_and(|suffix| suffix.starts_with('.'))
+                        });
                     (valid, "translation key", "invalid_laravel_trans")
                 }
                 CheckedStringKind::Command => {
@@ -1020,7 +1074,7 @@ impl Backend {
             };
             if !valid
                 && let Some(range) =
-                    self.offset_range_to_lsp_range(uri, content, *start as usize, *end as usize)
+                    self.offset_range_to_lsp_range(uri, content, start as usize, end as usize)
             {
                 out.push(helpers::make_diagnostic(
                     range,
@@ -1977,6 +2031,20 @@ mod tests {
             !backend.diag.last_full.lock().contains_key(uri),
             "pull must not compute diagnostics inline on the request path"
         );
+    }
+
+    #[test]
+    fn laravel_string_key_diagnostics_ignore_an_unindexed_uri() {
+        let backend = crate::Backend::new_test();
+        let mut out = Vec::new();
+
+        backend.collect_invalid_laravel_string_key_diagnostics(
+            "file:///closed.php",
+            "<?php config('app.name');",
+            &mut out,
+        );
+
+        assert!(out.is_empty());
     }
 
     /// Regression test: `collect_invalid_laravel_string_key_diagnostics`
