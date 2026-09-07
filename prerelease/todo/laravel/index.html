@@ -1301,17 +1301,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l25-storage-disk-name-strings" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L25. Storage disk name strings
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l27-legacy-controllermethod-action-strings" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2009,17 +1998,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         L24. Translation depth: JSON lang files, locales, placeholders
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#l25-storage-disk-name-strings" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L25. Storage disk name strings
       </span>
     </span>
   </a>
@@ -2839,15 +2817,6 @@ still partially lack:</p>
   empty string as the value). No fix when the group file itself doesn't
   exist yet; that case still just diagnoses.</li>
 </ul>
-<h4 id="l25-storage-disk-name-strings">L25. Storage disk name strings<a class="headerlink" href="#l25-storage-disk-name-strings" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
-<p><code>Storage::disk('...')</code> and the <code>#[Storage]</code> container attribute already
-complete against <code>filesystems.disks.*</code>, navigate to the disk's entry in
-<code>config/filesystems.php</code>, and flag an unknown disk. <code>Storage::fake()</code>,
-<code>persistentFake()</code>, and <code>forgetDisk()</code> still name a disk with none of
-that: their return type is patched to <code>FilesystemAdapter</code>, but the
-disk-name argument itself gets no completion, go-to-definition, or
-diagnostic.</p>
 <h4 id="l27-legacy-controllermethod-action-strings">L27. Legacy <code>Controller@method</code> action strings<a class="headerlink" href="#l27-legacy-controllermethod-action-strings" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
 <p>We already complete and resolve the modern <code>[Controller::class,
@@ -2894,14 +2863,15 @@ semantic tokens reuse the existing spans. Renaming a view name implies
 moving the Blade file — defer that one until the rest is in place.</p>
 <h4 id="l32-config-backed-named-resource-strings">L32. Config-backed named-resource strings<a class="headerlink" href="#l32-config-backed-named-resource-strings" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<p>L25 (storage disks) is one instance of a general pattern: a method
-argument names an entry under a known config subtree, and the config
-scanner already parses those files. Auth guards (<code>auth('...')</code>,
+<p>Storage disks are one instance of a general pattern: a method argument
+names an entry under a known config subtree, and the config scanner
+already parses those files. Auth guards (<code>auth('...')</code>,
 <code>Auth::guard()</code>, <code>-&gt;middleware('auth:web')</code>), cache stores
 (<code>Cache::store()</code>), log channels (<code>Log::channel()</code>), and storage disks
-(L25) already complete against their config subtree — but all of them
-route through the generic <code>LaravelStringKind::Config</code> kind rather than
-a dedicated one, so they get completion plus the shared config
+(<code>Storage::disk()</code>, test fakes, disk eviction, and <code>#[Storage]</code>) already
+complete against their config subtree — but all of them route through
+the generic <code>LaravelStringKind::Config</code> kind rather than a dedicated
+one, so they get completion plus the shared config
 diagnostics/go-to-definition and nothing family-specific (a "cache
 store" hovers with the same generic wording as any other config key).
 <code>Log::stack()</code> (array values) isn't recognized at all. Generalize into
