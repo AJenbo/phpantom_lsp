@@ -160,6 +160,100 @@ fn collect_array_declarations<'a, 'content>(
     }
 }
 
+// ─── Keys declared at runtime ─────────────────────────────────────────────────
+
+/// The config keys a single file declares at runtime, read from the
+/// [`SymbolKind::LaravelStringKey`] spans the extractor already marked as
+/// writes.
+fn config_write_keys(symbol_map: &SymbolMap) -> Vec<String> {
+    let mut keys: Vec<String> = symbol_map
+        .spans
+        .iter()
+        .filter_map(|span| match &span.kind {
+            SymbolKind::LaravelStringKey {
+                kind,
+                key,
+                is_write: true,
+                ..
+            } if kind.is_config_backed() => Some(canonical_config_key(kind, key).into_owned()),
+            _ => None,
+        })
+        .collect();
+    keys.sort();
+    keys.dedup();
+    keys
+}
+
+impl Backend {
+    /// Record the runtime config writes from each map being published, so a
+    /// later read is judged against the same active spans as navigation.
+    ///
+    /// This includes batch indexing and maps whose facade alias was shadowed
+    /// or restored by an edit elsewhere. Each file's whole set is replaced:
+    /// removing a write must also withdraw the key it declared. Vendor maps
+    /// are excluded because their on-demand loading would otherwise make
+    /// diagnostics depend on which classes happened to be loaded.
+    pub(crate) fn refresh_laravel_config_writes<'a>(
+        &self,
+        maps: impl IntoIterator<Item = (&'a str, &'a SymbolMap)>,
+    ) {
+        if !self.resolved_class_cache.read().is_laravel() {
+            return;
+        }
+        for (uri, map) in maps {
+            let keys = config_write_keys(map);
+            if keys.is_empty() {
+                // Only take the write lock when there is something to forget.
+                if self.laravel_runtime_config_keys.read().contains_key(uri) {
+                    self.laravel_runtime_config_keys.write().remove(uri);
+                }
+                continue;
+            }
+            if self
+                .workspace
+                .vendor_uri_prefixes
+                .lock()
+                .iter()
+                .any(|prefix| uri.starts_with(prefix.as_str()))
+            {
+                continue;
+            }
+            let mut index = self.laravel_runtime_config_keys.write();
+            if index.get(uri) != Some(&keys) {
+                index.insert(uri.to_string(), keys);
+            }
+        }
+    }
+
+    /// Every config key the project declares at runtime.
+    ///
+    /// `Config::set('filesystems.disks.ondemand', […])` in a test's `setUp()`
+    /// establishes a key no `config/` file declares, and a read of it
+    /// afterwards is as valid as a read of one that ships on disk.
+    pub(crate) fn runtime_config_keys(&self) -> std::collections::HashSet<String> {
+        self.laravel_runtime_config_keys
+            .read()
+            .values()
+            .flatten()
+            .cloned()
+            .collect()
+    }
+
+    /// Whether the workspace is an application rather than a library; see
+    /// [`Backend::is_application`](crate::Backend::is_application).
+    pub(crate) fn is_application_project(&self) -> bool {
+        self.is_application
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Record the application/library classification, once the workspace's
+    /// `composer.json` files have been read.
+    pub(crate) fn set_is_application(&self, is_application: bool) {
+        self.is_application
+            .store(is_application, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 // ─── Public cross-file query API ──────────────────────────────────────────────
 
 /// Find all references for a Laravel config key across the project.
@@ -460,6 +554,39 @@ pub(crate) fn resolve_config_key_definition_fallback(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The index tracks the file, not the key: an edit that takes the write
+    /// away has to take what it declared with it, or the key outlives the
+    /// call that made it.
+    #[test]
+    fn a_runtime_write_lasts_exactly_as_long_as_the_call_that_makes_it() {
+        let backend = Backend::new_test();
+        backend.resolved_class_cache.write().set_laravel(true);
+        let uri = "file:///project/tests/FixtureTest.php";
+
+        backend.update_ast(
+            uri,
+            &Arc::new(
+                "<?php\nConfig::set('filesystems.disks.ondemand', []);\nStorage::fake('scratch');\nStorage::persistentFake('persistent');\n"
+                    .to_string(),
+            ),
+        );
+        assert!(
+            backend
+                .runtime_config_keys()
+                .contains("filesystems.disks.ondemand"),
+            "the write should declare the disk it configures"
+        );
+        for key in ["filesystems.disks.scratch", "filesystems.disks.persistent"] {
+            assert!(backend.runtime_config_keys().contains(key));
+        }
+
+        backend.update_ast(uri, &Arc::new("<?php\nclass FixtureTest {}\n".to_string()));
+        assert!(
+            backend.runtime_config_keys().is_empty(),
+            "removing the write should remove the key it declared"
+        );
+    }
 
     #[test]
     fn config_prefix_from_uri_normal() {

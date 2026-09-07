@@ -104,6 +104,11 @@
 //! - **Type mismatch diagnostics** — report argument, return, and
 //!   property-assignment values whose type does not satisfy the
 //!   declared/inferred type.
+//! - **Member visibility diagnostics** — report a `private` or
+//!   `protected` property, method, or class constant reached from a
+//!   scope PHP does not let see it.  Emitted from the unknown-member
+//!   walk, which has already resolved the subject.  Suppressed when the
+//!   class declares a magic handler that would answer for the member.
 //! - **Readonly write diagnostics** — report writes to a `readonly`
 //!   property from outside the class that declares it, and second
 //!   writes from inside it once the constructor has initialized the
@@ -229,6 +234,7 @@ mod implementation_errors;
 mod incompatible_override;
 mod invalid_class_kind;
 mod match_type_errors;
+pub(crate) mod member_visibility;
 pub(crate) mod namespace_mismatch;
 mod property_type_errors;
 mod pull;
@@ -788,18 +794,45 @@ impl Backend {
         } else {
             (HashSet::new(), Vec::new(), Vec::new())
         };
+        // A library is installed into an application that declares the
+        // configuration it reads, and that application is a file we never
+        // see, so none of its keys can be judged.  Only an application owns
+        // the whole of its configuration.
+        let has_config = has_config && self.is_application_project();
         let cached_config_keys = has_config.then(|| self.cached_config_keys());
-        let config_keys = cached_config_keys.as_deref().map_or(&[][..], Vec::as_slice);
+        let declared_config_keys = cached_config_keys.as_deref().map_or(&[][..], Vec::as_slice);
+        // A key that `Config::set()` or the array form of the `config()`
+        // helper establishes is as real as one a `config/` file declares; a
+        // test that configures a disk in `setUp()` before exercising it is
+        // the common shape.
+        let written_config_keys = if has_config {
+            self.runtime_config_keys()
+        } else {
+            HashSet::new()
+        };
+        // A runtime write establishes its ancestors while leaving the value
+        // and all descendants opaque. Match whole segments in either direction.
+        let config_paths_overlap = |left: &str, right: &str| {
+            left == right
+                || left
+                    .strip_prefix(right)
+                    .is_some_and(|rest| rest.starts_with('.'))
+                || right
+                    .strip_prefix(left)
+                    .is_some_and(|rest| rest.starts_with('.'))
+        };
         // The config files we managed to enumerate keys from, by name.  A
         // key whose root segment names none of them lives in a file we
-        // cannot see (a library whose config is supplied by the host
-        // application), so nothing about it is knowable.
-        let config_roots: HashSet<&str> = config_keys
+        // cannot see, so nothing about it is knowable.  A runtime write is
+        // deliberately not a root of its own: the keys one file writes say
+        // nothing about what the rest of that namespace holds, least of all
+        // when the writes that established it were spelled dynamically.
+        let config_roots: HashSet<&str> = declared_config_keys
             .iter()
             .map(|key| key.split('.').next().unwrap_or(key.as_str()))
             .collect();
         let config_resource_mask = if has_config_resource {
-            config_keys.iter().fold(0, |mask, key| {
+            declared_config_keys.iter().fold(0, |mask, key| {
                 crate::symbol_map::laravel_resources::resource_from_config_key(key)
                     .map_or(mask, |(resource, _)| mask | resource.bit())
             })
@@ -942,15 +975,19 @@ impl Backend {
                         continue;
                     }
                     // Config keys may be partial prefixes (e.g. `config('app')`)
-                    // which are valid even without a direct match.
-                    let candidate = config_keys
-                        .get(config_keys.partition_point(|candidate| candidate.as_str() < key));
+                    // which are valid even without a direct match. Runtime
+                    // writes also make their opaque descendants unjudgeable.
+                    let candidate = declared_config_keys.get(
+                        declared_config_keys.partition_point(|candidate| candidate.as_str() < key),
+                    );
                     let valid = candidate.is_some_and(|candidate| {
                         candidate == key
                             || candidate
                                 .strip_prefix(key)
                                 .is_some_and(|suffix| suffix.starts_with('.'))
-                    });
+                    }) || written_config_keys
+                        .iter()
+                        .any(|written| config_paths_overlap(key, written));
                     (valid, "config key", "invalid_laravel_config")
                 }
                 CheckedStringKind::ConfigResource(resource) => {
@@ -966,14 +1003,26 @@ impl Backend {
                         continue;
                     }
                     let prefix = descriptor.config_prefix;
-                    let first =
-                        config_keys.partition_point(|candidate| candidate.as_str() < prefix);
-                    let valid = config_keys[first..]
+                    let first = declared_config_keys
+                        .partition_point(|candidate| candidate.as_str() < prefix);
+                    let child =
+                        crate::symbol_map::laravel_resources::configured_child_name(resource, key);
+                    let valid = declared_config_keys[first..]
                         .iter()
                         .take_while(|candidate| candidate.starts_with(prefix))
                         .any(|candidate| {
                             crate::symbol_map::laravel_resources::matches_config_key(
                                 resource, key, candidate,
+                            )
+                        })
+                        || written_config_keys.iter().any(|written| {
+                            written.strip_prefix(prefix).map_or_else(
+                                || {
+                                    prefix
+                                        .strip_prefix(written.as_str())
+                                        .is_some_and(|rest| rest.starts_with('.'))
+                                },
+                                |written_child| config_paths_overlap(child, written_child),
                             )
                         });
                     (valid, descriptor.label, descriptor.diagnostic_code)

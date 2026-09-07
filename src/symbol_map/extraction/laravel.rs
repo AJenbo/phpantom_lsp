@@ -28,7 +28,9 @@ pub(super) fn matches_laravel_facade(class_name: &str, short: &str) -> bool {
 
 /// The Laravel-specific meaning of a container-injection attribute.
 pub(super) enum LaravelContainerAttribute {
+    /// A full config key accepted by `#[Config]`.
     Config,
+    /// A named config resource accepted by the matching container attribute.
     Resource(crate::symbol_map::laravel_resources::ResourceTriggerMatch),
 }
 
@@ -229,6 +231,24 @@ fn partial_argument_expr_for_parameter<'a>(
         })
 }
 
+/// The offsets and text of a plain string literal's content, between the
+/// quotes.  An interpolated or concatenated expression, or an empty string,
+/// names nothing and yields `None`.
+fn string_literal_content<'a>(
+    expr: &Expression<'_>,
+    content: &'a str,
+) -> Option<(u32, u32, &'a str)> {
+    let Expression::Literal(literal::Literal::String(string)) = expr else {
+        return None;
+    };
+    let start = string.span.start.offset + 1;
+    let end = string.span.end.offset - 1;
+    if start >= end || end as usize > content.len() {
+        return None;
+    }
+    Some((start, end, &content[start as usize..end as usize]))
+}
+
 /// Emit the section- or stack-name span for one of the marker calls the
 /// Blade preprocessor lowers `@yield`, `@section`, `@stack`, `@push` and
 /// their helpers to, when `name` is one of them.
@@ -276,14 +296,72 @@ pub(super) fn try_emit_laravel_config_key_span(
     if member_name.eq_ignore_ascii_case("getMany") {
         return try_emit_config_get_many_spans(argument_list, content, spans);
     }
+    let is_write = member_name.eq_ignore_ascii_case("set");
+    if is_write && try_emit_config_write_array_spans(argument_list, content, spans) {
+        return;
+    }
     emit_laravel_string_span(
         crate::symbol_map::LaravelStringKind::Config,
-        member_name.eq_ignore_ascii_case("set"),
+        is_write,
         0,
         argument_list,
         content,
         spans,
     );
+}
+
+/// Emit the config-key spans for the `config()` helper, which both reads and
+/// writes: `config('app.name')` names the key it reads, while
+/// `config(['app.name' => 'Acme'])` declares every key it lists.
+pub(super) fn try_emit_laravel_config_helper_spans(
+    argument_list: &ArgumentList<'_>,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    if try_emit_config_write_array_spans(argument_list, content, spans) {
+        return;
+    }
+    emit_laravel_string_span(
+        crate::symbol_map::LaravelStringKind::Config,
+        false,
+        0,
+        argument_list,
+        content,
+        spans,
+    );
+}
+
+/// Push a write span for every key the `['app.name' => 'Acme']` argument of a
+/// `set()`-shaped call declares, reporting whether that argument was an array
+/// at all so the caller can fall back to the single-key spelling.
+///
+/// The value side is left alone: only the key names a config path.
+fn try_emit_config_write_array_spans(
+    argument_list: &ArgumentList<'_>,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) -> bool {
+    let Some(first_arg) = argument_list.arguments.iter().next() else {
+        return false;
+    };
+    let elements = match first_arg.value() {
+        Expression::Array(array) => &array.elements,
+        Expression::LegacyArray(array) => &array.elements,
+        _ => return false,
+    };
+    for element in elements.iter() {
+        if let ArrayElement::KeyValue(kv) = element {
+            push_laravel_string_span(
+                crate::symbol_map::LaravelStringKind::Config,
+                true,
+                false,
+                kv.key,
+                content,
+                spans,
+            );
+        }
+    }
+    true
 }
 
 /// Push a config-key span for every key a `getMany()` argument names.
@@ -344,21 +422,13 @@ fn push_laravel_string_span(
     content: &str,
     spans: &mut Vec<SymbolSpan>,
 ) {
-    let Expression::Literal(literal::Literal::String(s)) = expr else {
+    let Some((inner_start, mut inner_end, mut key)) = string_literal_content(expr, content) else {
         return;
     };
-    let inner_start = s.span.start.offset + 1;
-    let mut inner_end = s.span.end.offset - 1;
-    if inner_start >= inner_end || inner_end as usize > content.len() {
-        return;
-    }
-    let mut key = &content[inner_start as usize..inner_end as usize];
-    if key.is_empty() {
-        return;
-    }
 
-    if kind == crate::symbol_map::LaravelStringKind::Config && !key.contains('.') {
-        // Require at least one dot: bare keys like 'app' are not valid config paths.
+    if kind == crate::symbol_map::LaravelStringKind::Config && !is_write && !key.contains('.') {
+        // A bare read names a config file, not one of its keys. A write can
+        // establish that whole file's namespace with an opaque runtime value.
         return;
     }
 

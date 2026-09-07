@@ -146,13 +146,18 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
 
+        /// Disable coloured output.
+        #[arg(long)]
+        no_colour: bool,
+
         /// Project root directory. Defaults to the current working directory.
         #[arg(long, value_name = "DIR")]
         project_root: Option<std::path::PathBuf>,
 
-        /// Output format.
-        #[arg(long, value_name = "FORMAT", default_value = "table")]
-        format: MoveFormatArg,
+        /// Output format. When running in GitHub Actions the default
+        /// automatically includes workflow annotations alongside the summary.
+        #[arg(long, value_name = "FORMAT")]
+        format: Option<FormatArg>,
     },
 
     /// Create a default .phpantom.toml configuration file.
@@ -220,23 +225,6 @@ enum FormatArg {
     Github,
     /// Machine-readable JSON object.
     Json,
-}
-
-#[derive(Clone, Copy, Debug, clap::ValueEnum)]
-enum MoveFormatArg {
-    /// Human-readable summary.
-    Table,
-    /// Machine-readable JSON object.
-    Json,
-}
-
-impl From<MoveFormatArg> for phpantom_lsp::move_cli::MoveOutputFormat {
-    fn from(arg: MoveFormatArg) -> Self {
-        match arg {
-            MoveFormatArg::Table => Self::Table,
-            MoveFormatArg::Json => Self::Json,
-        }
-    }
 }
 
 impl From<FormatArg> for phpantom_lsp::analyse::OutputFormat {
@@ -415,6 +403,7 @@ async fn async_main() {
             from,
             to,
             dry_run,
+            no_colour,
             project_root,
             format,
         }) => {
@@ -429,7 +418,11 @@ async fn async_main() {
                 to,
                 workspace_root,
                 dry_run,
-                output_format: format.into(),
+                use_colour: !no_colour && atty_stdout(),
+                output_format: match format {
+                    Some(f) => f.into(),
+                    None => phpantom_lsp::analyse::OutputFormat::Table,
+                },
                 global_config: phpantom_lsp::config::global_config_path(),
             };
             let exit_code = phpantom_lsp::move_cli::run(options).await;

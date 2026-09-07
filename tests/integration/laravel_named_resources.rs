@@ -10,6 +10,13 @@ const COMPOSER_JSON: &str = r#"{
     "autoload": { "psr-4": { "App\\": "app/" } }
 }"#;
 
+const PACKAGE_COMPOSER_JSON: &str = r#"{
+    "name": "acme/widgets",
+    "require": { "illuminate/support": "^12.0" },
+    "require-dev": { "laravel/framework": "^12.0" },
+    "autoload": { "psr-4": { "App\\": "app/" } }
+}"#;
+
 const AUTH_CONFIG: &str = "<?php return ['guards' => ['web' => [], 'admin' => []]];\n";
 const CACHE_CONFIG: &str = "<?php return ['stores' => ['array' => [], 'redis' => []]];\n";
 const LOGGING_CONFIG: &str = "<?php return ['channels' => ['daily' => [], 'slack' => []]];\n";
@@ -943,10 +950,167 @@ async fn generic_config_diagnostics_accept_only_exact_segment_prefixes() {
 }
 
 #[tokio::test]
+async fn library_resource_names_belong_to_the_host_application() {
+    let source = r#"<?php
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Broadcast;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Storage;
+
+Auth::guard('host-guard');
+Broadcast::connection('host-broadcaster');
+Cache::store('host-cache');
+DB::connection('host-database');
+Log::channel('host-log');
+Mail::mailer('host-mailer');
+Queue::connection('host-queue');
+Storage::disk('host-disk');
+config('cache.stores.host-cache');
+Cache::store('r');
+"#;
+    let (backend, dir) = create_psr4_workspace(PACKAGE_COMPOSER_JSON, &workspace_files(source));
+    backend.initialized(InitializedParams {}).await;
+    let uri = Url::from_file_path(dir.path().join("app/NamedResourceConsumer.php")).unwrap();
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: source.to_string(),
+            },
+        })
+        .await;
+
+    let mut diagnostics = Vec::new();
+    backend.collect_slow_diagnostics(uri.as_str(), source, &mut diagnostics);
+    let invalid = diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            matches!(
+                &diagnostic.code,
+                Some(NumberOrString::String(code)) if code.starts_with("invalid_laravel_")
+            )
+        })
+        .collect::<Vec<_>>();
+    assert!(invalid.is_empty(), "diagnostics: {invalid:#?}");
+
+    let labels = completion_items(&backend, &uri, position_after(source, "Cache::store('r"))
+        .await
+        .into_iter()
+        .map(|item| item.label)
+        .collect::<Vec<_>>();
+    assert_eq!(labels, ["redis"]);
+}
+
+#[tokio::test]
+async fn runtime_config_writes_validate_resources_across_files_at_segment_boundaries() {
+    let writer = r#"<?php
+namespace App;
+use Illuminate\Support\Facades\Config;
+
+class ResourceConfiguration {
+    public function configure(array $channels, array $filesystems): void {
+        Config::set('auth.guards.session', ['driver' => 'session']);
+        config(['cache.stores.temp.driver' => 'array']);
+        Config::set('logging.channels', $channels);
+        Config::set('filesystems', $filesystems);
+        Config::set('database.connections.reporting', ['driver' => 'mysql']);
+        Config::set('queue.connections.custom', ['driver' => 'sync']);
+        Config::set('mail.mailers.outbound.transport', 'smtp');
+        Config::set('broadcasting.connections.realtime', ['driver' => 'reverb']);
+        Config::set('external.runtime', []);
+    }
+}
+"#;
+    let source = r#"<?php
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Broadcast;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Storage;
+
+Auth::guard('session');
+Auth::guard('session-typo');
+Cache::store('temp');
+Cache::store('tem');
+Cache::store('temporary');
+Log::channel('dynamic');
+Storage::disk('dynamic');
+DB::connection('reporting::read');
+DB::connection('reporting::replica');
+Queue::connection('custom');
+Queue::connection('custom-typo');
+Mail::mailer('outbound');
+Mail::mailer('out');
+Broadcast::connection('realtime');
+Broadcast::connection('realtime-typo');
+config('cache.stores.temp');
+config('cache.stores.temp.driver');
+config('cache.stores.temp.driver.option');
+config('cache.stores.te');
+config('cache.stores.temporary.driver');
+config('logging.channels.dynamic');
+config('filesystems.disks.dynamic');
+config('external.unknown');
+"#;
+    let mut files = workspace_files(source);
+    files.push(("app/ResourceConfiguration.php", writer));
+    let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, &files);
+    backend.initialized(InitializedParams {}).await;
+    let uri = Url::from_file_path(dir.path().join("app/NamedResourceConsumer.php")).unwrap();
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: source.to_string(),
+            },
+        })
+        .await;
+
+    let mut diagnostics = Vec::new();
+    backend.collect_slow_diagnostics(uri.as_str(), source, &mut diagnostics);
+    let invalid = diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            matches!(
+                &diagnostic.code,
+                Some(NumberOrString::String(code)) if code.starts_with("invalid_laravel_")
+            )
+        })
+        .map(|diagnostic| text_in_range(source, diagnostic.range))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        invalid,
+        [
+            "session-typo",
+            "tem",
+            "temporary",
+            "reporting::replica",
+            "custom-typo",
+            "out",
+            "realtime-typo",
+            "cache.stores.te",
+            "cache.stores.temporary.driver",
+        ]
+    );
+}
+
+#[tokio::test]
 async fn an_undiscovered_resource_subtree_is_not_treated_as_a_closed_empty_set() {
     let source = r#"<?php
 use Illuminate\Support\Facades\Cache;
 
+config(['cache.stores.discovered-at-runtime' => ['driver' => 'array']]);
 Cache::store('provided-at-runtime');
 "#;
     let (backend, dir) = create_psr4_workspace(

@@ -30,6 +30,7 @@
 //!   mapping exists, `RenameFile` operations are emitted to move
 //!   files so the directory structure stays consistent.
 
+mod blade;
 mod class;
 mod namespace;
 mod prepare;

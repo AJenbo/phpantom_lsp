@@ -397,7 +397,9 @@ fn resolve_known_class_reference(
         }
     }
 
-    if !allow_root_alias || (!is_root_qualified && source_has_namespace(content)) {
+    if !allow_root_alias
+        || (!is_root_qualified && crate::text_scan::source_declares_namespace(content))
+    {
         return None;
     }
     let candidate = candidates
@@ -459,18 +461,6 @@ fn is_laravel_facade_reference(
         indexed_class_exists,
     )
     .is_some()
-}
-
-fn source_has_namespace(content: &str) -> bool {
-    content.lines().any(|line| {
-        let mut line = line.trim_start();
-        if let Some(rest) = line.strip_prefix("<?php") {
-            line = rest.trim_start();
-        }
-        line.get(..9)
-            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("namespace"))
-            && line.as_bytes().get(9).is_some_and(u8::is_ascii_whitespace)
-    })
 }
 
 #[inline]
@@ -1205,7 +1195,17 @@ fn detect_laravel_string_key_context_inner<'a>(
             }
         }
     } else {
-        if argument.shape != StringArgumentShape::Scalar {
+        let fn_lower = func_name.to_ascii_lowercase();
+        // The Blade preprocessor lowers `@includeFirst`/`@componentFirst`/
+        // `@extendsFirst` and `@canany` to markers that name their candidates
+        // inside an array literal rather than as a plain first argument.
+        let accepts_array = matches!(
+            fn_lower.as_str(),
+            "blade_view_directive" | "blade_can_directive"
+        );
+        if argument.shape != StringArgumentShape::Scalar
+            && (!accepts_array || !before_quote.trim_end().ends_with('['))
+        {
             return None;
         }
         let mut callable_start = name_start;
@@ -1230,7 +1230,7 @@ fn detect_laravel_string_key_context_inner<'a>(
         } else if argument.named_argument.is_some() {
             None
         } else {
-            match func_name.to_ascii_lowercase().as_str() {
+            match fn_lower.as_str() {
                 "route" | "to_route" => Some(LaravelStringKind::Route),
                 "config" => Some(LaravelStringKind::Config),
                 "view" | "blade_view_directive" | "blade_each_directive" => {
@@ -1761,6 +1761,8 @@ impl Backend {
             LaravelStringKind::Config => self.cached_config_keys().as_ref().clone(),
             LaravelStringKind::ConfigResource(resource) => {
                 let prefix = config_sub_prefix.expect("config resources always have a prefix");
+                // Runtime writes can contain the half-typed name under the
+                // cursor, so offer only names declared by config files.
                 let keys = self.cached_config_keys();
                 let first = keys.partition_point(|key| key.as_str() < prefix);
                 let mut names: Vec<String> = keys[first..]
@@ -2133,6 +2135,28 @@ mod tests {
             let ctx = ctx.unwrap_or_else(|| panic!("should detect {marker} context"));
             assert!(matches!(ctx.kind, LaravelStringKind::View));
             assert_eq!(ctx.prefix, "partials.");
+        }
+    }
+
+    /// `@includeFirst`, `@componentFirst`, `@extendsFirst` and `@canany`
+    /// name their candidates inside an array literal, so the marker calls
+    /// they compile to have to complete there and not only for a plain
+    /// first argument.
+    #[test]
+    fn detects_the_blade_markers_that_list_their_names_in_an_array() {
+        for (marker, value, kind) in [
+            ("blade_view_directive", "partials.", LaravelStringKind::View),
+            ("blade_can_directive", "upd", LaravelStringKind::GateAbility),
+        ] {
+            let content = format!("<?php\n{marker}(['{value}']);\n");
+            let cursor = content.find(value).unwrap() + value.len();
+            let ctx = detect_laravel_string_key_context(
+                &content,
+                crate::text_position::offset_to_position(&content, cursor),
+            )
+            .unwrap_or_else(|| panic!("should detect {marker} array context"));
+            assert_eq!(ctx.kind, kind);
+            assert_eq!(ctx.prefix, value);
         }
     }
 
@@ -2525,6 +2549,8 @@ mod tests {
     fn storage_facade_resolution_accepts_imports_and_rejects_homonyms() {
         for content in [
             "<?php\nStorage::disk('arch');\n",
+            "<?php\nIlluminate\\Support\\Facades\\Storage::disk('arch');\n",
+            "<?php\nnamespace App;\n\\Illuminate\\Support\\Facades\\Storage::disk('arch');\n",
             "<?php\nuse Vendor\\Unrelated;\nStorage::disk('arch');\n",
             "<?php\nuse Illuminate\\Support\\Facades\\Storage as Disks;\nDisks::disk('arch');\n",
             "<?php\nuse Illuminate\\Support\\Facades\\{Storage as Disks, Cache};\nDisks::disk('arch');\n",
@@ -2539,6 +2565,8 @@ mod tests {
 
         for content in [
             "<?php\nVendor\\Storage::disk('arch');\n",
+            "<?php\n\\Acme\\Storage::disk('arch');\n",
+            "<?php\nnamespace App;\nStorage::disk('arch');\n",
             "<?php\nuse Vendor\\Storage;\nStorage::disk('arch');\n",
             "<?php\nnamespace App;\nuse Vendor\\{Storage as Disks};\nDisks::disk('arch');\n",
             "<?php\nnamespace App;\nuse Illuminate\\Support\\Facades\\{Storage;\nStorage::disk('arch');\n",
@@ -2570,6 +2598,65 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn storage_facade_completion_respects_import_bindings_in_namespaces() {
+        for (import, local_name) in [
+            ("use Illuminate\\Support\\Facades\\Storage;", "Storage"),
+            ("use Illuminate\\Support\\Facades\\{Storage};", "Storage"),
+            (
+                "use Illuminate\\Support\\Facades\\{Cache, Storage};",
+                "Storage",
+            ),
+            (
+                "use Illuminate\\Support\\Facades\\{\n    Cache,\n    Storage,\n};",
+                "Storage",
+            ),
+            (
+                "use Illuminate\\Support\\Facades\\Storage as Disks;",
+                "Disks",
+            ),
+            (
+                "use Illuminate\\Support\\Facades\\{Storage as Disks, Cache};",
+                "Disks",
+            ),
+        ] {
+            for class_name in ["Storage", "Disks"] {
+                let content =
+                    format!("<?php\nnamespace App;\n{import}\n{class_name}::disk('arch');\n");
+                let expected = (class_name == local_name).then_some(
+                    LaravelStringKind::ConfigResource(LaravelConfigResource::StorageDisk),
+                );
+                assert_eq!(
+                    detect_at_end(&content, "arch").map(|context| context.kind),
+                    expected,
+                    "source: {content}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn storage_facade_completion_rejects_unrelated_and_malformed_imports() {
+        for import in [
+            "use Vendor\\Storage;",
+            "use Vendor\\Package\\{Storage};",
+            "use Illuminate\\Support\\Facades\\Storage nope;",
+            "use Illuminate\\Support\\Facades\\Storage as;",
+            "use Illuminate\\Support\\Facades\\Storage as Disks trailing;",
+            "use Illuminate\\Support\\Facades\\{Storage;",
+            "use function Illuminate\\Support\\Facades\\Storage;",
+        ] {
+            for class_name in ["Storage", "Disks"] {
+                let content =
+                    format!("<?php\nnamespace App;\n{import}\n{class_name}::disk('arch');\n");
+                assert!(
+                    detect_at_end(&content, "arch").is_none(),
+                    "source: {content}"
+                );
+            }
+        }
     }
 
     #[test]

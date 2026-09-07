@@ -4756,6 +4756,33 @@ namespace App;
     );
 }
 
+/// The completion side offers disk names for a group import, so the symbol
+/// map has to record them there too — otherwise the name it inserts has no
+/// hover, no definition and no references.
+#[test]
+fn group_imported_storage_facades_and_attributes_record_a_disk_key() {
+    let facade = r#"<?php
+namespace App;
+use Illuminate\Support\Facades\{Cache, Storage as Disks};
+Disks::disk('archive');
+"#;
+    assert_eq!(
+        storage_disk_keys(&parse_and_extract_semantic(facade)),
+        vec![("filesystems.disks.archive".to_string(), false, false)]
+    );
+
+    let attribute = r#"<?php
+namespace App;
+use Illuminate\Container\Attributes\{Config, Storage};
+#[Storage('backup')]
+class GroupImported {}
+"#;
+    assert_eq!(
+        storage_disk_keys(&parse_and_extract_semantic(attribute)),
+        vec![("filesystems.disks.backup".to_string(), false, false)]
+    );
+}
+
 #[test]
 fn unrelated_storage_classes_receivers_and_methods_name_no_disk() {
     for call in [
@@ -5742,6 +5769,75 @@ fn get_many_names_every_config_key_it_lists() {
         string_keys_of(&map, LaravelStringKind::Config),
         vec!["app.name".to_string()]
     );
+}
+
+/// Every config key the map records, with whether the call declares it, in
+/// source order.
+fn config_keys_written(map: &SymbolMap) -> Vec<(String, bool)> {
+    map.spans
+        .iter()
+        .filter_map(|span| match &span.kind {
+            SymbolKind::LaravelStringKey {
+                kind: LaravelStringKind::Config,
+                key,
+                is_write,
+                ..
+            } => Some((key.clone(), *is_write)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The array form of a `set()`-shaped call declares every key it lists: the
+/// keys are on the left, and the value each is given says nothing.
+#[test]
+fn the_array_form_of_a_config_write_declares_every_key_it_lists() {
+    for call in [
+        "config(['app.name' => 'Acme', 'app.timezone' => 'UTC'])",
+        "Config::set(['app.name' => 'Acme', 'app.timezone' => 'UTC'])",
+        "config()->set(array('app.name' => 'Acme', 'app.timezone' => 'UTC'))",
+    ] {
+        let map = parse_and_extract(&format!("<?php\n{call};\n"));
+        assert_eq!(
+            config_keys_written(&map),
+            vec![
+                ("app.name".to_string(), true),
+                ("app.timezone".to_string(), true),
+            ],
+            "`{call}` should declare both keys"
+        );
+    }
+}
+
+/// The single-key spellings are unchanged by the array form sharing their
+/// path: `config('app.name')` still reads, and `set()` still writes.
+#[test]
+fn the_single_key_form_of_config_still_reads_and_writes() {
+    assert_eq!(
+        config_keys_written(&parse_and_extract("<?php\nconfig('app.name');\n")),
+        vec![("app.name".to_string(), false)]
+    );
+    assert_eq!(
+        config_keys_written(&parse_and_extract(
+            "<?php\nConfig::set('app.name', 'Acme');\n"
+        )),
+        vec![("app.name".to_string(), true)]
+    );
+}
+
+#[test]
+fn runtime_config_writes_can_establish_an_entire_root() {
+    for call in [
+        "Config::set('filesystems', $settings)",
+        "config(['filesystems' => $settings])",
+    ] {
+        assert_eq!(
+            config_keys_written(&parse_and_extract(&format!("<?php\n{call};\n"))),
+            vec![("filesystems".to_string(), true)],
+            "source: {call}"
+        );
+    }
+    assert!(config_keys_written(&parse_and_extract("<?php config('filesystems');")).is_empty());
 }
 
 /// `hasForLocale()` asks the same question of the same keys `has()` does.

@@ -333,9 +333,17 @@ fn extract_call<'a>(
                     // Uses if-else to short-circuit (most function calls
                     // won't match) and avoids to_ascii_lowercase() heap
                     // allocations.
-                    let laravel_kind = if name_clean.eq_ignore_ascii_case("config") {
-                        Some(crate::symbol_map::LaravelStringKind::Config)
-                    } else if name_clean.eq_ignore_ascii_case("view")
+                    // The `config()` helper is the one that both reads and
+                    // writes, so it takes a path of its own rather than the
+                    // read-only mapping below.
+                    if name_clean.eq_ignore_ascii_case("config") {
+                        try_emit_laravel_config_helper_spans(
+                            &func_call.argument_list,
+                            ctx.content,
+                            &mut ctx.spans,
+                        );
+                    }
+                    let laravel_kind = if name_clean.eq_ignore_ascii_case("view")
                         || name_clean.eq_ignore_ascii_case("blade_each_directive")
                     {
                         Some(crate::symbol_map::LaravelStringKind::View)

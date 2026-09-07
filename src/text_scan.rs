@@ -663,6 +663,21 @@ fn same_line_continuation_prefix(trimmed: &str) -> Option<&str> {
     None
 }
 
+/// Whether the file declares a namespace.  An unqualified name in a file
+/// without one resolves in the global namespace, where Laravel's class
+/// aliases live.
+pub(crate) fn source_declares_namespace(content: &str) -> bool {
+    content.lines().any(|line| {
+        let mut line = line.trim_start();
+        if let Some(rest) = line.strip_prefix("<?php") {
+            line = rest.trim_start();
+        }
+        line.get(..9)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("namespace"))
+            && line.as_bytes().get(9).is_some_and(u8::is_ascii_whitespace)
+    })
+}
+
 #[cfg(test)]
 #[path = "text_scan_tests.rs"]
 mod tests;

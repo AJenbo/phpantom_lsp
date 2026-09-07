@@ -291,7 +291,10 @@ pub fn preprocess_with_vars(
     }
 
     // ── Prologue ──
-    virtual_php.push_str("<?php if (!function_exists('blade_directive')) { function blade_directive(...$args) {} function blade_bound_attr_directive(...$args) {} function blade_view_directive(...$args) {} function blade_each_directive(...$args) {} function blade_can_directive(...$args): bool { return true; } function blade_section_directive(...$args): bool { return true; } function blade_stack_directive(...$args): bool { return true; } function blade_push_if_directive(...$args) {} function blade_custom_directive(...$args): bool { return true; } }\n");
+    // The marker functions the lowering calls are declared once for the
+    // whole project, as a stub (see `blade::with_marker_stubs`), rather
+    // than by every template that calls them.
+    virtual_php.push_str("<?php\n");
     // Where hoisted `@use` imports are spliced in once the whole
     // template has been scanned: still in the prologue, so they precede
     // every name they import (name resolution runs in source order and
@@ -2947,12 +2950,9 @@ mod tests {
             "the real binding should still be emitted: {}",
             php
         );
-        // The prologue declares `function blade_bound_attr_directive(...)`
-        // once, so a single binding yields two occurrences of
-        // `blade_bound_attr_directive(`.
         assert_eq!(
             php.matches("blade_bound_attr_directive(").count(),
-            2,
+            1,
             "no spurious bindings from value/text/escaped colons: {}",
             php
         );
@@ -2975,12 +2975,9 @@ mod tests {
     fn test_preprocess_bound_attribute_ignored_outside_tag() {
         let content = r#"<p>ratio :w="16" here</p>"#;
         let (php, _) = preprocess(content);
-        // Only the prologue's `function blade_bound_attr_directive(...)`
-        // declaration should remain; no binding call is emitted for a colon
-        // in text.
         assert_eq!(
             php.matches("blade_bound_attr_directive(").count(),
-            1,
+            0,
             "a colon in text (outside a tag span) is not a binding: {}",
             php
         );
@@ -3307,19 +3304,27 @@ mod tests {
         assert!(php.contains("endif;"), "should contain endif: {}", php);
     }
 
+    /// The marker functions are registered once for the whole project, so
+    /// a template calls them without declaring anything itself.
     #[test]
-    fn test_preprocess_prologue_declares_view_directive() {
+    fn test_preprocess_declares_no_marker_functions() {
         let (php, _) = preprocess("<p>hello</p>");
         assert!(
-            php.contains("function blade_view_directive"),
-            "prologue should declare blade_view_directive: {}",
+            !php.contains("function blade_"),
+            "a template must not declare the markers it calls: {}",
             php
         );
-        assert!(
-            php.contains("function blade_each_directive"),
-            "prologue should declare blade_each_directive: {}",
-            php
-        );
+
+        let stubs = crate::blade::with_marker_stubs(crate::ci_map::CiMap::new());
+        for marker in ["blade_view_directive", "blade_each_directive"] {
+            let source = stubs
+                .get(marker)
+                .unwrap_or_else(|| panic!("{marker} should be registered as a stub"));
+            assert!(
+                source.contains(&format!("function {marker}")),
+                "the stub should declare {marker}: {source}"
+            );
+        }
     }
 
     /// `@each` gets a marker of its own: the arguments after its view name

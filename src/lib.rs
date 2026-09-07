@@ -50,6 +50,8 @@
 //!     statement for unresolved class names)
 //!   - `code_actions::remove_unused_import` — Remove unused import quick-fix
 //!     (delete individual or all unused `use` statements)
+//!   - `code_actions::replace_fqcn` — Import qualified classes, functions,
+//!     and constants and replace their file-local usages with short names
 //!   - `code_actions::generate_constructor` — Generate a constructor from
 //!     non-static properties
 //!   - `code_actions::generate_getter_setter` — Generate `getX()`/`setX()`
@@ -765,6 +767,21 @@ pub struct Backend {
     /// `$user->can()`, `$this->authorize()`, and `@can` check.  Empty for
     /// non-Laravel projects.  See [`virtual_members::laravel::gates`].
     pub(crate) laravel_gates: Arc<RwLock<virtual_members::laravel::LaravelGateIndex>>,
+    /// Config keys the project declares at runtime rather than in a
+    /// `config/` file (`Config::set()`, the array form of the `config()`
+    /// helper, `Storage::fake()`), keyed by the file each write is written
+    /// in so an edit that removes one takes the key with it.  A test that
+    /// configures a disk in `setUp()` before exercising it is the common
+    /// shape.  Empty for non-Laravel projects.
+    pub(crate) laravel_runtime_config_keys: Arc<RwLock<HashMap<String, Vec<String>>>>,
+    /// Whether the workspace is an application rather than a library.
+    ///
+    /// A library's configuration is supplied by whatever application
+    /// installs it, so the config keys it reads are declared in a file we
+    /// never see and none of them can be judged.  See
+    /// [`crate::composer::is_application_project`].  Starts `true` so a
+    /// workspace with no `composer.json` to classify behaves as before.
+    pub(crate) is_application: Arc<std::sync::atomic::AtomicBool>,
     /// Laravel macro seed files (service providers plus the app's provider
     /// registration files), mapped to the class references each contributed
     /// at the last macro-index build.  An edit that changes a seed's
@@ -1116,9 +1133,9 @@ impl Backend {
             parsed_uris: Arc::new(RwLock::new(HashSet::new())),
             parse_inflight: Arc::new(resolution::ParseInflight::new()),
             stub_index: Arc::new(RwLock::new(CiMap::from(stubs::build_stub_class_index()))),
-            stub_function_index: Arc::new(RwLock::new(CiMap::from(
+            stub_function_index: Arc::new(RwLock::new(blade::with_marker_stubs(CiMap::from(
                 stubs::build_stub_function_index(),
-            ))),
+            )))),
             stub_constant_index: Arc::new(RwLock::new(stubs::build_stub_constant_index())),
             resolved_class_cache,
             auth_user_type_cache: Arc::new(RwLock::new(HashMap::new())),
@@ -1144,6 +1161,8 @@ impl Backend {
             laravel_gates: Arc::new(RwLock::new(
                 virtual_members::laravel::LaravelGateIndex::default(),
             )),
+            laravel_runtime_config_keys: Arc::new(RwLock::new(HashMap::new())),
+            is_application: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             laravel_macro_seeds: Arc::new(RwLock::new(HashMap::new())),
             laravel_macro_mixin_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
             laravel_date_class: Arc::new(RwLock::new(None)),
@@ -1230,7 +1249,7 @@ impl Backend {
             parsed_uris: Arc::new(RwLock::new(HashSet::new())),
             parse_inflight: Arc::new(resolution::ParseInflight::new()),
             stub_index: Arc::new(RwLock::new(CiMap::new())),
-            stub_function_index: Arc::new(RwLock::new(CiMap::new())),
+            stub_function_index: Arc::new(RwLock::new(blade::with_marker_stubs(CiMap::new()))),
             stub_constant_index: Arc::new(RwLock::new(HashMap::new())),
             resolved_class_cache,
             auth_user_type_cache: Arc::new(RwLock::new(HashMap::new())),
@@ -1256,6 +1275,8 @@ impl Backend {
             laravel_gates: Arc::new(RwLock::new(
                 virtual_members::laravel::LaravelGateIndex::default(),
             )),
+            laravel_runtime_config_keys: Arc::new(RwLock::new(HashMap::new())),
+            is_application: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             laravel_macro_seeds: Arc::new(RwLock::new(HashMap::new())),
             laravel_macro_mixin_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
             laravel_date_class: Arc::new(RwLock::new(None)),
@@ -1389,7 +1410,9 @@ impl Backend {
         virtual_members::phpdoc::clear_mixin_cache();
         let backend = Self {
             stub_index: Arc::new(RwLock::new(CiMap::from(stub_index))),
-            stub_function_index: Arc::new(RwLock::new(CiMap::from(stub_function_index))),
+            stub_function_index: Arc::new(RwLock::new(blade::with_marker_stubs(CiMap::from(
+                stub_function_index,
+            )))),
             stub_constant_index: Arc::new(RwLock::new(stub_constant_index)),
             ..Self::test_defaults()
         };
@@ -1820,6 +1843,10 @@ impl Backend {
                 // behind.  Created/changed files rebuild it when re-parsed
                 // below.
                 self.symbols.uri_globals_index.write().remove(uri);
+                // A deleted file no longer declares the config keys it wrote
+                // at runtime.  A file that was merely changed re-registers
+                // them when it is re-parsed below.
+                self.laravel_runtime_config_keys.write().remove(uri);
             }
         }
 
@@ -1913,6 +1940,8 @@ impl Backend {
             laravel_has_commands: Arc::clone(&self.laravel_has_commands),
             laravel_morph_map: Arc::clone(&self.laravel_morph_map),
             laravel_gates: Arc::clone(&self.laravel_gates),
+            laravel_runtime_config_keys: Arc::clone(&self.laravel_runtime_config_keys),
+            is_application: Arc::clone(&self.is_application),
             laravel_macro_seeds: Arc::clone(&self.laravel_macro_seeds),
             laravel_macro_mixin_uris: Arc::clone(&self.laravel_macro_mixin_uris),
             laravel_date_class: Arc::clone(&self.laravel_date_class),
@@ -2231,71 +2260,31 @@ impl Backend {
         Some(location)
     }
 
-    /// Translate every text edit in a workspace edit from virtual PHP
-    /// coordinates back to Blade, dropping the ones that target a template's
-    /// injected prologue.
+    /// Move a file's edits from the virtual PHP they were planned against
+    /// back into the file's own coordinates, dropping the ones that target
+    /// a template's injected prologue.
     ///
-    /// Covers both `changes` and `document_changes`; a class rename that also
-    /// renames its file uses the latter.
-    pub(crate) fn translate_workspace_edit(&self, edit: &mut tower_lsp::lsp_types::WorkspaceEdit) {
-        use tower_lsp::lsp_types::{DocumentChangeOperation, DocumentChanges};
-
-        if let Some(changes) = &mut edit.changes {
-            changes.retain(|uri, edits| {
-                let uri_str = uri.to_string();
-                if !self.is_blade_file(&uri_str) {
-                    return true;
-                }
-                edits.retain_mut(
-                    |e| match self.try_translate_blade_range(&uri_str, e.range) {
-                        Some(range) => {
-                            e.range = range;
-                            true
-                        }
-                        None => false,
-                    },
-                );
-                !edits.is_empty()
-            });
-        }
-
-        match &mut edit.document_changes {
-            Some(DocumentChanges::Edits(edits)) => {
-                edits.retain_mut(|e| self.translate_text_document_edit(e));
-            }
-            Some(DocumentChanges::Operations(ops)) => ops.retain_mut(|op| match op {
-                DocumentChangeOperation::Edit(e) => self.translate_text_document_edit(e),
-                DocumentChangeOperation::Op(_) => true,
-            }),
-            None => {}
-        }
-    }
-
-    /// Translate one document's edits back to Blade coordinates, returning
-    /// `false` when every edit it held targeted the prologue.
-    fn translate_text_document_edit(
+    /// A no-op for every file that is not a template.  A template is
+    /// planned against the virtual PHP it lowers to, because that is what
+    /// its symbol map describes, but the editor applies the edits to the
+    /// template; the prologue holds declarations no template line stands
+    /// behind, so an edit landing there has no position to be applied at.
+    pub(crate) fn translate_template_edits(
         &self,
-        edit: &mut tower_lsp::lsp_types::TextDocumentEdit,
-    ) -> bool {
-        use tower_lsp::lsp_types::OneOf;
-
-        let uri_str = edit.text_document.uri.to_string();
-        if !self.is_blade_file(&uri_str) {
-            return true;
+        uri: &str,
+        edits: &mut Vec<tower_lsp::lsp_types::TextEdit>,
+    ) {
+        if !self.is_blade_file(uri) {
+            return;
         }
-        edit.edits.retain_mut(|e| {
-            let range = match e {
-                OneOf::Left(e) => &mut e.range,
-                OneOf::Right(e) => &mut e.text_edit.range,
-            };
-            match self.try_translate_blade_range(&uri_str, *range) {
-                Some(translated) => {
-                    *range = translated;
+        edits.retain_mut(
+            |edit| match self.try_translate_blade_range(uri, edit.range) {
+                Some(range) => {
+                    edit.range = range;
                     true
                 }
                 None => false,
-            }
-        });
-        !edit.edits.is_empty()
+            },
+        );
     }
 }

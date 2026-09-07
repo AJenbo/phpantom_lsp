@@ -883,4 +883,91 @@ mod tests {
             hover
         );
     }
+
+    #[tokio::test]
+    async fn test_lowering_declarations_are_not_workspace_symbols() {
+        let backend = create_test_backend();
+
+        let first = Url::parse("file:///page.blade.php").unwrap();
+        let second = Url::parse("file:///other.blade.php").unwrap();
+        let body = "@can('update', $post)\n    <p>ok</p>\n@endcan\n@section('content')\n@endsection\n@stack('scripts')\n";
+        open_blade(&backend, &first, body).await;
+        open_blade(&backend, &second, body).await;
+
+        // Keeping them out of the index must not turn every marker call
+        // the lowering emits into an unknown function.
+        let virtual_php = backend.blade_virtual_php(first.as_str()).unwrap();
+        let mut diags = Vec::new();
+        backend.collect_slow_diagnostics(first.as_str(), &virtual_php, &mut diags);
+        let unknown: Vec<String> = diags
+            .into_iter()
+            .filter(|d| matches!(&d.code, Some(NumberOrString::String(code)) if code == "unknown_function"))
+            .map(|d| d.message)
+            .collect();
+        assert!(
+            unknown.is_empty(),
+            "marker calls must stay resolvable inside the template: {:?}",
+            unknown
+        );
+
+        // The wrapper the body is lowered into and the marker functions
+        // the directives compile to are the preprocessor's own
+        // boilerplate: no file wrote them, so nothing should find them.
+        let leaked: Vec<String> = backend
+            .handle_workspace_symbol("blade")
+            .unwrap_or_default()
+            .into_iter()
+            .map(|symbol| symbol.name)
+            .filter(|name| name.contains("blade_") || name.contains("__blade"))
+            .collect();
+        assert!(
+            leaked.is_empty(),
+            "the lowering's own declarations reached workspace symbols: {:?}",
+            leaked
+        );
+
+        // Nor are they something to complete: a PHP file typing `blade`
+        // is not reaching for the lowering's own functions.
+        let php_uri = Url::parse("file:///helpers.php").unwrap();
+        let php = "<?php\nblade\n";
+        backend
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: php_uri.clone(),
+                    language_id: "php".to_string(),
+                    version: 1,
+                    text: php.to_string(),
+                },
+            })
+            .await;
+        let completions = backend
+            .completion(CompletionParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: php_uri },
+                    position: Position {
+                        line: 1,
+                        character: 5,
+                    },
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+                context: None,
+            })
+            .await
+            .unwrap();
+        let offered: Vec<String> = match completions {
+            Some(CompletionResponse::Array(items)) => items.into_iter().map(|i| i.label).collect(),
+            Some(CompletionResponse::List(list)) => {
+                list.items.into_iter().map(|i| i.label).collect()
+            }
+            None => Vec::new(),
+        };
+        assert!(
+            !offered
+                .iter()
+                .any(|label| label.contains("blade_") || label.contains("__blade")),
+            "the lowering's own functions were offered as completions: {:?}",
+            offered
+        );
+    }
 }

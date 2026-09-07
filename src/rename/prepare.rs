@@ -258,11 +258,13 @@ impl Backend {
             let loc_uri_str = location.uri.to_string();
 
             // For each reference location, we need the file content to
-            // inspect what text is at that range.
+            // inspect what text is at that range.  A template's locations
+            // index the virtual PHP it lowers to, which is what the
+            // request's own buffer already holds for it.
             let loc_content = if loc_uri_str == uri {
                 Some(content.to_string())
             } else {
-                self.get_file_content(&loc_uri_str)
+                self.reference_file_content(&loc_uri_str)
             };
 
             // An import names the function qualified (`use function
@@ -335,6 +337,14 @@ impl Backend {
                 .or_default()
                 .push(text_edit);
         }
+
+        // A template's references were found in the virtual PHP it lowers
+        // to, so its edits still have to come back to the template's own
+        // coordinates.
+        for (loc_uri, edits) in &mut changes {
+            self.translate_template_edits(loc_uri.as_str(), edits);
+        }
+        changes.retain(|_, edits| !edits.is_empty());
 
         Ok(Some(WorkspaceEdit {
             changes: Some(changes),

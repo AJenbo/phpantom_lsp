@@ -231,6 +231,11 @@ impl Backend {
             return false;
         }
         self.reindex_references_for_symbol_maps_batch(refreshed.clone());
+        self.refresh_laravel_config_writes(
+            refreshed
+                .iter()
+                .map(|(uri, map)| (uri.as_str(), map.as_ref())),
+        );
         let mut symbol_maps = self.symbol_maps.write();
         for (uri, map) in refreshed {
             symbol_maps.insert(uri, map);
@@ -275,50 +280,9 @@ impl Backend {
         // served after a file changes.
         crate::virtual_members::phpdoc::bump_mixin_generation();
 
-        let content_to_parse = if self.is_blade_file(uri) {
-            // Seed the template scope with the set cached by the refresh
-            // passes (post-index refresh, Blade did_open, caller save):
-            // the members of the component class backing the view, then
-            // the types its call sites imply, plus the class the view's
-            // `$this` is bound to.  Both variable sources sit below the
-            // template's own declarations, which the preprocessor gives
-            // priority.
-            //
-            // Neither is computed here: `update_ast` is called from the
-            // parallel index/analyse workers, where scanning call sites
-            // is wasted (callers may not be parsed yet) and resolving
-            // their expression types from many threads at once has
-            // deadlocked against the batch-publish locks.  The serial
-            // refresh passes own the cache; this path only reads it.
-            let injected = self
-                .blade_injected_vars
-                .read()
-                .get(uri)
-                .cloned()
-                .unwrap_or_default();
-            let components = self.blade_component_resolver(&injected.components);
-            // Read under the guard rather than cloned: the set is small but
-            // this runs on every keystroke in a template, and nothing the
-            // preprocessor does can write it back.
-            let custom_directives = self.blade_custom_directives.read();
-            let (virtual_php, source_map) = crate::blade::preprocessor::preprocess_with_vars(
-                content,
-                &injected.vars,
-                crate::blade::template_kind(uri, content),
-                injected.this_class.as_deref(),
-                Some(&components),
-                &custom_directives,
-            );
-            self.blade_source_maps
-                .write()
-                .insert(uri.to_string(), source_map);
-            self.blade_virtual_content
-                .write()
-                .insert(uri.to_string(), virtual_php.clone());
-            virtual_php
-        } else {
-            content.to_string()
-        };
+        let content_to_parse = self
+            .record_blade_virtual_php(uri, content)
+            .unwrap_or_else(|| content.to_string());
 
         self.laravel_string_key_cache
             .write()
@@ -420,12 +384,82 @@ impl Backend {
         }
     }
 
+    /// Preprocess a Blade template into the virtual PHP everything else
+    /// reads it as, publishing the source map and the virtual content the
+    /// position translation rides on.
+    ///
+    /// Returns `None` for a file that is not a template, which is parsed
+    /// as it stands.
+    ///
+    /// Seeds the template scope with the set cached by the refresh passes
+    /// (post-index refresh, Blade did_open, caller save): the members of
+    /// the component class backing the view, then the types its call sites
+    /// imply, plus the class the view's `$this` is bound to.  Both variable
+    /// sources sit below the template's own declarations, which the
+    /// preprocessor gives priority.
+    ///
+    /// Neither is computed here: this runs on the parallel index/analyse
+    /// workers, where scanning call sites is wasted (callers may not be
+    /// parsed yet) and resolving their expression types from many threads
+    /// at once has deadlocked against the batch-publish locks.  The serial
+    /// refresh passes own the cache; this path only reads it.
+    pub(crate) fn record_blade_virtual_php(&self, uri: &str, content: &str) -> Option<String> {
+        if !self.is_blade_file(uri) {
+            return None;
+        }
+
+        let injected = self
+            .blade_injected_vars
+            .read()
+            .get(uri)
+            .cloned()
+            .unwrap_or_default();
+        let components = self.blade_component_resolver(&injected.components);
+        // Read under the guard rather than cloned: the set is small but
+        // this runs on every keystroke in a template, and nothing the
+        // preprocessor does can write it back.
+        let custom_directives = self.blade_custom_directives.read();
+        let (virtual_php, source_map) = crate::blade::preprocessor::preprocess_with_vars(
+            content,
+            &injected.vars,
+            crate::blade::template_kind(uri, content),
+            injected.this_class.as_deref(),
+            Some(&components),
+            &custom_directives,
+        );
+        self.blade_source_maps
+            .write()
+            .insert(uri.to_string(), source_map);
+        self.blade_virtual_content
+            .write()
+            .insert(uri.to_string(), virtual_php.clone());
+        Some(virtual_php)
+    }
+
     pub(crate) fn parse_ast_index_update_for_index(
         &self,
         uri: &str,
         content: &str,
     ) -> AstIndexParseResult {
         let uri_owned = uri.to_string();
+        // A template is indexed as the virtual PHP it lowers to, the same
+        // way an open one is.  Parsing its own bytes leaves everything
+        // Blade-specific as inline HTML, so the symbol map holds none of
+        // the class references the template makes and rename, references,
+        // and diagnostics all read it as empty.
+        //
+        // An open buffer is left alone: this batch reads the file from
+        // disk, and `apply_ast_index_parse_results_batch` drops its result
+        // for that reason.  Publishing virtual content from disk here
+        // would leave it describing different text than the symbol map
+        // `did_change` published, which is exactly what the rename's
+        // `matches_source` check refuses to plan against.
+        let preprocessed = if self.is_blade_file(uri) && !self.open_files.read().contains_key(uri) {
+            self.record_blade_virtual_php(uri, content)
+        } else {
+            None
+        };
+        let content = preprocessed.as_deref().unwrap_or(content);
 
         match crate::util::catch_panic_unwind_safe("parse", uri, None, || {
             self.build_ast_index_update(uri, content)
@@ -718,6 +752,18 @@ impl Backend {
                 &namespace,
                 Some(&func_doc_ctx),
             );
+
+            // Drop the declarations the Blade lowering wrote itself: the
+            // wrapper holding the template body and the prologue's marker
+            // functions.  Every template lowers to the same ones, so
+            // publishing them makes each template a redeclaration of the
+            // last and puts boilerplate no file wrote into
+            // workspace-symbol results.  They stay in the virtual PHP, so
+            // the calls the lowering emits still resolve against them
+            // within the template.
+            if self.is_blade_file(uri) {
+                functions.retain(|func| !crate::blade::is_synthetic_function(&func.name));
+            }
 
             // Apply stub patches when parsing embedded stub content
             // (e.g. a constant lookup routes its stub source through
@@ -1463,6 +1509,19 @@ impl Backend {
             .collect();
         reference_items.extend(refreshed_existing.iter().cloned());
         self.reindex_references_for_symbol_maps_batch(reference_items);
+
+        // Runtime writes follow every published map, including unedited
+        // files whose facade alias was shadowed or restored by this batch.
+        self.refresh_laravel_config_writes(
+            prepared
+                .iter()
+                .map(|update| (update.uri.as_str(), update.symbol_map.as_ref()))
+                .chain(
+                    refreshed_existing
+                        .iter()
+                        .map(|(uri, map)| (uri.as_str(), map.as_ref())),
+                ),
+        );
 
         {
             let mut symbol_maps = self.symbol_maps.write();
@@ -2302,6 +2361,99 @@ mod tests {
             "route",
             crate::symbol_map::LaravelConfigResource::AuthGuard
         ));
+    }
+
+    #[test]
+    fn batch_publication_indexes_runtime_writes_without_opening_the_writer() {
+        let backend = Backend::new_test();
+        backend.resolved_class_cache.write().set_laravel(true);
+        let writer_uri = "file:///project/tests/DiskTest.php";
+        let reader_uri = "file:///project/app/Reader.php";
+        let writer = backend.parse_ast_index_update_for_index(
+            writer_uri,
+            "<?php\nconfig(['cache.stores.scratch' => []]);\nConfig::set('filesystems.disks.temporary', []);\nStorage::fake('temporary');\nStorage::persistentFake('persistent');\n",
+        );
+        let reader = backend.parse_ast_index_update_for_index(
+            reader_uri,
+            "<?php\nStorage::disk('temporary');\nCache::store('scratch');\n",
+        );
+
+        backend.apply_ast_index_parse_results_batch(vec![reader, writer]);
+
+        assert_eq!(
+            backend.runtime_config_keys(),
+            HashSet::from([
+                "cache.stores.scratch".to_string(),
+                "filesystems.disks.temporary".to_string(),
+                "filesystems.disks.persistent".to_string(),
+            ])
+        );
+        let writes = backend.laravel_runtime_config_keys.read();
+        assert_eq!(
+            writes[writer_uri].len(),
+            3,
+            "duplicate writes share one key"
+        );
+        assert!(!writes.contains_key(reader_uri));
+    }
+
+    #[test]
+    fn runtime_writes_follow_cross_file_facade_shadows() {
+        for (facade, call, key) in [
+            (
+                "Storage",
+                "Storage::fake('scratch')",
+                "filesystems.disks.scratch",
+            ),
+            (
+                "Config",
+                "Config::set('cache.stores.scratch', [])",
+                "cache.stores.scratch",
+            ),
+        ] {
+            let backend = Backend::new_test();
+            backend.resolved_class_cache.write().set_laravel(true);
+            let writer_uri = "file:///project/tests/FixtureTest.php";
+            let shadow_uri = "file:///project/app/LocalFacade.php";
+            backend.update_ast(writer_uri, &format!("<?php\n{call};\n"));
+            assert!(backend.runtime_config_keys().contains(key), "{facade}");
+
+            backend.update_ast(shadow_uri, &format!("<?php\nclass {facade} {{}}\n"));
+            assert!(
+                backend.runtime_config_keys().is_empty(),
+                "a global {facade} class must withdraw the unedited file's write"
+            );
+
+            backend.update_ast(shadow_uri, "<?php\nclass Other {}\n");
+            assert!(
+                backend.runtime_config_keys().contains(key),
+                "removing the {facade} shadow must restore the unedited file's write"
+            );
+        }
+    }
+
+    #[test]
+    fn discovery_refresh_reconciles_runtime_writes_with_facade_aliases() {
+        let backend = Backend::new_test();
+        backend.resolved_class_cache.write().set_laravel(true);
+        let writer_uri = "file:///project/tests/DiskTest.php";
+        let shadow_uri = "file:///project/app/Storage.php";
+        let key = "filesystems.disks.scratch";
+        backend.update_ast(writer_uri, "<?php\nStorage::fake('scratch');\n");
+        assert!(backend.runtime_config_keys().contains(key));
+
+        backend.symbols.with_class_declarations(|declarations| {
+            declarations.note_discovered("Storage", shadow_uri.to_string());
+        });
+        assert!(backend.refresh_all_published_laravel_candidates());
+        assert!(backend.runtime_config_keys().is_empty());
+
+        backend.symbols.with_class_declarations(|declarations| {
+            declarations.withdraw_uris(&HashSet::from([shadow_uri.to_string()]));
+        });
+        assert!(backend.refresh_all_published_laravel_candidates());
+        assert!(backend.runtime_config_keys().contains(key));
+        assert!(!backend.refresh_all_published_laravel_candidates());
     }
 
     #[test]

@@ -304,13 +304,11 @@ pub(super) fn extract_from_attribute_lists<'a>(
 
                 // Laravel container attributes: #[Config('key')],
                 // #[Database('conn')], #[Cache('store')], etc. →
-                // emit a LaravelStringKey::Config span so hover,
-                // go-to-definition, and diagnostics work on the key.
+                // emit a config-key or named-resource span so hover,
+                // go-to-definition, and diagnostics work on the name.
                 //
-                // FQN attributes match directly. Short names require
-                // the file to import from the Illuminate namespace;
-                // that check is cached once per file to avoid repeated
-                // linear scans.
+                // Semantic names resolve imports and aliases exactly. The
+                // syntax-only fallback caches its import check per file.
                 let semantic_class_name = ctx
                     .resolved_name_at(attr.name.span().start.offset)
                     .unwrap_or(class_name);

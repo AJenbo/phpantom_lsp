@@ -46,10 +46,33 @@ files.
 
 A destination no PSR-4 mapping covers rewrites the declarations and their
 references, but no file can follow them, which leaves the autoloader unable to
-find what moved. That is reported as a warning on stderr and in the `warnings`
-array of the JSON output, so a script can catch it. A destination under a
-*different* mapping is an ordinary move: the files follow it to that mapping's
-directory.
+find what moved. That is reported as a warning, so a script can catch it. A
+destination under a *different* mapping is an ordinary move: the files follow it
+to that mapping's directory.
+
+### What a move could not reach
+
+The rewriter only reaches what it can resolve as a symbol. A namespace named in
+a Blade template, a Doctrine or Symfony YAML config, a PHPStan baseline, or a
+plain path string is invisible to it, and so is a directory spelled out inside
+`app_path('Elastic/Config/ILM/')`. Rewriting those is out of scope: nothing can
+tell whether a string is a path or a label, and the matching key in a deployment
+secret is out of reach entirely.
+
+So the move reports them instead. Once the plan is built, the project is scanned
+as it will look afterwards, and every leftover mention of the old name or the old
+location becomes a warning with the file and line it sits on:
+
+```
+Would move namespace `App\Entity` to `App\Domain\Entity` (71 file(s) changed, 1 path(s) moved).
+Warning: config/packages/doctrine.yaml:26: The old path `src/Entity` still appears here. ...
+Warning: src/Repository/SeasonRepository.php:65: The old name `App\Entity` still appears here. ...
+```
+
+`files_changed` can then be read against a stated list of what was left alone,
+rather than assumed complete. The scan covers every file regardless of extension,
+skipping `vendor/`, `.git/`, and anything `.gitignore` or `[indexing] exclude`
+rules out.
 
 ### Options
 
@@ -58,8 +81,15 @@ directory.
 | `FROM`                 | Source class, namespace, PHP file, or PSR-4 directory.             |
 | `TO`                   | Destination name or path, of the same kind as `FROM`.              |
 | `--dry-run`            | Validate and report the move without changing the project.         |
+| `--no-colour`          | Disable coloured output.                                           |
 | `--project-root <DIR>` | Project root directory. Defaults to the current working directory. |
-| `--format <FORMAT>`    | Output format: `table` (default) or `json`.                         |
+| `--format <FORMAT>`    | Output format: `table` (default), `github`, or `json`.             |
+
+`--format json` emits the same `{"totals": …, "files": …, "errors": []}` shape
+`analyze` does, with the move's own counters under a `move` key, so both commands
+can be consumed by the same tooling. `--format github` emits workflow
+annotations; the default `table` adds them automatically when `GITHUB_ACTIONS`
+is set.
 
 ### Exit codes
 
@@ -224,6 +254,7 @@ Each has a rule identifier shown below the message.
 | `argument_count`         | Error    | Wrong number of arguments to a function or method     |
 | `implementation_error`   | Error    | Missing required interface or abstract methods        |
 | `scalar_member_access`   | Error    | Member access on a scalar type (int, string, etc.)    |
+| `invalid_member_access`  | Error    | `private` or `protected` member reached from outside  |
 | `unused_import`          | Hint     | `use` statement with no references in the file        |
 | `deprecated`             | Hint     | Reference to a `@deprecated` symbol                   |
 
