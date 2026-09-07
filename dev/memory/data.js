@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788742555020,
+  "lastUpdate": 1788747534468,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -26723,6 +26723,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 73.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "petr@mediasolution.cz",
+            "name": "petrovo-as",
+            "username": "petrovo-as"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "8e3a29d9e9cc8c389c5d8e8183e1eabea35501b1",
+          "message": "Report a `private` or `protected` member reached from outside its scope\n\nPHP resolves a member access to a declaration first and enforces that\ndeclaration's visibility second, so reading a private property from\noutside its class is a fatal error rather than a missing member. Neither\nwas reported.\n\nThe check runs inside the unknown-member walk, which has already\nresolved the subject expression to a class. It looks the member up in\nthe raw declarations — the class as parsed, then its traits, then its\nancestors — rather than in the merged class, because the inheritance\nmerge drops a parent's private members and would make them look absent\ninstead of unreachable. Walking the raw chain is also what supplies the\ndeclaring class, which is the scope `private` and `protected` are\nmeasured against: a member declared on a shared parent stays reachable\nfrom every branch below it while one declared on a sibling does not.\n\nProperties, methods, class constants, and static properties are checked.\nNothing is reported unless a declaration is positively found and\npositively out of reach, so an unresolvable ancestor, a virtual member,\nor a class the loader cannot produce end in silence. A class declaring\n`__get`, `__set`, `__call`, or `__callStatic` anywhere in its hierarchy\nanswers for members the caller cannot see directly and is left alone, as\nis a trait body, whose host class is unknown, and a `@see` tag, which\ndocuments a member rather than reading one.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>",
+          "timestamp": "2026-09-07T04:01:36+02:00",
+          "tree_id": "359850c515b8170f8ace33cd13d2a02d35f5d967",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/8e3a29d9e9cc8c389c5d8e8183e1eabea35501b1"
+        },
+        "date": 1788747527201,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 72.4,
             "unit": "MiB"
           }
         ]
