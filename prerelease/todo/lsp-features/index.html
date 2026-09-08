@@ -1504,6 +1504,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#f23-rename-a-class-through-its-yamlxml-occurrences" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        F23. Rename a class through its YAML/XML occurrences
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2216,6 +2227,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#f23-rename-a-class-through-its-yamlxml-occurrences" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        F23. Rename a class through its YAML/XML occurrences
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2804,6 +2826,33 @@ that could.</p>
 (<code>namespace_merge_conflict</code>, <code>build_namespace_prefix_rename_edit</code>,
 <code>collect_merge_move_ops</code>), <code>src/rename/class.rs</code> (the import-adding
 rule to mirror).</p>
+<h2 id="f23-rename-a-class-through-its-yamlxml-occurrences">F23. Rename a class through its YAML/XML occurrences<a class="headerlink" href="#f23-rename-a-class-through-its-yamlxml-occurrences" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p>A fully-qualified class name in a YAML or XML file is found by Find
+References and counted by the declaration CodeLens, but rename leaves
+it alone: <code>find_references_inner</code> drops resource locations in
+<code>ReferenceSearchMode::Rename</code>. Renaming the class therefore leaves the
+config pointing at a name that no longer exists, and <code>move</code> reports the
+leftover through its residual scan rather than fixing it.</p>
+<p>The blocker is that the text at such an occurrence is not always the
+PHP spelling of the name. A YAML double-quoted scalar writes
+<code>"App\\Handler\\Run"</code>, so the span covers doubled separators; an XML
+attribute may carry entity references. Rename plans a single
+replacement string per location and verifies each range spells a whole
+PHP name token before emitting anything, so an escaped occurrence both
+fails verification (dropping the <em>entire</em> rename, including its PHP
+edits, which is what the current exclusion prevents) and would be
+rewritten with single separators, corrupting the document's quoting.</p>
+<p>What is needed is a per-occurrence replacement: the scanner already
+knows the raw text it normalised, so it can record how the name was
+escaped and let the rename re-escape the replacement the same way,
+with verification asking for "a name token in this document's
+escaping" rather than a bare PHP one.</p>
+<p><strong>Where to look:</strong> <code>src/resource_navigation.rs</code> (<code>scan_symbols</code>,
+<code>normalize_fqn</code>), <code>src/references/dispatch.rs</code>
+(<code>find_references_inner</code>), <code>src/rename/validate.rs</code>
+(<code>Expected</code>, <code>is_name_token</code>), <code>src/rename/class.rs</code>
+(<code>build_class_move_edit</code>).</p>
 
 
 
