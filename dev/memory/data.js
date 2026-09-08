@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788827850250,
+  "lastUpdate": 1788830030639,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -26927,6 +26927,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 73.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "sidux@users.noreply.github.com",
+            "name": "sidux",
+            "username": "sidux"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "fa7f03175fd20c2e59df3c30d8b0423b14b7f30f",
+          "message": "fix(types): Normalize nullable array shapes\n\nTreat union-with-null and nullable wrappers as the same shape during\nrepeated branch merges.",
+          "timestamp": "2026-09-08T02:56:29+02:00",
+          "tree_id": "ac2e8eed6272e6f7d686b24cf84d9ef9b67caf2d",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/fa7f03175fd20c2e59df3c30d8b0423b14b7f30f"
+        },
+        "date": 1788830023080,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 35.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 73.2,
             "unit": "MiB"
           }
         ]
