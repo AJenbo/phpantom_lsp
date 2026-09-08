@@ -276,6 +276,7 @@ mod reference_index;
 mod references;
 mod rename;
 mod resolution;
+mod resource_navigation;
 pub(crate) mod return_collection;
 pub(crate) mod scope_collector;
 mod selection_range;

@@ -707,6 +707,16 @@ impl LanguageServer for Backend {
             .write()
             .insert(uri.clone(), Arc::clone(&text));
 
+        // Resource documents are not PHP source. Build a lightweight symbol
+        // map so navigation, references, rename, and PHP declaration lenses
+        // all consume the same indexed occurrences.
+        if crate::resource_navigation::is_resource_document(&uri) {
+            self.update_resource_symbol_index(&uri, &text);
+            self.log(MessageType::INFO, format!("Opened resource file: {}", uri))
+                .await;
+            return;
+        }
+
         // Parse and update AST map, use map, and namespace map
         self.update_ast(&uri, &text);
 
@@ -785,6 +795,46 @@ impl LanguageServer for Backend {
         self.open_files
             .write()
             .insert(uri.clone(), Arc::clone(&text));
+
+        // A resource document is re-scanned the same way a PHP file is
+        // re-parsed: on a blocking task, and only if the buffer it was
+        // queued for is still the current one.  Scanning a large XML on the
+        // service loop for every keystroke would stall interactive
+        // requests, and refreshing lenses per keystroke would make the
+        // client re-pull them faster than it can render them.
+        if crate::resource_navigation::is_resource_document(&uri) {
+            if self.sync_ast_updates {
+                self.update_resource_symbol_index(&uri, &text);
+                return;
+            }
+            let backend = self.clone_for_blocking();
+            tokio::spawn(async move {
+                let refresh_backend = backend.clone_for_blocking();
+                let committed = run_blocking_cancel_safe("did_change resource scan", move || {
+                    let is_latest_text = backend
+                        .open_files
+                        .read()
+                        .get(&uri)
+                        .is_some_and(|current| Arc::ptr_eq(current, &text));
+                    if !is_latest_text {
+                        return false;
+                    }
+                    backend.update_resource_symbol_index(&uri, &text);
+                    true
+                })
+                .await;
+
+                if committed == Some(true)
+                    && refresh_backend
+                        .supports_code_lens_refresh
+                        .load(Ordering::Acquire)
+                    && let Some(ref client) = refresh_backend.client
+                {
+                    let _ = client.code_lens_refresh().await;
+                }
+            });
+            return;
+        }
 
         // Re-parse in a blocking background task so typing does not
         // monopolize the LSP service loop and delay completion requests.
@@ -891,7 +941,15 @@ impl LanguageServer for Backend {
             self.blade_injected_vars.write().remove(&uri);
         }
 
-        self.clear_file_maps(&uri);
+        if crate::resource_navigation::is_resource_document(&uri) {
+            if let Some(content) = self.get_file_content(&uri) {
+                self.update_resource_symbol_index(&uri, &content);
+            } else {
+                self.clear_file_maps(&uri);
+            }
+        } else {
+            self.clear_file_maps(&uri);
+        }
 
         // Clear diagnostics so stale warnings don't linger after the file is closed
         self.clear_diagnostics_for_file(&uri).await;
@@ -902,13 +960,22 @@ impl LanguageServer for Backend {
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
         let uri = params.text_document.uri.to_string();
+        let is_resource = crate::resource_navigation::is_resource_document(&uri);
 
         if let Some(text) = params.text {
             let text = Arc::new(text);
             self.open_files
                 .write()
                 .insert(uri.clone(), Arc::clone(&text));
-            self.update_ast(&uri, &text);
+            if is_resource {
+                self.update_resource_symbol_index(&uri, &text);
+            } else {
+                self.update_ast(&uri, &text);
+            }
+        }
+
+        if is_resource {
+            return;
         }
 
         // A save is a reliable sync point: re-diagnose the saved file
@@ -998,6 +1065,11 @@ impl LanguageServer for Backend {
         // (or missing ones) are corrected.
         if did_work {
             self.request_diagnostic_refresh().await;
+            if self.supports_code_lens_refresh.load(Ordering::Acquire)
+                && let Some(ref client) = self.client
+            {
+                let _ = client.code_lens_refresh().await;
+            }
         }
     }
 
@@ -1015,6 +1087,22 @@ impl LanguageServer for Backend {
         let backend = self.clone_for_blocking();
         let uri_clone = uri.clone();
         run_blocking_cancel_safe("goto_definition", move || {
+            // YAML and XML may name PHP classes under any schema. Resolve
+            // fully-qualified class and Class::member tokens before entering
+            // the PHP-only symbol-map path below.
+            if crate::resource_navigation::is_resource_document(&uri_clone) {
+                let location = backend.get_file_content(&uri_clone).and_then(|content| {
+                    crate::util::catch_panic_unwind_safe(
+                        "goto_definition",
+                        &uri_clone,
+                        Some(position),
+                        || backend.resolve_resource_definition(&content, position),
+                    )
+                    .flatten()
+                });
+                return Ok(location.map(GotoDefinitionResponse::Scalar));
+            }
+
             // A component tag is HTML, so it has no position in the virtual
             // PHP `handle_with_position` would swap in below; it is resolved
             // from the template's own source instead.
@@ -2238,7 +2326,9 @@ impl Backend {
         // map, so a file passes through here once; a file the parser panics
         // on publishes nothing and is retried, which is the same work its
         // next keystroke would do anyway.
-        if !self.symbol_maps.read().contains_key(uri) {
+        if !crate::resource_navigation::is_resource_document(uri)
+            && !self.symbol_maps.read().contains_key(uri)
+        {
             self.update_ast(uri, &content);
         }
 

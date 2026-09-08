@@ -105,7 +105,7 @@ impl Backend {
                 sym.kind,
                 sym.start
             );
-            let locations = self.dispatch_symbol_references(
+            let mut locations = self.dispatch_symbol_references(
                 &sym.kind,
                 uri,
                 content,
@@ -113,6 +113,20 @@ impl Backend {
                 include_declaration,
                 mode,
             );
+            // A YAML/XML occurrence is a reference the user can be shown,
+            // but not one an edit can be planned against: its text may be
+            // the escaped `App\\Handler` form the document's own quoting
+            // requires, which is neither the PHP spelling of the name nor
+            // something a PHP-shaped replacement can be written over.
+            // Rename verifies every location before emitting any edit and
+            // drops the whole rename when one fails, so leaving these in
+            // makes a single escaped name in any config file silently turn
+            // the class rename into a no-op.
+            if mode == ReferenceSearchMode::Rename {
+                locations.retain(|location| {
+                    !crate::resource_navigation::is_resource_document(location.uri.as_str())
+                });
+            }
             tracing::info!(
                 "Find References: total time for {:?}: {:?}",
                 sym.kind,
