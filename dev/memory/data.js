@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788830030639,
+  "lastUpdate": 1788830453039,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -26961,6 +26961,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 73.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "sidux@users.noreply.github.com",
+            "name": "sidux",
+            "username": "sidux"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "75e18e394f42323679a8ee86c8621b43050409b1",
+          "message": "fix(release): support unsigned macOS builds\n\nKeep signing and notarization enabled when the complete Apple credential\nset is available. Package unsigned macOS artifacts when credentials are\nabsent so release workflows remain usable from forks.",
+          "timestamp": "2026-09-08T03:04:23+02:00",
+          "tree_id": "4abebcb5f42e7b0f90d4414adb97f182e1988f17",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/75e18e394f42323679a8ee86c8621b43050409b1"
+        },
+        "date": 1788830445253,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 75.6,
             "unit": "MiB"
           }
         ]
