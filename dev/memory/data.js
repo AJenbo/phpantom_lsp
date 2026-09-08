@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788821995387,
+  "lastUpdate": 1788827850250,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -26893,6 +26893,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 77.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "1242225+sidux@users.noreply.github.com",
+            "name": "sidux",
+            "username": "sidux"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "969ac2d013b4dda80d590b0f1511baa87799ef75",
+          "message": "feat(navigation): navigate PHP symbols in YAML and XM",
+          "timestamp": "2026-09-08T02:22:17+02:00",
+          "tree_id": "41d41cce4994802d1306885c9c62171fc0089311",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/969ac2d013b4dda80d590b0f1511baa87799ef75"
+        },
+        "date": 1788827845664,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 36.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 73.8,
             "unit": "MiB"
           }
         ]
